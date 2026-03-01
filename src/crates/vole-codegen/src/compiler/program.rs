@@ -184,7 +184,7 @@ impl Compiler<'_> {
                     // Global initializer presence is resolved via ProgramQuery lookups.
                 }
                 Decl::Class(class) => {
-                    self.finalize_class(class, program)?;
+                    self.finalize_class(class.name)?;
                 }
                 Decl::Interface(_) => {
                     // Interface declarations don't generate code directly
@@ -193,7 +193,7 @@ impl Compiler<'_> {
                     self.register_implement_block(impl_block)?;
                 }
                 Decl::Struct(s) => {
-                    self.finalize_struct(s)?;
+                    self.finalize_struct(s.name)?;
                 }
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 1
@@ -291,7 +291,7 @@ impl Compiler<'_> {
                     // LetTuple (destructuring imports) don't generate code
                 }
                 Decl::Class(class) => {
-                    self.compile_class_methods(class, program)?;
+                    self.compile_class_methods(class.name, program)?;
                 }
                 Decl::Interface(_) => {
                     // Interface methods are compiled when used via implement blocks
@@ -301,7 +301,11 @@ impl Compiler<'_> {
                 }
                 Decl::Struct(struct_decl) => {
                     if !struct_decl.methods.is_empty() || struct_decl.statics.is_some() {
-                        self.compile_struct_methods(struct_decl, program)?;
+                        self.compile_struct_methods(
+                            struct_decl.name,
+                            !struct_decl.type_params.is_empty(),
+                            program,
+                        )?;
                     }
                 }
                 Decl::Error(_) => {
@@ -336,10 +340,10 @@ impl Compiler<'_> {
         for decl in &program.declarations {
             match decl {
                 Decl::Class(class) => {
-                    self.pre_register_class(class)?;
+                    self.pre_register_class(class.name)?;
                 }
                 Decl::Struct(s) => {
-                    self.pre_register_struct(s)?;
+                    self.pre_register_struct(s.name)?;
                 }
                 Decl::Sentinel(s) => {
                     self.pre_register_sentinel(s)?;
@@ -436,14 +440,14 @@ impl Compiler<'_> {
             // MUST happen before implement block registration, which needs type_metadata
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
-                    self.finalize_module_class(class, module_interner, module_id)?;
+                    self.finalize_module_class(class.name, module_interner, module_id)?;
                 }
             }
 
             // Finalize module structs (register type metadata, declare methods)
             for decl in &program.declarations {
                 if let Decl::Struct(struct_decl) = decl {
-                    self.finalize_module_struct(struct_decl, module_interner, module_id)?;
+                    self.finalize_module_struct(struct_decl.name, module_interner, module_id)?;
                 }
             }
 
@@ -579,7 +583,7 @@ impl Compiler<'_> {
         for decl in &program.declarations {
             if let Decl::Class(class) = decl {
                 tracing::debug!(class_name = %module_interner.resolve(class.name), "Compiling module class methods");
-                self.compile_module_class_methods(class, module_interner, module_path)?;
+                self.compile_module_class_methods(class.name, module_interner, module_path)?;
             }
         }
 
@@ -589,7 +593,13 @@ impl Compiler<'_> {
                 && (!struct_decl.methods.is_empty() || struct_decl.statics.is_some())
             {
                 tracing::debug!(struct_name = %module_interner.resolve(struct_decl.name), "Compiling module struct methods");
-                self.compile_module_struct_methods(struct_decl, module_interner, module_path)?;
+                let has_methods = !struct_decl.methods.is_empty() || struct_decl.statics.is_some();
+                self.compile_module_struct_methods(
+                    struct_decl.name,
+                    has_methods,
+                    module_interner,
+                    module_path,
+                )?;
             }
         }
 
@@ -681,7 +691,7 @@ impl Compiler<'_> {
         module_id: ModuleId,
     ) -> CodegenResult<()> {
         // First finalize to get type metadata registered
-        self.finalize_module_class(class, module_interner, module_id)?;
+        self.finalize_module_class(class.name, module_interner, module_id)?;
 
         // The methods are already compiled - they'll be linked via external symbols
         // No additional work needed here since method calls go through func_registry
@@ -697,7 +707,7 @@ impl Compiler<'_> {
         module_interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        self.finalize_module_struct(struct_decl, module_interner, module_id)
+        self.finalize_module_struct(struct_decl.name, module_interner, module_id)
     }
 
     /// Compile a single module function with its own interner
@@ -1032,7 +1042,7 @@ impl Compiler<'_> {
                 Decl::Class(class) => {
                     // Scoped classes are registered under the virtual module
                     if let Some(vm_id) = virtual_module_id {
-                        self.finalize_module_class(class, interner, vm_id)?;
+                        self.finalize_module_class(class.name, interner, vm_id)?;
                     }
                 }
                 Decl::Implement(impl_block) => {
@@ -1091,7 +1101,7 @@ impl Compiler<'_> {
                     self.compile_function(func)?;
                 }
                 Decl::Class(class) => {
-                    self.compile_class_methods_in_module(class, program, virtual_module_id)?;
+                    self.compile_class_methods_in_module(class.name, program, virtual_module_id)?;
                 }
                 Decl::Implement(impl_block) => {
                     self.compile_implement_block_in_module(impl_block, virtual_module_id)?;

@@ -1,13 +1,12 @@
 use rustc_hash::FxHashMap;
 
-use super::impls::TypeDeclInfo;
 use super::{Compiler, SelfParam};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{MethodInfo, TypeMetadata, method_name_id_with_interner};
-use vole_frontend::ast::{ClassDecl, SentinelDecl, StaticsBlock, StructDecl};
-use vole_frontend::{Interner, Program, Symbol};
-use vole_identity::{ModuleId, NameId, TypeDefId, TypeId};
+use crate::types::{MethodInfo, TypeMetadata};
+use vole_frontend::ast::SentinelDecl;
+use vole_frontend::{Interner, Symbol};
+use vole_identity::{MethodId, ModuleId, NameId, TypeDefId, TypeId};
 use vole_runtime::type_registry::{FieldTypeTag, alloc_type_id, register_instance_type};
 
 /// Convert a TypeId to a FieldTypeTag for runtime cleanup.
@@ -57,12 +56,12 @@ impl Compiler<'_> {
 
     /// Pre-register a class type (just the name and type_id)
     /// This is called first so that field type resolution can find other classes/records
-    pub(super) fn pre_register_class(&mut self, class: &ClassDecl) -> CodegenResult<()> {
+    pub(super) fn pre_register_class(&mut self, name: Symbol) -> CodegenResult<()> {
         let type_id = alloc_type_id();
 
         let query = self.analyzed;
         let module_id = self.program_module();
-        let name_id = query.name_id(module_id, &[class.name]);
+        let name_id = query.name_id(module_id, &[name]);
 
         // Look up the TypeDefId from EntityRegistry
         let type_def_id = self.analyzed.try_type_def_id(name_id).ok_or_else(|| {
@@ -95,37 +94,29 @@ impl Compiler<'_> {
     }
 
     /// Finalize a class type: fill in field types and declare methods
-    pub(super) fn finalize_class(
-        &mut self,
-        class: &ClassDecl,
-        program: &Program,
-    ) -> CodegenResult<()> {
-        self.finalize_type(class, Some(program))
+    pub(super) fn finalize_class(&mut self, name: Symbol) -> CodegenResult<()> {
+        let module_id = self.program_module();
+        let type_def_id = self
+            .analyzed
+            .try_name_id(module_id, &[name])
+            .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
+            .ok_or_else(|| {
+                CodegenError::internal("finalize_class: class not in entity registry")
+            })?;
+        self.finalize_type(type_def_id, true)
     }
 
     /// Core implementation for finalizing a type (class or struct).
     /// - For classes: includes runtime type registration and interface handling
     /// - For structs: simpler path without runtime registration
-    fn finalize_type<T: TypeDeclInfo>(
+    fn finalize_type(
         &mut self,
-        type_decl: &T,
-        program: Option<&Program>,
+        type_def_id: TypeDefId,
+        register_defaults: bool,
     ) -> CodegenResult<()> {
-        let module_id = self.program_module();
-        let type_kind = type_decl.type_kind();
-        let is_class = type_decl.is_class();
-
-        // Look up TypeDefId first (needed as key for type_metadata)
-        let type_def_id = self
-            .analyzed
-            .try_name_id(module_id, &[type_decl.name()])
-            .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-            .ok_or_else(|| {
-                CodegenError::internal_with_context(
-                    "finalize_type: type not in entity registry",
-                    type_kind.to_string(),
-                )
-            })?;
+        let type_def = self.analyzed.get_type(type_def_id);
+        let type_kind = type_def.type_kind();
+        let is_class = type_def.is_class();
 
         // Get type_id: for classes, use pre-registered value; for structs, use 0
         let type_id = if is_class {
@@ -152,24 +143,27 @@ impl Compiler<'_> {
             register_instance_type(type_id, field_type_tags);
         }
 
-        // Register instance methods
+        // Register instance methods (read method_ids from VirTypeDef)
+        let method_ids: Vec<MethodId> = self.analyzed.get_type(type_def_id).methods.clone();
         let mut method_infos =
-            self.register_type_instance_methods(type_decl, type_def_id, type_kind)?;
+            self.register_type_instance_methods(&method_ids, type_def_id, type_kind)?;
 
-        // Handle interface default methods (classes only, requires program)
-        if is_class && let Some(prog) = program {
+        // Handle interface default methods (classes only)
+        if is_class && register_defaults {
+            let direct_method_ids: Vec<MethodId> =
+                self.analyzed.get_type(type_def_id).methods.clone();
             self.register_interface_default_methods(
-                type_decl,
+                &direct_method_ids,
                 type_def_id,
-                module_id,
-                prog,
                 &mut method_infos,
             )?;
         }
 
-        // Register static methods from statics block
-        if let Some(statics) = type_decl.statics() {
-            self.register_static_methods(statics, type_decl.name())?;
+        // Register static methods
+        let static_method_ids: Vec<MethodId> =
+            self.analyzed.get_type(type_def_id).static_methods.clone();
+        if !static_method_ids.is_empty() {
+            self.register_static_methods(&static_method_ids, type_def_id)?;
         }
 
         // Reuse the vole_type_id from pre_register
@@ -254,25 +248,26 @@ impl Compiler<'_> {
     }
 
     /// Register instance methods for a type and return the method_infos map.
-    fn register_type_instance_methods<T: TypeDeclInfo>(
+    ///
+    /// Takes a slice of MethodId from VirTypeDef.methods instead of iterating
+    /// AST FuncDecl nodes.  Inherited default methods (has_default=true) are
+    /// skipped here — they are declared by `register_interface_default_methods`.
+    fn register_type_instance_methods(
         &mut self,
-        type_decl: &T,
+        method_ids: &[MethodId],
         type_def_id: TypeDefId,
-        type_kind: &str,
+        _type_kind: &str,
     ) -> CodegenResult<FxHashMap<NameId, MethodInfo>> {
         let mut method_infos = FxHashMap::default();
 
-        for method in type_decl.methods() {
-            let method_name_id = self.method_name_id(method.name)?;
-            let method_id = self
-                .analyzed
-                .find_method(type_def_id, method_name_id)
-                .ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "finalize_type: method not in entity registry",
-                        type_kind.to_string(),
-                    )
-                })?;
+        for &method_id in method_ids {
+            let method_def = self.analyzed.get_method(method_id);
+            // Skip inherited default methods — they are declared separately
+            // by register_interface_default_methods.
+            if method_def.has_default {
+                continue;
+            }
+            let method_name_id = method_def.name_id;
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
             let full_name_id = self.analyzed.method_full_name(method_id);
             let func_key = self.func_registry.intern_name_id(full_name_id);
@@ -291,34 +286,35 @@ impl Compiler<'_> {
     /// This registers default methods from all implemented interfaces, including
     /// interfaces imported from stdlib modules. It works entirely from entity
     /// registry data so it does not need to search the AST.
-    fn register_interface_default_methods<T: TypeDeclInfo>(
+    fn register_interface_default_methods(
         &mut self,
-        type_decl: &T,
+        direct_method_ids: &[MethodId],
         type_def_id: TypeDefId,
-        module_id: ModuleId,
-        _program: &Program,
         method_infos: &mut FxHashMap<NameId, MethodInfo>,
     ) -> CodegenResult<()> {
-        // Collect direct method name strings to filter out explicitly implemented methods.
-        // We compare by string (cross-interner safe) rather than Symbol.
-        let direct_method_name_strs: std::collections::HashSet<String> = type_decl
-            .methods()
+        // Collect direct (non-default) method name strings to filter out explicitly
+        // implemented methods.  We compare by string (cross-interner safe) rather than Symbol.
+        // Only non-default methods count as "explicitly implemented" — inherited defaults
+        // should NOT suppress the default method registration.
+        let direct_method_name_strs: std::collections::HashSet<String> = direct_method_ids
             .iter()
-            .map(|m| self.resolve_symbol(m.name))
+            .filter_map(|&mid| {
+                let md = self.analyzed.get_method(mid);
+                if md.has_default {
+                    return None;
+                }
+                self.analyzed.last_segment(md.name_id)
+            })
             .collect();
 
         // Collect (interface_tdef_id, default_method_name_id pairs) from entity registry.
         // Works for interfaces from any program (main, stdlib, user modules) since
         // the entity registry is populated by sema regardless of which program the
         // interface was defined in.
-        let default_method_ids: Vec<(TypeDefId, vole_identity::MethodId, NameId)> = {
+        let default_method_ids: Vec<(TypeDefId, MethodId, NameId)> = {
             let query = self.analyzed;
-            let lookup_tdef_id = query
-                .try_name_id(module_id, &[type_decl.name()])
-                .and_then(|name_id| query.try_type_def_id(name_id))
-                .unwrap_or(type_def_id);
             let mut results = Vec::new();
-            for interface_tdef_id in query.implemented_interfaces(lookup_tdef_id) {
+            for interface_tdef_id in query.implemented_interfaces(type_def_id) {
                 let interface_method_ids = query.type_methods(interface_tdef_id);
                 for method_id in interface_method_ids {
                     let method_def = query.get_method(method_id);
@@ -370,10 +366,10 @@ impl Compiler<'_> {
 
     /// Pre-register a struct type (just the name and type_id)
     /// Structs are stack-allocated value types, so no runtime type registration is needed.
-    pub(super) fn pre_register_struct(&mut self, struct_decl: &StructDecl) -> CodegenResult<()> {
+    pub(super) fn pre_register_struct(&mut self, name: Symbol) -> CodegenResult<()> {
         let query = self.analyzed;
         let module_id = self.program_module();
-        let name_id = query.name_id(module_id, &[struct_decl.name]);
+        let name_id = query.name_id(module_id, &[name]);
 
         let type_def_id = self.analyzed.try_type_def_id(name_id).ok_or_else(|| {
             CodegenError::internal("pre_register_struct: struct not in entity registry")
@@ -497,42 +493,37 @@ impl Compiler<'_> {
     }
 
     /// Finalize a struct type: fill in field slots and register instance methods.
-    pub(super) fn finalize_struct(&mut self, struct_decl: &StructDecl) -> CodegenResult<()> {
-        // Structs don't implement interfaces, so no program needed
-        self.finalize_type(struct_decl, None)
+    pub(super) fn finalize_struct(&mut self, name: Symbol) -> CodegenResult<()> {
+        let module_id = self.program_module();
+        let type_def_id = self
+            .analyzed
+            .try_name_id(module_id, &[name])
+            .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
+            .ok_or_else(|| {
+                CodegenError::internal("finalize_struct: struct not in entity registry")
+            })?;
+        // Structs don't implement interfaces, so no default method registration
+        self.finalize_type(type_def_id, false)
     }
 
-    /// Register static methods from a statics block for a type
+    /// Register static methods for a type from VIR metadata.
+    ///
+    /// Takes a slice of static MethodId from VirTypeDef.static_methods.
     fn register_static_methods(
         &mut self,
-        statics: &StaticsBlock,
-        type_name: Symbol,
+        static_method_ids: &[MethodId],
+        type_def_id: TypeDefId,
     ) -> CodegenResult<()> {
-        // Get the TypeDefId for this type from entity_registry
-        let query = self.analyzed;
-        let module_id = self.program_module();
-        let type_name_id = query.name_id(module_id, &[type_name]);
-        let type_def_id = query.try_type_def_id(type_name_id).ok_or_else(|| {
-            CodegenError::internal("register_static_methods: type not in entity registry")
-        })?;
+        for &method_id in static_method_ids {
+            let method_def = self.analyzed.get_method(method_id);
 
-        for method in &statics.methods {
-            // Only register methods with bodies (not abstract ones)
-            if method.body.is_none() {
+            // Skip external-only statics (no Vole body to compile)
+            if method_def.external_binding.is_some() {
                 continue;
             }
 
-            let method_name_id = self.method_name_id(method.name)?;
+            let method_name_id = method_def.name_id;
 
-            // Get MethodId and build signature from pre-resolved types
-            let method_id = self
-                .analyzed
-                .find_static_method(type_def_id, method_name_id)
-                .ok_or_else(|| {
-                    CodegenError::internal(
-                        "register_static_methods: static method not in entity registry",
-                    )
-                })?;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
 
             // Function key from method full name
@@ -551,43 +542,40 @@ impl Compiler<'_> {
     /// Register and finalize a module class (uses module interner)
     pub(super) fn finalize_module_class(
         &mut self,
-        class: &ClassDecl,
+        name: Symbol,
         module_interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        self.finalize_module_type(class, module_interner, module_id)
+        let type_name_str = module_interner.resolve(name);
+        self.finalize_module_type_by_name(type_name_str, module_id)
     }
 
     /// Register and finalize a module struct (uses module interner).
     pub(super) fn finalize_module_struct(
         &mut self,
-        struct_decl: &StructDecl,
+        name: Symbol,
         module_interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        self.finalize_module_type(struct_decl, module_interner, module_id)
+        let type_name_str = module_interner.resolve(name);
+        self.finalize_module_type_by_name(type_name_str, module_id)
     }
 
     /// Core implementation for finalizing a module type (class or struct).
+    /// Resolves the type by name string and delegates to VIR-based registration.
     /// - For classes: includes runtime type registration with field_type_tags
     /// - For structs: simpler path without runtime registration
-    fn finalize_module_type<T: TypeDeclInfo>(
+    fn finalize_module_type_by_name(
         &mut self,
-        type_decl: &T,
-        module_interner: &Interner,
+        type_name_str: &str,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        let type_name_str = module_interner.resolve(type_decl.name());
-        let type_kind = type_decl.type_kind();
-        let is_class = type_decl.is_class();
-        let is_generic_type = type_decl.has_type_params();
-
-        tracing::debug!(type_name = %type_name_str, type_kind, "finalize_module_type called");
+        tracing::debug!(type_name = %type_name_str, "finalize_module_type called");
 
         // Look up the TypeDefId via full resolution chain
         let query = self.analyzed;
         let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
-            tracing::warn!(type_name = %type_name_str, type_kind, "Could not find TypeDefId for module type");
+            tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module type");
             return Ok(());
         };
         tracing::debug!(type_name = %type_name_str, ?type_def_id, "Found TypeDefId for module type");
@@ -597,6 +585,13 @@ impl Compiler<'_> {
             tracing::debug!(type_name = %type_name_str, "Skipping - already registered in type_metadata");
             return Ok(());
         }
+
+        let type_def = self.analyzed.get_type(type_def_id);
+        let type_kind = type_def.type_kind();
+        let is_class = type_def.is_class();
+        let is_generic_type = type_def.has_type_params();
+
+        tracing::debug!(type_name = %type_name_str, type_kind, "finalizing module type");
 
         // Allocate type_id for classes; structs use 0
         let type_id = if is_class { alloc_type_id() } else { 0 };
@@ -610,18 +605,14 @@ impl Compiler<'_> {
             register_instance_type(type_id, field_type_tags);
         }
 
-        // Register instance methods using module interner.
+        // Register instance methods using VIR metadata.
         // Generic types are compiled via monomorphized instances, so skip direct
         // method declaration here to avoid declaring functions that never compile.
         let method_infos = if is_generic_type {
             FxHashMap::default()
         } else {
-            self.register_module_type_instance_methods(
-                type_decl,
-                type_def_id,
-                module_interner,
-                type_name_str,
-            )?
+            let method_ids: Vec<MethodId> = self.analyzed.get_type(type_def_id).methods.clone();
+            self.register_module_type_instance_methods(&method_ids, type_def_id, type_name_str)?
         };
 
         // Register type metadata
@@ -651,68 +642,59 @@ impl Compiler<'_> {
 
         // Register static methods for non-generic types.
         // Generic type statics are emitted from static-method monomorph instances.
-        if !is_generic_type && let Some(statics) = type_decl.statics() {
-            self.register_module_type_static_methods(
-                statics,
-                type_def_id,
-                module_interner,
-                type_name_str,
-                type_kind,
-            )?;
+        if !is_generic_type {
+            let static_method_ids: Vec<MethodId> =
+                self.analyzed.get_type(type_def_id).static_methods.clone();
+            if !static_method_ids.is_empty() {
+                self.register_module_type_static_methods(
+                    &static_method_ids,
+                    type_def_id,
+                    type_name_str,
+                )?;
+            }
         }
 
         Ok(())
     }
 
-    /// Register instance methods for a module type using the module interner.
-    fn register_module_type_instance_methods<T: TypeDeclInfo>(
+    /// Register instance methods for a module type using VIR metadata.
+    ///
+    /// Iterates MethodId from VirTypeDef.methods to register each method in the
+    /// JIT function registry.  Inherited default methods (has_default=true) are
+    /// skipped — they are declared and compiled through the implement block path.
+    fn register_module_type_instance_methods(
         &mut self,
-        type_decl: &T,
+        method_ids: &[MethodId],
         type_def_id: TypeDefId,
-        module_interner: &Interner,
         type_name_str: &str,
     ) -> CodegenResult<FxHashMap<NameId, MethodInfo>> {
-        let type_kind = type_decl.type_kind();
         let mut method_infos = FxHashMap::default();
 
         tracing::debug!(
             type_name = %type_name_str,
-            method_count = type_decl.methods().len(),
+            method_count = method_ids.len(),
             "Registering instance methods"
         );
 
-        for method in type_decl.methods() {
-            let method_name_str = module_interner.resolve(method.name);
+        for &method_id in method_ids {
+            let method_def = self.analyzed.get_method(method_id);
+            // Skip inherited default methods — they are declared and compiled
+            // through the implement block path, not the module type path.
+            if method_def.has_default {
+                continue;
+            }
+            let method_name_id = method_def.name_id;
+            let method_name_str = self
+                .analyzed
+                .last_segment(method_name_id)
+                .unwrap_or_default();
             tracing::debug!(
                 type_name = %type_name_str,
                 method_name = %method_name_str,
                 "Processing instance method"
             );
 
-            let method_name_id =
-                method_name_id_with_interner(self.analyzed, module_interner, method.name)
-                    .ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "module method name not found in name_table",
-                            format!("{}::{}::{}", type_kind, type_name_str, method_name_str),
-                        )
-                    })?;
-
-            let semantic_method_id = self
-                .analyzed
-                .find_method(type_def_id, method_name_id)
-                .ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "module method not registered in entity_registry",
-                        format!(
-                            "{}::{}::{} (type_def_id={:?}, method_name_id={:?})",
-                            type_kind, type_name_str, method_name_str, type_def_id, method_name_id
-                        ),
-                    )
-                })?;
-
-            let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -737,45 +719,31 @@ impl Compiler<'_> {
         Ok(method_infos)
     }
 
-    /// Register static methods for a module type using the module interner.
+    /// Register static methods for a module type using VIR metadata.
+    ///
+    /// Iterates MethodId from VirTypeDef.static_methods to register each static
+    /// method in the JIT function registry.
     fn register_module_type_static_methods(
         &mut self,
-        statics: &StaticsBlock,
+        static_method_ids: &[MethodId],
         type_def_id: TypeDefId,
-        module_interner: &Interner,
         type_name_str: &str,
-        type_kind: &str,
     ) -> CodegenResult<()> {
-        for method in &statics.methods {
-            if method.body.is_none() {
+        for &method_id in static_method_ids {
+            let method_def = self.analyzed.get_method(method_id);
+
+            // Skip external-only statics (no Vole body to compile)
+            if method_def.external_binding.is_some() {
                 continue;
             }
 
-            let method_name_str = module_interner.resolve(method.name);
-            let method_name_id =
-                method_name_id_with_interner(self.analyzed, module_interner, method.name)
-                    .ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "module static method name not found in name_table",
-                            format!("{}::{}::{}", type_kind, type_name_str, method_name_str),
-                        )
-                    })?;
-
-            let semantic_method_id = self
+            let method_name_id = method_def.name_id;
+            let method_name_str_local = self
                 .analyzed
-                .find_static_method(type_def_id, method_name_id)
-                .ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "module static method not registered in entity_registry",
-                        format!(
-                            "{}::{}::{} (type_def_id={:?}, method_name_id={:?})",
-                            type_kind, type_name_str, method_name_str, type_def_id, method_name_id
-                        ),
-                    )
-                })?;
+                .last_segment(method_name_id)
+                .unwrap_or_default();
 
-            let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let sig = self.build_signature_for_method(method_id, SelfParam::None);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -783,7 +751,7 @@ impl Compiler<'_> {
 
             tracing::debug!(
                 type_name = %type_name_str,
-                method_name = %method_name_str,
+                method_name = %method_name_str_local,
                 "Registering static method"
             );
 

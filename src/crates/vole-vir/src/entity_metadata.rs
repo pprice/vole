@@ -48,6 +48,24 @@ impl VirTypeDefKind {
     pub fn is_interface(self) -> bool {
         matches!(self, Self::Interface)
     }
+
+    /// Whether this is a class (heap-allocated, RC-managed).
+    pub fn is_class(self) -> bool {
+        matches!(self, Self::Class)
+    }
+
+    /// Type kind string for error messages ("class", "struct", etc.).
+    pub fn type_kind_str(self) -> &'static str {
+        match self {
+            Self::Interface => "interface",
+            Self::Class => "class",
+            Self::Struct => "struct",
+            Self::ErrorType => "error",
+            Self::Primitive => "primitive",
+            Self::Alias => "alias",
+            Self::Sentinel => "sentinel",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +126,23 @@ pub struct VirTypeDef {
     /// `get_field_slot_and_type_id_cg()` in structs/helpers.rs.
     /// `None` for non-generic types.
     pub generic_field_names: Option<Vec<NameId>>,
+}
+
+impl VirTypeDef {
+    /// Whether this type has generic type parameters.
+    pub fn has_type_params(&self) -> bool {
+        !self.type_params.is_empty()
+    }
+
+    /// Whether this is a class (heap-allocated, RC-managed).
+    pub fn is_class(&self) -> bool {
+        self.kind.is_class()
+    }
+
+    /// Type kind string for error messages ("class", "struct", etc.).
+    pub fn type_kind(&self) -> &'static str {
+        self.kind.type_kind_str()
+    }
 }
 
 // ---------------------------------------------------------------------------
