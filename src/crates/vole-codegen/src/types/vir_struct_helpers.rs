@@ -12,19 +12,34 @@
 #![allow(dead_code)]
 
 use cranelift::prelude::*;
+use rustc_hash::FxHashMap;
 
-use vole_identity::{FieldId, TypeDefId, TypeId, VirTypeId};
+use crate::errors::{CodegenError, CodegenResult};
+use vole_identity::{FieldId, NameId, TypeDefId, TypeId, VirTypeId};
+use vole_vir::entity_metadata::VirTypeDef;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{VirPrimitiveKind, VirType};
 
 use super::vir_conversions::{
-    vir_field_byte_size, vir_field_slot_count, vir_unwrap_struct, vir_unwrap_union,
+    vir_field_byte_size, vir_field_slot_count, vir_unwrap_class, vir_unwrap_class_or_struct,
+    vir_unwrap_struct, vir_unwrap_union,
 };
 
 pub(crate) trait VirStructEntityLookup {
     fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool;
     fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId>;
     fn field_type(&self, field_id: FieldId) -> TypeId;
+
+    /// Resolve a NameId to its last segment string.
+    ///
+    /// Used by `vir_get_field_slot_and_type_id` to match field names.
+    fn last_segment(&self, name_id: NameId) -> Option<String>;
+
+    /// Look up the VirTypeDef for a TypeDefId.
+    ///
+    /// Used by `vir_get_field_slot_and_type_id` to access generic field
+    /// types and type params from VIR metadata.
+    fn vir_type_def(&self, type_def_id: TypeDefId) -> Option<&VirTypeDef>;
 }
 
 impl VirStructEntityLookup for crate::analyzed::AnalyzedProgram {
@@ -38,6 +53,14 @@ impl VirStructEntityLookup for crate::analyzed::AnalyzedProgram {
 
     fn field_type(&self, field_id: FieldId) -> TypeId {
         self.entity_field_type(field_id)
+    }
+
+    fn last_segment(&self, name_id: NameId) -> Option<String> {
+        crate::analyzed::AnalyzedProgram::last_segment(self, name_id)
+    }
+
+    fn vir_type_def(&self, type_def_id: TypeDefId) -> Option<&VirTypeDef> {
+        Some(self.type_def(type_def_id))
     }
 }
 
@@ -53,6 +76,16 @@ impl VirStructEntityLookup for vole_sema::entity_registry::EntityRegistry {
 
     fn field_type(&self, field_id: FieldId) -> TypeId {
         self.get_field(field_id).ty
+    }
+
+    fn last_segment(&self, _name_id: NameId) -> Option<String> {
+        // Tests use NameTable directly; not available here.
+        None
+    }
+
+    fn vir_type_def(&self, _type_def_id: TypeDefId) -> Option<&VirTypeDef> {
+        // Tests don't have VirTypeDef; they use the FieldId-based trait methods.
+        None
     }
 }
 
@@ -99,6 +132,153 @@ pub(crate) fn sema_to_vir_hint(sema_ty: TypeId) -> VirTypeId {
     } else {
         VirTypeId::UNKNOWN
     }
+}
+
+// ============================================================================
+// Field slot and type lookup (VirTypeId-native)
+//
+// VirTypeId-native equivalent of `get_field_slot_and_type_id_cg` in
+// structs/helpers.rs.  Takes VirTypeId, returns (slot, VirTypeId).
+// ============================================================================
+
+/// Get field slot and type for a field access, using VirTypeId throughout.
+///
+/// VirTypeId-native equivalent of `get_field_slot_and_type_id_cg` in
+/// `structs/helpers.rs`.  Uses `VirTypeDef::generic_field_types` (VirTypeId
+/// vec) and `VirTypeTable::substitute_vir_ids` for substitution, avoiding
+/// the sema TypeId round-trip.
+///
+/// `func_subs` are the monomorphization substitutions from the function
+/// context (still `NameId -> TypeId` because that is what `Cg::substitutions`
+/// provides).
+pub(crate) fn vir_get_field_slot_and_type_id(
+    vir_ty: VirTypeId,
+    field_name: &str,
+    table: &VirTypeTable,
+    entities: &impl VirStructEntityLookup,
+    func_subs: Option<&FxHashMap<NameId, TypeId>>,
+) -> CodegenResult<(usize, VirTypeId)> {
+    // Resolve the input type through function-level substitutions.
+    let resolved_vir = resolve_through_subs(vir_ty, table, func_subs);
+
+    // Unwrap as class or struct.
+    let (type_def_id, type_args) =
+        vir_unwrap_class_or_struct(resolved_vir, table).ok_or_else(|| {
+            CodegenError::type_mismatch("field access", "class or struct", "other type")
+        })?;
+
+    let type_def = entities
+        .vir_type_def(type_def_id)
+        .ok_or_else(|| CodegenError::not_found("VirTypeDef", "type"))?;
+
+    let vir_field_types = type_def
+        .generic_field_types
+        .as_ref()
+        .ok_or_else(|| CodegenError::not_found("generic_field_types", "type"))?;
+    let field_names = type_def
+        .generic_field_names
+        .as_ref()
+        .ok_or_else(|| CodegenError::not_found("generic_field_names", "type"))?;
+
+    // Build combined substitution map (VirTypeId-native).
+    let combined_subs = build_combined_vir_subs(type_def, type_args, table, func_subs);
+
+    let is_class = vir_unwrap_class(resolved_vir, table).is_some();
+    find_field_slot(
+        field_name,
+        field_names,
+        vir_field_types,
+        &combined_subs,
+        is_class,
+        table,
+        entities,
+    )
+}
+
+/// Resolve a VirTypeId through function-level substitutions.
+///
+/// If `func_subs` is provided and the type is a Param, substitute it.
+/// Otherwise return the original type.
+fn resolve_through_subs(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    func_subs: Option<&FxHashMap<NameId, TypeId>>,
+) -> VirTypeId {
+    if let Some(subs) = func_subs {
+        table.lookup_substitute_vir(vir_ty, subs).unwrap_or(vir_ty)
+    } else {
+        vir_ty
+    }
+}
+
+/// Build a combined VirTypeId-native substitution map from type args and
+/// function-level monomorphization subs.
+fn build_combined_vir_subs(
+    type_def: &VirTypeDef,
+    type_args: &[VirTypeId],
+    table: &VirTypeTable,
+    func_subs: Option<&FxHashMap<NameId, TypeId>>,
+) -> FxHashMap<NameId, VirTypeId> {
+    // Start with type_params -> type_args (already VirTypeId).
+    let mut combined: FxHashMap<NameId, VirTypeId> = type_def
+        .type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(&param, &arg)| (param, arg))
+        .collect();
+
+    // Merge function-level substitutions, converting TypeId -> VirTypeId.
+    // Prefer concrete function subs over placeholder type args.
+    if let Some(subs) = func_subs {
+        for (&k, &v) in subs {
+            let vir_v = table.lookup_type_id(v).unwrap_or(VirTypeId::UNKNOWN);
+            let should_override = combined
+                .get(&k)
+                .is_some_and(|&existing| matches!(table.get(existing), VirType::Param { .. }));
+            if should_override || !combined.contains_key(&k) {
+                combined.insert(k, vir_v);
+            }
+        }
+    }
+
+    combined
+}
+
+/// Search fields by name and compute the (physical_slot, field_type) pair.
+fn find_field_slot(
+    field_name: &str,
+    field_names: &[NameId],
+    vir_field_types: &[VirTypeId],
+    combined_subs: &FxHashMap<NameId, VirTypeId>,
+    is_class: bool,
+    table: &VirTypeTable,
+    entities: &impl VirStructEntityLookup,
+) -> CodegenResult<(usize, VirTypeId)> {
+    let mut physical_slot = 0usize;
+    for (idx, &field_name_id) in field_names.iter().enumerate() {
+        let name = entities.last_segment(field_name_id);
+        if name.as_deref() == Some(field_name) {
+            let base_vir_ty = vir_field_types[idx];
+            let field_vir_ty = table
+                .substitute_vir_ids(base_vir_ty, combined_subs)
+                .unwrap_or(base_vir_ty);
+            let slot = if is_class { physical_slot } else { idx };
+            return Ok((slot, field_vir_ty));
+        }
+        // Advance physical slot counter for class types.
+        let ft = vir_field_types[idx];
+        let resolved_ft = table.substitute_vir_ids(ft, combined_subs).unwrap_or(ft);
+        physical_slot += if is_class {
+            vir_field_slot_count(resolved_ft, table)
+        } else {
+            1
+        };
+    }
+
+    Err(CodegenError::not_found(
+        "field",
+        format!("{} in type", field_name),
+    ))
 }
 
 // ============================================================================
@@ -585,5 +765,305 @@ mod tests {
             types::I64
         );
         assert_eq!(vir_leaf_cranelift_type(VirTypeId::BOOL, &table), types::I64);
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_get_field_slot_and_type_id tests
+    // -----------------------------------------------------------------------
+
+    /// Test helper that holds VirTypeDef data and a NameTable for field name
+    /// resolution, implementing VirStructEntityLookup.
+    struct TestVirEntities {
+        registry: EntityRegistry,
+        type_defs: FxHashMap<TypeDefId, VirTypeDef>,
+        names: vole_identity::NameTable,
+    }
+
+    impl VirStructEntityLookup for TestVirEntities {
+        fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
+            self.registry.get_type(type_def_id).kind.is_sentinel()
+        }
+
+        fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+            self.registry.fields_on_type(type_def_id).collect()
+        }
+
+        fn field_type(&self, field_id: FieldId) -> TypeId {
+            self.registry.get_field(field_id).ty
+        }
+
+        fn last_segment(&self, name_id: NameId) -> Option<String> {
+            self.names.last_segment_str(name_id)
+        }
+
+        fn vir_type_def(&self, type_def_id: TypeDefId) -> Option<&VirTypeDef> {
+            self.type_defs.get(&type_def_id)
+        }
+    }
+
+    /// Build test entities with a struct type, field names, and VirTypeDef.
+    fn make_vir_test_entities(
+        field_names: &[&str],
+        field_sema_types: &[TypeId],
+        field_vir_types: &[VirTypeId],
+    ) -> (TestVirEntities, TypeDefId) {
+        use vole_identity::NameTable;
+        use vole_sema::entity_defs::TypeDefKind;
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
+        let mut names = NameTable::new();
+        let main_mod = names.main_module();
+        let builtin_mod = names.builtin_module();
+        let type_name = names.intern_raw(main_mod, &["TestStruct"]);
+
+        let mut registry = EntityRegistry::new();
+        let type_def_id = registry.register_type(type_name, TypeDefKind::Struct, main_mod);
+
+        let mut generic_field_names = Vec::new();
+        for (i, (&fname, &sema_ty)) in field_names.iter().zip(field_sema_types.iter()).enumerate() {
+            let field_name = names.intern_raw(builtin_mod, &[fname]);
+            let full_name = names.intern_raw(main_mod, &["TestStruct", fname]);
+            registry.register_field(type_def_id, field_name, full_name, sema_ty, i);
+            generic_field_names.push(field_name);
+        }
+
+        let vir_type_def = VirTypeDef {
+            id: type_def_id,
+            name_id: type_name,
+            kind: VirTypeDefKind::Struct,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: main_mod,
+            is_generic: false,
+            generic_field_types: Some(field_vir_types.to_vec()),
+            sema_generic_field_types: Some(field_sema_types.to_vec()),
+            generic_field_names: Some(generic_field_names),
+        };
+
+        let mut type_defs = FxHashMap::default();
+        type_defs.insert(type_def_id, vir_type_def);
+
+        (
+            TestVirEntities {
+                registry,
+                type_defs,
+                names,
+            },
+            type_def_id,
+        )
+    }
+
+    #[test]
+    fn vir_get_field_struct_two_i64() {
+        let (entities, type_def_id) = make_vir_test_entities(
+            &["x", "y"],
+            &[TypeId::I64, TypeId::I64],
+            &[VirTypeId::I64, VirTypeId::I64],
+        );
+
+        let mut table = test_table();
+        let struct_ty = table.intern(
+            VirType::Struct {
+                def: type_def_id,
+                type_args: vec![],
+            },
+            None,
+        );
+
+        // First field "x" at slot 0
+        let (slot, ty) =
+            vir_get_field_slot_and_type_id(struct_ty, "x", &table, &entities, None).unwrap();
+        assert_eq!(slot, 0);
+        assert_eq!(ty, VirTypeId::I64);
+
+        // Second field "y" at slot 1
+        let (slot, ty) =
+            vir_get_field_slot_and_type_id(struct_ty, "y", &table, &entities, None).unwrap();
+        assert_eq!(slot, 1);
+        assert_eq!(ty, VirTypeId::I64);
+    }
+
+    #[test]
+    fn vir_get_field_not_found() {
+        let (entities, type_def_id) =
+            make_vir_test_entities(&["x"], &[TypeId::I64], &[VirTypeId::I64]);
+
+        let mut table = test_table();
+        let struct_ty = table.intern(
+            VirType::Struct {
+                def: type_def_id,
+                type_args: vec![],
+            },
+            None,
+        );
+
+        assert!(vir_get_field_slot_and_type_id(struct_ty, "z", &table, &entities, None,).is_err());
+    }
+
+    #[test]
+    fn vir_get_field_non_struct_type() {
+        let entities = TestVirEntities {
+            registry: EntityRegistry::new(),
+            type_defs: FxHashMap::default(),
+            names: vole_identity::NameTable::new(),
+        };
+        let table = test_table();
+
+        assert!(
+            vir_get_field_slot_and_type_id(VirTypeId::I64, "x", &table, &entities, None,).is_err()
+        );
+    }
+
+    #[test]
+    fn vir_get_field_class_with_wide_type() {
+        use vole_identity::NameTable;
+        use vole_sema::entity_defs::TypeDefKind;
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
+        let mut names = NameTable::new();
+        let main_mod = names.main_module();
+        let builtin_mod = names.builtin_module();
+        let type_name = names.intern_raw(main_mod, &["TestClass"]);
+
+        let mut registry = EntityRegistry::new();
+        let type_def_id = registry.register_type(type_name, TypeDefKind::Class, main_mod);
+
+        let field_a_name = names.intern_raw(builtin_mod, &["a"]);
+        let field_a_full = names.intern_raw(main_mod, &["TestClass", "a"]);
+        registry.register_field(type_def_id, field_a_name, field_a_full, TypeId::I128, 0);
+
+        let field_b_name = names.intern_raw(builtin_mod, &["b"]);
+        let field_b_full = names.intern_raw(main_mod, &["TestClass", "b"]);
+        registry.register_field(type_def_id, field_b_name, field_b_full, TypeId::I64, 1);
+
+        let vir_type_def = VirTypeDef {
+            id: type_def_id,
+            name_id: type_name,
+            kind: VirTypeDefKind::Class,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: main_mod,
+            is_generic: false,
+            generic_field_types: Some(vec![VirTypeId::I128, VirTypeId::I64]),
+            sema_generic_field_types: Some(vec![TypeId::I128, TypeId::I64]),
+            generic_field_names: Some(vec![field_a_name, field_b_name]),
+        };
+
+        let mut type_defs = FxHashMap::default();
+        type_defs.insert(type_def_id, vir_type_def);
+
+        let entities = TestVirEntities {
+            registry,
+            type_defs,
+            names,
+        };
+
+        let mut table = test_table();
+        let class_ty = table.intern(
+            VirType::Class {
+                def: type_def_id,
+                type_args: vec![],
+            },
+            None,
+        );
+
+        // Field "a" (i128) at physical slot 0
+        let (slot, ty) =
+            vir_get_field_slot_and_type_id(class_ty, "a", &table, &entities, None).unwrap();
+        assert_eq!(slot, 0);
+        assert_eq!(ty, VirTypeId::I128);
+
+        // Field "b" (i64) at physical slot 2 (i128 takes 2 slots)
+        let (slot, ty) =
+            vir_get_field_slot_and_type_id(class_ty, "b", &table, &entities, None).unwrap();
+        assert_eq!(slot, 2);
+        assert_eq!(ty, VirTypeId::I64);
+    }
+
+    #[test]
+    fn vir_get_field_generic_substitution() {
+        use vole_identity::NameTable;
+        use vole_sema::entity_defs::TypeDefKind;
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
+        let mut names = NameTable::new();
+        let main_mod = names.main_module();
+        let builtin_mod = names.builtin_module();
+        let type_name = names.intern_raw(main_mod, &["Wrapper"]);
+        let t_param = names.intern_raw(builtin_mod, &["T"]);
+
+        let mut registry = EntityRegistry::new();
+        let type_def_id = registry.register_type(type_name, TypeDefKind::Struct, main_mod);
+
+        let field_val_name = names.intern_raw(builtin_mod, &["val"]);
+        let field_val_full = names.intern_raw(main_mod, &["Wrapper", "val"]);
+        // sema type for the generic field is a type param placeholder
+        let sema_param_ty = TypeId::from_raw(500);
+        registry.register_field(
+            type_def_id,
+            field_val_name,
+            field_val_full,
+            sema_param_ty,
+            0,
+        );
+
+        let mut table = test_table();
+        // Intern the Param type for T
+        let param_vir = table.intern(VirType::Param { name: t_param }, None);
+
+        let vir_type_def = VirTypeDef {
+            id: type_def_id,
+            name_id: type_name,
+            kind: VirTypeDefKind::Struct,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![t_param],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: main_mod,
+            is_generic: true,
+            generic_field_types: Some(vec![param_vir]),
+            sema_generic_field_types: Some(vec![sema_param_ty]),
+            generic_field_names: Some(vec![field_val_name]),
+        };
+
+        let mut type_defs = FxHashMap::default();
+        type_defs.insert(type_def_id, vir_type_def);
+
+        let entities = TestVirEntities {
+            registry,
+            type_defs,
+            names,
+        };
+
+        // Concrete instantiation: Wrapper<i64>
+        let struct_ty = table.intern(
+            VirType::Struct {
+                def: type_def_id,
+                type_args: vec![VirTypeId::I64],
+            },
+            None,
+        );
+
+        // Field "val" should resolve to i64 after substitution
+        let (slot, ty) =
+            vir_get_field_slot_and_type_id(struct_ty, "val", &table, &entities, None).unwrap();
+        assert_eq!(slot, 0);
+        assert_eq!(ty, VirTypeId::I64);
     }
 }
