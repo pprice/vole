@@ -8,7 +8,7 @@ use crate::types::CompiledValue;
 use crate::union_layout;
 use cranelift::prelude::*;
 use cranelift_codegen::ir::StackSlot;
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 
 impl Cg<'_, '_, '_> {
     /// Coerce a value to match a field's declared type.
@@ -112,7 +112,12 @@ impl Cg<'_, '_, '_> {
             );
         }
 
-        Ok(CompiledValue::new(heap_ptr, self.ptr_type(), union_type_id))
+        Ok(CompiledValue::new(
+            heap_ptr,
+            self.ptr_type(),
+            union_type_id,
+            self.vir_lookup(union_type_id),
+        ))
     }
 
     /// Copy a union value (possibly stack-allocated) to a heap-allocated buffer.
@@ -184,7 +189,12 @@ impl Cg<'_, '_, '_> {
         self.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
 
-        Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
+        Ok(CompiledValue::new(
+            heap_ptr,
+            ptr_type,
+            value.type_id,
+            self.vir_lookup(value.type_id),
+        ))
     }
 
     /// Copy an interface fat pointer into a new heap allocation.
@@ -228,7 +238,12 @@ impl Cg<'_, '_, '_> {
             .ins()
             .store(MemFlags::new(), vtable_ptr, heap_ptr, word_bytes as i32);
 
-        Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
+        Ok(CompiledValue::new(
+            heap_ptr,
+            ptr_type,
+            value.type_id,
+            self.vir_lookup(value.type_id),
+        ))
     }
 
     /// Copy an unknown-typed TaggedValue to a new heap allocation.
@@ -272,7 +287,12 @@ impl Cg<'_, '_, '_> {
             union_layout::PAYLOAD_OFFSET,
         );
 
-        Ok(CompiledValue::new(heap_ptr, ptr_type, TypeId::UNKNOWN))
+        Ok(CompiledValue::new(
+            heap_ptr,
+            ptr_type,
+            TypeId::UNKNOWN,
+            VirTypeId::UNKNOWN,
+        ))
     }
 
     /// Store a value into a struct field's stack slot, handling nested structs,

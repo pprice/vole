@@ -100,6 +100,14 @@ impl WideType {
         }
     }
 
+    /// The VIR type ID for this wide type.
+    pub fn vir_type_id(self) -> VirTypeId {
+        match self {
+            WideType::I128 => VirTypeId::I128,
+            WideType::F128 => VirTypeId::F128,
+        }
+    }
+
     /// Build a `CompiledValue` from raw i128 bits, applying the correct
     /// bitcast for F128 types.
     pub fn compiled_value_from_i128(
@@ -109,6 +117,6 @@ impl WideType {
         type_id: TypeId,
     ) -> CompiledValue {
         let value = self.reinterpret_i128(builder, i128_bits);
-        CompiledValue::new(value, self.cranelift_type(), type_id)
+        CompiledValue::new(value, self.cranelift_type(), type_id, self.vir_type_id())
     }
 }

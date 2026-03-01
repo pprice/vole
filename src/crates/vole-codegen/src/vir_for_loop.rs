@@ -439,7 +439,12 @@ impl Cg<'_, '_, '_> {
         let runtime_iter_type_id = self
             .vir_query_lookup_runtime_iterator(elem_type_id)
             .unwrap_or(TypeId::STRING);
-        super::types::CompiledValue::owned(raw, types::I64, runtime_iter_type_id)
+        super::types::CompiledValue::owned(
+            raw,
+            types::I64,
+            runtime_iter_type_id,
+            self.vir_lookup(runtime_iter_type_id),
+        )
     }
 
     /// Track an owned iterator in the current RC scope for cleanup.

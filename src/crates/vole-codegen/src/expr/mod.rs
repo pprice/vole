@@ -105,15 +105,30 @@ impl Cg<'_, '_, '_> {
             match const_val {
                 ConstantValue::F64(v) => {
                     let val = self.builder.ins().f64const(v);
-                    Ok(CompiledValue::new(val, types::F64, prims.f64))
+                    Ok(CompiledValue::new(
+                        val,
+                        types::F64,
+                        prims.f64,
+                        VirTypeId::F64,
+                    ))
                 }
                 ConstantValue::I64(v) => {
                     let val = self.iconst_cached(types::I64, v);
-                    Ok(CompiledValue::new(val, types::I64, prims.i64))
+                    Ok(CompiledValue::new(
+                        val,
+                        types::I64,
+                        prims.i64,
+                        VirTypeId::I64,
+                    ))
                 }
                 ConstantValue::Bool(v) => {
                     let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
-                    Ok(CompiledValue::new(val, types::I8, prims.bool))
+                    Ok(CompiledValue::new(
+                        val,
+                        types::I8,
+                        prims.bool,
+                        VirTypeId::BOOL,
+                    ))
                 }
                 ConstantValue::String(s) => self.string_literal(&s),
             }
@@ -126,7 +141,12 @@ impl Cg<'_, '_, '_> {
         } else if self.vir_query_is_sentinel(export_type_id) {
             // Sentinel exports are zero-field structs - emit i8(0)
             let value = self.iconst_cached(types::I8, 0);
-            Ok(CompiledValue::new(value, types::I8, export_type_id))
+            Ok(CompiledValue::new(
+                value,
+                types::I8,
+                export_type_id,
+                self.vir_lookup(export_type_id),
+            ))
         } else {
             Err(CodegenError::not_found(
                 "module export constant",
@@ -276,7 +296,12 @@ impl Cg<'_, '_, '_> {
         // Use closure type from sema (already has is_closure: true).
         // Mark as Owned: the closure allocation is a fresh +1 reference that
         // must be rc_dec'd when it goes out of scope or is consumed as an arg.
-        let cv = CompiledValue::new(closure_ptr, self.ptr_type(), func_type_id);
+        let cv = CompiledValue::new(
+            closure_ptr,
+            self.ptr_type(),
+            func_type_id,
+            self.vir_lookup(func_type_id),
+        );
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -304,6 +329,7 @@ impl Cg<'_, '_, '_> {
             self.iconst_cached(types::I64, 0),
             types::I64,
             TypeId::I64,
+            VirTypeId::I64,
         ))
     }
 
@@ -365,7 +391,12 @@ impl Cg<'_, '_, '_> {
             }
             VirExpr::NilLiteral => {
                 let value = self.iconst_cached(types::I8, 0);
-                Ok(CompiledValue::new(value, types::I8, TypeId::NIL))
+                Ok(CompiledValue::new(
+                    value,
+                    types::I8,
+                    TypeId::NIL,
+                    VirTypeId::NIL,
+                ))
             }
 
             // -- Simple expressions -----------------------------------------
@@ -378,10 +409,12 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.sema_type_from_vir(*ty)
                 };
-                Ok(
-                    CompiledValue::new(self.iconst_cached(types::I64, 0), types::I64, type_id)
-                        .with_vir_type(*vir_ty),
-                )
+                Ok(CompiledValue::new(
+                    self.iconst_cached(types::I64, 0),
+                    types::I64,
+                    type_id,
+                    *vir_ty,
+                ))
             }
             VirExpr::TypeLiteral => Err(CodegenError::unsupported(
                 "type expressions as runtime values",
@@ -839,11 +872,21 @@ impl Cg<'_, '_, '_> {
                 } else {
                     sextend_const(self.builder, target_ty, value.value)
                 };
-                Ok(CompiledValue::new(result, target_ty, to))
+                Ok(CompiledValue::new(
+                    result,
+                    target_ty,
+                    to,
+                    self.vir_lookup(to),
+                ))
             }
             CoerceKind::IntTruncate => {
                 let result = self.builder.ins().ireduce(target_ty, value.value);
-                Ok(CompiledValue::new(result, target_ty, to))
+                Ok(CompiledValue::new(
+                    result,
+                    target_ty,
+                    to,
+                    self.vir_lookup(to),
+                ))
             }
             CoerceKind::IntToFloat => {
                 let result = if vir_is_unsigned(vir_from, table) {
@@ -851,7 +894,12 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.builder.ins().fcvt_from_sint(target_ty, value.value)
                 };
-                Ok(CompiledValue::new(result, target_ty, to))
+                Ok(CompiledValue::new(
+                    result,
+                    target_ty,
+                    to,
+                    self.vir_lookup(to),
+                ))
             }
             CoerceKind::FloatToInt => {
                 let result = if vir_is_unsigned(vir_to, table) {
@@ -859,15 +907,30 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.builder.ins().fcvt_to_sint(target_ty, value.value)
                 };
-                Ok(CompiledValue::new(result, target_ty, to))
+                Ok(CompiledValue::new(
+                    result,
+                    target_ty,
+                    to,
+                    self.vir_lookup(to),
+                ))
             }
             CoerceKind::FloatExtend => {
                 let result = self.builder.ins().fpromote(target_ty, value.value);
-                Ok(CompiledValue::new(result, target_ty, to))
+                Ok(CompiledValue::new(
+                    result,
+                    target_ty,
+                    to,
+                    self.vir_lookup(to),
+                ))
             }
             CoerceKind::FloatTruncate => {
                 let result = self.builder.ins().fdemote(target_ty, value.value);
-                Ok(CompiledValue::new(result, target_ty, to))
+                Ok(CompiledValue::new(
+                    result,
+                    target_ty,
+                    to,
+                    self.vir_lookup(to),
+                ))
             }
             CoerceKind::InterfaceBox {
                 interface_type_def,
@@ -932,6 +995,7 @@ impl Cg<'_, '_, '_> {
             concrete_val,
             concrete_ty,
             concrete_type_id,
+            self.vir_lookup(concrete_type_id),
         ))
     }
 
@@ -965,6 +1029,7 @@ impl Cg<'_, '_, '_> {
             wrapped,
             types::I64,
             runtime_iter_type_id,
+            self.vir_lookup(runtime_iter_type_id),
         ))
     }
 
@@ -981,7 +1046,12 @@ impl Cg<'_, '_, '_> {
         // 1. Sentinel types — always i8(0).
         if self.vir_query_is_sentinel(ty) {
             let value = self.iconst_cached(types::I8, 0);
-            return Ok(CompiledValue::new(value, types::I8, ty));
+            return Ok(CompiledValue::new(
+                value,
+                types::I8,
+                ty,
+                self.vir_lookup(ty),
+            ));
         }
 
         // 2. Captured variable — load from closure environment.
@@ -1023,7 +1093,12 @@ impl Cg<'_, '_, '_> {
         {
             let payload_ty = self.cranelift_type(narrowed_variant);
             let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
-            let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
+            let mut cv = CompiledValue::new(
+                payload,
+                payload_ty,
+                narrowed_variant,
+                self.vir_lookup(narrowed_variant),
+            );
             self.mark_borrowed_if_rc(&mut cv);
             return Ok(cv);
         }
@@ -1042,7 +1117,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Simple local: no narrowing needed.
-        let mut cv = CompiledValue::new(val, cl_ty, var_type_id);
+        let mut cv = CompiledValue::new(val, cl_ty, var_type_id, self.vir_lookup(var_type_id));
         self.mark_borrowed_if_rc(&mut cv);
         if cv.rc_lifecycle == RcLifecycle::Untracked
             && self.rc_state(var_type_id).union_variants().is_some()
@@ -1111,7 +1186,12 @@ impl Cg<'_, '_, '_> {
             && let Some(sentinel_type_id) = self.analyzed().sentinel_base_type(type_def_id)
         {
             let value = self.iconst_cached(types::I8, 0);
-            return Ok(CompiledValue::new(value, types::I8, sentinel_type_id));
+            return Ok(CompiledValue::new(
+                value,
+                types::I8,
+                sentinel_type_id,
+                self.vir_lookup(sentinel_type_id),
+            ));
         }
 
         Err(CodegenError::not_found(
@@ -1456,6 +1536,7 @@ impl Cg<'_, '_, '_> {
                     self.iconst_cached(types::I64, 0),
                     types::I64,
                     TypeId::NEVER,
+                    self.vir_lookup(TypeId::NEVER),
                 ))
             }
         }

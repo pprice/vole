@@ -36,7 +36,12 @@ impl Cg<'_, '_, '_> {
             self.vir_query_lookup_runtime_iterator(TypeId::I64)
                 .expect("INTERNAL: range iterator: RuntimeIterator<i64> type not pre-created")
         });
-        Ok(CompiledValue::owned(result, self.ptr_type(), iter_type_id))
+        Ok(CompiledValue::owned(
+            result,
+            self.ptr_type(),
+            iter_type_id,
+            self.vir_lookup(iter_type_id),
+        ))
     }
 
     /// Handle built-in methods on arrays, strings, and ranges.
@@ -80,6 +85,7 @@ impl Cg<'_, '_, '_> {
                         result,
                         self.ptr_type(),
                         iter_type_id,
+                        self.vir_lookup(iter_type_id),
                     )))
                 }
                 _ => Ok(None),
@@ -120,6 +126,7 @@ impl Cg<'_, '_, '_> {
                         result,
                         self.ptr_type(),
                         iter_type_id,
+                        self.vir_lookup(iter_type_id),
                     )))
                 }
                 _ => Ok(None),
@@ -150,6 +157,7 @@ impl Cg<'_, '_, '_> {
                     result,
                     self.ptr_type(),
                     iter_type_id,
+                    self.vir_lookup(iter_type_id),
                 )));
             }
             return Ok(None);
@@ -192,6 +200,7 @@ impl Cg<'_, '_, '_> {
             self.iconst_cached(types::I64, 0),
             types::I64,
             void_type_id,
+            self.vir_lookup(void_type_id),
         ))
     }
 }

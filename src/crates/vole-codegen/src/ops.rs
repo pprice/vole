@@ -467,7 +467,12 @@ impl Cg<'_, '_, '_> {
             _ => (result_ty, result_type_id),
         };
 
-        Ok(CompiledValue::new(result, final_ty, final_type_id))
+        Ok(CompiledValue::new(
+            result,
+            final_ty,
+            final_type_id,
+            self.vir_lookup(final_type_id),
+        ))
     }
 
     fn coerce_value_to_f128(&mut self, value: CompiledValue) -> CodegenResult<Value> {
@@ -805,7 +810,12 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(not_nil_block);
         let payload =
             self.load_union_payload(optional.value, optional.type_id, payload_cranelift_type);
-        let payload_compiled = CompiledValue::new(payload, payload_cranelift_type, inner_type_id);
+        let payload_compiled = CompiledValue::new(
+            payload,
+            payload_cranelift_type,
+            inner_type_id,
+            self.vir_lookup(inner_type_id),
+        );
         let eq_result = self.struct_equality(payload_compiled, value, op)?;
         let eq_arg = BlockArg::from(eq_result.value);
         self.builder.ins().jump(merge_block, &[eq_arg]);

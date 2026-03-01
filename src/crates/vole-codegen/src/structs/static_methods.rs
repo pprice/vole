@@ -7,7 +7,9 @@ use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
 use vole_frontend::Symbol;
-use vole_identity::{MethodId, NameId, NodeId, StaticMethodMonomorphKey, TypeDefId, TypeId};
+use vole_identity::{
+    MethodId, NameId, NodeId, StaticMethodMonomorphKey, TypeDefId, TypeId, VirTypeId,
+};
 use vole_vir::VirStaticMethodMonomorphInfo;
 use vole_vir::expr::{VirMethodDispatchMeta, VirStaticMethodMonomorphKey};
 
@@ -180,7 +182,12 @@ impl Cg<'_, '_, '_> {
                         self.compile_method_default_args(method_id, slot, &[param_id], false)?;
                     rc_temps.extend(rc_owned);
                     if let Some(&val) = default_vals.first() {
-                        CompiledValue::new(val, self.cranelift_type(param_id), param_id)
+                        CompiledValue::new(
+                            val,
+                            self.cranelift_type(param_id),
+                            param_id,
+                            self.vir_lookup(param_id),
+                        )
                     } else {
                         continue;
                     }
@@ -225,7 +232,12 @@ impl Cg<'_, '_, '_> {
         // For sret, result[0] is the sret pointer we passed in
         let mut result = if is_sret {
             let results = self.builder.inst_results(call);
-            CompiledValue::new(results[0], self.ptr_type(), return_type_id)
+            CompiledValue::new(
+                results[0],
+                self.ptr_type(),
+                return_type_id,
+                self.vir_lookup(return_type_id),
+            )
         } else {
             // call_result must run before consume_rc_args to copy union data
             // from callee's stack before rc_dec calls can clobber it
@@ -412,7 +424,12 @@ impl Cg<'_, '_, '_> {
         // For sret, result[0] is the sret pointer we passed in
         let mut result = if is_sret {
             let results = self.builder.inst_results(call);
-            CompiledValue::new(results[0], self.ptr_type(), return_type_id)
+            CompiledValue::new(
+                results[0],
+                self.ptr_type(),
+                return_type_id,
+                self.vir_lookup(return_type_id),
+            )
         } else {
             // call_result must run before consume_rc_args to copy union data
             // from callee's stack before rc_dec calls can clobber it
@@ -453,37 +470,37 @@ impl Cg<'_, '_, '_> {
             "nan" => {
                 if is_f32 {
                     let v = self.builder.ins().f32const(f32::NAN);
-                    CompiledValue::new(v, types::F32, TypeId::F32)
+                    CompiledValue::new(v, types::F32, TypeId::F32, VirTypeId::F32)
                 } else {
                     let v = self.builder.ins().f64const(f64::NAN);
-                    CompiledValue::new(v, types::F64, TypeId::F64)
+                    CompiledValue::new(v, types::F64, TypeId::F64, VirTypeId::F64)
                 }
             }
             "infinity" => {
                 if is_f32 {
                     let v = self.builder.ins().f32const(f32::INFINITY);
-                    CompiledValue::new(v, types::F32, TypeId::F32)
+                    CompiledValue::new(v, types::F32, TypeId::F32, VirTypeId::F32)
                 } else {
                     let v = self.builder.ins().f64const(f64::INFINITY);
-                    CompiledValue::new(v, types::F64, TypeId::F64)
+                    CompiledValue::new(v, types::F64, TypeId::F64, VirTypeId::F64)
                 }
             }
             "neg_infinity" => {
                 if is_f32 {
                     let v = self.builder.ins().f32const(f32::NEG_INFINITY);
-                    CompiledValue::new(v, types::F32, TypeId::F32)
+                    CompiledValue::new(v, types::F32, TypeId::F32, VirTypeId::F32)
                 } else {
                     let v = self.builder.ins().f64const(f64::NEG_INFINITY);
-                    CompiledValue::new(v, types::F64, TypeId::F64)
+                    CompiledValue::new(v, types::F64, TypeId::F64, VirTypeId::F64)
                 }
             }
             "epsilon" => {
                 if is_f32 {
                     let v = self.builder.ins().f32const(f32::EPSILON);
-                    CompiledValue::new(v, types::F32, TypeId::F32)
+                    CompiledValue::new(v, types::F32, TypeId::F32, VirTypeId::F32)
                 } else {
                     let v = self.builder.ins().f64const(f64::EPSILON);
-                    CompiledValue::new(v, types::F64, TypeId::F64)
+                    CompiledValue::new(v, types::F64, TypeId::F64, VirTypeId::F64)
                 }
             }
             _ => return Ok(None),
@@ -566,7 +583,12 @@ impl Cg<'_, '_, '_> {
             self.consume_rc_value(&mut stored_value)?;
         }
 
-        let mut result = CompiledValue::new(result_val, self.ptr_type(), return_type_id);
+        let mut result = CompiledValue::new(
+            result_val,
+            self.ptr_type(),
+            return_type_id,
+            self.vir_lookup(return_type_id),
+        );
         result.rc_lifecycle = RcLifecycle::Owned;
 
         Ok(Some(result))

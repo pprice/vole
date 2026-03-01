@@ -12,7 +12,7 @@
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
-use vole_identity::{Symbol, TypeDefId, TypeId};
+use vole_identity::{Symbol, TypeDefId, TypeId, VirTypeId};
 use vole_vir::types::{VirAnnotation, VirAnnotationValue, VirConstant};
 
 use crate::RuntimeKey;
@@ -73,7 +73,12 @@ pub(super) fn build_field_meta_array(
     let array_type_id = cg
         .vir_query_lookup_array(info.field_meta_type_id)
         .unwrap_or(info.field_meta_type_id);
-    Ok(CompiledValue::new(arr_ptr, cg.ptr_type(), array_type_id))
+    Ok(CompiledValue::new(
+        arr_ptr,
+        cg.ptr_type(),
+        array_type_id,
+        cg.vir_lookup(array_type_id),
+    ))
 }
 
 /// Collect field info tuples for all fields, including VIR-lowered annotations.
@@ -195,6 +200,7 @@ fn build_annotations_array(
             arr_ptr,
             cg.ptr_type(),
             cg.vir_query_unknown(),
+            cg.vir_lookup(cg.vir_query_unknown()),
         ));
     }
 
@@ -210,6 +216,7 @@ fn build_annotations_array(
         arr_ptr,
         cg.ptr_type(),
         cg.vir_query_unknown(),
+        cg.vir_lookup(cg.vir_query_unknown()),
     ))
 }
 
@@ -294,7 +301,12 @@ fn compile_vir_constant(cg: &mut Cg, constant: &VirConstant) -> CodegenResult<Co
         VirConstant::String(s) => cg.string_literal(s),
         VirConstant::Nil => {
             let value = cg.iconst_cached(types::I8, 0);
-            Ok(CompiledValue::new(value, types::I8, TypeId::NIL))
+            Ok(CompiledValue::new(
+                value,
+                types::I8,
+                TypeId::NIL,
+                VirTypeId::NIL,
+            ))
         }
     }
 }

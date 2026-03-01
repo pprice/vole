@@ -152,7 +152,12 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .load(elem_cr_type, MemFlags::new(), obj.value, offset);
 
-            let mut cv = CompiledValue::new(value, elem_cr_type, elem_type_id);
+            let mut cv = CompiledValue::new(
+                value,
+                elem_cr_type,
+                elem_type_id,
+                self.vir_lookup(elem_type_id),
+            );
             self.mark_borrowed_if_rc(&mut cv);
             Ok(cv)
         } else {
@@ -214,7 +219,8 @@ impl Cg<'_, '_, '_> {
                 .load(elem_cr_type, MemFlags::new(), elem_ptr, 0)
         };
 
-        let mut cv = CompiledValue::new(value, elem_cr_type, element_id);
+        let mut cv =
+            CompiledValue::new(value, elem_cr_type, element_id, self.vir_lookup(element_id));
         self.mark_borrowed_if_rc(&mut cv);
         Ok(cv)
     }

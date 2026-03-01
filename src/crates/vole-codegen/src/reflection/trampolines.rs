@@ -6,7 +6,7 @@
 
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Module};
-use vole_identity::{TypeDefId, TypeId};
+use vole_identity::{TypeDefId, TypeId, VirTypeId};
 use vole_runtime::value::RuntimeTypeId;
 
 use crate::RuntimeKey;
@@ -337,6 +337,6 @@ fn wrap_in_closure(cg: &mut Cg, func_id: FuncId) -> CodegenResult<CompiledValue>
     let closure_ptr = cg.builder.inst_results(alloc_call)[0];
 
     // Use a generic function type — the closure type will be coerced as needed.
-    let cv = CompiledValue::new(closure_ptr, ptr_type, TypeId::UNKNOWN);
+    let cv = CompiledValue::new(closure_ptr, ptr_type, TypeId::UNKNOWN, VirTypeId::UNKNOWN);
     Ok(cg.mark_rc_owned(cv))
 }

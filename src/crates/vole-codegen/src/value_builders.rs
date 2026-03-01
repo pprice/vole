@@ -31,7 +31,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// construction, avoiding thousands of dead iconst instructions that were
     /// previously emitted and never referenced.
     pub fn void_value(&self) -> CompiledValue {
-        CompiledValue::new(self.cached_void_val, types::I64, TypeId::VOID)
+        CompiledValue::new(
+            self.cached_void_val,
+            types::I64,
+            TypeId::VOID,
+            VirTypeId::VOID,
+        )
     }
 
     /// Create a zero/default value of the given Cranelift type.
@@ -64,7 +69,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as a Bool CompiledValue
     pub fn bool_value(&self, value: Value) -> CompiledValue {
-        CompiledValue::new(value, types::I8, TypeId::BOOL)
+        CompiledValue::new(value, types::I8, TypeId::BOOL, VirTypeId::BOOL)
     }
 
     /// Create a boolean constant (true or false)
@@ -75,7 +80,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as an I64 CompiledValue
     pub fn i64_value(&self, value: Value) -> CompiledValue {
-        CompiledValue::new(value, types::I64, TypeId::I64)
+        CompiledValue::new(value, types::I64, TypeId::I64, VirTypeId::I64)
     }
 
     /// Create an integer constant with a specific Vole type
@@ -111,7 +116,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             self.iconst_cached(ty, n)
         };
-        CompiledValue::new(value, ty, type_id)
+        CompiledValue::new(value, ty, type_id, self.vir_lookup(type_id))
     }
 
     /// Create an integer constant using a VIR type ID.
@@ -145,7 +150,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.iconst_cached(cranelift_ty, n)
         };
         let type_id = self.sema_type_from_vir(vir_ty);
-        CompiledValue::new(value, cranelift_ty, type_id).with_vir_type(vir_ty)
+        CompiledValue::new(value, cranelift_ty, type_id, vir_ty)
     }
 
     /// Create a wide (i128/f128) literal using a VIR type ID.
@@ -164,9 +169,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .builder
                 .ins()
                 .bitcast(types::F128, MemFlags::new(), i128_val);
-            CompiledValue::new(value, types::F128, type_id).with_vir_type(vir_ty)
+            CompiledValue::new(value, types::F128, type_id, vir_ty)
         } else {
-            CompiledValue::new(i128_val, types::I128, type_id).with_vir_type(vir_ty)
+            CompiledValue::new(i128_val, types::I128, type_id, vir_ty)
         }
     }
 
@@ -174,7 +179,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
         if self.vir_query_is_union(type_id) {
             let v = self.builder.ins().f64const(n);
-            return CompiledValue::new(v, types::F64, TypeId::F64);
+            return CompiledValue::new(v, types::F64, TypeId::F64, VirTypeId::F64);
         }
         let (ty, value) = match type_id {
             TypeId::F32 => {
@@ -203,7 +208,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 type_id
             ),
         };
-        CompiledValue::new(value, ty, type_id)
+        CompiledValue::new(value, ty, type_id, self.vir_lookup(type_id))
     }
 
     /// Create a float constant using a VIR type ID.
@@ -211,7 +216,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let table = self.vir_type_table();
         if table.is_union(vir_ty) {
             let v = self.builder.ins().f64const(n);
-            return CompiledValue::new(v, types::F64, TypeId::F64).with_vir_type(VirTypeId::F64);
+            return CompiledValue::new(v, types::F64, TypeId::F64, VirTypeId::F64);
         }
         let (ty, value) = match vir_ty {
             VirTypeId::F32 => {
@@ -237,7 +242,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ),
         };
         let type_id = self.sema_type_from_vir(vir_ty);
-        CompiledValue::new(value, ty, type_id).with_vir_type(vir_ty)
+        CompiledValue::new(value, ty, type_id, vir_ty)
     }
 
     // ========== Tag helpers ==========
@@ -262,12 +267,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as a String CompiledValue marked as an RC temp
     pub fn string_temp(&self, value: Value) -> CompiledValue {
-        CompiledValue::owned(value, self.ptr_type(), TypeId::STRING)
+        CompiledValue::owned(value, self.ptr_type(), TypeId::STRING, VirTypeId::STRING)
     }
 
     /// Create a CompiledValue from a value and TypeId, automatically computing the cranelift type
     pub fn compiled(&self, value: Value, type_id: TypeId) -> CompiledValue {
-        CompiledValue::new(value, self.cranelift_type(type_id), type_id)
+        CompiledValue::new(
+            value,
+            self.cranelift_type(type_id),
+            type_id,
+            self.vir_lookup(type_id),
+        )
     }
 
     /// Convert a raw i64 field value to a CompiledValue with the proper type.
@@ -277,7 +287,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.env.analyzed.type_arena();
         let (value, ty) =
             super::structs::convert_field_value_id(self.builder, raw_value, type_id, arena);
-        CompiledValue::new(value, ty, type_id)
+        CompiledValue::new(value, ty, type_id, self.vir_lookup(type_id))
     }
 
     /// Extract a value from a TaggedValue (unknown type) after type narrowing.
@@ -407,7 +417,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        let mut cv = CompiledValue::new(ptr, ptr_type, union_type_id);
+        let mut cv =
+            CompiledValue::new(ptr, ptr_type, union_type_id, self.vir_lookup(union_type_id));
         cv.mark_borrowed();
         cv
     }
@@ -525,7 +536,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue::new(ptr, ptr_type, type_id))
+        Ok(CompiledValue::new(
+            ptr,
+            ptr_type,
+            type_id,
+            self.vir_lookup(type_id),
+        ))
     }
 
     /// Copy a struct value to a new stack slot (value semantics).
@@ -551,7 +567,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let dst_ptr = self.builder.ins().stack_addr(ptr_type, dst_slot, 0);
 
-        Ok(CompiledValue::new(dst_ptr, ptr_type, src.type_id))
+        Ok(CompiledValue::new(
+            dst_ptr,
+            ptr_type,
+            src.type_id,
+            src.vir_type_id,
+        ))
     }
 
     /// Copy a struct value to a heap allocation.
@@ -582,7 +603,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .store(MemFlags::new(), val, heap_ptr, offset);
         }
 
-        Ok(CompiledValue::new(heap_ptr, ptr_type, src.type_id))
+        Ok(CompiledValue::new(
+            heap_ptr,
+            ptr_type,
+            src.type_id,
+            src.vir_type_id,
+        ))
     }
 
     // ========== Call result & union helpers ==========
@@ -627,7 +653,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            return Ok(CompiledValue::new(ptr, ptr_type, return_type_id));
+            return Ok(CompiledValue::new(
+                ptr,
+                ptr_type,
+                return_type_id,
+                self.vir_lookup(return_type_id),
+            ));
         }
 
         // Check for fallible multi-value return (2 results: tag, payload)
@@ -650,7 +681,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            return Ok(CompiledValue::new(ptr, ptr_type, return_type_id));
+            return Ok(CompiledValue::new(
+                ptr,
+                ptr_type,
+                return_type_id,
+                self.vir_lookup(return_type_id),
+            ));
         }
 
         // Check for small struct multi-value return (2 results: field0, field1)

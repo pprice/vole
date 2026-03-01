@@ -266,7 +266,12 @@ impl Cg<'_, '_, '_> {
             self.setup_closure_captures(captures, closure_ptr)?;
         }
 
-        Ok(CompiledValue::new(closure_ptr, ptr_type, func_type_id))
+        Ok(CompiledValue::new(
+            closure_ptr,
+            ptr_type,
+            func_type_id,
+            self.vir_lookup(func_type_id),
+        ))
     }
 
     /// Set up the capture values in an allocated closure.

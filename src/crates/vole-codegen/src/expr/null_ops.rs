@@ -48,7 +48,12 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let nil_type_id = self.vir_query_nil();
-        let nil_val = CompiledValue::new(self.iconst_cached(types::I8, 0), types::I8, nil_type_id);
+        let nil_val = CompiledValue::new(
+            self.iconst_cached(types::I8, 0),
+            types::I8,
+            nil_type_id,
+            self.vir_lookup(nil_type_id),
+        );
         self.coerce_to_type(nil_val, result_type_id)
     }
 
@@ -71,7 +76,12 @@ impl Cg<'_, '_, '_> {
         // struct pointer.
         if self.vir_query_is_struct(binding.vole_type) {
             let ptr_type = self.ptr_type();
-            let cv = CompiledValue::new(heap_ptr, ptr_type, binding.vole_type);
+            let cv = CompiledValue::new(
+                heap_ptr,
+                ptr_type,
+                binding.vole_type,
+                self.vir_lookup(binding.vole_type),
+            );
             return Ok(cv);
         }
 
@@ -84,7 +94,12 @@ impl Cg<'_, '_, '_> {
         // Capture loads are borrows — the closure owns the reference via its
         // capture slot.  Marking as Borrowed ensures the return path inc's the
         // value when it leaves the closure body, giving the caller a +1 ref.
-        let mut cv = CompiledValue::new(value, cranelift_ty, binding.vole_type);
+        let mut cv = CompiledValue::new(
+            value,
+            cranelift_ty,
+            binding.vole_type,
+            self.vir_lookup(binding.vole_type),
+        );
         self.mark_borrowed_if_rc(&mut cv);
         Ok(cv)
     }
@@ -119,7 +134,12 @@ impl Cg<'_, '_, '_> {
             value.mark_consumed();
             value.debug_assert_rc_handled("closure capture assign");
             let ptr_type = self.ptr_type();
-            return Ok(CompiledValue::new(heap_ptr, ptr_type, binding.vole_type));
+            return Ok(CompiledValue::new(
+                heap_ptr,
+                ptr_type,
+                binding.vole_type,
+                self.vir_lookup(binding.vole_type),
+            ));
         }
 
         let cranelift_ty = self.cranelift_type(binding.vole_type);
@@ -134,6 +154,7 @@ impl Cg<'_, '_, '_> {
             value.value,
             cranelift_ty,
             binding.vole_type,
+            self.vir_lookup(binding.vole_type),
         ))
     }
 
@@ -219,7 +240,12 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        let cv = CompiledValue::new(result, cranelift_type, inner_type_id);
+        let cv = CompiledValue::new(
+            result,
+            cranelift_type,
+            inner_type_id,
+            self.vir_lookup(inner_type_id),
+        );
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -260,7 +286,12 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result_ptr = self.builder.block_params(merge_block)[0];
-        let cv = CompiledValue::new(result_ptr, ptr_type, inner_type_id);
+        let cv = CompiledValue::new(
+            result_ptr,
+            ptr_type,
+            inner_type_id,
+            self.vir_lookup(inner_type_id),
+        );
         Ok(cv)
     }
 
@@ -480,7 +511,12 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::new(result, payload_ty, success_type_id))
+        Ok(CompiledValue::new(
+            result,
+            payload_ty,
+            success_type_id,
+            self.vir_lookup(success_type_id),
+        ))
     }
 
     /// Extract the inner (non-nil) value from an optional union.
@@ -502,10 +538,20 @@ impl Cg<'_, '_, '_> {
                 scrutinee.value,
                 union_layout::PAYLOAD_OFFSET,
             );
-            CompiledValue::new(loaded, inner_cranelift_type, inner_type_id)
+            CompiledValue::new(
+                loaded,
+                inner_cranelift_type,
+                inner_type_id,
+                self.vir_lookup(inner_type_id),
+            )
         } else {
             let zero = self.iconst_cached(inner_cranelift_type, 0);
-            CompiledValue::new(zero, inner_cranelift_type, inner_type_id)
+            CompiledValue::new(
+                zero,
+                inner_cranelift_type,
+                inner_type_id,
+                self.vir_lookup(inner_type_id),
+            )
         }
     }
 

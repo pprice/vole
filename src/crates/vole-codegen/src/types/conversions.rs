@@ -71,10 +71,10 @@ pub enum RcLifecycle {
 pub struct CompiledValue {
     pub value: Value,
     pub ty: Type,
-    /// The Vole type of this value (interned TypeId handle - use arena to query)
+    /// The Vole type of this value (interned TypeId handle - use arena to query).
+    /// Migration: being replaced by `vir_type_id` (vol-zlly).
     pub type_id: TypeId,
     /// The VIR type of this value (proper VirTypeId from VirTypeTable).
-    /// Migration: populated by VIR compilation paths, `VirTypeId::UNKNOWN` elsewhere.
     pub vir_type_id: VirTypeId,
     /// Lifecycle state for reference-counted values.
     pub rc_lifecycle: RcLifecycle,
@@ -86,12 +86,12 @@ pub struct CompiledValue {
 
 impl CompiledValue {
     /// Create a compiled value (not an RC temporary).
-    pub fn new(value: Value, ty: Type, type_id: TypeId) -> Self {
+    pub fn new(value: Value, ty: Type, type_id: TypeId, vir_type_id: VirTypeId) -> Self {
         Self {
             value,
             ty,
             type_id,
-            vir_type_id: VirTypeId::UNKNOWN,
+            vir_type_id,
             rc_lifecycle: RcLifecycle::Untracked,
             #[cfg(debug_assertions)]
             consumed: false,
@@ -99,12 +99,12 @@ impl CompiledValue {
     }
 
     /// Create a compiled value marked as an RC temporary that needs cleanup.
-    pub fn owned(value: Value, ty: Type, type_id: TypeId) -> Self {
+    pub fn owned(value: Value, ty: Type, type_id: TypeId, vir_type_id: VirTypeId) -> Self {
         Self {
             value,
             ty,
             type_id,
-            vir_type_id: VirTypeId::UNKNOWN,
+            vir_type_id,
             rc_lifecycle: RcLifecycle::Owned,
             #[cfg(debug_assertions)]
             consumed: false,

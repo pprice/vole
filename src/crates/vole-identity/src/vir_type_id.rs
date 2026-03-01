@@ -99,6 +99,53 @@ impl VirTypeId {
     pub fn compat_raw(self) -> u32 {
         self.0 & !Self::COMPAT_FLAG
     }
+
+    /// Check if this is the UNKNOWN type.
+    #[inline]
+    pub fn is_unknown(self) -> bool {
+        self == Self::UNKNOWN
+    }
+
+    /// Check if this is the NIL type.
+    #[inline]
+    pub fn is_nil(self) -> bool {
+        self == Self::NIL
+    }
+
+    /// Check if this is a numeric type (integer or float).
+    #[inline]
+    pub fn is_numeric(self) -> bool {
+        self.is_integer() || self.is_float()
+    }
+
+    /// Check if this is an integer type (signed or unsigned).
+    #[inline]
+    pub fn is_integer(self) -> bool {
+        matches!(
+            self,
+            Self::I8
+                | Self::I16
+                | Self::I32
+                | Self::I64
+                | Self::I128
+                | Self::U8
+                | Self::U16
+                | Self::U32
+                | Self::U64
+        )
+    }
+
+    /// Check if this is a float type.
+    #[inline]
+    pub fn is_float(self) -> bool {
+        matches!(self, Self::F32 | Self::F64 | Self::F128)
+    }
+
+    /// Check if this is an unsigned integer type.
+    #[inline]
+    pub fn is_unsigned_int(self) -> bool {
+        matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
+    }
 }
 
 impl fmt::Display for VirTypeId {

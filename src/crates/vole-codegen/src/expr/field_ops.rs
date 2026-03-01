@@ -17,7 +17,7 @@ use crate::structs::helpers::{
 use crate::types::{CompiledValue, module_name_id};
 
 use vole_frontend::Symbol;
-use vole_identity::{ConstantValue, TypeId};
+use vole_identity::{ConstantValue, TypeId, VirTypeId};
 use vole_vir::VirExpr;
 use vole_vir::expr::FieldStorage;
 
@@ -133,7 +133,12 @@ impl Cg<'_, '_, '_> {
             }
             if self.vir_query_is_sentinel(export_type_id) {
                 let value = self.iconst_cached(types::I8, 0);
-                return Ok(Some(CompiledValue::new(value, types::I8, export_type_id)));
+                return Ok(Some(CompiledValue::new(
+                    value,
+                    types::I8,
+                    export_type_id,
+                    self.vir_lookup(export_type_id),
+                )));
             }
             return Err(CodegenError::unsupported_with_context(
                 "non-constant module export",
@@ -153,15 +158,30 @@ impl Cg<'_, '_, '_> {
         match const_val {
             ConstantValue::F64(v) => {
                 let val = self.builder.ins().f64const(v);
-                Ok(CompiledValue::new(val, types::F64, prims.f64))
+                Ok(CompiledValue::new(
+                    val,
+                    types::F64,
+                    prims.f64,
+                    VirTypeId::F64,
+                ))
             }
             ConstantValue::I64(v) => {
                 let val = self.iconst_cached(types::I64, v);
-                Ok(CompiledValue::new(val, types::I64, prims.i64))
+                Ok(CompiledValue::new(
+                    val,
+                    types::I64,
+                    prims.i64,
+                    VirTypeId::I64,
+                ))
             }
             ConstantValue::Bool(v) => {
                 let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
-                Ok(CompiledValue::new(val, types::I8, prims.bool))
+                Ok(CompiledValue::new(
+                    val,
+                    types::I8,
+                    prims.bool,
+                    VirTypeId::BOOL,
+                ))
             }
             ConstantValue::String(s) => self.string_literal(&s),
         }

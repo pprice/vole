@@ -17,7 +17,7 @@ use crate::types::{
 };
 use crate::union_layout;
 use vole_frontend::Symbol;
-use vole_identity::{MethodId, NameId, TypeDefId, TypeId};
+use vole_identity::{MethodId, NameId, TypeDefId, TypeId, VirTypeId};
 use vole_sema::type_arena::SemaType;
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
@@ -528,10 +528,17 @@ impl InterfaceVtableRegistry {
                     let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
                     let compiled = {
                         let arena = ctx.analyzed().type_arena();
+                        let vir_type_id = ctx
+                            .analyzed()
+                            .vir_program()
+                            .type_table
+                            .lookup_type_id(method.return_type_id)
+                            .unwrap_or(VirTypeId::UNKNOWN);
                         CompiledValue::new(
                             result,
                             type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
                             method.return_type_id,
+                            vir_type_id,
                         )
                     };
                     let word =
@@ -2107,6 +2114,11 @@ fn box_interface_value_core<'a, 'ctx>(
             value.value,
             codegen_ctx.ptr_type(),
             interface_type_id,
+            env.analyzed
+                .vir_program()
+                .type_table
+                .lookup_type_id(interface_type_id)
+                .unwrap_or(VirTypeId::UNKNOWN),
         ));
     }
 
@@ -2150,6 +2162,11 @@ fn box_interface_value_core<'a, 'ctx>(
         iface_ptr,
         ctx_view.ptr_type(),
         interface_type_id,
+        env.analyzed
+            .vir_program()
+            .type_table
+            .lookup_type_id(interface_type_id)
+            .unwrap_or(VirTypeId::UNKNOWN),
     ))
 }
 

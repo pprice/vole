@@ -1195,6 +1195,7 @@ impl Cg<'_, '_, '_> {
                 results[0],
                 self.ptr_type(),
                 return_type_id,
+                self.vir_lookup(return_type_id),
             ));
         }
 
@@ -1235,6 +1236,7 @@ impl Cg<'_, '_, '_> {
                 result_value,
                 expected_ty,
                 return_type_id,
+                self.vir_lookup(return_type_id),
             ))
         }
     }

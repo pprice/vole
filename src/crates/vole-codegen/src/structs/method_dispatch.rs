@@ -179,7 +179,12 @@ impl Cg<'_, '_, '_> {
         // For sret, result[0] is the sret pointer we passed in
         let result = if is_sret {
             let results = self.builder.inst_results(call_inst);
-            CompiledValue::new(results[0], self.ptr_type(), return_type_id)
+            CompiledValue::new(
+                results[0],
+                self.ptr_type(),
+                return_type_id,
+                self.vir_lookup(return_type_id),
+            )
         } else {
             self.call_result(call_inst, return_type_id)?
         };

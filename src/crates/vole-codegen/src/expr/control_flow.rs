@@ -26,6 +26,7 @@ impl Cg<'_, '_, '_> {
             self.iconst_cached(types::I64, 0),
             types::I64,
             TypeId::NEVER,
+            self.vir_lookup(TypeId::NEVER),
         ))
     }
 
@@ -103,7 +104,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.void_value());
         }
         let result = self.builder.block_params(merge_block)[0];
-        let mut cv = CompiledValue::new(result, cranelift_type, type_id);
+        let mut cv = CompiledValue::new(result, cranelift_type, type_id, self.vir_lookup(type_id));
         if self.rc_state(type_id).needs_cleanup() {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
@@ -210,7 +211,12 @@ impl Cg<'_, '_, '_> {
         if then_terminated && else_terminated {
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
             let dummy = self.cached_void_val;
-            return Ok(CompiledValue::new(dummy, types::I64, TypeId::NEVER));
+            return Ok(CompiledValue::new(
+                dummy,
+                types::I64,
+                TypeId::NEVER,
+                self.vir_lookup(TypeId::NEVER),
+            ));
         }
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)

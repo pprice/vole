@@ -240,7 +240,12 @@ impl Cg<'_, '_, '_> {
                 return self.reconstruct_struct_from_regs(&results_vec, type_id);
             }
             // Large struct (sret): result[0] is already the pointer to our buffer
-            return Ok(CompiledValue::new(results[0], self.ptr_type(), type_id));
+            return Ok(CompiledValue::new(
+                results[0],
+                self.ptr_type(),
+                type_id,
+                self.vir_lookup(type_id),
+            ));
         }
 
         // Non-struct: standard single result
@@ -252,7 +257,12 @@ impl Cg<'_, '_, '_> {
         } else {
             self.coerce_cranelift_value(results[0], actual_ty, expected_ty)
         };
-        Ok(CompiledValue::new(value, expected_ty, type_id))
+        Ok(CompiledValue::new(
+            value,
+            expected_ty,
+            type_id,
+            self.vir_lookup(type_id),
+        ))
     }
 
     /// Compile a native function call with known Vole types (for generic external functions).

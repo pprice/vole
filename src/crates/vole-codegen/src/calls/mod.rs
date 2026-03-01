@@ -89,7 +89,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Check if it's a functional interface variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym) {
             let value = self.builder.use_var(*var);
-            let obj = CompiledValue::new(value, self.cranelift_type(*type_id), *type_id);
+            let obj = CompiledValue::new(
+                value,
+                self.cranelift_type(*type_id),
+                *type_id,
+                self.vir_lookup(*type_id),
+            );
             if let Some(result) = self.try_call_functional_interface(&obj, arg_source)? {
                 return Ok(result);
             }
@@ -540,7 +545,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);
-            let mut result = CompiledValue::new(results[0], ptr_type, callee_return_type_id);
+            let mut result = CompiledValue::new(
+                results[0],
+                ptr_type,
+                callee_return_type_id,
+                self.vir_lookup(callee_return_type_id),
+            );
             if return_type_id != callee_return_type_id {
                 result = self.coerce_to_type(result, return_type_id)?;
             }

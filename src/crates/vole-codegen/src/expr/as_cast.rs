@@ -49,7 +49,12 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        let cv = CompiledValue::new(result, result_cranelift_type, nullable_type_id);
+        let cv = CompiledValue::new(
+            result,
+            result_cranelift_type,
+            nullable_type_id,
+            self.vir_lookup(nullable_type_id),
+        );
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -90,6 +95,7 @@ impl Cg<'_, '_, '_> {
             result,
             result_cranelift_type,
             tested_type_id,
+            self.vir_lookup(tested_type_id),
         ))
     }
 
@@ -101,6 +107,11 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let payload_ty = self.cranelift_type(target_type_id);
         let payload = self.load_union_payload(union_value.value, union_value.type_id, payload_ty);
-        Ok(CompiledValue::new(payload, payload_ty, target_type_id))
+        Ok(CompiledValue::new(
+            payload,
+            payload_ty,
+            target_type_id,
+            self.vir_lookup(target_type_id),
+        ))
     }
 }

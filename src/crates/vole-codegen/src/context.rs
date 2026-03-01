@@ -1720,7 +1720,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             if was_already_unknown && value.type_id.is_unknown() {
                 let cloned = self.call_runtime(RuntimeKey::TaggedValueClone, &[value.value])?;
-                value = CompiledValue::new(cloned, self.ptr_type(), value.type_id);
+                value = CompiledValue::new(
+                    cloned,
+                    self.ptr_type(),
+                    value.type_id,
+                    self.vir_lookup(value.type_id),
+                );
             }
 
             if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
@@ -1831,7 +1836,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        let mut cv = CompiledValue::new(ptr, ptr_type, resolved_union_id);
+        let mut cv = CompiledValue::new(
+            ptr,
+            ptr_type,
+            resolved_union_id,
+            self.vir_lookup(resolved_union_id),
+        );
         cv.mark_borrowed();
         cv
     }

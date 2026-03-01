@@ -15,7 +15,7 @@ mod saturating;
 use cranelift::prelude::{AbiParam, InstBuilder, IntCC, MemFlags, Value, types};
 use cranelift_module::Module;
 
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_runtime::native_registry::NativeType;
 
 use crate::RuntimeKey;
@@ -132,7 +132,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             } else {
                 self.coerce_cranelift_value(results[0], actual_ty, cranelift_ty)
             };
-            Ok(CompiledValue::new(result_val, cranelift_ty, return_type_id))
+            Ok(CompiledValue::new(
+                result_val,
+                cranelift_ty,
+                return_type_id,
+                self.vir_lookup(return_type_id),
+            ))
         }
     }
 
@@ -148,7 +153,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .iter()
             .map(|&value| {
                 let ty = self.builder.func.dfg.value_type(value);
-                CompiledValue::new(value, ty, TypeId::VOID)
+                CompiledValue::new(value, ty, TypeId::VOID, VirTypeId::VOID)
             })
             .collect();
         self.call_compiler_intrinsic_key_typed_with_line(
@@ -196,7 +201,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     let value = self.call_runtime(runtime, &args)?;
                     let ty = self.cranelift_type(return_type_id);
-                    Ok(CompiledValue::new(value, ty, return_type_id))
+                    Ok(CompiledValue::new(
+                        value,
+                        ty,
+                        return_type_id,
+                        self.vir_lookup(return_type_id),
+                    ))
                 }
             }
         }
@@ -279,7 +289,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue::new(value, ty, type_id))
+                Ok(CompiledValue::new(
+                    value,
+                    ty,
+                    type_id,
+                    self.vir_lookup(type_id),
+                ))
             }
             IntrinsicHandler::UnaryFloatOp(op) => {
                 if args.is_empty() {
@@ -336,7 +351,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue::new(value, ty, type_id))
+                Ok(CompiledValue::new(
+                    value,
+                    ty,
+                    type_id,
+                    self.vir_lookup(type_id),
+                ))
             }
             IntrinsicHandler::BinaryFloatOp(op) => {
                 use crate::intrinsics::BinaryFloatOp;
@@ -363,21 +383,36 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue::new(value, ty, type_id))
+                Ok(CompiledValue::new(
+                    value,
+                    ty,
+                    type_id,
+                    self.vir_lookup(type_id),
+                ))
             }
             IntrinsicHandler::UnaryIntOp(op) => {
                 if args.is_empty() {
                     return Err(CodegenError::arg_count(key_display, 1, args.len()));
                 }
                 let (value, ty, type_id) = self.compile_unary_int_op(*op, args[0]);
-                Ok(CompiledValue::new(value, ty, type_id))
+                Ok(CompiledValue::new(
+                    value,
+                    ty,
+                    type_id,
+                    self.vir_lookup(type_id),
+                ))
             }
             IntrinsicHandler::BinaryIntOp(op) => {
                 if args.len() < 2 {
                     return Err(CodegenError::arg_count(key_display, 2, args.len()));
                 }
                 let (value, ty, type_id) = self.compile_binary_int_op(*op, args[0], args[1]);
-                Ok(CompiledValue::new(value, ty, type_id))
+                Ok(CompiledValue::new(
+                    value,
+                    ty,
+                    type_id,
+                    self.vir_lookup(type_id),
+                ))
             }
             IntrinsicHandler::UnaryIntWrappingOp(op) => {
                 use crate::intrinsics::UnaryIntWrappingOp;
@@ -404,7 +439,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::I64, TypeId::I64)
                     }
                 };
-                Ok(CompiledValue::new(value, ty, type_id))
+                Ok(CompiledValue::new(
+                    value,
+                    ty,
+                    type_id,
+                    self.vir_lookup(type_id),
+                ))
             }
             IntrinsicHandler::CheckedIntOp(op) => {
                 if args.len() < 2 {
@@ -512,7 +552,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let call_inst = self.call_native_indirect(native_func, &[ch_handle, tag_val, payload_bits]);
         let send_result = self.builder.inst_results(call_inst)[0];
         let is_ok = self.builder.ins().icmp_imm(IntCC::Equal, send_result, 0);
-        Ok(CompiledValue::new(is_ok, types::I8, TypeId::BOOL))
+        Ok(CompiledValue::new(
+            is_ok,
+            types::I8,
+            TypeId::BOOL,
+            VirTypeId::BOOL,
+        ))
     }
 
     fn emit_task_channel_recv_intrinsic(
@@ -567,8 +612,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.emit_brif(cond, done_block, value_block);
 
         self.switch_to_block(done_block);
-        let done_value =
-            CompiledValue::new(self.iconst_cached(types::I8, 0), types::I8, TypeId::DONE);
+        let done_value = CompiledValue::new(
+            self.iconst_cached(types::I8, 0),
+            types::I8,
+            TypeId::DONE,
+            self.vir_lookup(TypeId::DONE),
+        );
         let done_union = self.construct_union_id(done_value, return_type_id)?;
         self.builder
             .ins()
@@ -594,6 +643,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             union_ptr,
             self.ptr_type(),
             return_type_id,
+            self.vir_lookup(return_type_id),
         ))
     }
 
@@ -639,7 +689,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .ok_or_else(|| CodegenError::not_found("native function", "std:task::task_run"))?;
         let call_inst = self.call_native_indirect(native_func, &[closure.value]);
         let handle = self.builder.inst_results(call_inst)[0];
-        Ok(CompiledValue::new(handle, self.ptr_type(), TypeId::HANDLE))
+        Ok(CompiledValue::new(
+            handle,
+            self.ptr_type(),
+            TypeId::HANDLE,
+            self.vir_lookup(TypeId::HANDLE),
+        ))
     }
 
     fn emit_runtime_panic(&mut self, args: &[Value], call_line: u32) -> CodegenResult<()> {

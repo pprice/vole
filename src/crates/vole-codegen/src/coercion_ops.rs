@@ -10,7 +10,7 @@
 use cranelift::prelude::{InstBuilder, MemFlags, Type, Value, types};
 
 use smallvec::SmallVec;
-use vole_identity::{FunctionId, MethodId, NodeId, TypeId};
+use vole_identity::{FunctionId, MethodId, NodeId, TypeId, VirTypeId};
 use vole_vir::numeric_model::{NumericCoercion, numeric_coercion};
 
 use crate::RuntimeKey;
@@ -191,13 +191,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // If the Cranelift representation is already the right type (e.g. u8 → i8,
         // u32 → i32), no IR instruction is needed — just re-tag the value.
         if value.ty == target_ty {
-            return Ok(CompiledValue::new(value.value, target_ty, target_type_id));
+            return Ok(CompiledValue::new(
+                value.value,
+                target_ty,
+                target_type_id,
+                self.vir_lookup(target_type_id),
+            ));
         }
         let coercion = numeric_coercion(value.type_id, target_type_id);
 
         let converted = match coercion {
             NumericCoercion::Identity => {
-                return Ok(CompiledValue::new(value.value, target_ty, target_type_id));
+                return Ok(CompiledValue::new(
+                    value.value,
+                    target_ty,
+                    target_type_id,
+                    self.vir_lookup(target_type_id),
+                ));
             }
             NumericCoercion::IntWiden { signed: true } => {
                 sextend_const(self.builder, target_ty, value.value)
@@ -215,7 +225,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.float_to_int(value, target_type_id, to_signed)?
             }
         };
-        Ok(CompiledValue::new(converted, target_ty, target_type_id))
+        Ok(CompiledValue::new(
+            converted,
+            target_ty,
+            target_type_id,
+            self.vir_lookup(target_type_id),
+        ))
     }
 
     /// Float widening: F32→F64 (fpromote), or anything→F128 (runtime calls).
@@ -411,7 +426,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Heap-allocate the TaggedValue via runtime call
         let ptr = self.call_runtime(RuntimeKey::TaggedValueNew, &[tag_val, value_as_i64])?;
 
-        Ok(CompiledValue::new(ptr, self.ptr_type(), TypeId::UNKNOWN))
+        Ok(CompiledValue::new(
+            ptr,
+            self.ptr_type(),
+            TypeId::UNKNOWN,
+            VirTypeId::UNKNOWN,
+        ))
     }
 
     /// Box a value as an interface type.
@@ -484,7 +504,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(new_value, expected_ty, param_type_id)
+                CompiledValue::new(
+                    new_value,
+                    expected_ty,
+                    param_type_id,
+                    self.vir_lookup(param_type_id),
+                )
             } else {
                 compiled
             };
@@ -545,7 +570,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(new_value, expected_ty, param_type_id)
+                CompiledValue::new(
+                    new_value,
+                    expected_ty,
+                    param_type_id,
+                    self.vir_lookup(param_type_id),
+                )
             } else {
                 compiled
             };
@@ -603,7 +633,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(new_value, expected_ty, param_type_id)
+                CompiledValue::new(
+                    new_value,
+                    expected_ty,
+                    param_type_id,
+                    self.vir_lookup(param_type_id),
+                )
             } else {
                 compiled
             };

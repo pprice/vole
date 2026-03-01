@@ -197,6 +197,7 @@ impl Cg<'_, '_, '_> {
             wrapped,
             types::I64,
             runtime_iter_type_id,
+            self.vir_lookup(runtime_iter_type_id),
         ))
     }
 
@@ -336,7 +337,12 @@ impl Cg<'_, '_, '_> {
             } else {
                 result_val
             };
-            CompiledValue::new(converted, expected_cty, return_type_id)
+            CompiledValue::new(
+                converted,
+                expected_cty,
+                return_type_id,
+                self.vir_lookup(return_type_id),
+            )
         } else if method_name == "sum" {
             // sum() -> T: the runtime always returns i64 (raw word). When the
             // element type is a float, the runtime does float addition and returns
@@ -359,7 +365,12 @@ impl Cg<'_, '_, '_> {
             } else {
                 result_val
             };
-            CompiledValue::new(converted, expected_cty, effective_return_type)
+            CompiledValue::new(
+                converted,
+                expected_cty,
+                effective_return_type,
+                self.vir_lookup(effective_return_type),
+            )
         } else {
             self.call_external_id(&external_info, &args, return_type_id)?
         };
