@@ -392,8 +392,6 @@ impl Compiler<'_> {
             return false; // cycle — treat as not program-owned
         }
 
-        let arena = self.analyzed.type_arena();
-
         let nominal_is_program_owned = |type_def_id| {
             let name_id = self.analyzed.entity_type_name_id(type_def_id);
             let module_id = self.analyzed.name_table().module_of(name_id);
@@ -405,50 +403,50 @@ impl Compiler<'_> {
             !self.analyzed.module_programs().contains_key(&module_path)
         };
 
-        if let Some((type_def_id, type_args)) = arena.unwrap_class(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_class(type_id) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_struct(type_id) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((type_def_id, type_args)) = arena.unwrap_interface(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_interface(type_id) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some(elem) = arena.unwrap_array(type_id) {
+        if let Some(elem) = self.vir_query_unwrap_array(type_id) {
             return self.type_depends_on_program_definitions_inner(elem, visited);
         }
-        if let Some((elem, _)) = arena.unwrap_fixed_array(type_id) {
+        if let Some((elem, _)) = self.vir_query_unwrap_fixed_array(type_id) {
             return self.type_depends_on_program_definitions_inner(elem, visited);
         }
-        if let Some(elements) = arena.unwrap_tuple(type_id) {
+        if let Some(elements) = self.vir_query_unwrap_tuple(type_id) {
             return elements
                 .iter()
                 .copied()
                 .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some(variants) = arena.unwrap_union(type_id) {
+        if let Some(variants) = self.vir_query_unwrap_union(type_id) {
             return variants
                 .iter()
                 .copied()
                 .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((ok_type, err_type)) = arena.unwrap_fallible(type_id) {
+        if let Some((ok_type, err_type)) = self.vir_query_unwrap_fallible(type_id) {
             return self.type_depends_on_program_definitions_inner(ok_type, visited)
                 || self.type_depends_on_program_definitions_inner(err_type, visited);
         }
-        if let Some((params, ret, _)) = arena.unwrap_function(type_id) {
+        if let Some((params, ret, _)) = self.vir_query_unwrap_function(type_id) {
             return params
                 .iter()
                 .copied()
@@ -1016,8 +1014,6 @@ impl Compiler<'_> {
         }
         self.last_expansion_cache_size = current_cache_size;
 
-        let arena = self.arena();
-
         // Step 1: Collect abstract class method templates (those with TypeParam in substitutions)
         tracing::debug!(
             current_cache_size,
@@ -1080,7 +1076,7 @@ impl Compiler<'_> {
             if key
                 .class_type_keys
                 .iter()
-                .any(|&tk| arena.contains_type_param(tk))
+                .any(|&tk| self.vir_query_contains_type_param(tk))
             {
                 continue;
             }
@@ -1128,7 +1124,7 @@ impl Compiler<'_> {
             if key
                 .type_keys
                 .iter()
-                .any(|&tk| arena.contains_type_param(tk))
+                .any(|&tk| self.vir_query_contains_type_param(tk))
             {
                 continue;
             }
@@ -1176,7 +1172,7 @@ impl Compiler<'_> {
                 .type_keys
                 .iter()
                 .enumerate()
-                .filter_map(|(i, &tk)| arena.unwrap_type_param(tk).map(|name| (i, name)))
+                .filter_map(|(i, &tk)| self.vir_query_unwrap_type_param(tk).map(|name| (i, name)))
                 .collect();
             if abstract_type_param_positions.is_empty() {
                 continue;
@@ -1199,7 +1195,7 @@ impl Compiler<'_> {
                     .iter()
                     .enumerate()
                     .map(|(i, &tk)| {
-                        if arena.unwrap_type_param(tk).is_some() {
+                        if self.vir_query_unwrap_type_param(tk).is_some() {
                             concrete_type_args[i]
                         } else {
                             tk
@@ -1210,7 +1206,7 @@ impl Compiler<'_> {
                 // Skip if any concrete type_keys still contain TypeParams
                 if concrete_type_keys
                     .iter()
-                    .any(|&tk| arena.contains_type_param(tk))
+                    .any(|&tk| self.vir_query_contains_type_param(tk))
                 {
                     continue;
                 }
@@ -1246,7 +1242,7 @@ impl Compiler<'_> {
                     .substitutions
                     .iter()
                     .map(|(&key_name, &value_type_id)| {
-                        if let Some(param_name) = arena.unwrap_type_param(value_type_id)
+                        if let Some(param_name) = self.vir_query_unwrap_type_param(value_type_id)
                             && let Some(&concrete_ty) = concrete_subs.get(&param_name)
                         {
                             return (key_name, concrete_ty);
@@ -1261,13 +1257,15 @@ impl Compiler<'_> {
                     .params_id
                     .iter()
                     .map(|&param_ty| {
-                        arena
-                            .lookup_substitute(param_ty, &concrete_class_subs)
+                        self.vir_query_lookup_substitute(param_ty, &concrete_class_subs)
                             .unwrap_or(param_ty)
                     })
                     .collect();
-                let concrete_return = arena
-                    .lookup_substitute(tmpl.func_type.return_type_id, &concrete_class_subs)
+                let concrete_return = self
+                    .vir_query_lookup_substitute(
+                        tmpl.func_type.return_type_id,
+                        &concrete_class_subs,
+                    )
                     .unwrap_or(tmpl.func_type.return_type_id);
                 let concrete_func_type = FunctionType::from_ids(
                     &concrete_params,
@@ -1275,8 +1273,8 @@ impl Compiler<'_> {
                     tmpl.func_type.is_closure,
                 );
 
-                let concrete_self_type = arena
-                    .lookup_substitute(tmpl.self_type, &concrete_class_subs)
+                let concrete_self_type = self
+                    .vir_query_lookup_substitute(tmpl.self_type, &concrete_class_subs)
                     .unwrap_or(tmpl.self_type);
 
                 // Skip if any resolved types still contain TypeParams.
@@ -1284,9 +1282,9 @@ impl Compiler<'_> {
                 // other generic contexts that our substitution set doesn't cover.
                 if concrete_params
                     .iter()
-                    .any(|&p| arena.contains_type_param(p))
-                    || arena.contains_type_param(concrete_return)
-                    || arena.contains_type_param(concrete_self_type)
+                    .any(|&p| self.vir_query_contains_type_param(p))
+                    || self.vir_query_contains_type_param(concrete_return)
+                    || self.vir_query_contains_type_param(concrete_self_type)
                 {
                     continue;
                 }

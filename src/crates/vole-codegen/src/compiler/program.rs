@@ -177,7 +177,7 @@ impl Compiler<'_> {
                     self.declare_tests_scoped_decls(tests_decl, &mut test_count)?;
 
                     // Declare each test with a generated name and signature () -> i64
-                    let i64_type_id = self.arena().primitives.i64;
+                    let i64_type_id = self.vir_query_primitives().i64;
                     for _ in &tests_decl.tests {
                         let func_key = self.test_function_key(test_count);
                         let func_name = self.test_display_name(func_key);
@@ -242,8 +242,7 @@ impl Compiler<'_> {
             }
         };
 
-        let arena = self.arena();
-        if let Some(runtime_iter_type_id) = arena.lookup_runtime_iterator(elem_type_id) {
+        if let Some(runtime_iter_type_id) = self.vir_query_lookup_runtime_iterator(elem_type_id) {
             self.func_registry
                 .set_return_type(func_key, runtime_iter_type_id);
         }

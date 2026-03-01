@@ -203,7 +203,7 @@ fn emit_implicit_return(
         // Check if the return type is fallible - need multi-value return
         let is_fallible_return = cg
             .return_type
-            .map(|ret_type_id| cg.arena().unwrap_fallible(ret_type_id).is_some())
+            .map(|ret_type_id| cg.vir_query_unwrap_fallible(ret_type_id).is_some())
             .unwrap_or(false);
 
         // Check if the function has a void return type. Expression-bodied default methods
@@ -211,7 +211,7 @@ fn emit_implicit_return(
         // The Cranelift signature for void functions has no return values.
         let is_void_return = cg
             .return_type
-            .map(|ret_type_id| cg.arena().is_void(ret_type_id))
+            .map(|ret_type_id| cg.vir_query_is_void(ret_type_id))
             .unwrap_or(false);
 
         if is_void_return {
@@ -264,7 +264,7 @@ fn emit_implicit_return(
         {
             cg.emit_sret_struct_return(value.value, ret_type_id)?;
         } else if let Some(ret_type_id) = cg.return_type
-            && cg.arena().is_union(ret_type_id)
+            && cg.vir_query_is_union(ret_type_id)
         {
             // For union return types, wrap the value in a union
             let wrapped = cg.construct_union_id(value, ret_type_id)?;
@@ -395,7 +395,7 @@ fn compile_vir_block_body(
     cg: &mut Cg,
     stmts: &[VirStmt],
 ) -> CodegenResult<(bool, Option<(CompiledValue, Option<Variable>)>)> {
-    let has_trailing_expr = cg.return_type.is_some_and(|ret| !cg.arena().is_void(ret))
+    let has_trailing_expr = cg.return_type.is_some_and(|ret| !cg.vir_query_is_void(ret))
         && matches!(
             stmts.last(),
             Some(VirStmt::Expr { value }) if !value.is_void_if()

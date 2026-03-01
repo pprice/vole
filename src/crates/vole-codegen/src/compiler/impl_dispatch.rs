@@ -332,14 +332,12 @@ impl Compiler<'_> {
         // Get param and return types from sema (pre-resolved signature)
         let method_def = self.analyzed.get_method(semantic_method_id);
         let (param_type_ids, method_return_type_id) = {
-            let arena = self.arena();
-            let (params, ret, _) =
-                arena
-                    .unwrap_function(method_def.signature_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal("method signature: expected function type")
-                    })?;
-            (params.to_vec(), Some(ret))
+            let (params, ret, _) = self
+                .vir_query_unwrap_function(method_def.signature_id)
+                .ok_or_else(|| {
+                    CodegenError::internal("method signature: expected function type")
+                })?;
+            (params, Some(ret))
         };
 
         // Get source file pointer and self symbol before borrowing ctx.func
@@ -447,14 +445,12 @@ impl Compiler<'_> {
         // Get param and return types from sema (pre-resolved signature)
         let method_def = self.analyzed.get_method(semantic_method_id);
         let (param_type_ids, return_type_id) = {
-            let arena = self.arena();
-            let (params, ret, _) =
-                arena
-                    .unwrap_function(method_def.signature_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal("method signature: expected function type")
-                    })?;
-            (params.to_vec(), ret)
+            let (params, ret, _) = self
+                .vir_query_unwrap_function(method_def.signature_id)
+                .ok_or_else(|| {
+                    CodegenError::internal("method signature: expected function type")
+                })?;
+            (params, ret)
         };
 
         let param_types = self.type_ids_to_cranelift(&param_type_ids);
@@ -561,14 +557,12 @@ impl Compiler<'_> {
         // Get param and return types from sema (pre-resolved signature)
         let method_def = self.analyzed.get_method(semantic_method_id);
         let (param_type_ids, return_type_id) = {
-            let arena = self.arena();
-            let (params, ret, _) =
-                arena
-                    .unwrap_function(method_def.signature_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal("method signature: expected function type")
-                    })?;
-            (params.to_vec(), ret)
+            let (params, ret, _) = self
+                .vir_query_unwrap_function(method_def.signature_id)
+                .ok_or_else(|| {
+                    CodegenError::internal("method signature: expected function type")
+                })?;
+            (params, ret)
         };
 
         let param_types = self.type_ids_to_cranelift(&param_type_ids);
@@ -688,16 +682,12 @@ impl Compiler<'_> {
 
             // Get param and return types from sema (pre-resolved signature)
             let (param_type_ids, return_type_id) = {
-                let arena = self.arena();
-                let (params, ret, _) =
-                    arena
-                        .unwrap_function(method_def.signature_id)
-                        .ok_or_else(|| {
-                            CodegenError::internal(
-                                "static method signature: expected function type",
-                            )
-                        })?;
-                (params.to_vec(), ret)
+                let (params, ret, _) = self
+                    .vir_query_unwrap_function(method_def.signature_id)
+                    .ok_or_else(|| {
+                        CodegenError::internal("static method signature: expected function type")
+                    })?;
+                (params, ret)
             };
 
             let param_types = self.type_ids_to_cranelift(&param_type_ids);
@@ -775,12 +765,13 @@ impl Compiler<'_> {
             .type_metadata
             .values()
             .find(|meta| {
-                let arena = self.arena();
                 // Use unwrap_class for classes, unwrap_struct for structs
                 let type_def_id = if is_class {
-                    arena.unwrap_class(meta.vole_type).map(|(id, _)| id)
+                    self.vir_query_unwrap_class(meta.vole_type)
+                        .map(|(id, _)| id)
                 } else {
-                    arena.unwrap_struct(meta.vole_type).map(|(id, _)| id)
+                    self.vir_query_unwrap_struct(meta.vole_type)
+                        .map(|(id, _)| id)
                 };
                 type_def_id.is_some_and(|id| {
                     let name_id = self.analyzed.entity_type_name_id(id);
@@ -878,14 +869,12 @@ impl Compiler<'_> {
             // Get param and return types from sema
             let method_def = self.analyzed.get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
-                let arena = self.arena();
-                let (params, ret, _) =
-                    arena
-                        .unwrap_function(method_def.signature_id)
-                        .ok_or_else(|| {
-                            CodegenError::internal("method signature: expected function type")
-                        })?;
-                (params.to_vec(), Some(ret))
+                let (params, ret, _) = self
+                    .vir_query_unwrap_function(method_def.signature_id)
+                    .ok_or_else(|| {
+                        CodegenError::internal("method signature: expected function type")
+                    })?;
+                (params, Some(ret))
             };
 
             let self_sym = module_info
@@ -1005,16 +994,12 @@ impl Compiler<'_> {
             // Get param and return types from sema
             let method_def = self.analyzed.get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
-                let arena = self.arena();
-                let (params, ret, _) =
-                    arena
-                        .unwrap_function(method_def.signature_id)
-                        .ok_or_else(|| {
-                            CodegenError::internal(
-                                "static method signature: expected function type",
-                            )
-                        })?;
-                (params.to_vec(), Some(ret))
+                let (params, ret, _) = self
+                    .vir_query_unwrap_function(method_def.signature_id)
+                    .ok_or_else(|| {
+                        CodegenError::internal("static method signature: expected function type")
+                    })?;
+                (params, Some(ret))
             };
 
             let param_types = self.type_ids_to_cranelift(&param_type_ids);
