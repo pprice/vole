@@ -563,20 +563,12 @@ impl Cg<'_, '_, '_> {
             // -- RC operations ------------------------------------------------
             VirExpr::RcInc { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_inc_with_cleanup(
-                    compiled.value,
-                    self.cv_type_id(&compiled),
-                    *cleanup,
-                )?;
+                self.emit_rc_inc_with_cleanup_v(compiled.value, compiled.type_id, *cleanup)?;
                 Ok(compiled)
             }
             VirExpr::RcDec { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_dec_with_cleanup(
-                    compiled.value,
-                    self.cv_type_id(&compiled),
-                    *cleanup,
-                )?;
+                self.emit_rc_dec_with_cleanup_v(compiled.value, compiled.type_id, *cleanup)?;
                 Ok(compiled)
             }
             VirExpr::RcMove { value } => {
@@ -714,7 +706,7 @@ impl Cg<'_, '_, '_> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
         let ast_op = vir_binop_to_ast(op);
-        if ast_op == BinaryOp::Add && self.cv_type_id(&left) == TypeId::STRING {
+        if ast_op == BinaryOp::Add && left.type_id == VirTypeId::STRING {
             return self.string_concat(left, right);
         }
         self.binary_op(left, right, ast_op, line)
@@ -1390,7 +1382,7 @@ impl Cg<'_, '_, '_> {
             }
             IsCheckResult::CheckTag(tag_index) => {
                 let compiled = self.compile_vir_expr(value)?;
-                if self.vir_query_is_unknown(self.cv_type_id(&compiled))
+                if self.vir_query_is_unknown_v(compiled.type_id)
                     && let Some(source_vir_ty) = Self::vir_expr_type_id(value)
                     && let Some(variants) = crate::types::vir_conversions::vir_unwrap_union(
                         source_vir_ty,
@@ -1404,26 +1396,25 @@ impl Cg<'_, '_, '_> {
                 let cmp = self.tag_eq(compiled.value, tag_index as i64);
                 Ok(self.bool_value(cmp))
             }
-            IsCheckResult::CheckUnknown(tested_type_id, tested_vir_type_id) => {
+            IsCheckResult::CheckUnknown(_tested_compat, tested_vir_type_id) => {
                 let compiled = self.compile_vir_expr(value)?;
-                let tested_type_id = self.sema_type_from_vir(tested_type_id);
+                let concrete_tested = self.try_substitute_type_v(tested_vir_type_id);
 
                 // Generic union checks are lowered as CheckUnknown so we can
                 // re-derive the concrete union tag after substitutions.
-                if tested_type_id != TypeId::UNKNOWN {
-                    let concrete_value_ty = self.try_substitute_type(self.cv_type_id(&compiled));
-                    let concrete_tested_ty = self.try_substitute_type(tested_type_id);
-                    if let Some(variants) = self.vir_query_unwrap_union_sema(concrete_value_ty)
+                if concrete_tested != VirTypeId::UNKNOWN {
+                    let concrete_value_ty = self.try_substitute_type_v(compiled.type_id);
+                    if let Some(variants) = self.vir_query_unwrap_union_v(concrete_value_ty)
                         && let Some(tag_index) =
-                            variants.iter().position(|&ty| ty == concrete_tested_ty)
+                            variants.iter().position(|&ty| ty == concrete_tested)
                     {
                         let cmp = self.tag_eq(compiled.value, tag_index as i64);
                         return Ok(self.bool_value(cmp));
                     }
                 }
 
-                let cmp = if tested_type_id != TypeId::UNKNOWN {
-                    self.compile_unknown_is_check(compiled.value, tested_type_id)
+                let cmp = if concrete_tested != VirTypeId::UNKNOWN {
+                    self.compile_unknown_is_check_vir(compiled.value, concrete_tested)
                 } else {
                     self.compile_unknown_is_check_vir(compiled.value, tested_vir_type_id)
                 };
@@ -1454,14 +1445,15 @@ impl Cg<'_, '_, '_> {
             IsCheckResult::CheckTag(tag_index) => {
                 self.vir_as_cast_check_tag(kind, value, tag_index, target_ty)
             }
-            IsCheckResult::CheckUnknown(tested_type_id, tested_vir_type_id) => {
-                let tested_type_id = self.sema_type_from_vir(tested_type_id);
-                let tested_type_id = if tested_type_id != TypeId::UNKNOWN {
-                    tested_type_id
-                } else {
-                    self.sema_type_from_vir(tested_vir_type_id)
-                };
-                self.vir_as_cast_check_unknown(kind, value, tested_type_id, target_ty)
+            IsCheckResult::CheckUnknown(_tested_compat, tested_vir_type_id) => {
+                let concrete_tested = self.try_substitute_type_v(tested_vir_type_id);
+                let tested_sema =
+                    self.cv_type_id_from_vir(if concrete_tested != VirTypeId::UNKNOWN {
+                        concrete_tested
+                    } else {
+                        tested_vir_type_id
+                    });
+                self.vir_as_cast_check_unknown(kind, value, tested_sema, target_ty)
             }
         }
     }
@@ -1516,16 +1508,14 @@ impl Cg<'_, '_, '_> {
         tag_index: u32,
         target_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        // Derive the tested type from the union variants.
-        // NOTE: arena() retained — extract_union_payload_typed requires sema TypeId.
-        // Remove when CompiledValue carries VirTypeId (Phase D).
-        let tested_type_id = self
-            .arena()
-            .unwrap_union(self.cv_type_id(&value))
+        // Derive the tested type from the union variants via VirTypeTable.
+        let tested_vir_ty = self
+            .vir_query_unwrap_union_v(value.type_id)
             .and_then(|variants| variants.get(tag_index as usize).copied())
             .ok_or_else(|| {
                 CodegenError::internal("as cast CheckTag: cannot derive tested type from union")
             })?;
+        let tested_type_id = self.cv_type_id_from_vir(tested_vir_ty);
         let is_match = self.tag_eq(value.value, tag_index as i64);
         match kind {
             AsCastKind::Checked => {

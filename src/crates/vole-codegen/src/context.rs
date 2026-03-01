@@ -1883,6 +1883,55 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Some(new_type_id)
     }
 
+    /// VirTypeId overload of [`get_annotation_runtime_type_id`].
+    pub fn get_annotation_runtime_type_id_v(&self, vir_ty: VirTypeId) -> Option<u32> {
+        let (type_def_id, _) = self.vir_query_unwrap_struct_v(vir_ty)?;
+
+        // Check sema's is_annotation flag (authoritative source)
+        if !self.analyzed().type_is_annotation(type_def_id) {
+            return None;
+        }
+
+        // Check the annotation_type_ids cache first
+        if let Some(&cached_id) = self
+            .env
+            .state
+            .annotation_type_ids
+            .borrow()
+            .get(&type_def_id)
+        {
+            return Some(cached_id);
+        }
+
+        // Check if this type already has a non-zero type_id in type_metadata
+        // (it's a class rather than a struct)
+        if let Some(meta) = self.type_metadata().get(&type_def_id)
+            && meta.type_id != 0
+        {
+            return Some(meta.type_id);
+        }
+
+        // Eagerly register: allocate a new runtime type_id with field type tags
+        let new_type_id = vole_runtime::type_registry::alloc_type_id();
+        let field_type_tags: Vec<_> = self
+            .analyzed()
+            .fields_on_type(type_def_id)
+            .map(|field_id| {
+                let field = self.analyzed().field_def(field_id);
+                self.field_type_tag(field.sema_type_id)
+            })
+            .collect();
+        vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
+
+        self.env
+            .state
+            .annotation_type_ids
+            .borrow_mut()
+            .insert(type_def_id, new_type_id);
+
+        Some(new_type_id)
+    }
+
     /// Get substituted return type from VIR-stashed `vir_call_return_type`.
     ///
     /// VIR return types are already concrete (post-monomorphization), so no

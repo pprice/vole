@@ -111,8 +111,8 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an `is` check against an unknown value using VIR type metadata.
     ///
-    /// TEMP(N279-C): bridge for VIR-native type checks where sema `TypeId`
-    /// cannot be recovered losslessly.
+    /// Handles annotation types via two-level check (Instance tag + type_id),
+    /// mirroring [`compile_unknown_is_check`].
     pub(super) fn compile_unknown_is_check_vir(
         &mut self,
         tagged_value_ptr: Value,
@@ -122,12 +122,47 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), tagged_value_ptr, 0);
-        let expected_tag = crate::types::vir_conversions::vir_unknown_type_tag(
-            tested_vir_type_id,
-            self.vir_type_table(),
-        );
-        let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
-        self.builder.ins().icmp(IntCC::Equal, tag, expected_val)
+
+        if let Some(ann_runtime_type_id) = self.get_annotation_runtime_type_id_v(tested_vir_type_id)
+        {
+            // Two-level annotation check:
+            // 1. Tag must be Instance (7)
+            let instance_tag = self.iconst_cached(
+                types::I64,
+                vole_runtime::value::RuntimeTypeId::Instance as i64,
+            );
+            let tag_match = self.builder.ins().icmp(IntCC::Equal, tag, instance_tag);
+
+            // 2. Load the instance pointer from TaggedValue.value (offset 8)
+            let instance_ptr =
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), tagged_value_ptr, 8);
+
+            // 3. Load RcInstance.type_id (u32 at offset 16 = sizeof(RcHeader))
+            let inst_type_id =
+                self.builder
+                    .ins()
+                    .load(types::I32, MemFlags::new(), instance_ptr, 16);
+
+            // 4. Compare against the expected annotation runtime type_id
+            let expected_id = self.iconst_cached(types::I32, ann_runtime_type_id as i64);
+            let id_match = self
+                .builder
+                .ins()
+                .icmp(IntCC::Equal, inst_type_id, expected_id);
+
+            // Both checks must pass
+            self.builder.ins().band(tag_match, id_match)
+        } else {
+            // Standard single-level tag check
+            let expected_tag = crate::types::vir_conversions::vir_unknown_type_tag(
+                tested_vir_type_id,
+                self.vir_type_table(),
+            );
+            let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
+            self.builder.ins().icmp(IntCC::Equal, tag, expected_val)
+        }
     }
 
     /// Compile an equality check for two values based on their Vole type.

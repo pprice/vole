@@ -393,6 +393,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit rc_inc using the VIR cleanup strategy, falling back to arena
     /// queries for `Unresolved`.
+    #[allow(dead_code)]
     pub fn emit_rc_inc_with_cleanup(
         &mut self,
         value: Value,
@@ -417,6 +418,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit rc_dec using the VIR cleanup strategy, falling back to arena
     /// queries for `Unresolved`.
+    #[allow(dead_code)]
     pub fn emit_rc_dec_with_cleanup(
         &mut self,
         value: Value,
