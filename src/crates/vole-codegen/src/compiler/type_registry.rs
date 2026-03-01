@@ -4,9 +4,7 @@ use super::{Compiler, SelfParam};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{MethodInfo, TypeMetadata};
-use vole_frontend::ast::SentinelDecl;
-use vole_frontend::{Interner, Symbol};
-use vole_identity::{MethodId, ModuleId, NameId, TypeDefId, TypeId};
+use vole_identity::{Interner, MethodId, ModuleId, NameId, Symbol, TypeDefId, TypeId};
 use vole_runtime::type_registry::{FieldTypeTag, alloc_type_id, register_instance_type};
 
 /// Convert a TypeId to a FieldTypeTag for runtime cleanup.
@@ -404,13 +402,10 @@ impl Compiler<'_> {
 
     /// Pre-register a sentinel type in codegen.
     /// Sentinels are zero-field structs, so they need minimal metadata.
-    pub(super) fn pre_register_sentinel(
-        &mut self,
-        sentinel_decl: &SentinelDecl,
-    ) -> CodegenResult<()> {
+    pub(super) fn pre_register_sentinel(&mut self, name: Symbol) -> CodegenResult<()> {
         let query = self.analyzed;
         let module_id = self.program_module();
-        let name_id = query.name_id(module_id, &[sentinel_decl.name]);
+        let name_id = query.name_id(module_id, &[name]);
 
         let type_def_id = self.analyzed.try_type_def_id(name_id).ok_or_else(|| {
             CodegenError::internal("pre_register_sentinel: sentinel not in entity registry")
@@ -446,11 +441,11 @@ impl Compiler<'_> {
     /// registered so that struct literal codegen can find them.
     pub(super) fn finalize_module_sentinel(
         &mut self,
-        sentinel_decl: &SentinelDecl,
+        name: Symbol,
         module_interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        let type_name_str = module_interner.resolve(sentinel_decl.name);
+        let type_name_str = module_interner.resolve(name);
         tracing::debug!(type_name = %type_name_str, "finalize_module_sentinel called");
 
         // Look up the TypeDefId using the sentinel name via full resolution chain

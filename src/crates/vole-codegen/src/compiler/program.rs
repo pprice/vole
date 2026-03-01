@@ -368,7 +368,7 @@ impl Compiler<'_> {
                     self.pre_register_struct(s.name)?;
                 }
                 Decl::Sentinel(s) => {
-                    self.pre_register_sentinel(s)?;
+                    self.pre_register_sentinel(s.name)?;
                 }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(_) => {
@@ -476,7 +476,7 @@ impl Compiler<'_> {
             // Register module sentinels (zero-field struct types like Done, nil)
             for decl in &program.declarations {
                 if let Decl::Sentinel(sentinel_decl) = decl {
-                    self.finalize_module_sentinel(sentinel_decl, module_interner, module_id)?;
+                    self.finalize_module_sentinel(sentinel_decl.name, module_interner, module_id)?;
                 }
             }
 
