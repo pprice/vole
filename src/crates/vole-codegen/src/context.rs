@@ -1284,6 +1284,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap a runtime iterator type, returning the element sema `TypeId`.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_runtime_iterator_sema(&self, type_id: TypeId) -> Option<TypeId> {
         self.arena().unwrap_runtime_iterator(type_id)

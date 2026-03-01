@@ -319,7 +319,6 @@ impl Cg<'_, '_, '_> {
     ///
     /// Bridge method — converts the receiver `VirTypeId` to sema `TypeId`,
     /// then delegates to the original.
-    #[allow(dead_code)]
     fn concretize_method_param_type_ids_for_receiver_v(
         &self,
         receiver_vir_type_id: VirTypeId,
@@ -337,10 +336,8 @@ impl Cg<'_, '_, '_> {
         // Global interface initializers are recompiled per use. They can surface as
         // untracked/borrowed values in method-call paths, but still represent fresh
         // temporary interface boxes that must be released after dispatch.
-        if receiver_is_global_init_rc_iface
-            && self.vir_query_is_interface(self.cv_type_id(receiver))
-        {
-            self.emit_rc_dec_for_type(receiver.value, self.cv_type_id(receiver))?;
+        if receiver_is_global_init_rc_iface && self.vir_query_is_interface_v(receiver.type_id) {
+            self.emit_rc_dec_for_type_v(receiver.value, receiver.type_id)?;
             receiver.mark_consumed();
             return Ok(());
         }
@@ -469,8 +466,8 @@ impl Cg<'_, '_, '_> {
         // RuntimeIterator dispatch: detected from the codegen-side compiled type
         // (not sema annotation) because the Iterator<T> → RuntimeIterator<T>
         // conversion happens in codegen only.
-        let obj_sema_tid = self.cv_type_id(&obj);
-        if let Some(elem_type_id) = self.vir_query_unwrap_runtime_iterator_sema(obj_sema_tid) {
+        if let Some(elem_vir_type_id) = self.vir_query_unwrap_runtime_iterator_v(obj.type_id) {
+            let elem_type_id = self.cv_type_id_from_vir(elem_vir_type_id);
             let return_type_hint = dispatch
                 .substituted_return_type
                 .map(|ty| self.sema_type_from_vir(ty))
@@ -525,10 +522,7 @@ impl Cg<'_, '_, '_> {
         // resolution as None so the monomorphized-fallback path (which derives dispatch from
         // obj.type_id) handles it correctly.
         let resolution = match resolution {
-            Some(r)
-                if r.is_interface_method()
-                    && !self.vir_query_is_interface(self.cv_type_id(&obj)) =>
-            {
+            Some(r) if r.is_interface_method() && !self.vir_query_is_interface_v(obj.type_id) => {
                 None
             }
             other => other,
@@ -557,7 +551,7 @@ impl Cg<'_, '_, '_> {
             // This is a fallback path when we don't have InterfaceMethod (e.g., in monomorphized context)
             // Extract interface info before mutable borrow
             let interface_info = self
-                .vir_query_unwrap_interface_sema(self.cv_type_id(&obj))
+                .vir_query_unwrap_interface_v(obj.type_id)
                 .map(|(id, _)| id);
             if let Some(interface_type_id) = interface_info {
                 let result = self.interface_dispatch_call_args_by_type_def_id(
@@ -583,7 +577,7 @@ impl Cg<'_, '_, '_> {
             if let Some(func_type_id) = functional_func_type_id {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
                 let interface_type_def_id = self
-                    .vir_query_unwrap_interface_sema(self.cv_type_id(&obj))
+                    .vir_query_unwrap_interface_v(obj.type_id)
                     .map(|(id, _)| id);
                 if let Some(interface_type_def_id) = interface_type_def_id {
                     let result = self.interface_dispatch_call_args_by_type_def_id(
@@ -750,7 +744,7 @@ impl Cg<'_, '_, '_> {
                     // range) has its own compiled function keyed by (method_name_id, self_type_id).
                     let key = self
                         .array_iterable_func_keys()
-                        .get(&(method_name_id, self.cv_type_id(&obj)))
+                        .get(&(method_name_id, self.cv_type_id_from_vir(obj.type_id)))
                         .copied();
                     if key.is_some() {
                         used_array_iterable_path = true;
@@ -763,7 +757,7 @@ impl Cg<'_, '_, '_> {
             // When inside a monomorphized method body, the object type may still be a type
             // parameter (e.g. T from class<T: Disposable>). Apply substitutions to get the
             // concrete type before looking up the TypeDefId.
-            let resolved_obj_type_id = self.substitute_type(self.cv_type_id(&obj));
+            let resolved_obj_type_id = self.sema_type_from_vir(obj.type_id);
 
             // In monomorphized context, resolution is None so the interface dispatch
             // paths above (lines 264-310) are skipped. Check here if the object is an
@@ -992,8 +986,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 // Not a monomorphized class method, use regular dispatch
                 let is_generic_class = self
-                    .arena()
-                    .unwrap_class(self.cv_type_id(&obj))
+                    .vir_query_unwrap_class_v(obj.type_id)
                     .map(|(_, type_args)| !type_args.is_empty())
                     .unwrap_or(false);
                 let func_key = func_key.ok_or_else(|| {
@@ -1016,9 +1009,7 @@ impl Cg<'_, '_, '_> {
         let final_arg_count = mc.arg_count();
         let param_type_ids = param_type_ids
             .map(|ids| self.normalize_method_param_type_ids_for_call(&ids, final_arg_count))
-            .map(|ids| {
-                self.concretize_method_param_type_ids_for_receiver(self.cv_type_id(&obj), &ids)
-            });
+            .map(|ids| self.concretize_method_param_type_ids_for_receiver_v(obj.type_id, &ids));
         let mapping_is_valid = |mapping: &[Option<usize>]| {
             let mut method_param_offset = 0usize;
             if let Some(param_type_ids) = &param_type_ids {
@@ -1281,22 +1272,19 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         method_name: &str,
     ) -> vole_sema::MethodDispatchKind {
-        if let Some((module_id, _)) = self.vir_query_unwrap_module(self.cv_type_id(obj)) {
+        if let Some((module_id, _)) = self.vir_query_unwrap_module_v(obj.type_id) {
             return vole_sema::MethodDispatchKind::Module(module_id);
         }
         // Check array-specific methods: push needs its own path, other array
         // builtins (length, iter) go through builtin_method.
-        if self
-            .vir_query_unwrap_array_sema(self.cv_type_id(obj))
-            .is_some()
-        {
+        if self.vir_query_unwrap_array_v(obj.type_id).is_some() {
             if method_name == "push" {
                 return vole_sema::MethodDispatchKind::ArrayPush;
             }
             return vole_sema::MethodDispatchKind::Builtin;
         }
         // String and range builtins
-        if self.cv_type_id(obj) == TypeId::STRING || self.cv_type_id(obj) == TypeId::RANGE {
+        if obj.type_id == VirTypeId::STRING || obj.type_id == VirTypeId::RANGE {
             return vole_sema::MethodDispatchKind::Builtin;
         }
         vole_sema::MethodDispatchKind::Standard
