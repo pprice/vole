@@ -83,8 +83,8 @@ impl Compiler<'_> {
             let sig = {
                 let method_def = self.analyzed.get_method(semantic_method_id);
                 let (param_type_ids, return_type_id) =
-                    match self.vir_query_unwrap_function(method_def.signature_id) {
-                        Some((params, ret, _)) => {
+                    match self.vir_query_unwrap_function_sema(method_def.signature_id) {
+                        Some((params, ret)) => {
                             let subst_params: Vec<TypeId> = params
                                 .iter()
                                 .map(|&p| {
@@ -191,8 +191,8 @@ impl Compiler<'_> {
             let sig = {
                 let method_def = self.analyzed.get_method(semantic_method_id);
                 let (param_type_ids, return_type_id) =
-                    match self.vir_query_unwrap_function(method_def.signature_id) {
-                        Some((params, ret, _)) => {
+                    match self.vir_query_unwrap_function_sema(method_def.signature_id) {
+                        Some((params, ret)) => {
                             let subst_params: Vec<TypeId> = params
                                 .iter()
                                 .map(|&p| {
@@ -362,8 +362,8 @@ impl Compiler<'_> {
 
         let method_return_type_id = {
             let method_def = self.analyzed.get_method(method_id);
-            self.vir_query_unwrap_function(method_def.signature_id)
-                .map(|(_, ret, _)| ret)
+            self.vir_query_unwrap_function_sema(method_def.signature_id)
+                .map(|(_, ret)| ret)
         };
 
         // Get the VIR function (must be available — implement block methods are always lowered)
@@ -423,8 +423,8 @@ impl Compiler<'_> {
 
             // Use pre-resolved signature from MethodDef
             let method_def = self.analyzed.get_method(method_id);
-            let (param_type_ids, ret, _) = self
-                .vir_query_unwrap_function(method_def.signature_id)
+            let (param_type_ids, ret) = self
+                .vir_query_unwrap_function_sema(method_def.signature_id)
                 .ok_or_else(|| {
                     CodegenError::internal("method compilation: missing function signature")
                 })?;
@@ -534,8 +534,8 @@ impl Compiler<'_> {
         // Get the method's return type from the pre-resolved signature
         let method_return_type_id = {
             let method_def = self.analyzed.get_method(method_id);
-            self.vir_query_unwrap_function(method_def.signature_id)
-                .map(|(_, ret, _)| ret)
+            self.vir_query_unwrap_function_sema(method_def.signature_id)
+                .map(|(_, ret)| ret)
         };
 
         // Create function builder and compile
@@ -635,8 +635,8 @@ impl Compiler<'_> {
         interner: &Interner,
     ) -> CodegenResult<Vec<(Symbol, TypeId, types::Type)>> {
         let method_def = self.analyzed.get_method(method_id);
-        let (param_type_ids, _, _) = self
-            .vir_query_unwrap_function(method_def.signature_id)
+        let (param_type_ids, _) = self
+            .vir_query_unwrap_function_sema(method_def.signature_id)
             .ok_or_else(|| {
                 CodegenError::internal("method compilation: missing function signature")
             })?;
@@ -814,8 +814,8 @@ impl Compiler<'_> {
             //   2. TypeParam(T) -> concrete element type (via type_param_subs)
             let (param_type_ids, return_type_id) = {
                 let method_def = self.analyzed.get_method(semantic_method_id);
-                match self.vir_query_unwrap_function(method_def.signature_id) {
-                    Some((params, ret, _)) => {
+                match self.vir_query_unwrap_function_sema(method_def.signature_id) {
+                    Some((params, ret)) => {
                         let subst_params: Vec<TypeId> = params
                             .iter()
                             .map(|&p| {
@@ -1046,8 +1046,8 @@ impl Compiler<'_> {
                 // return type. Params fall back to abstract type on failure (safe for ptr-size).
                 let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
                     let method_def = self.analyzed.get_method(*semantic_method_id);
-                    self.vir_query_unwrap_function(method_def.signature_id)
-                        .and_then(|(params, ret, _)| {
+                    self.vir_query_unwrap_function_sema(method_def.signature_id)
+                        .and_then(|(params, ret)| {
                             let subst_params: Vec<TypeId> = params
                                 .iter()
                                 .map(|&p| {
@@ -1249,8 +1249,8 @@ impl Compiler<'_> {
                 // Build the concrete signature (same as compile path)
                 let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
                     let method_def = self.analyzed.get_method(*semantic_method_id);
-                    self.vir_query_unwrap_function(method_def.signature_id)
-                        .and_then(|(params, ret, _)| {
+                    self.vir_query_unwrap_function_sema(method_def.signature_id)
+                        .and_then(|(params, ret)| {
                             let subst_params: Vec<TypeId> = params
                                 .iter()
                                 .map(|&p| {

@@ -62,7 +62,7 @@ impl Cg<'_, '_, '_> {
         array_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // If sema inferred a tuple type, use stack allocation.
-        let elem_type_ids = self.vir_query_unwrap_tuple(array_type_id);
+        let elem_type_ids = self.vir_query_unwrap_tuple_sema(array_type_id);
         if let Some(elem_type_ids) = elem_type_ids {
             return self.compile_vir_tuple_literal(elements, &elem_type_ids, array_type_id);
         }
@@ -70,7 +70,7 @@ impl Cg<'_, '_, '_> {
         // Dynamic array path.
         let arr_ptr = self.call_runtime(RuntimeKey::ArrayNew, &[])?;
         let array_push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
-        let mut elem_type = self.vir_query_unwrap_array(array_type_id);
+        let mut elem_type = self.vir_query_unwrap_array_sema(array_type_id);
         let mut result_array_type = array_type_id;
         let mut first_compiled: Option<CompiledValue> = None;
 
@@ -137,7 +137,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let mut elem_value = self.compile_vir_expr(element)?;
         let (elem_type_id, result_type_id) =
-            if let Some((elem_type_id, _)) = self.vir_query_unwrap_fixed_array(type_id) {
+            if let Some((elem_type_id, _)) = self.vir_query_unwrap_fixed_array_sema(type_id) {
                 (elem_type_id, type_id)
             } else {
                 // TEMP(N279-C): During mixed VIR/sema migration, some repeat literals

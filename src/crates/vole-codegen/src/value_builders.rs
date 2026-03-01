@@ -640,7 +640,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Check for fallible multi-value return (2 results: tag, payload)
-        if results.len() == 2 && self.vir_query_unwrap_fallible(return_type_id).is_some() {
+        if results.len() == 2
+            && self
+                .vir_query_unwrap_fallible_sema(return_type_id)
+                .is_some()
+        {
             let tag = results[0];
             let payload = results[1];
 

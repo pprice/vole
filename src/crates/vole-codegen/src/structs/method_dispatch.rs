@@ -55,8 +55,8 @@ impl Cg<'_, '_, '_> {
 
         // Get return type from function type
         let return_type_id = {
-            let (_, ret, _) = self
-                .vir_query_unwrap_function(func_type_id)
+            let (_, ret) = self
+                .vir_query_unwrap_function_sema(func_type_id)
                 .expect("INTERNAL: module method: missing function type");
             ret
         };
@@ -197,15 +197,15 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         // Extract function type components
         let (param_ids, return_type_id) = {
-            let (params, ret, _) =
-                self.vir_query_unwrap_function(func_type_id)
-                    .ok_or_else(|| {
-                        CodegenError::type_mismatch(
-                            "functional interface call",
-                            "function type",
-                            "other",
-                        )
-                    })?;
+            let (params, ret) = self
+                .vir_query_unwrap_function_sema(func_type_id)
+                .ok_or_else(|| {
+                    CodegenError::type_mismatch(
+                        "functional interface call",
+                        "function type",
+                        "other",
+                    )
+                })?;
             (params, ret)
         };
 
@@ -314,7 +314,7 @@ impl Cg<'_, '_, '_> {
         let word_type = self.ptr_type();
         let word_bytes = word_type.bytes() as i32;
         let dispatch_func_type_id = self
-            .vir_query_unwrap_interface(self.cv_type_id(obj))
+            .vir_query_unwrap_interface_sema(self.cv_type_id(obj))
             .and_then(|(interface_type_def_id, _)| {
                 self.analyzed()
                     .interface_method_ids_ordered(interface_type_def_id)
@@ -326,8 +326,8 @@ impl Cg<'_, '_, '_> {
 
         // Unwrap function type to get params and return type
         let (param_count, param_type_ids, return_type_id, is_void_return) = {
-            let (params, ret_id, _is_closure) = self
-                .vir_query_unwrap_function(dispatch_func_type_id)
+            let (params, ret_id) = self
+                .vir_query_unwrap_function_sema(dispatch_func_type_id)
                 .ok_or_else(|| {
                     CodegenError::type_mismatch(
                         "interface dispatch",

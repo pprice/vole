@@ -35,7 +35,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - The class has no type args (non-generic)
     /// - None of the field types involve type parameters
     pub fn mono_instance_type_id(&self, base_type_id: u32, result_type_id: TypeId) -> u32 {
-        let Some((type_def_id, type_args)) = self.vir_query_unwrap_class(result_type_id) else {
+        let Some((type_def_id, type_args)) = self.vir_query_unwrap_class_sema(result_type_id)
+        else {
             return base_type_id;
         };
         if type_args.is_empty() {
@@ -523,7 +524,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             FieldTypeTag::Interface
         } else if self.rc_state(type_id).needs_cleanup() {
             FieldTypeTag::Rc
-        } else if let Some(variants) = self.vir_query_unwrap_union(type_id) {
+        } else if let Some(variants) = self.vir_query_unwrap_union_sema(type_id) {
             for &variant in &variants {
                 if self.rc_state(variant).needs_cleanup() {
                     return FieldTypeTag::UnionHeap;

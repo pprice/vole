@@ -151,6 +151,17 @@ impl<'a> Compiler<'a> {
         self.analyzed.module_id()
     }
 
+    /// Convert a `VirTypeId` to sema `TypeId`.
+    #[allow(dead_code)]
+    #[inline]
+    fn cv_type_id_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
+        crate::types::vir_conversions::vir_to_sema_type_id(
+            vir_ty,
+            self.vir_type_table(),
+            self.arena(),
+        )
+    }
+
     /// Get the "self" keyword symbol (panics if not interned - should never happen)
     fn self_symbol(&self) -> Symbol {
         self.analyzed
@@ -335,16 +346,16 @@ impl<'a> Compiler<'a> {
         crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
     }
 
-    /// Unwrap a function type to `(params, return_type, is_closure)`.
+    /// Unwrap a function type to `(params, return_type)` via VirTypeTable.
     ///
-    /// Always uses the arena path because the VIR unwrap converts inner
-    /// VirTypeIds back to TypeIds via `vir_to_sema_type_id_lossy`, which
-    /// degrades dynamic VirTypeIds to `TypeId::UNKNOWN`.
+    /// VIR does not track the `is_closure` flag. Callers that need it must
+    /// consult the arena directly.
     #[inline]
-    fn vir_query_unwrap_function(&self, type_id: TypeId) -> Option<(Vec<TypeId>, TypeId, bool)> {
-        self.arena()
-            .unwrap_function(type_id)
-            .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure))
+    #[allow(dead_code)]
+    fn vir_query_unwrap_function(&self, type_id: TypeId) -> Option<(Vec<VirTypeId>, VirTypeId)> {
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_unwrap_function(vir_ty, self.vir_type_table())
+            .map(|(params, ret)| (params.to_vec(), ret))
     }
 
     /// Look up the result of substituting type parameters in a type (read-only).
@@ -373,13 +384,13 @@ impl<'a> Compiler<'a> {
         self.arena().lookup_runtime_iterator(elem)
     }
 
-    /// Unwrap a fallible type to `(success, error)` sema `TypeId`s.
-    ///
-    /// Always uses the arena — the VIR unwrap path degrades dynamic
-    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
+    /// Unwrap a fallible type to `(success, errors)` via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
-    fn vir_query_unwrap_fallible(&self, type_id: TypeId) -> Option<(TypeId, TypeId)> {
-        self.arena().unwrap_fallible(type_id)
+    fn vir_query_unwrap_fallible(&self, type_id: TypeId) -> Option<(VirTypeId, Vec<VirTypeId>)> {
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_unwrap_fallible(vir_ty, self.vir_type_table())
+            .map(|(success, errors)| (success, errors.to_vec()))
     }
 
     /// Check if a type is a union via VirTypeTable.
@@ -398,73 +409,70 @@ impl<'a> Compiler<'a> {
         crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
     }
 
-    /// Unwrap a class type to `(TypeDefId, type_args)`.
-    ///
-    /// Always uses the arena — the VIR unwrap path degrades dynamic
-    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
+    /// Unwrap a class type to `(TypeDefId, type_args)` via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
-    fn vir_query_unwrap_class(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
-        self.arena()
-            .unwrap_class(type_id)
+    fn vir_query_unwrap_class(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<VirTypeId>)> {
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_unwrap_class(vir_ty, self.vir_type_table())
             .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap a struct type to `(TypeDefId, type_args)`.
-    ///
-    /// Always uses the arena — the VIR unwrap path degrades dynamic
-    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
+    /// Unwrap a struct type to `(TypeDefId, type_args)` via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
-    fn vir_query_unwrap_struct(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
-        self.arena()
-            .unwrap_struct(type_id)
+    fn vir_query_unwrap_struct(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<VirTypeId>)> {
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_unwrap_struct(vir_ty, self.vir_type_table())
             .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap an interface type to `(TypeDefId, type_args)`.
-    ///
-    /// Always uses the arena — the VIR unwrap path degrades dynamic
-    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
+    /// Unwrap an interface type to `(TypeDefId, type_args)` via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
-    fn vir_query_unwrap_interface(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
-        self.arena()
-            .unwrap_interface(type_id)
+    fn vir_query_unwrap_interface(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<VirTypeId>)> {
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_unwrap_interface(vir_ty, self.vir_type_table())
             .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap an array type to its element `TypeId`.
-    ///
-    /// Always uses the arena — the VIR unwrap path degrades dynamic
-    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
+    /// Unwrap an array type to its element `VirTypeId` via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
-    fn vir_query_unwrap_array(&self, type_id: TypeId) -> Option<TypeId> {
-        self.arena().unwrap_array(type_id)
+    fn vir_query_unwrap_array(&self, type_id: TypeId) -> Option<VirTypeId> {
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_unwrap_array(vir_ty, self.vir_type_table())
     }
 
-    /// Unwrap a fixed array type to `(elem, len)`.
-    ///
-    /// Always uses the arena — the VIR unwrap path degrades dynamic
-    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
+    /// Unwrap a fixed array type to `(elem, len)` via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
-    fn vir_query_unwrap_fixed_array(&self, type_id: TypeId) -> Option<(TypeId, usize)> {
-        self.arena().unwrap_fixed_array(type_id)
+    fn vir_query_unwrap_fixed_array(&self, type_id: TypeId) -> Option<(VirTypeId, usize)> {
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_unwrap_fixed_array(vir_ty, self.vir_type_table())
+            .map(|(elem, len)| (elem, len as usize))
     }
 
-    /// Unwrap a tuple type to its element `TypeId`s.
-    ///
-    /// Always uses the arena — the VIR unwrap path degrades dynamic
-    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
+    /// Unwrap a tuple type to its element `VirTypeId`s via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
-    fn vir_query_unwrap_tuple(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
-        self.arena().unwrap_tuple(type_id).map(|v| v.to_vec())
+    fn vir_query_unwrap_tuple(&self, type_id: TypeId) -> Option<Vec<VirTypeId>> {
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_unwrap_tuple(vir_ty, self.vir_type_table())
+            .map(|v| v.to_vec())
     }
 
-    /// Unwrap a union type to its variant `TypeId`s.
-    ///
-    /// Always uses the arena — the VIR unwrap path degrades dynamic
-    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
+    /// Unwrap a union type to its variant `VirTypeId`s via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
-    fn vir_query_unwrap_union(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
-        self.arena().unwrap_union(type_id).map(|v| v.to_vec())
+    fn vir_query_unwrap_union(&self, type_id: TypeId) -> Option<Vec<VirTypeId>> {
+        let vir_ty = self.vir_lookup(type_id);
+        let table = self.vir_type_table();
+        match table.get(vir_ty) {
+            vole_vir::VirType::Union { variants } => Some(variants.to_vec()),
+            vole_vir::VirType::Optional { inner } => Some(vec![*inner, VirTypeId::NIL]),
+            _ => None,
+        }
     }
 
     /// Check if a type contains any type parameter anywhere in its structure
@@ -486,5 +494,81 @@ impl<'a> Compiler<'a> {
         }
         let ptr = self.pointer_type;
         crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
+    }
+
+    // =====================================================================
+    // Sema-bridge unwrap wrappers (Compiler-level)
+    // =====================================================================
+
+    /// Unwrap a function type to `(params, return_type)` as sema `TypeId`s.
+    ///
+    /// Uses the arena directly to preserve Self placeholder TypeIds that would
+    /// be lost in the VIR roundtrip (VIR maps Placeholder -> Unknown).
+    #[inline]
+    fn vir_query_unwrap_function_sema(&self, type_id: TypeId) -> Option<(Vec<TypeId>, TypeId)> {
+        let (arena_params, arena_ret, _) = self.arena().unwrap_function(type_id)?;
+        Some((arena_params.to_vec(), arena_ret))
+    }
+
+    // =====================================================================
+    // Sema-bridge unwrap wrappers
+    //
+    // These use the arena directly to return sema `TypeId` results,
+    // preserving exact ordering and identity that callers depend on
+    // (e.g. union variant ordering for tag computation, Self placeholders).
+    // =====================================================================
+
+    /// Unwrap a fallible type to `(success, error)` sema TypeIds.
+    #[inline]
+    fn vir_query_unwrap_fallible_sema(&self, type_id: TypeId) -> Option<(TypeId, TypeId)> {
+        self.arena().unwrap_fallible(type_id)
+    }
+
+    /// Unwrap a union type, returning variant sema TypeIds.
+    #[inline]
+    fn vir_query_unwrap_union_sema(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
+        self.arena().unwrap_union(type_id).map(|v| v.to_vec())
+    }
+
+    /// Unwrap a class type, returning (TypeDefId, type_args as sema TypeIds).
+    #[inline]
+    fn vir_query_unwrap_class_sema(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
+        self.arena()
+            .unwrap_class(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
+    }
+
+    /// Unwrap a struct type, returning (TypeDefId, type_args as sema TypeIds).
+    #[inline]
+    fn vir_query_unwrap_struct_sema(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
+        self.arena()
+            .unwrap_struct(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
+    }
+
+    /// Unwrap an interface type, returning (TypeDefId, type_args as sema TypeIds).
+    #[inline]
+    fn vir_query_unwrap_interface_sema(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
+        self.arena()
+            .unwrap_interface(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
+    }
+
+    /// Unwrap an array type, returning the element sema TypeId.
+    #[inline]
+    fn vir_query_unwrap_array_sema(&self, type_id: TypeId) -> Option<TypeId> {
+        self.arena().unwrap_array(type_id)
+    }
+
+    /// Unwrap a fixed-size array type, returning (element sema TypeId, length).
+    #[inline]
+    fn vir_query_unwrap_fixed_array_sema(&self, type_id: TypeId) -> Option<(TypeId, usize)> {
+        self.arena().unwrap_fixed_array(type_id)
+    }
+
+    /// Unwrap a tuple type, returning element sema TypeIds.
+    #[inline]
+    fn vir_query_unwrap_tuple_sema(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
+        self.arena().unwrap_tuple(type_id).map(|v| v.to_vec())
     }
 }

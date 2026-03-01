@@ -91,7 +91,7 @@ impl Compiler<'_> {
 
         // Check if this is a fallible return type - use multi-value returns
         if let Some(ret_type_id) = return_type_id
-            && self.vir_query_unwrap_fallible(ret_type_id).is_some()
+            && self.vir_query_unwrap_fallible_sema(ret_type_id).is_some()
         {
             if is_wide_fallible(ret_type_id, arena_ref) {
                 // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
@@ -154,8 +154,8 @@ impl Compiler<'_> {
         self_param: SelfParam,
     ) -> Signature {
         let method_def = self.analyzed.method_def(method_id);
-        let (params, ret, _) = self
-            .vir_query_unwrap_function(method_def.signature_id)
+        let (params, ret) = self
+            .vir_query_unwrap_function_sema(method_def.signature_id)
             .expect("INTERNAL: method signature: missing function signature");
         self.build_signature_from_type_ids(&params, Some(ret), self_param)
     }

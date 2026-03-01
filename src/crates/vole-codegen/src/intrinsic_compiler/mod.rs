@@ -556,7 +556,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         let elem_type_id = self
-            .vir_query_unwrap_union(return_type_id)
+            .vir_query_unwrap_union_sema(return_type_id)
             .and_then(|variants| variants.iter().copied().find(|&ty| ty != TypeId::DONE))
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
@@ -640,8 +640,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let closure = typed_args[0];
         let closure_return_type = self
-            .vir_query_unwrap_function(self.cv_type_id(&closure))
-            .map(|(_, ret, _)| self.try_substitute_type(ret))
+            .vir_query_unwrap_function_sema(self.cv_type_id(&closure))
+            .map(|(_, ret)| self.try_substitute_type(ret))
             .unwrap_or(TypeId::I64);
         let tag = {
             let arena = self.arena();

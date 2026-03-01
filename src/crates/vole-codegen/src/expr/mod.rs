@@ -271,8 +271,8 @@ impl Cg<'_, '_, '_> {
 
         // Unwrap function type to get params and return type
         let (param_ids, return_type_id) = {
-            let (params, ret, _is_closure) = self
-                .vir_query_unwrap_function(func_type_id)
+            let (params, ret) = self
+                .vir_query_unwrap_function_sema(func_type_id)
                 .ok_or_else(|| {
                     CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
                 })?;
@@ -344,9 +344,9 @@ impl Cg<'_, '_, '_> {
         expected_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         if (self.vir_query_is_array(expected_type_id)
-            || self.vir_query_unwrap_tuple(expected_type_id).is_some()
+            || self.vir_query_unwrap_tuple_sema(expected_type_id).is_some()
             || self
-                .vir_query_unwrap_fixed_array(expected_type_id)
+                .vir_query_unwrap_fixed_array_sema(expected_type_id)
                 .is_some())
             && let VirExpr::ArrayLiteral { elements, .. } = expr
         {
@@ -354,7 +354,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.mark_rc_owned(result));
         }
         if self
-            .vir_query_unwrap_fixed_array(expected_type_id)
+            .vir_query_unwrap_fixed_array_sema(expected_type_id)
             .is_some()
             && let VirExpr::RepeatLiteral { element, count, .. } = expr
         {
@@ -1101,7 +1101,7 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
         narrowed_type_id: TypeId,
     ) -> Option<TypeId> {
-        self.vir_query_unwrap_union(union_type_id)
+        self.vir_query_unwrap_union_sema(union_type_id)
             .and_then(|variants| {
                 variants
                     .iter()
@@ -1413,7 +1413,7 @@ impl Cg<'_, '_, '_> {
                 if tested_type_id != TypeId::UNKNOWN {
                     let concrete_value_ty = self.try_substitute_type(self.cv_type_id(&compiled));
                     let concrete_tested_ty = self.try_substitute_type(tested_type_id);
-                    if let Some(variants) = self.vir_query_unwrap_union(concrete_value_ty)
+                    if let Some(variants) = self.vir_query_unwrap_union_sema(concrete_value_ty)
                         && let Some(tag_index) =
                             variants.iter().position(|&ty| ty == concrete_tested_ty)
                     {

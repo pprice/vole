@@ -212,7 +212,7 @@ impl Cg<'_, '_, '_> {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type (using TypeId)
-            if let Some(inner_type_id) = self.vir_query_unwrap_optional(self.cv_type_id(&left))
+            if let Some(inner_type_id) = self.vir_query_unwrap_optional_sema(self.cv_type_id(&left))
                 && (inner_type_id == self.cv_type_id(&right)
                     || (self.vir_query_is_integer(inner_type_id)
                         && self.vir_query_is_integer(self.cv_type_id(&right))))
@@ -220,7 +220,8 @@ impl Cg<'_, '_, '_> {
                 return self.optional_value_compare(left, right, op);
             }
             // Check if right is optional and left is a compatible value type (using TypeId)
-            if let Some(inner_type_id) = self.vir_query_unwrap_optional(self.cv_type_id(&right))
+            if let Some(inner_type_id) =
+                self.vir_query_unwrap_optional_sema(self.cv_type_id(&right))
                 && (inner_type_id == self.cv_type_id(&left)
                     || (self.vir_query_is_integer(inner_type_id)
                         && self.vir_query_is_integer(self.cv_type_id(&left))))
@@ -739,7 +740,7 @@ impl Cg<'_, '_, '_> {
 
         // Resolve the inner (non-nil) TypeId for dispatch
         let inner_type_id = self
-            .vir_query_unwrap_optional(self.cv_type_id(&optional))
+            .vir_query_unwrap_optional_sema(self.cv_type_id(&optional))
             .unwrap_or(TypeId::I64);
         let payload_cranelift_type = self.cranelift_type(inner_type_id);
 

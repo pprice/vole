@@ -80,7 +80,10 @@ impl Cg<'_, '_, '_> {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // low
             sig.returns.push(AbiParam::new(types::I64)); // high
-        } else if self.vir_query_unwrap_fallible(return_type_id).is_some() {
+        } else if self
+            .vir_query_unwrap_fallible_sema(return_type_id)
+            .is_some()
+        {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // payload
         } else {
@@ -131,18 +134,18 @@ impl Cg<'_, '_, '_> {
         &self,
         func_type_id: TypeId,
     ) -> CodegenResult<(Vec<TypeId>, TypeId)> {
-        let (sema_params, ret_id, _) =
-            self.vir_query_unwrap_function(func_type_id)
-                .ok_or_else(|| {
-                    CodegenError::type_mismatch(
-                        "VIR lambda",
-                        "function type",
-                        format!(
-                            "{func_type_id:?} ({})",
-                            self.vir_query_display_basic(func_type_id)
-                        ),
-                    )
-                })?;
+        let (sema_params, ret_id) = self
+            .vir_query_unwrap_function_sema(func_type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
+                    "VIR lambda",
+                    "function type",
+                    format!(
+                        "{func_type_id:?} ({})",
+                        self.vir_query_display_basic(func_type_id)
+                    ),
+                )
+            })?;
         let param_ids: Vec<TypeId> = sema_params
             .iter()
             .map(|&p| self.substitute_type(p))

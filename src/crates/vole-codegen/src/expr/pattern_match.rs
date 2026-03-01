@@ -32,7 +32,7 @@ impl Cg<'_, '_, '_> {
     ) -> IsCheckResult {
         if value_type_id.is_unknown() {
             IsCheckResult::CheckUnknown(tested_type_id)
-        } else if let Some(variants) = self.vir_query_unwrap_union(value_type_id) {
+        } else if let Some(variants) = self.vir_query_unwrap_union_sema(value_type_id) {
             if let Some(index) = variants.iter().position(|&v| v == tested_type_id) {
                 IsCheckResult::CheckTag(index as u32)
             } else {
@@ -598,7 +598,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> CodegenResult<Option<Value>> {
-        let elem_type_ids = self.vir_query_unwrap_tuple(self.cv_type_id(scrutinee));
+        let elem_type_ids = self.vir_query_unwrap_tuple_sema(self.cv_type_id(scrutinee));
         if let Some(elem_type_ids) = elem_type_ids {
             let (_, offsets) = self.tuple_layout(&elem_type_ids);
             let elem_cr_types = self.cranelift_types(&elem_type_ids);

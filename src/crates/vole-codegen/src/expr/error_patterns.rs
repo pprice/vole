@@ -36,7 +36,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         scrutinee_type_id: TypeId,
     ) -> CodegenResult<()> {
-        let fallible_types = self.vir_query_unwrap_fallible(scrutinee_type_id);
+        let fallible_types = self.vir_query_unwrap_fallible_sema(scrutinee_type_id);
         let Some((success_type_id, error_type_id)) = fallible_types else {
             return Ok(());
         };
@@ -104,7 +104,7 @@ impl Cg<'_, '_, '_> {
         if self.error_type_single_field_is_rc(error_type_id) {
             return true;
         }
-        if let Some(variants) = self.vir_query_unwrap_union(error_type_id) {
+        if let Some(variants) = self.vir_query_unwrap_union_sema(error_type_id) {
             // All variants must be safe for unconditional rc_dec:
             // - 0 fields: payload is null (rc_dec is no-op)
             // - 1 RC field: payload is an RC pointer (rc_dec works)

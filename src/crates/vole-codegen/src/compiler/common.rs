@@ -197,7 +197,7 @@ fn emit_implicit_return(
         // Check if the return type is fallible - need multi-value return
         let is_fallible_return = cg
             .return_type
-            .map(|ret_type_id| cg.vir_query_unwrap_fallible(ret_type_id).is_some())
+            .map(|ret_type_id| cg.vir_query_unwrap_fallible_sema(ret_type_id).is_some())
             .unwrap_or(false);
 
         // Check if the function has a void return type. Expression-bodied default methods

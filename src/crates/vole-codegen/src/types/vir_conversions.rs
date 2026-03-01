@@ -455,11 +455,15 @@ pub(crate) fn vir_is_struct(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
 
 /// Unwrap a struct type, returning its `TypeDefId` and type arguments.
 ///
-/// Returns `None` if the type is not a struct.
+/// Returns `None` if the type is not a struct or is a sentinel (Nil, Done).
+/// Matches `vir_is_struct()` which also excludes sentinels.
 pub(crate) fn vir_unwrap_struct(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
 ) -> Option<(TypeDefId, &[VirTypeId])> {
+    if table.is_sentinel(vir_ty) {
+        return None;
+    }
     match table.get(vir_ty) {
         VirType::Struct { def, type_args } => Some((*def, type_args)),
         _ => None,
@@ -542,11 +546,14 @@ pub(crate) fn vir_is_class_or_struct(vir_ty: VirTypeId, table: &VirTypeTable) ->
 
 /// Unwrap a class or struct type, returning its `TypeDefId` and type arguments.
 ///
-/// Returns `None` if the type is neither a class nor a struct.
+/// Returns `None` if the type is neither a class nor a struct, or is a sentinel.
 pub(crate) fn vir_unwrap_class_or_struct(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
 ) -> Option<(TypeDefId, &[VirTypeId])> {
+    if table.is_sentinel(vir_ty) {
+        return None;
+    }
     match table.get(vir_ty) {
         VirType::Class { def, type_args } | VirType::Struct { def, type_args } => {
             Some((*def, type_args))
@@ -560,6 +567,9 @@ pub(crate) fn vir_unwrap_class_or_struct(
 /// Returns `None` for non-nominal types (primitives, unions, etc.)
 /// and for sentinel types (Nil, Done).
 pub(crate) fn vir_unwrap_nominal(vir_ty: VirTypeId, table: &VirTypeTable) -> Option<TypeDefId> {
+    if table.is_sentinel(vir_ty) {
+        return None;
+    }
     match table.get(vir_ty) {
         VirType::Class { def, .. }
         | VirType::Struct { def, .. }
@@ -809,6 +819,22 @@ pub(crate) fn vir_unwrap_type_param(
 pub(crate) fn vir_unwrap_error(vir_ty: VirTypeId, table: &VirTypeTable) -> Option<TypeDefId> {
     match table.get(vir_ty) {
         VirType::Error { def } => Some(*def),
+        _ => None,
+    }
+}
+
+/// Unwrap an error or struct type, returning its `TypeDefId`.
+///
+/// Returns `None` if the type is neither an error nor a struct.
+pub(crate) fn vir_unwrap_error_or_struct_def(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<TypeDefId> {
+    if table.is_sentinel(vir_ty) {
+        return None;
+    }
+    match table.get(vir_ty) {
+        VirType::Error { def } | VirType::Struct { def, .. } => Some(*def),
         _ => None,
     }
 }

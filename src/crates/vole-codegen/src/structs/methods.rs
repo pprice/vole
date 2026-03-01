@@ -199,8 +199,8 @@ impl Cg<'_, '_, '_> {
     }
 
     fn signature_has_self_placeholder_param(&self, signature_id: TypeId) -> bool {
-        self.vir_query_unwrap_function(signature_id)
-            .is_some_and(|(params, _, _)| params.iter().any(|&p| self.vir_query_is_self_type(p)))
+        self.vir_query_unwrap_function_sema(signature_id)
+            .is_some_and(|(params, _)| params.iter().any(|&p| self.vir_query_is_self_type(p)))
     }
 
     /// Resolve method parameter types for argument coercion.
@@ -213,7 +213,7 @@ impl Cg<'_, '_, '_> {
     ) -> Option<Vec<TypeId>> {
         if let Some(method_id) = resolved.method_id() {
             let signature_id = self.analyzed().method_signature_id(method_id);
-            if let Some((params, _, _)) = self.vir_query_unwrap_function(signature_id) {
+            if let Some((params, _)) = self.vir_query_unwrap_function_sema(signature_id) {
                 return Some(params);
             }
         }
@@ -221,12 +221,12 @@ impl Cg<'_, '_, '_> {
         let resolved_signature_id = self.resolved_func_type_id(resolved);
         if self.signature_has_self_placeholder_param(resolved_signature_id)
             && let Some(signature_id) = self.resolved_interface_signature_id(resolved)
-            && let Some((params, _, _)) = self.vir_query_unwrap_function(signature_id)
+            && let Some((params, _)) = self.vir_query_unwrap_function_sema(signature_id)
         {
             return Some(params);
         }
 
-        if let Some((params, _, _)) = self.vir_query_unwrap_function(resolved_signature_id) {
+        if let Some((params, _)) = self.vir_query_unwrap_function_sema(resolved_signature_id) {
             return Some(params);
         }
         if let VirType::Function { params, .. } =
@@ -279,8 +279,8 @@ impl Cg<'_, '_, '_> {
 
         let resolved_receiver = self.try_substitute_type(receiver_type_id);
         let receiver_generic = self
-            .vir_query_unwrap_class(resolved_receiver)
-            .or_else(|| self.vir_query_unwrap_interface(resolved_receiver));
+            .vir_query_unwrap_class_sema(resolved_receiver)
+            .or_else(|| self.vir_query_unwrap_interface_sema(resolved_receiver));
 
         let Some((type_def_id, type_args)) = receiver_generic else {
             return resolved;
@@ -453,7 +453,7 @@ impl Cg<'_, '_, '_> {
         // (not sema annotation) because the Iterator<T> → RuntimeIterator<T>
         // conversion happens in codegen only.
         let obj_sema_tid = self.cv_type_id(&obj);
-        if let Some(elem_type_id) = self.vir_query_unwrap_runtime_iterator(obj_sema_tid) {
+        if let Some(elem_type_id) = self.vir_query_unwrap_runtime_iterator_sema(obj_sema_tid) {
             let return_type_hint = dispatch
                 .substituted_return_type
                 .map(|ty| self.sema_type_from_vir(ty))
@@ -540,7 +540,7 @@ impl Cg<'_, '_, '_> {
             // This is a fallback path when we don't have InterfaceMethod (e.g., in monomorphized context)
             // Extract interface info before mutable borrow
             let interface_info = self
-                .vir_query_unwrap_interface(self.cv_type_id(&obj))
+                .vir_query_unwrap_interface_sema(self.cv_type_id(&obj))
                 .map(|(id, _)| id);
             if let Some(interface_type_id) = interface_info {
                 let result = self.interface_dispatch_call_args_by_type_def_id(
@@ -566,7 +566,7 @@ impl Cg<'_, '_, '_> {
             if let Some(func_type_id) = functional_func_type_id {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
                 let interface_type_def_id = self
-                    .vir_query_unwrap_interface(self.cv_type_id(&obj))
+                    .vir_query_unwrap_interface_sema(self.cv_type_id(&obj))
                     .map(|(id, _)| id);
                 if let Some(interface_type_def_id) = interface_type_def_id {
                     let result = self.interface_dispatch_call_args_by_type_def_id(
@@ -580,15 +580,9 @@ impl Cg<'_, '_, '_> {
                     self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                     return Ok(result);
                 }
-                // For functional interfaces, the object holds the function ptr or closure
-                let is_closure = self
-                    .vir_query_unwrap_function(self.cv_type_id(&obj))
-                    .map(|(_, _, is_closure)| is_closure)
-                    .or_else(|| {
-                        self.vir_query_unwrap_function(func_type_id)
-                            .map(|(_, _, is_closure)| is_closure)
-                    })
-                    .unwrap_or(true);
+                // For functional interfaces, the object holds the function ptr or closure.
+                // All lambdas are now wrapped in Closure structs, so is_closure is always true.
+                let is_closure = true;
                 let result = self.functional_interface_call(
                     obj.value,
                     func_type_id,
@@ -758,7 +752,7 @@ impl Cg<'_, '_, '_> {
             // paths above (lines 264-310) are skipped. Check here if the object is an
             // interface type and dispatch via vtable.
             let interface_type_def_id = self
-                .vir_query_unwrap_interface(resolved_obj_type_id)
+                .vir_query_unwrap_interface_sema(resolved_obj_type_id)
                 .map(|(id, _)| id);
             if let Some(interface_type_def_id) = interface_type_def_id {
                 let func_type_id = self
@@ -1275,7 +1269,10 @@ impl Cg<'_, '_, '_> {
         }
         // Check array-specific methods: push needs its own path, other array
         // builtins (length, iter) go through builtin_method.
-        if self.vir_query_unwrap_array(self.cv_type_id(obj)).is_some() {
+        if self
+            .vir_query_unwrap_array_sema(self.cv_type_id(obj))
+            .is_some()
+        {
             if method_name == "push" {
                 return vole_sema::MethodDispatchKind::ArrayPush;
             }

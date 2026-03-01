@@ -329,9 +329,11 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
-        let variants = self.vir_query_unwrap_union(union_type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("union construction", "union type", "non-union")
-        })?;
+        let variants = self
+            .vir_query_unwrap_union_sema(union_type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch("union construction", "union type", "non-union")
+            })?;
 
         // If the value is already the same union type, just return it.
         // Also check the substituted type, since generic code may produce values
@@ -415,7 +417,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 None
             }
-        } else if let Some(variants) = self.vir_query_unwrap_union(error_type_id) {
+        } else if let Some(variants) = self.vir_query_unwrap_union_sema(error_type_id) {
             // Union of error types
             variants.iter().find_map(|&v| {
                 if let Some(type_def_id) = self.vir_query_unwrap_error(v) {
@@ -654,11 +656,11 @@ impl Cg<'_, '_, '_> {
         &self,
         union_type_id: TypeId,
     ) -> Option<TypeId> {
-        let variants = self.vir_query_unwrap_union(union_type_id)?;
+        let variants = self.vir_query_unwrap_union_sema(union_type_id)?;
         let mut it = variants.iter().copied().filter(|&variant| {
             self.vir_query_is_array(variant)
-                || self.vir_query_unwrap_tuple(variant).is_some()
-                || self.vir_query_unwrap_fixed_array(variant).is_some()
+                || self.vir_query_unwrap_tuple_sema(variant).is_some()
+                || self.vir_query_unwrap_fixed_array_sema(variant).is_some()
         });
         let first = it.next()?;
         if it.next().is_some() {
@@ -867,7 +869,7 @@ impl Cg<'_, '_, '_> {
         })?;
 
         let (_success_type_id, error_type_id) = self
-            .vir_query_unwrap_fallible(return_type_id)
+            .vir_query_unwrap_fallible_sema(return_type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "raise statement",

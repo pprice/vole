@@ -55,16 +55,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         func_type_id: TypeId,
     ) -> CodegenResult<(Signature, Vec<TypeId>, TypeId)> {
-        // Get function components from arena
-        let (params, ret, _is_closure) =
-            self.vir_query_unwrap_function(func_type_id)
-                .ok_or_else(|| {
-                    CodegenError::type_mismatch(
-                        "call_actual_closure",
-                        "function type",
-                        "non-function type",
-                    )
-                })?;
+        // Get function components from VirTypeTable
+        let (params, ret) = self
+            .vir_query_unwrap_function_sema(func_type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
+                    "call_actual_closure",
+                    "function type",
+                    "non-function type",
+                )
+            })?;
 
         // Build signature (closure ptr + params)
         let mut sig = self.jit_module().make_signature();
@@ -80,7 +80,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // low
                 sig.returns.push(AbiParam::new(types::I64)); // high
-            } else if self.vir_query_unwrap_fallible(ret).is_some() {
+            } else if self.vir_query_unwrap_fallible_sema(ret).is_some() {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // payload
             } else {
@@ -175,7 +175,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         if results.is_empty() {
             Ok(self.void_value())
-        } else if results.len() == 2 && self.vir_query_unwrap_fallible(ret).is_some() {
+        } else if results.len() == 2 && self.vir_query_unwrap_fallible_sema(ret).is_some() {
             // Fallible multi-value return: pack (tag, payload) into stack slot
             let tag = results[0];
             let payload = results[1];

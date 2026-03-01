@@ -60,13 +60,15 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let obj = self.compile_vir_expr(object)?;
 
-        if let Some(elem_type_ids) = self.vir_query_unwrap_tuple(self.cv_type_id(&obj)) {
+        if let Some(elem_type_ids) = self.vir_query_unwrap_tuple_sema(self.cv_type_id(&obj)) {
             return self.vir_index_tuple(obj, index, &elem_type_ids);
         }
-        if let Some((element_id, size)) = self.vir_query_unwrap_fixed_array(self.cv_type_id(&obj)) {
+        if let Some((element_id, size)) =
+            self.vir_query_unwrap_fixed_array_sema(self.cv_type_id(&obj))
+        {
             return self.vir_index_fixed_array(obj, index, element_id, size);
         }
-        if let Some(element_id) = self.vir_query_unwrap_array(self.cv_type_id(&obj)) {
+        if let Some(element_id) = self.vir_query_unwrap_array_sema(self.cv_type_id(&obj)) {
             return self.vir_index_dynamic_array(obj, index, element_id, ty, union_storage);
         }
         if let Some((tuple_elems, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
@@ -101,7 +103,7 @@ impl Cg<'_, '_, '_> {
         let arr = self.compile_vir_expr(object)?;
         let val = self.compile_vir_expr(value_expr)?;
 
-        let fixed_array_info = self.vir_query_unwrap_fixed_array(self.cv_type_id(&arr));
+        let fixed_array_info = self.vir_query_unwrap_fixed_array_sema(self.cv_type_id(&arr));
         let is_dynamic_array = self.vir_query_is_array(self.cv_type_id(&arr));
 
         if let Some((elem_type_id, size)) = fixed_array_info {
@@ -339,7 +341,7 @@ impl Cg<'_, '_, '_> {
         idx: CompiledValue,
         val: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
-        let elem_type = self.vir_query_unwrap_array(self.cv_type_id(&arr));
+        let elem_type = self.vir_query_unwrap_array_sema(self.cv_type_id(&arr));
         let (tag_val, value_bits, val) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(val, elem_id)?
         } else {

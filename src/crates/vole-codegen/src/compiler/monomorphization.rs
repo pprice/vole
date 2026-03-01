@@ -355,50 +355,50 @@ impl Compiler<'_> {
             !self.analyzed.vir_program().has_module(&module_path)
         };
 
-        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_class(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_class_sema(type_id) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_struct(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_struct_sema(type_id) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_interface(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_interface_sema(type_id) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some(elem) = self.vir_query_unwrap_array(type_id) {
+        if let Some(elem) = self.vir_query_unwrap_array_sema(type_id) {
             return self.type_depends_on_program_definitions_inner(elem, visited);
         }
-        if let Some((elem, _)) = self.vir_query_unwrap_fixed_array(type_id) {
+        if let Some((elem, _)) = self.vir_query_unwrap_fixed_array_sema(type_id) {
             return self.type_depends_on_program_definitions_inner(elem, visited);
         }
-        if let Some(elements) = self.vir_query_unwrap_tuple(type_id) {
+        if let Some(elements) = self.vir_query_unwrap_tuple_sema(type_id) {
             return elements
                 .iter()
                 .copied()
                 .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some(variants) = self.vir_query_unwrap_union(type_id) {
+        if let Some(variants) = self.vir_query_unwrap_union_sema(type_id) {
             return variants
                 .iter()
                 .copied()
                 .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((ok_type, err_type)) = self.vir_query_unwrap_fallible(type_id) {
+        if let Some((ok_type, err_type)) = self.vir_query_unwrap_fallible_sema(type_id) {
             return self.type_depends_on_program_definitions_inner(ok_type, visited)
                 || self.type_depends_on_program_definitions_inner(err_type, visited);
         }
-        if let Some((params, ret, _)) = self.vir_query_unwrap_function(type_id) {
+        if let Some((params, ret)) = self.vir_query_unwrap_function_sema(type_id) {
             return params
                 .iter()
                 .copied()

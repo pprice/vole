@@ -227,7 +227,7 @@ impl Cg<'_, '_, '_> {
 
         // TEMP(N279-C): if VIR iterator metadata degraded to `unknown`, recover
         // element typing/storage from the compiled iterable value.
-        if let Some(arr_elem_type_id) = self.vir_query_unwrap_array(self.cv_type_id(&arr)) {
+        if let Some(arr_elem_type_id) = self.vir_query_unwrap_array_sema(self.cv_type_id(&arr)) {
             elem_type_id = arr_elem_type_id;
             if union_storage.is_none() && self.vir_query_is_union(arr_elem_type_id) {
                 union_storage = Some(
@@ -379,11 +379,11 @@ impl Cg<'_, '_, '_> {
                 let hint = self.sema_type_from_vir(*elem_type);
                 let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
                 let (elem_type_id, is_interface_iter) = if let Some(elem_id) =
-                    self.vir_query_unwrap_runtime_iterator(self.cv_type_id(&iter))
+                    self.vir_query_unwrap_runtime_iterator_sema(self.cv_type_id(&iter))
                 {
                     (elem_id, false)
                 } else if let Some((_, type_args)) =
-                    self.vir_query_unwrap_interface(self.cv_type_id(&iter))
+                    self.vir_query_unwrap_interface_sema(self.cv_type_id(&iter))
                 {
                     (type_args.first().copied().unwrap_or(hint), true)
                 } else {
