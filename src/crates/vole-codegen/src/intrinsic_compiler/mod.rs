@@ -24,7 +24,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::convert_to_i64_for_storage;
 
 use super::context::{Cg, ExternalMethodRef, resolve_external_names};
-use super::types::{CompiledValue, array_element_tag_id, native_type_to_cranelift};
+use super::types::{CompiledValue, native_type_to_cranelift};
 use crate::ops::uextend_const;
 
 /// Get signed integer min/max bounds for a given bit width.
@@ -484,36 +484,32 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Function-call semantics may clean up temporary RC args after return.
         // Keep an extra retained reference for values that are sent by inline
         // tag/payload representation.
-        let can_classify_rc = self.cv_type_id(&payload) != TypeId::VOID
+        let can_classify_rc = payload.type_id != VirTypeId::VOID
             && self
-                .vir_query_unwrap_type_param(self.cv_type_id(&payload))
+                .vir_query_unwrap_type_param_v(payload.type_id)
                 .is_none();
-        let payload_is_union = self.vir_query_is_union(self.cv_type_id(&payload));
+        let payload_is_union = self.vir_query_is_union_v(payload.type_id);
 
         let (tag_val, payload_bits) = if payload_is_union {
             // Reuse array tagged-value lowering for union payloads so channel
             // send/recv use the same runtime representation policy (inline tags
             // when unambiguous, heap-boxed union when needed).
-            let prefers_inline = self.union_array_prefers_inline_storage(
-                self.try_substitute_type(self.cv_type_id(&payload)),
-            );
-            if can_classify_rc
-                && prefers_inline
-                && self.rc_state(self.cv_type_id(&payload)).needs_cleanup()
+            let prefers_inline = self
+                .union_array_prefers_inline_storage_v(self.try_substitute_type_v(payload.type_id));
+            if can_classify_rc && prefers_inline && self.rc_state_v(payload.type_id).needs_cleanup()
             {
-                self.emit_rc_inc_for_type(payload.value, self.cv_type_id(&payload))?;
+                self.emit_rc_inc_for_type_v(payload.value, payload.type_id)?;
             }
+            // Bridge to sema TypeId for prepare_dynamic_array_store (no _v variant yet).
+            let elem_sema_id = self.cv_type_id_from_vir(payload.type_id);
             let (tag_val, payload_bits, _) =
-                self.prepare_dynamic_array_store(payload, self.cv_type_id(&payload))?;
+                self.prepare_dynamic_array_store(payload, elem_sema_id)?;
             (tag_val, payload_bits)
         } else {
-            let tag = {
-                let arena = self.arena();
-                array_element_tag_id(self.cv_type_id(&payload), arena)
-            };
+            let tag = self.vir_query_array_element_tag_id_v(payload.type_id);
             let tag_val = self.iconst_cached(types::I64, tag);
-            if can_classify_rc && self.rc_state(self.cv_type_id(&payload)).needs_cleanup() {
-                self.emit_rc_inc_for_type(payload.value, self.cv_type_id(&payload))?;
+            if can_classify_rc && self.rc_state_v(payload.type_id).needs_cleanup() {
+                self.emit_rc_inc_for_type_v(payload.value, payload.type_id)?;
             }
             let payload_bits = convert_to_i64_for_storage(self.builder, &payload);
             (tag_val, payload_bits)
@@ -639,14 +635,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Err(CodegenError::arg_count("task_run", 1, 0));
         }
         let closure = typed_args[0];
-        let closure_return_type = self
-            .vir_query_unwrap_function_sema(self.cv_type_id(&closure))
-            .map(|(_, ret)| self.try_substitute_type(ret))
-            .unwrap_or(TypeId::I64);
-        let tag = {
-            let arena = self.arena();
-            array_element_tag_id(closure_return_type, arena)
-        };
+        let closure_return_vir = self
+            .vir_query_unwrap_function_v(closure.type_id)
+            .map(|(_, ret)| self.try_substitute_type_v(ret))
+            .unwrap_or(VirTypeId::I64);
+        let tag = self.vir_query_array_element_tag_id_v(closure_return_vir);
         let tag_val = self.iconst_cached(types::I64, tag);
         self.call_runtime_void(RuntimeKey::TaskSetSpawnTag, &[tag_val])?;
 
