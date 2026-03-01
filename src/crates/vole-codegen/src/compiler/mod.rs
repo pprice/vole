@@ -561,6 +561,76 @@ impl<'a> Compiler<'a> {
         self.vir_query_unwrap_union_v(self.vir_lookup(type_id))
     }
 
+    /// Unwrap a nominal `VirTypeId` to its `TypeDefId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_nominal_v(&self, vir_ty: VirTypeId) -> Option<TypeDefId> {
+        crate::types::vir_conversions::vir_unwrap_nominal(vir_ty, self.vir_type_table())
+    }
+
+    /// Unwrap a nominal type to its `TypeDefId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_nominal(&self, type_id: TypeId) -> Option<TypeDefId> {
+        self.vir_query_unwrap_nominal_v(self.vir_lookup(type_id))
+    }
+
+    /// Unwrap a runtime iterator `VirTypeId` to its element `VirTypeId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_runtime_iterator_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
+        crate::types::vir_conversions::vir_unwrap_runtime_iterator(vir_ty, self.vir_type_table())
+    }
+
+    /// Unwrap a runtime iterator type to its element `VirTypeId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_runtime_iterator(&self, type_id: TypeId) -> Option<VirTypeId> {
+        self.vir_query_unwrap_runtime_iterator_v(self.vir_lookup(type_id))
+    }
+
+    /// Unwrap an error `VirTypeId` to its `TypeDefId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_error_v(&self, vir_ty: VirTypeId) -> Option<TypeDefId> {
+        crate::types::vir_conversions::vir_unwrap_error(vir_ty, self.vir_type_table())
+    }
+
+    /// Unwrap an error type to its `TypeDefId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_error(&self, type_id: TypeId) -> Option<TypeDefId> {
+        self.vir_query_unwrap_error_v(self.vir_lookup(type_id))
+    }
+
+    /// Unwrap an optional `VirTypeId` to its inner `VirTypeId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_optional_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
+        crate::types::vir_conversions::vir_unwrap_optional(vir_ty, self.vir_type_table())
+    }
+
+    /// Unwrap an optional type to its inner `VirTypeId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_optional(&self, type_id: TypeId) -> Option<VirTypeId> {
+        self.vir_query_unwrap_optional_v(self.vir_lookup(type_id))
+    }
+
+    /// Unwrap an error or struct `VirTypeId` to its `TypeDefId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_error_or_struct_def_v(&self, vir_ty: VirTypeId) -> Option<TypeDefId> {
+        crate::types::vir_conversions::vir_unwrap_error_or_struct_def(vir_ty, self.vir_type_table())
+    }
+
+    /// Unwrap an error or struct type to its `TypeDefId` via VirTypeTable.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_error_or_struct_def(&self, type_id: TypeId) -> Option<TypeDefId> {
+        self.vir_query_unwrap_error_or_struct_def_v(self.vir_lookup(type_id))
+    }
+
     /// Check if a `VirTypeId` contains any type parameter anywhere in its structure
     /// via VirTypeTable.
     #[allow(dead_code)]
@@ -669,5 +739,19 @@ impl<'a> Compiler<'a> {
     #[inline]
     fn vir_query_unwrap_tuple_sema(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
         self.arena().unwrap_tuple(type_id).map(|v| v.to_vec())
+    }
+
+    /// Unwrap an optional type, returning the inner sema TypeId.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_optional_sema(&self, type_id: TypeId) -> Option<TypeId> {
+        self.arena().unwrap_optional(type_id)
+    }
+
+    /// Unwrap a runtime iterator type, returning the element sema TypeId.
+    #[allow(dead_code)]
+    #[inline]
+    fn vir_query_unwrap_runtime_iterator_sema(&self, type_id: TypeId) -> Option<TypeId> {
+        self.arena().unwrap_runtime_iterator(type_id)
     }
 }
