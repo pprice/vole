@@ -67,12 +67,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a `VirTypeId` to a Cranelift type via the VIR type table.
     #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
-    pub fn vir_cranelift_type(&self, vir_ty: VirTypeId) -> Type {
-        super::types::vir_conversions::vir_type_to_cranelift(
-            vir_ty,
-            self.vir_type_table(),
-            self.ptr_type(),
-        )
+    pub fn cranelift_type_v(&self, vir_ty: VirTypeId) -> Type {
+        self.vir_query_type_to_cranelift_v(vir_ty)
     }
 
     /// Temporary bridge from `VirTypeId` to sema `TypeId` for legacy code paths.
@@ -117,9 +113,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect()
     }
 
-    /// Get the size (in bits) of a TypeId
+    /// Get the size (in bytes) of a TypeId.
     pub fn type_size(&self, ty: TypeId) -> u32 {
         type_id_size(ty, self.ptr_type(), self.analyzed(), self.arena())
+    }
+
+    /// Get the size (in bytes) of a `VirTypeId` via the VIR type table.
+    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
+    pub fn type_size_v(&self, vir_ty: VirTypeId) -> u32 {
+        super::types::vir_conversions::vir_type_id_size(
+            vir_ty,
+            self.ptr_type(),
+            self.analyzed(),
+            self.vir_type_table(),
+        )
     }
 
     /// Compute the memory layout for a tuple type.
@@ -131,6 +138,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.ptr_type(),
             self.analyzed(),
             self.arena(),
+        )
+    }
+
+    /// Compute the memory layout for a tuple type from `VirTypeId` elements.
+    ///
+    /// Returns (total_size_bytes, per_element_byte_offsets).
+    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
+    pub fn tuple_layout_v(&self, elems: &[VirTypeId]) -> (u32, Vec<i32>) {
+        super::types::vir_conversions::vir_tuple_layout(
+            elems,
+            self.ptr_type(),
+            self.analyzed(),
+            self.vir_type_table(),
         )
     }
 
@@ -163,6 +183,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let analyzed = self.analyzed();
         let arena = self.arena();
         word_to_value_type_id(self.builder, word, type_id, ptr_type, analyzed, arena)
+    }
+
+    /// Convert an i64 value back to its proper type using a `VirTypeId`.
+    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
+    pub fn convert_from_i64_storage_v(&mut self, word: Value, vir_ty: VirTypeId) -> Value {
+        let ptr_type = self.ptr_type();
+        let analyzed = self.analyzed();
+        let table = &analyzed.vir_program().type_table;
+        super::types::vir_conversions::vir_word_to_value(
+            self.builder,
+            word,
+            vir_ty,
+            ptr_type,
+            analyzed,
+            table,
+        )
     }
 
     // ========== Type resolution ==========
@@ -209,6 +245,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_query_unwrap_interface_sema(ty).map(|(id, _)| id)
     }
 
+    /// Unwrap an interface `VirTypeId`, returning the `TypeDefId` if it is one.
+    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
+    pub fn interface_type_def_id_v(&self, vir_ty: VirTypeId) -> Option<TypeDefId> {
+        self.vir_query_unwrap_interface_v(vir_ty).map(|(id, _)| id)
+    }
+
     // ========== Union array storage policy ==========
 
     /// Returns true when a union array can be stored inline as (runtime_tag, payload)
@@ -246,6 +288,38 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         true
     }
 
+    /// VirTypeId version of [`union_array_prefers_inline_storage`](Self::union_array_prefers_inline_storage).
+    ///
+    /// VirTypeId types are post-monomorphization, so no substitution is needed.
+    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
+    pub fn union_array_prefers_inline_storage_v(&self, vir_ty: VirTypeId) -> bool {
+        use rustc_hash::FxHashSet;
+        use vole_runtime::value::RuntimeTypeId;
+
+        let Some(variants) = self.vir_query_unwrap_union_v(vir_ty) else {
+            return false;
+        };
+
+        let mut seen_tags: FxHashSet<u64> = FxHashSet::default();
+        for &variant in &variants {
+            if !self.supports_inline_union_array_variant_v(variant) {
+                return false;
+            }
+
+            let tag = self.vir_query_unknown_type_tag_v(variant);
+            if tag == RuntimeTypeId::I64 as u64
+                && !self.vir_query_is_integer_v(variant)
+                && !self.vir_query_is_sentinel_v(variant)
+            {
+                return false;
+            }
+            if !seen_tags.insert(tag) {
+                return false;
+            }
+        }
+        true
+    }
+
     fn supports_inline_union_array_variant(&self, variant: TypeId) -> bool {
         // Codegen/runtime layout policy: inline union array slots store only
         // (runtime_tag, payload_bits), so variants that need richer tagging or
@@ -258,6 +332,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             || self.vir_query_unwrap_tuple_sema(variant).is_some()
             || self.vir_query_unwrap_fallible_sema(variant).is_some()
             || self.vir_query_unwrap_type_param(variant).is_some())
+    }
+
+    fn supports_inline_union_array_variant_v(&self, variant: VirTypeId) -> bool {
+        !(self.vir_query_is_union_v(variant)
+            || self.vir_query_is_interface_v(variant)
+            || self.vir_query_is_class_v(variant)
+            || self.vir_query_is_struct_v(variant)
+            || self.vir_query_is_unknown_v(variant)
+            || self.vir_query_unwrap_tuple_v(variant).is_some()
+            || self.vir_query_unwrap_fallible_v(variant).is_some()
+            || self.vir_query_unwrap_type_param_v(variant).is_some())
     }
 
     pub(crate) fn union_variant_index_to_array_tag(
