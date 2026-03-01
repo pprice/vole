@@ -1412,12 +1412,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         )
     }
 
+    /// Get the runtime tag for an array element `VirTypeId` via VirTypeTable.
+    #[inline]
+    pub fn vir_query_array_element_tag_id_v(&self, vir_ty: VirTypeId) -> i64 {
+        crate::types::vir_conversions::vir_array_element_tag_id(vir_ty, self.vir_type_table())
+    }
+
     /// Get the runtime tag for an array element type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_array_element_tag_id(&self, type_id: TypeId) -> i64 {
-        let vir_ty = self.vir_lookup(type_id);
-        crate::types::vir_conversions::vir_array_element_tag_id(vir_ty, self.vir_type_table())
+        self.vir_query_array_element_tag_id_v(self.vir_lookup(type_id))
     }
 
     /// Convert a compiled value to a target Cranelift type via VirTypeTable.
