@@ -28,12 +28,16 @@ use super::vir_struct_helpers::{
 
 /// Temporary bridge from `VirTypeId` to sema `TypeId`.
 ///
-/// Reserved type IDs are aligned by raw index; dynamic VIR IDs cannot be
-/// reliably mapped without a dedicated bridge table, so they degrade to
-/// `TypeId::UNKNOWN` for legacy sema-typed code paths.
+/// Handles three cases:
+/// 1. Reserved IDs (< FIRST_DYNAMIC): direct index mapping (TypeId ↔ VirTypeId aligned).
+/// 2. Compat-encoded IDs (high bit set): strip the flag to recover the original TypeId.
+/// 3. Dynamic VIR IDs: no reliable mapping available, returns `TypeId::UNKNOWN`.
+///
 /// TODO(N279-C): remove after all codegen consumers are `VirTypeId`-native.
 pub(crate) fn vir_to_sema_type_id_lossy(vir_ty: VirTypeId) -> TypeId {
-    if vir_ty.raw() < TypeId::FIRST_DYNAMIC {
+    if vir_ty.is_compat() {
+        TypeId::from_raw(vir_ty.compat_raw())
+    } else if vir_ty.raw() < TypeId::FIRST_DYNAMIC {
         TypeId::from_raw(vir_ty.raw())
     } else {
         TypeId::UNKNOWN
@@ -43,8 +47,7 @@ pub(crate) fn vir_to_sema_type_id_lossy(vir_ty: VirTypeId) -> TypeId {
 /// Convert a `VirTypeId` to sema `TypeId` using VIR structure and arena lookups.
 ///
 /// This handles both true VIR dynamic IDs (lookup via `VirTypeTable`) and
-/// legacy sema-encoded IDs carried in compatibility fields by falling back to
-/// raw `TypeId` when the candidate exists in the arena.
+/// compat-encoded IDs (high-bit flagged by `compat_ty()` during lowering).
 pub(crate) fn vir_to_sema_type_id(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
@@ -55,7 +58,7 @@ pub(crate) fn vir_to_sema_type_id(
         return mapped;
     }
 
-    let in_vir_table = (vir_ty.raw() as usize) < table.len();
+    let in_vir_table = !vir_ty.is_compat() && (vir_ty.raw() as usize) < table.len();
     if in_vir_table {
         let resolved = match table.get(vir_ty) {
             VirType::Primitive(_) => Some(vir_to_sema_type_id_lossy(vir_ty)),

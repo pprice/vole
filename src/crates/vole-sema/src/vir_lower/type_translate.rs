@@ -522,10 +522,6 @@ pub fn sweep_unmapped_type_ids(table: &mut VirTypeTable, arena: &TypeArena) {
         .collect();
 
     for type_id in unmapped {
-        // Skip types that still contain unresolved type parameters.
-        if arena.contains_type_param(type_id) {
-            continue;
-        }
         sweep_translate_one(table, type_id, arena);
     }
 }
@@ -536,30 +532,24 @@ pub fn sweep_unmapped_type_ids(table: &mut VirTypeTable, arena: &TypeArena) {
 /// (or `VirTypeId::UNKNOWN` if a child is unmapped).  Only records the
 /// mapping for `type_id` itself, never for its children.
 ///
-/// **Table-size invariant**: Uses `table.lookup()` (not `intern()`) to
-/// avoid growing the table.  `compat_ty()` encodes raw sema TypeIds as
-/// VirTypeIds for types without VIR representation (e.g. Module).  If the
-/// sweep grew the table past those raw indices, `vir_to_sema_type_id()`
-/// would mistake them for real VIR entries and resolve to the wrong sema
-/// type.  By only recording mappings when the VirType already exists
-/// (dedup hit), the table size remains unchanged.
+/// Uses `intern()` to create new VirType entries when needed.  This is safe
+/// because `compat_ty()` now tags its encoded IDs with `COMPAT_FLAG`, so
+/// table growth cannot cause collisions with compat-encoded VirTypeIds.
 fn sweep_translate_one(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeArena) {
     // Sentinel check: nil/done have reserved slots, user-defined sentinels
-    // use lookup to avoid growing the table.
+    // are interned as VirType::Struct (sentinels are zero-field structs).
     if arena.is_sentinel(type_id) {
         if type_id == arena.nil() {
             table.record_type_id(type_id, VirTypeId::NIL);
         } else if type_id == arena.done() {
             table.record_type_id(type_id, VirTypeId::DONE);
         } else if let SemaType::Struct { type_def_id, .. } = arena.get(type_id) {
-            // User-defined sentinels: only record if the VirType already exists.
             let vir_type = VirType::Struct {
                 def: *type_def_id,
                 type_args: vec![],
             };
-            if let Some(vir_id) = table.lookup(&vir_type) {
-                table.record_type_id(type_id, vir_id);
-            }
+            let vir_id = table.intern(vir_type, None);
+            table.record_type_id(type_id, vir_id);
         }
         // Other sentinel shapes: skip (no safe VirTypeId to record).
         return;
@@ -661,15 +651,14 @@ fn sweep_translate_one(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeAr
         | SemaType::Invalid { .. } => VirType::Unknown,
     };
 
-    // Only record the mapping if the VirType already exists in the table
-    // (dedup hit).  We must NOT grow the table, because `compat_ty()` encodes
-    // raw sema TypeIds as VirTypeIds for types without VIR representation
-    // (e.g. Module).  If the table grew past those raw indices,
-    // `vir_to_sema_type_id()` would mistake them for real VIR entries and
-    // resolve to the wrong sema type.
-    if let Some(vir_id) = table.lookup(&vir_type) {
-        table.record_type_id(type_id, vir_id);
+    // Skip Module/Structural/Placeholder/Invalid types — they map to
+    // VirType::Unknown which would collide with the UNKNOWN reserved slot.
+    if matches!(vir_type, VirType::Unknown) && type_id != TypeId::UNKNOWN {
+        return;
     }
+
+    let vir_id = table.intern(vir_type, None);
+    table.record_type_id(type_id, vir_id);
 }
 
 // ---------------------------------------------------------------------------

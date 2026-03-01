@@ -63,6 +63,14 @@ impl VirTypeId {
     /// First non-reserved index (for dynamic / user-defined types).
     pub const FIRST_DYNAMIC: u32 = 23;
 
+    /// High-bit flag for compat_ty-encoded VirTypeIds.
+    ///
+    /// During VIR lowering, types that `translate_type_id()` cannot resolve
+    /// are encoded by `compat_ty()` as `VirTypeId(type_id.raw() | COMPAT_FLAG)`.
+    /// This separates them from real VirTypeTable indices so the post-lowering
+    /// sweep can safely grow the table via `intern()` without collisions.
+    pub const COMPAT_FLAG: u32 = 0x8000_0000;
+
     /// Create a VirTypeId from a raw u32 index.
     pub fn from_raw(index: u32) -> Self {
         VirTypeId(index)
@@ -77,6 +85,19 @@ impl VirTypeId {
     #[inline]
     pub fn is_invalid(self) -> bool {
         self == Self::INVALID
+    }
+
+    /// Check if this VirTypeId was produced by `compat_ty()` (raw TypeId encoding).
+    #[inline]
+    pub fn is_compat(self) -> bool {
+        self.0 & Self::COMPAT_FLAG != 0
+    }
+
+    /// Strip the compat flag to recover the original TypeId raw value.
+    /// Only valid when `is_compat()` returns true.
+    #[inline]
+    pub fn compat_raw(self) -> u32 {
+        self.0 & !Self::COMPAT_FLAG
     }
 }
 

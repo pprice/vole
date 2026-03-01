@@ -287,19 +287,15 @@ impl<'a> Compiler<'a> {
     // these instead of raw `self.arena().method()` calls.
     // =====================================================================
 
-    /// Best-effort sema `TypeId` → `VirTypeId` translation.
-    /// Consults the `type_id_to_vir` mapping populated during VIR lowering;
-    /// falls back to `VirTypeId::UNKNOWN` for unmapped types.
+    /// Sema `TypeId` → `VirTypeId` translation.
+    /// Consults the `type_id_to_vir` mapping populated during VIR lowering
+    /// and the post-lowering sweep.
     #[inline]
     fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
         let lookup = self.vir_type_table().lookup_type_id(type_id);
-        // Reserved/primitive TypeIds (< FIRST_DYNAMIC) must always have an
-        // explicit mapping (populated by `populate_reserved_type_id_map`).
-        // Dynamic TypeIds may be unmapped when their VirType was never interned
-        // during lowering — the sweep (vol-wdt4) only records dedup hits.
         debug_assert!(
-            lookup.is_some() || type_id.raw() >= TypeId::FIRST_DYNAMIC,
-            "reserved TypeId({}) has no VirTypeId mapping",
+            lookup.is_some(),
+            "TypeId({}) has no VirTypeId mapping — was it missed by the sweep?",
             type_id.raw(),
         );
         lookup.unwrap_or(VirTypeId::UNKNOWN)
@@ -332,15 +328,11 @@ impl<'a> Compiler<'a> {
         self.arena().is_self_type(type_id)
     }
 
-    /// Unwrap a type parameter to its `NameId`, using VirTypeTable with arena fallback.
+    /// Unwrap a type parameter to its `NameId` via VirTypeTable.
     #[inline]
     fn vir_query_unwrap_type_param(&self, type_id: TypeId) -> Option<NameId> {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_type_param(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a function type to `(params, return_type, is_closure)`.
@@ -390,30 +382,20 @@ impl<'a> Compiler<'a> {
         self.arena().unwrap_fallible(type_id)
     }
 
-    /// Check if a type is a union, using VirTypeTable with arena fallback
-    /// for unmapped monomorphized types.
+    /// Check if a type is a union via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     fn vir_query_is_union(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_union(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a type is void, using VirTypeTable with arena fallback
-    /// for unmapped monomorphized types.
+    /// Check if a type is void via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     fn vir_query_is_void(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_void(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a class type to `(TypeDefId, type_args)`.
@@ -485,20 +467,15 @@ impl<'a> Compiler<'a> {
         self.arena().unwrap_union(type_id).map(|v| v.to_vec())
     }
 
-    /// Check if a type contains any type parameter anywhere in its structure,
-    /// using VirTypeTable with arena fallback.
+    /// Check if a type contains any type parameter anywhere in its structure
+    /// via VirTypeTable.
     #[inline]
     fn vir_query_contains_type_param(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().contains_type_param(type_id)
-        } else {
-            crate::types::vir_conversions::vir_contains_type_param(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_contains_type_param(vir_ty, self.vir_type_table())
     }
 
-    /// Map a sema `TypeId` to its Cranelift type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// Map a sema `TypeId` to its Cranelift type via VirTypeTable.
     #[inline]
     fn vir_query_type_to_cranelift(&self, type_id: TypeId) -> clif_types::Type {
         // Sentinel types are always i8 (zero-field struct tag). VIR lacks a
@@ -509,10 +486,6 @@ impl<'a> Compiler<'a> {
         }
         let vir_ty = self.vir_lookup(type_id);
         let ptr = self.pointer_type;
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::type_id_to_cranelift(type_id, self.arena(), ptr)
-        } else {
-            crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
-        }
+        crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
     }
 }

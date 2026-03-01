@@ -418,15 +418,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
         let lookup = self.vir_type_table().lookup_type_id(type_id);
-        // Reserved/primitive TypeIds (< FIRST_DYNAMIC) must always have an
-        // explicit mapping (populated by `populate_reserved_type_id_map`).
-        // Dynamic TypeIds may be unmapped when their VirType was never interned
-        // during lowering — the sweep (vol-wdt4) only records dedup hits.
-        // Unmapped dynamic types fall back to UNKNOWN and are handled by the
-        // arena-fallback path in each vir_query_* helper.
+        // The post-lowering sweep (vol-wdt4) maps all concrete arena TypeIds
+        // to VirTypeIds.  Only Module/Structural/Placeholder/Invalid types and
+        // those containing type parameters remain unmapped — these should never
+        // appear in codegen predicate queries.
         debug_assert!(
-            lookup.is_some() || type_id.raw() >= TypeId::FIRST_DYNAMIC,
-            "reserved TypeId({}) has no VirTypeId mapping",
+            lookup.is_some(),
+            "TypeId({}) has no VirTypeId mapping — was it missed by the sweep?",
             type_id.raw(),
         );
         lookup.unwrap_or(VirTypeId::UNKNOWN)
@@ -442,16 +440,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().is_struct(type_id)
     }
 
-    /// Check if a sema `TypeId` is a union type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a union type via VirTypeTable.
     #[inline]
     pub fn vir_query_is_union(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_union(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
     }
 
     /// Check if a sema `TypeId` is the unknown type.
@@ -463,143 +456,87 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().is_unknown(type_id)
     }
 
-    /// Check if a sema `TypeId` is a payload-carrying union, using VirTypeTable
-    /// with arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a payload-carrying union via VirTypeTable.
     #[inline]
     pub fn vir_query_is_payload_union(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::structs::helpers::is_payload_union(type_id, self.arena())
-        } else {
-            crate::types::vir_conversions::vir_is_payload_union(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_payload_union(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is void, using VirTypeTable with arena
-    /// fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is void via VirTypeTable.
     #[inline]
     pub fn vir_query_is_void(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_void(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a fallible type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a fallible type via VirTypeTable.
     #[inline]
     pub fn vir_query_is_fallible(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_fallible(type_id).is_some()
-        } else {
-            crate::types::vir_conversions::vir_is_fallible(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_fallible(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a wide fallible (i128 success type), using
-    /// VirTypeTable with arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a wide fallible (i128 success type) via VirTypeTable.
     #[inline]
     pub fn vir_query_is_wide_fallible(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::is_wide_fallible(type_id, self.arena())
-        } else {
-            crate::types::vir_conversions::vir_is_wide_fallible(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_wide_fallible(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a wide type (i128/f128), using VirTypeTable
-    /// with arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a wide type (i128/f128) via VirTypeTable.
     #[inline]
     pub fn vir_query_is_wide(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::is_wide_type(type_id, self.arena())
-        } else {
-            crate::types::vir_conversions::vir_is_wide(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_wide(vir_ty, self.vir_type_table())
     }
 
-    /// Classify a sema `TypeId` as a `WideType` (i128/f128), using VirTypeTable
-    /// with arena fallback for unmapped monomorphized types.
+    /// Classify a sema `TypeId` as a `WideType` (i128/f128) via VirTypeTable.
     ///
     /// Returns `None` for non-wide types.
     #[inline]
     #[allow(dead_code)] // call-site migration is a separate ticket
     pub fn vir_query_wide_type(&self, type_id: TypeId) -> Option<crate::types::wide_ops::WideType> {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::wide_ops::WideType::from_type_id(type_id, self.arena())
-        } else {
-            crate::types::wide_ops::WideType::from_vir_type_id(vir_ty, self.vir_type_table())
-        }
+        crate::types::wide_ops::WideType::from_vir_type_id(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is an interface type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is an interface type via VirTypeTable.
     #[inline]
     pub fn vir_query_is_interface(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_interface(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
     }
 
-    /// Unwrap a nominal type to its TypeDefId, using VirTypeTable with arena
-    /// fallback for monomorphized types.
+    /// Unwrap a nominal type to its TypeDefId via VirTypeTable.
     #[inline]
     pub fn vir_query_unwrap_nominal(&self, type_id: TypeId) -> Option<vole_identity::TypeDefId> {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_nominal(type_id).map(|(id, _, _)| id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_nominal(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_unwrap_nominal(vir_ty, self.vir_type_table())
     }
 
-    /// Get a human-readable type display string, using VirTypeTable with arena
-    /// fallback for monomorphized types.
+    /// Get a human-readable type display string via VirTypeTable.
     #[inline]
     pub fn vir_query_display_basic(&self, type_id: TypeId) -> String {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().display_basic(type_id)
-        } else {
-            crate::types::vir_conversions::vir_display_basic(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_display_basic(vir_ty, self.vir_type_table())
     }
 
-    /// Get the field byte size for a type, using VirTypeTable with arena
-    /// fallback for monomorphized types.
+    /// Get the field byte size for a type via VirTypeTable.
     #[inline]
     pub fn vir_query_field_byte_size(&self, type_id: TypeId) -> u32 {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::field_byte_size(type_id, self.arena())
-        } else {
-            crate::types::vir_conversions::vir_field_byte_size(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_field_byte_size(vir_ty, self.vir_type_table())
     }
 
-    /// Get the runtime type tag for boxing a value to unknown, using
-    /// VirTypeTable with arena fallback for monomorphized types.
+    /// Get the runtime type tag for boxing a value to unknown via VirTypeTable.
     #[inline]
     pub fn vir_query_unknown_type_tag(&self, type_id: TypeId) -> u64 {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::unknown_type_tag(type_id, self.arena())
-        } else {
-            crate::types::vir_conversions::vir_unknown_type_tag(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_unknown_type_tag(vir_ty, self.vir_type_table())
     }
 
-    /// Map a sema `TypeId` to its Cranelift type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// Map a sema `TypeId` to its Cranelift type via VirTypeTable.
     #[inline]
     pub fn vir_query_type_to_cranelift(&self, type_id: TypeId) -> Type {
         // Sentinel types are always i8 (zero-field struct tag). VIR lacks a
@@ -610,11 +547,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let vir_ty = self.vir_lookup(type_id);
         let ptr = self.ptr_type();
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::type_id_to_cranelift(type_id, self.arena(), ptr)
-        } else {
-            crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
-        }
+        crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
     }
 
     /// Check if a sema `TypeId` is a sentinel type.
@@ -627,30 +560,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().is_sentinel(type_id)
     }
 
-    /// Check if a sema `TypeId` is a function type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a function type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_function(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_function(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_function(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_function(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is an unsigned integer type, using VirTypeTable
-    /// with arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is an unsigned integer type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_unsigned(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_unsigned(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_unsigned(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_unsigned(vir_ty, self.vir_type_table())
     }
 
     /// Check if a sema `TypeId` is a SelfType placeholder.
@@ -663,95 +586,60 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().is_self_type(type_id)
     }
 
-    /// Check if a sema `TypeId` is an integer type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is an integer type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_integer(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_integer(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_integer(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_integer(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a floating point type, using VirTypeTable
-    /// with arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a floating point type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_float(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_float(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_float(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_float(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is the string type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is the string type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_string(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_string(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_string(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_string(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is an optional type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is an optional type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_optional(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_optional(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_optional(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_optional(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is an array type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is an array type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_array(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_array(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_array(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_array(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a runtime iterator type, using VirTypeTable
-    /// with arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a runtime iterator type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_runtime_iterator(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_runtime_iterator(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_runtime_iterator(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_runtime_iterator(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is the handle type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is the handle type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_handle(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_handle(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_handle(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_handle(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a fallible type to `(success, error)` sema `TypeId`s.
@@ -834,17 +722,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure))
     }
 
-    /// Unwrap a type parameter to its `NameId`, using VirTypeTable with arena
-    /// fallback for monomorphized types.
+    /// Unwrap a type parameter to its `NameId` via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_type_param(&self, type_id: TypeId) -> Option<NameId> {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_type_param(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a runtime iterator type to its element sema `TypeId`.
@@ -872,17 +755,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap an error type to its `TypeDefId`, using VirTypeTable with arena
-    /// fallback for monomorphized types.
+    /// Unwrap an error type to its `TypeDefId` via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_error(&self, type_id: TypeId) -> Option<vole_identity::TypeDefId> {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_error(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_error(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_unwrap_error(vir_ty, self.vir_type_table())
     }
 
     /// Get the void `TypeId` from the arena.
@@ -986,17 +864,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().all_concrete_runtime_iterator_elem_types()
     }
 
-    /// Check if a type contains any type parameter anywhere in its structure,
-    /// using VirTypeTable with arena fallback for unmapped monomorphized types.
+    /// Check if a type contains any type parameter anywhere in its structure
+    /// via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_contains_type_param(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().contains_type_param(type_id)
-        } else {
-            crate::types::vir_conversions::vir_contains_type_param(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_contains_type_param(vir_ty, self.vir_type_table())
     }
 
     /// Check if a sema `TypeId` is a numeric type (integer or float).
@@ -1039,17 +913,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().primitives
     }
 
-    /// Check if a sema `TypeId` is a class type, using VirTypeTable with
-    /// arena fallback for unmapped monomorphized types.
+    /// Check if a sema `TypeId` is a class type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_class(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_class(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_class(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_is_class(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a class type to `(TypeDefId, type_args)`.
@@ -1145,61 +1014,45 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // unknown (dynamic sema IDs that can't be translated).
     // =====================================================================
 
-    /// Get the byte size of a type, using VirTypeTable with arena fallback.
+    /// Get the byte size of a type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_type_id_size(&self, type_id: TypeId) -> u32 {
         let vir_ty = self.vir_lookup(type_id);
         let ptr = self.ptr_type();
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::type_id_size(type_id, ptr, self.analyzed(), self.arena())
-        } else {
-            crate::types::vir_conversions::vir_type_id_size(
-                vir_ty,
-                ptr,
-                self.analyzed(),
-                self.vir_type_table(),
-            )
-        }
+        crate::types::vir_conversions::vir_type_id_size(
+            vir_ty,
+            ptr,
+            self.analyzed(),
+            self.vir_type_table(),
+        )
     }
 
-    /// Calculate tuple layout, using VirTypeTable with arena fallback.
+    /// Calculate tuple layout via VirTypeTable.
     ///
     /// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_tuple_layout(&self, elements: &[TypeId]) -> (u32, Vec<i32>) {
         let ptr = self.ptr_type();
-        // Try VIR path: convert TypeIds to VirTypeIds.
         let vir_elems: Vec<VirTypeId> = elements.iter().map(|&t| self.vir_lookup(t)).collect();
-        let any_unknown = vir_elems.contains(&VirTypeId::UNKNOWN);
-        if any_unknown {
-            crate::types::tuple_layout_id(elements, ptr, self.analyzed(), self.arena())
-        } else {
-            crate::types::vir_conversions::vir_tuple_layout(
-                &vir_elems,
-                ptr,
-                self.analyzed(),
-                self.vir_type_table(),
-            )
-        }
+        crate::types::vir_conversions::vir_tuple_layout(
+            &vir_elems,
+            ptr,
+            self.analyzed(),
+            self.vir_type_table(),
+        )
     }
 
-    /// Get the runtime tag for an array element type, using VirTypeTable with
-    /// arena fallback.
+    /// Get the runtime tag for an array element type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_array_element_tag_id(&self, type_id: TypeId) -> i64 {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::array_element_tag_id(type_id, self.arena())
-        } else {
-            crate::types::vir_conversions::vir_array_element_tag_id(vir_ty, self.vir_type_table())
-        }
+        crate::types::vir_conversions::vir_array_element_tag_id(vir_ty, self.vir_type_table())
     }
 
-    /// Convert a compiled value to a target Cranelift type, using VirTypeTable
-    /// with arena fallback.
+    /// Convert a compiled value to a target Cranelift type via VirTypeTable.
     #[allow(dead_code)]
     pub fn vir_query_convert_to_type(
         &self,
@@ -1207,21 +1060,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         val: CompiledValue,
         target: Type,
     ) -> Value {
-        let vir_ty = val.vir_type_id;
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::convert_to_type(builder, val, target, self.arena())
-        } else {
-            crate::types::vir_conversions::vir_convert_to_type(
-                builder,
-                val,
-                target,
-                self.vir_type_table(),
-            )
-        }
+        crate::types::vir_conversions::vir_convert_to_type(
+            builder,
+            val,
+            target,
+            self.vir_type_table(),
+        )
     }
 
-    /// Get the error tag for a fallible type, using VirTypeTable with arena
-    /// fallback.
+    /// Get the error tag for a fallible type via VirTypeTable.
     #[allow(dead_code)]
     pub fn vir_query_fallible_error_tag_by_id(
         &self,
@@ -1229,34 +1076,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         error_name: Symbol,
     ) -> Option<i64> {
         let vir_ty = self.vir_lookup(error_type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::types::fallible_error_tag_by_id(
-                error_type_id,
-                error_name,
-                self.arena(),
-                self.env.interner,
-                self.env.analyzed.name_table(),
-                self.analyzed(),
-            )
-        } else {
-            // For VIR path, we need the error VirTypeIds from the fallible.
-            // The caller passes the error part of a fallible, which could be
-            // a single Error or a Union of Errors.
-            let table = self.vir_type_table();
-            let error_vir_types: Vec<VirTypeId> = match table.get(vir_ty) {
-                vole_vir::types::VirType::Error { .. } => vec![vir_ty],
-                vole_vir::types::VirType::Union { variants } => variants.clone(),
-                _ => return None,
-            };
-            crate::types::vir_conversions::vir_fallible_error_tag_by_id(
-                &error_vir_types,
-                error_name,
-                table,
-                self.env.interner,
-                self.env.analyzed.name_table(),
-                self.analyzed().vir_program().entity_metadata(),
-            )
-        }
+        let table = self.vir_type_table();
+        // The caller passes the error part of a fallible, which could be
+        // a single Error or a Union of Errors.
+        let error_vir_types: Vec<VirTypeId> = match table.get(vir_ty) {
+            vole_vir::types::VirType::Error { .. } => vec![vir_ty],
+            vole_vir::types::VirType::Union { variants } => variants.clone(),
+            _ => return None,
+        };
+        crate::types::vir_conversions::vir_fallible_error_tag_by_id(
+            &error_vir_types,
+            error_name,
+            table,
+            self.env.interner,
+            self.env.analyzed.name_table(),
+            self.analyzed().vir_program().entity_metadata(),
+        )
     }
 
     // =====================================================================
@@ -1471,37 +1306,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // to arena when the VIR lookup returns UNKNOWN.
     // =====================================================================
 
-    /// Compute the RC state for a type, using VirTypeTable with arena fallback.
+    /// Compute the RC state for a type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_compute_rc_state(&self, type_id: TypeId) -> crate::rc_state::RcState {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::rc_state::compute_rc_state(self.arena(), self.analyzed(), type_id)
-        } else {
-            crate::types::vir_conversions::vir_compute_rc_state(
-                vir_ty,
-                self.vir_type_table(),
-                self.analyzed(),
-            )
-        }
+        crate::types::vir_conversions::vir_compute_rc_state(
+            vir_ty,
+            self.vir_type_table(),
+            self.analyzed(),
+        )
     }
 
-    /// Get the flat slot count for a struct type, using VirTypeTable with arena
-    /// fallback.
+    /// Get the flat slot count for a struct type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_struct_flat_slot_count(&self, type_id: TypeId) -> Option<usize> {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            crate::structs::struct_flat_slot_count(type_id, self.arena(), self.analyzed())
-        } else {
-            crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
-                vir_ty,
-                self.vir_type_table(),
-                self.analyzed(),
-            )
-        }
+        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+            vir_ty,
+            self.vir_type_table(),
+            self.analyzed(),
+        )
     }
 
     /// Get expression type from VIR-stashed `vir_call_return_type`.

@@ -70,12 +70,13 @@ impl LoweringCtx<'_> {
     ///
     /// Prefer a true translated VIR ID when available; when translation yields
     /// `UNKNOWN` for a non-unknown sema type (for types not represented in
-    /// `VirTypeTable` yet), preserve the raw sema ID so legacy bridges can
-    /// still recover the original `TypeId`.
+    /// `VirTypeTable` yet), preserve the raw sema ID with a high-bit flag
+    /// so legacy bridges can recover the original `TypeId` while keeping the
+    /// VirTypeId namespace separate from real table indices.
     pub fn compat_ty(&mut self, type_id: TypeId) -> VirTypeId {
         let vir_ty = self.translate(type_id);
         if vir_ty == VirTypeId::UNKNOWN && type_id != TypeId::UNKNOWN {
-            VirTypeId::from_raw(type_id.raw())
+            VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG)
         } else {
             vir_ty
         }
