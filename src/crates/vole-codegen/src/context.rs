@@ -1672,6 +1672,55 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         )
     }
 
+    /// Compute the byte offset of field `slot` within a VIR struct type.
+    ///
+    /// Panics if the type is not a struct or the slot is out of range.
+    #[inline]
+    pub fn vir_struct_field_byte_offset(&self, vir_ty: VirTypeId, slot: usize) -> i32 {
+        crate::types::vir_struct_helpers::vir_struct_field_byte_offset(
+            vir_ty,
+            slot,
+            self.vir_type_table(),
+            self.analyzed(),
+        )
+        .expect("INTERNAL: struct field offset must be computable for valid struct type")
+    }
+
+    /// Get field slot and type for a field access using VirTypeId.
+    ///
+    /// Converts `VirTypeId` → `TypeId` internally and delegates to the
+    /// legacy `get_field_slot_and_type_id_cg` path, which uses
+    /// `sema_generic_field_types` for reliable substitution.
+    ///
+    /// Note: The VIR-native path (`vir_get_field_slot_and_type_id`) is not
+    /// used here because `VirTypeDef::generic_field_types` has known
+    /// translation bugs for some generic types (e.g. type params that map
+    /// to wrong VirTypeIds).  Once those are fixed upstream, this can
+    /// switch to the VIR-native path.
+    #[inline]
+    pub fn vir_field_slot_and_type(
+        &self,
+        vir_ty: VirTypeId,
+        field_name: &str,
+    ) -> CodegenResult<(usize, TypeId)> {
+        let type_id = self.cv_type_id_from_vir(vir_ty);
+        crate::structs::helpers::get_field_slot_and_type_id_cg(type_id, field_name, self)
+    }
+
+    /// Unwrap a module type from a `VirTypeId`.
+    ///
+    /// Converts `VirTypeId` → `TypeId` internally, then delegates to the
+    /// arena-based module lookup (modules are not represented in VirTypeTable).
+    #[allow(clippy::type_complexity)]
+    #[inline]
+    pub fn vir_query_unwrap_module_v(
+        &self,
+        vir_ty: VirTypeId,
+    ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
+        let type_id = self.cv_type_id_from_vir(vir_ty);
+        self.vir_query_unwrap_module(type_id)
+    }
+
     // =====================================================================
     // VIR query wrappers with TypeId input (legacy bridge)
     //

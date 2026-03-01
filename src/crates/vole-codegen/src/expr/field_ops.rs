@@ -11,9 +11,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::structs::helpers::{
-    convert_to_i64_for_storage, get_field_slot_and_type_id_cg, store_field_value,
-};
+use crate::structs::helpers::{convert_to_i64_for_storage, store_field_value};
 use crate::types::{CompiledValue, module_name_id};
 
 use vole_frontend::Symbol;
@@ -41,8 +39,7 @@ impl Cg<'_, '_, '_> {
         // Resolved storage: use pre-resolved slot, only look up field type.
         if let FieldStorage::Direct { slot } | FieldStorage::Heap { slot } = storage {
             let field_name = self.interner().resolve(field);
-            let (_, field_type_id) =
-                get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
+            let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
             return self.extract_field(obj, slot as usize, field_type_id);
         }
 
@@ -51,8 +48,7 @@ impl Cg<'_, '_, '_> {
             return Ok(cv);
         }
         let field_name = self.interner().resolve(field);
-        let (slot, field_type_id) =
-            get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
+        let (slot, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
         self.extract_field(obj, slot, field_type_id)
     }
 
@@ -74,21 +70,19 @@ impl Cg<'_, '_, '_> {
         match storage {
             FieldStorage::Direct { slot } => {
                 let field_name = self.interner().resolve(field);
-                let (_, field_type_id) =
-                    get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
+                let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
                 self.vir_struct_field_store(obj, slot as usize, field_type_id, value)
             }
             FieldStorage::Heap { slot } => {
                 let field_name = self.interner().resolve(field);
-                let (_, field_type_id) =
-                    get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
+                let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
                 self.vir_class_field_store(obj, slot as usize, field_type_id, value)
             }
             FieldStorage::ByName => {
                 let field_name = self.interner().resolve(field);
                 let (slot, field_type_id) =
-                    get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
-                let is_struct = self.vir_query_is_struct(self.cv_type_id(&obj));
+                    self.vir_field_slot_and_type(obj.type_id, field_name)?;
+                let is_struct = self.vir_query_is_struct_v(obj.type_id);
                 if is_struct {
                     self.vir_struct_field_store(obj, slot, field_type_id, value)
                 } else {
@@ -108,7 +102,7 @@ impl Cg<'_, '_, '_> {
         obj: CompiledValue,
         field: Symbol,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let Some((module_id, exports)) = self.vir_query_unwrap_module(self.cv_type_id(&obj)) else {
+        let Some((module_id, exports)) = self.vir_query_unwrap_module_v(obj.type_id) else {
             return Ok(None);
         };
 
@@ -183,10 +177,10 @@ impl Cg<'_, '_, '_> {
         field_type_id: TypeId,
         value: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
-        let offset = self.struct_field_byte_offset(self.cv_type_id(&obj), slot);
+        let offset = self.vir_struct_field_byte_offset(obj.type_id, slot);
 
         // Nested struct: copy all flat slots inline.
-        if let Some(nested_flat) = self.struct_flat_slot_count(self.cv_type_id(&value)) {
+        if let Some(nested_flat) = self.vir_struct_flat_slot_count(value.type_id) {
             for i in 0..nested_flat {
                 let src_off = (i as i32) * 8;
                 let dst_off = offset + src_off;
