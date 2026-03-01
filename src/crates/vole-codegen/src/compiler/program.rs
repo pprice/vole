@@ -8,6 +8,7 @@ use super::{Compiler, DeclareMode};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, function_name_id_with_interner, type_id_to_cranelift};
+use vole_frontend::ast::TestsDecl;
 use vole_frontend::{Decl, FuncDecl, Interner, Program, Symbol};
 use vole_identity::{ModuleId, NameId, TypeId};
 use vole_vir::calls::CallTarget;
@@ -149,7 +150,6 @@ impl Compiler<'_> {
         // Bulk-register top-level module import bindings from VirProgram.
         self.register_global_module_bindings_from_vir();
 
-        let mut test_count = 0usize;
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
@@ -173,20 +173,8 @@ impl Compiler<'_> {
                 }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
-                    // Declare scoped declarations within the tests block
-                    self.declare_tests_scoped_decls(tests_decl, &mut test_count)?;
-
-                    // Declare each test with a generated name and signature () -> i64
-                    let i64_type_id = self.vir_query_primitives().i64;
-                    for _ in &tests_decl.tests {
-                        let func_key = self.test_function_key(test_count);
-                        let func_name = self.test_display_name(func_key);
-                        let sig = self.jit.create_signature(&[], Some(types::I64));
-                        let func_id = self.jit.declare_function(&func_name, &sig);
-                        self.func_registry.set_return_type(func_key, i64_type_id);
-                        self.func_registry.set_func_id(func_key, func_id);
-                        test_count += 1;
-                    }
+                    // Declare scoped type/function declarations within the tests block
+                    self.declare_tests_scoped_types(tests_decl)?;
                 }
                 Decl::LetTuple(_) => {
                     // Module bindings are bulk-registered from VirProgram at the
@@ -218,6 +206,23 @@ impl Compiler<'_> {
                 }
             }
         }
+
+        // Declare all test functions from VirProgram's flat test list.
+        // This uses VirProgram.tests order (outer tests first, then nested),
+        // matching the order used during compilation in compile_all_tests.
+        if !self.skip_tests {
+            let num_tests = self.analyzed.vir_program().tests.len();
+            let i64_type_id = self.vir_query_primitives().i64;
+            for test_index in 0..num_tests {
+                let func_key = self.test_function_key(test_index);
+                let func_name = self.test_display_name(func_key);
+                let sig = self.jit.create_signature(&[], Some(types::I64));
+                let func_id = self.jit.declare_function(&func_name, &sig);
+                self.func_registry.set_return_type(func_key, i64_type_id);
+                self.func_registry.set_func_id(func_key, func_id);
+            }
+        }
+
         Ok(())
     }
 
@@ -252,7 +257,6 @@ impl Compiler<'_> {
     /// Note: Decl::Let globals are handled by inlining their initializers
     /// when referenced (see compile_expr for ExprKind::Identifier).
     fn compile_program_declarations(&mut self, program: &Program) -> CodegenResult<()> {
-        let mut test_count = 0usize;
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
@@ -279,7 +283,8 @@ impl Compiler<'_> {
                 }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
-                    self.compile_tests(tests_decl, program, &mut test_count)?;
+                    // Compile scoped function/class/implement bodies (recursive into nested tests)
+                    self.compile_tests_scoped_bodies(tests_decl, program)?;
                 }
                 Decl::Let(_) | Decl::LetTuple(_) => {
                     // Globals are handled during identifier lookup
@@ -310,6 +315,17 @@ impl Compiler<'_> {
                 }
             }
         }
+
+        // Compile all test bodies from VirProgram's flat test list.
+        // This must happen after scoped declarations are compiled above,
+        // since test bodies may reference scoped functions/classes/impls.
+        if !self.skip_tests {
+            let vir_tests = &self.analyzed.vir_program().tests;
+            // Clone the tests slice to avoid borrowing self.analyzed during compilation.
+            let vir_tests: Vec<_> = vir_tests.clone();
+            self.compile_all_tests(&vir_tests)?;
+        }
+
         Ok(())
     }
 
@@ -981,6 +997,113 @@ impl Compiler<'_> {
                 )?;
             }
             self.finalize_function(func_id)?;
+        }
+        Ok(())
+    }
+
+    // =====================================================================
+    // Test-scoped declaration helpers
+    //
+    // These walk AST `TestsDecl` blocks to declare and compile scoped
+    // functions, classes, and implement blocks.  Test *bodies* are compiled
+    // separately via `compile_all_tests` which iterates VirProgram.tests.
+    // =====================================================================
+
+    /// Declare scoped type/function declarations within a tests block (pass 1).
+    /// Handles scoped functions, classes, and implement blocks so they're available
+    /// during test compilation. Does NOT declare test functions (those are declared
+    /// from VirProgram.tests in declare_program_declarations).
+    fn declare_tests_scoped_types(&mut self, tests_decl: &TestsDecl) -> CodegenResult<()> {
+        let interner = self.analyzed.interner();
+
+        // Look up the virtual module ID for scoped type declarations
+        let virtual_module_id = self.analyzed.tests_virtual_module(tests_decl.span);
+
+        for inner_decl in &tests_decl.decls {
+            match inner_decl {
+                Decl::Function(func) => {
+                    // Skip generic functions
+                    if !func.type_params.is_empty() {
+                        continue;
+                    }
+                    // Scoped functions are registered under the program module by sema
+                    self.declare_main_function(func.name);
+                }
+                Decl::Class(class) => {
+                    // Scoped classes are registered under the virtual module
+                    if let Some(vm_id) = virtual_module_id {
+                        self.finalize_module_class(class, interner, vm_id)?;
+                    }
+                }
+                Decl::Implement(impl_block) => {
+                    // Scoped implement blocks target types under the virtual module
+                    if let Some(vm_id) = virtual_module_id {
+                        self.register_implement_block_in_module(impl_block, vm_id)?;
+                    } else {
+                        self.register_implement_block(impl_block)?;
+                    }
+                }
+                Decl::Tests(nested_tests) => {
+                    // Recursively declare nested tests block scoped types
+                    self.declare_tests_scoped_types(nested_tests)?;
+                }
+                _ => {
+                    // Let declarations, interfaces, etc. don't need pass 1 handling
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compile scoped function and method bodies within a tests block (pass 2).
+    /// Does NOT compile test bodies (those are compiled via compile_all_tests).
+    fn compile_tests_scoped_bodies(
+        &mut self,
+        tests_decl: &TestsDecl,
+        program: &Program,
+    ) -> CodegenResult<()> {
+        let program_module = self.program_module();
+        // Scoped types are registered under the virtual module in sema
+        let virtual_module_id = self
+            .analyzed
+            .tests_virtual_module(tests_decl.span)
+            .unwrap_or(program_module);
+
+        for inner_decl in &tests_decl.decls {
+            match inner_decl {
+                Decl::Function(func) => {
+                    // Skip generic functions
+                    if !func.type_params.is_empty() {
+                        continue;
+                    }
+                    // Check for implicit generics
+                    let name_id = self.analyzed.function_name_id(program_module, func.name);
+                    let has_implicit_generic_info = self
+                        .analyzed
+                        .function_id_by_name_id(name_id)
+                        .map(|func_id| self.analyzed.function_def(func_id).is_generic)
+                        .unwrap_or(false);
+                    if has_implicit_generic_info {
+                        continue;
+                    }
+                    // Compile as a regular function
+                    self.compile_function(func)?;
+                }
+                Decl::Class(class) => {
+                    self.compile_class_methods_in_module(class, program, virtual_module_id)?;
+                }
+                Decl::Implement(impl_block) => {
+                    self.compile_implement_block_in_module(impl_block, virtual_module_id)?;
+                }
+                Decl::Tests(nested_tests) => {
+                    // Recursively compile nested tests block scoped bodies
+                    self.compile_tests_scoped_bodies(nested_tests, program)?;
+                }
+                _ => {
+                    // Let declarations are handled during test body compilation
+                }
+            }
         }
         Ok(())
     }

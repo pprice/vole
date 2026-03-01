@@ -9,7 +9,7 @@ use vole_frontend::{Interner, Program, Symbol};
 use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId};
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 use vole_sema::{AnalysisOutput, SemaType, TypeArena};
-use vole_vir::{VirBody, VirEntityMetadata, VirFunction, VirProgram};
+use vole_vir::{VirEntityMetadata, VirFunction, VirProgram};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
@@ -353,12 +353,6 @@ impl AnalyzedProgram {
     /// Resolve semantic FunctionId by NameId.
     pub(crate) fn function_id_by_name_id(&self, name_id: NameId) -> Option<FunctionId> {
         self.entity_metadata().function_by_name(name_id)
-    }
-
-    /// Resolve semantic FunctionId by module and Symbol.
-    pub(crate) fn function_id(&self, module_id: ModuleId, name: Symbol) -> Option<FunctionId> {
-        let name_id = self.try_function_name_id(module_id, name)?;
-        self.function_id_by_name_id(name_id)
     }
 
     /// Resolve a string type name in a module context.
@@ -728,11 +722,5 @@ impl AnalyzedProgram {
         } else {
             self.function_def(func.id).module == module_id
         }
-    }
-
-    /// Look up a VIR test body by the test case's span.
-    /// Returns `None` if no VIR body was lowered for this test.
-    pub(crate) fn get_vir_test(&self, span: Span) -> Option<&VirBody> {
-        self.vir_program.get_test(span)
     }
 }
