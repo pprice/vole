@@ -9,7 +9,7 @@ use cranelift::prelude::{InstBuilder, IntCC, MemFlags, Value, Variable, types};
 
 use rustc_hash::FxHashMap;
 
-use vole_identity::{NameId, TypeId};
+use vole_identity::{NameId, TypeId, VirTypeId};
 
 use crate::RuntimeKey;
 use crate::errors::CodegenResult;
@@ -17,6 +17,7 @@ use crate::union_layout;
 
 use super::context::Cg;
 use super::rc_state::{RcState, compute_rc_state_with_vir};
+use super::types::vir_conversions::vir_compute_rc_state;
 use super::types::{CompiledValue, RcLifecycle};
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
@@ -234,8 +235,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit rc_inc for a value, handling interface fat pointers by loading the
     /// data word at offset 0 before incrementing.
+    ///
+    /// Delegates to [`emit_rc_inc_for_type_v`](Self::emit_rc_inc_for_type_v)
+    /// via `vir_lookup`.
     pub fn emit_rc_inc_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
-        self.emit_rc_op_for_type(value, type_id, RuntimeKey::RcInc)
+        self.emit_rc_inc_for_type_v(value, self.vir_lookup(type_id))
+    }
+
+    /// Emit rc_inc for a value using VirTypeId (VirTypeId-native).
+    ///
+    /// For interface types, loads the data word at offset 0 before incrementing.
+    #[allow(dead_code)]
+    pub fn emit_rc_inc_for_type_v(&mut self, value: Value, vir_ty: VirTypeId) -> CodegenResult<()> {
+        self.emit_rc_op_for_type_v(value, vir_ty, RuntimeKey::RcInc)
     }
 
     /// Increment RC for a borrowed value being stored into a container.
@@ -336,17 +348,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(())
     }
 
-    /// Shared implementation for `emit_rc_inc_for_type` and `emit_rc_dec_for_type`.
+    /// Shared VirTypeId-native implementation for RC inc/dec operations.
     ///
     /// For interface types, loads the data word at offset 0 before applying
     /// the given `rc_fn`. For other types, applies `rc_fn` directly.
-    fn emit_rc_op_for_type(
+    fn emit_rc_op_for_type_v(
         &mut self,
         value: Value,
-        type_id: TypeId,
+        vir_ty: VirTypeId,
         rc_fn: RuntimeKey,
     ) -> CodegenResult<()> {
-        if self.vir_query_is_interface(type_id) {
+        if self.vir_query_is_interface_v(vir_ty) {
             let data_word = self
                 .builder
                 .ins()
@@ -366,8 +378,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit rc_dec for a value, handling interface fat pointers by loading the
     /// data word at offset 0 before decrementing.
+    ///
+    /// Delegates to [`emit_rc_dec_for_type_v`](Self::emit_rc_dec_for_type_v)
+    /// via `vir_lookup`.
     pub fn emit_rc_dec_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
-        self.emit_rc_op_for_type(value, type_id, RuntimeKey::RcDec)
+        self.emit_rc_dec_for_type_v(value, self.vir_lookup(type_id))
+    }
+
+    /// Emit rc_dec for a value using VirTypeId (VirTypeId-native).
+    ///
+    /// For interface types, loads the data word at offset 0 before decrementing.
+    #[allow(dead_code)]
+    pub fn emit_rc_dec_for_type_v(&mut self, value: Value, vir_ty: VirTypeId) -> CodegenResult<()> {
+        self.emit_rc_op_for_type_v(value, vir_ty, RuntimeKey::RcDec)
     }
 
     /// Emit rc_inc using the VIR cleanup strategy, falling back to arena
@@ -514,6 +537,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             type_id,
             self.vir_type_table(),
         )
+    }
+
+    /// Get the RC state for a VIR type (VirTypeId-native).
+    ///
+    /// Uses VirTypeTable directly — no TypeArena or sema TypeId involved.
+    /// Callers migrating away from TypeId should use this instead of `rc_state()`.
+    #[allow(dead_code)]
+    pub fn rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
+        vir_compute_rc_state(vir_ty, self.vir_type_table(), self.analyzed())
     }
 
     /// Get the field type tag for a type, determining how instance fields of this

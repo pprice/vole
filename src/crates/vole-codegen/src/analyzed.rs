@@ -655,10 +655,7 @@ impl AnalyzedProgram {
     /// falls back through `vir_to_sema_type_id_lossy` for primitives that are
     /// in the pre-computed `impl_type_names` map.
     #[allow(dead_code)]
-    pub(crate) fn impl_type_name_id_from_vir_type_id(
-        &self,
-        vir_ty: VirTypeId,
-    ) -> Option<NameId> {
+    pub(crate) fn impl_type_name_id_from_vir_type_id(&self, vir_ty: VirTypeId) -> Option<NameId> {
         let entity_metadata = self.vir_program.entity_metadata();
         let table = &self.vir_program.type_table;
         match table.get(vir_ty) {
@@ -668,8 +665,7 @@ impl AnalyzedProgram {
             }
             _ => {
                 // Primitives, Range, Handle: try the pre-computed map keyed by sema TypeId.
-                let sema_id =
-                    crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
+                let sema_id = crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
                 entity_metadata.impl_type_name(sema_id)
             }
         }
