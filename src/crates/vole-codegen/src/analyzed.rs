@@ -13,11 +13,8 @@ use vole_vir::{VirEntityMetadata, VirFunction, VirProgram};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
-    program: Program,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
     tests_virtual_modules: FxHashMap<Span, ModuleId>,
-    /// Parsed module programs for compiling pure Vole functions
-    module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     /// Type arena (Rc-shared, immutable during codegen).
     types: Rc<TypeArena>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
@@ -112,16 +109,13 @@ impl AnalyzedProgram {
             generic_vir_type_table,
             implements: &db.implements,
         });
-        let module_programs = lowering_output.module_programs;
         let mut vir_program = lowering_output.vir_program;
         // Move name resolution data into VirProgram (zero-clone for NameTable
         // via Rc::clone, single Rc::new wrap for interner).
         vir_program.interner = Rc::new(interner);
         vir_program.name_table = Rc::clone(&db.names);
         Self {
-            program,
             tests_virtual_modules,
-            module_programs,
             types: db.types,
             module_id,
             modules_with_errors,
@@ -132,11 +126,6 @@ impl AnalyzedProgram {
     /// Get read-only access to the name table.
     pub(crate) fn name_table(&self) -> &NameTable {
         self.vir_program.name_table()
-    }
-
-    /// Get read-only access to the analyzed root program AST.
-    pub fn program(&self) -> &Program {
-        &self.program
     }
 
     /// Get read-only access to the interner.
@@ -152,11 +141,6 @@ impl AnalyzedProgram {
     /// Get the main/root module ID for this analyzed program.
     pub fn module_id(&self) -> ModuleId {
         self.module_id
-    }
-
-    /// Get read-only access to parsed module programs and their interners.
-    pub fn module_programs(&self) -> &FxHashMap<String, (Program, Rc<Interner>)> {
-        &self.module_programs
     }
 
     /// Get read-only access to module paths that had sema errors.
@@ -496,14 +480,9 @@ impl AnalyzedProgram {
         self.vir_program.module_id_or_main(path)
     }
 
-    /// Return module ID when known for a path.
-    pub(crate) fn module_id_if_known(&self, path: &str) -> Option<ModuleId> {
-        self.vir_program.module_id_if_known(path)
-    }
-
     /// Return known imported module paths.
-    pub(crate) fn module_paths(&self) -> Vec<String> {
-        self.module_programs.keys().cloned().collect()
+    pub fn module_paths(&self) -> Vec<String> {
+        self.vir_program.module_paths()
     }
 
     /// Return whether a function parameter has a default expression.
@@ -527,9 +506,7 @@ impl AnalyzedProgram {
     /// Return imported-module interner for a module ID, when available.
     pub(crate) fn module_interner(&self, module_id: ModuleId) -> Option<&Interner> {
         let module_path = self.vir_program.module_path(module_id);
-        self.module_programs
-            .get(module_path)
-            .map(|(_, interner)| &**interner)
+        self.vir_program.module_interner(module_path)
     }
 
     /// Return whether a type definition is marked as an annotation type.

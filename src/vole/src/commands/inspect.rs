@@ -136,7 +136,7 @@ pub fn inspect_files(
                 let mut compiler = Compiler::new(&mut jit, &analyzed);
                 compiler.set_skip_tests(no_tests);
 
-                if let Err(e) = compiler.compile_program(analyzed.program()) {
+                if let Err(e) = compiler.compile_program() {
                     eprintln!("error: {}", e);
                     had_error = true;
                     continue;
@@ -190,7 +190,7 @@ pub fn inspect_files(
                 let mut compiler = Compiler::new(&mut jit, &analyzed);
                 let include_tests = !no_tests;
 
-                if let Err(e) = compiler.compile_program(analyzed.program()) {
+                if let Err(e) = compiler.compile_program() {
                     eprintln!("error: {}", e);
                     had_error = true;
                     continue;

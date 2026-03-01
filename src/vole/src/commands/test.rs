@@ -594,8 +594,8 @@ fn run_source_tests_with_modules(
     // Check if cached modules contain all modules needed by this file
     let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {
         analyzed
-            .module_programs()
-            .keys()
+            .module_paths()
+            .iter()
             .all(|module_path| modules.has_module(module_path))
     });
 
@@ -616,7 +616,7 @@ fn run_source_tests_with_modules(
         let _ = compiler.import_modules();
 
         // Compile just the main program
-        let result = compiler.compile_program_only(analyzed.program());
+        let result = compiler.compile_program_only();
 
         let tests = compiler.take_tests();
         (jit, result, tests)
@@ -631,7 +631,7 @@ fn run_source_tests_with_modules(
 
         // Compile main program
         let result = if modules_result.is_ok() {
-            compiler.compile_program_only(analyzed.program())
+            compiler.compile_program_only()
         } else {
             modules_result
         };
@@ -640,7 +640,7 @@ fn run_source_tests_with_modules(
 
         // If successful, grow the compiled modules cache with any new modules.
         // This avoids recompiling the same modules for subsequent test files.
-        if result.is_ok() && !analyzed.module_programs().is_empty() {
+        if result.is_ok() && !analyzed.module_paths().is_empty() {
             let mut modules_jit = JitContext::with_options(options);
             let compile_result = {
                 let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
@@ -648,8 +648,7 @@ fn run_source_tests_with_modules(
             };
             match compile_result {
                 Ok(()) => {
-                    let module_paths: Vec<String> =
-                        analyzed.module_programs().keys().cloned().collect();
+                    let module_paths: Vec<String> = analyzed.module_paths();
 
                     if let Some(existing) = compiled_modules.as_mut() {
                         // Grow existing cache with new modules
@@ -763,7 +762,7 @@ fn run_source_tests_with_progress(
 
         // Then compile just the main program
         let result = if modules_result.is_ok() {
-            compiler.compile_program_only(analyzed.program())
+            compiler.compile_program_only()
         } else {
             modules_result
         };

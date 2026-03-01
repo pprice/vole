@@ -590,42 +590,41 @@ impl Compiler<'_> {
         interface_name_str: &str,
         method_name_str: &str,
     ) -> Option<(Rc<Interner>, Option<ModuleId>)> {
-        // Search main program first
-        for decl in &self.analyzed.program().declarations {
-            if let vole_frontend::Decl::Interface(iface) = decl {
-                let iface_name = self.analyzed.interner().resolve(iface.name);
-                if iface_name != interface_name_str {
-                    continue;
-                }
-                for method in &iface.methods {
-                    let m_name = self.analyzed.interner().resolve(method.name);
-                    if m_name == method_name_str && method.body.is_some() {
-                        return Some((self.analyzed.interner_rc(), None));
-                    }
-                }
-            }
+        // Find the interface TypeDefId by short name
+        let iface_tdef_id = self.analyzed.type_by_short_name(interface_name_str)?;
+
+        // Verify it's an interface
+        if !self.analyzed.is_interface_type(iface_tdef_id) {
+            return None;
         }
 
-        // Search module programs
-        for (module_path, (_program, interner)) in self.analyzed.module_programs() {
-            for decl in &_program.declarations {
-                if let vole_frontend::Decl::Interface(iface) = decl {
-                    let iface_name = interner.resolve(iface.name);
-                    if iface_name != interface_name_str {
-                        continue;
-                    }
-                    for method in &iface.methods {
-                        let m_name = interner.resolve(method.name);
-                        if m_name == method_name_str && method.body.is_some() {
-                            let module_id = self.analyzed.module_id_if_known(module_path);
-                            return Some((interner.clone(), module_id));
-                        }
-                    }
-                }
-            }
+        // Find the method by name string
+        let method_name_id = self.analyzed.try_method_name_id_by_str(method_name_str)?;
+        let method_id = self.analyzed.find_method(iface_tdef_id, method_name_id)?;
+        let method_def = self.analyzed.get_method(method_id);
+
+        // Only return if the method has a default body
+        if !method_def.has_default {
+            return None;
         }
 
-        None
+        // Determine the module for this interface
+        let iface_type_def = self.analyzed.get_type(iface_tdef_id);
+        let iface_module_id = iface_type_def.module;
+        let program_module = self.program_module();
+
+        if iface_module_id == program_module {
+            // Interface is in the main program
+            Some((self.analyzed.interner_rc(), None))
+        } else {
+            // Interface is in a module — get its interner
+            let module_path = self.analyzed.name_table().module_path(iface_module_id);
+            let interner = self
+                .analyzed
+                .vir_program()
+                .module_interner_rc(module_path)?;
+            Some((interner, Some(iface_module_id)))
+        }
     }
 
     /// Build `(Symbol, TypeId, cranelift::Type)` param triples from VirMethodDef.
@@ -667,11 +666,9 @@ impl Compiler<'_> {
     /// Get the appropriate interner for a module, falling back to the program interner.
     fn interner_for_module(&self, module_id: Option<ModuleId>) -> Rc<Interner> {
         if let Some(mod_id) = module_id {
-            // Try to find the module's interner from module programs
-            for (module_path, (_program, interner)) in self.analyzed.module_programs() {
-                if self.analyzed.module_id_if_known(module_path) == Some(mod_id) {
-                    return interner.clone();
-                }
+            let module_path = self.analyzed.name_table().module_path(mod_id);
+            if let Some(interner) = self.analyzed.vir_program().module_interner_rc(module_path) {
+                return interner;
             }
         }
         self.analyzed.interner_rc()

@@ -312,6 +312,16 @@ impl VirProgram {
         self.module_interners.get(module_path).cloned()
     }
 
+    /// Return whether a module with the given path is loaded.
+    pub fn has_module(&self, module_path: &str) -> bool {
+        self.module_interners.contains_key(module_path)
+    }
+
+    /// Return all loaded module paths.
+    pub fn module_paths(&self) -> Vec<String> {
+        self.module_interners.keys().cloned().collect()
+    }
+
     /// Get read-only access to the name table.
     pub fn name_table(&self) -> &NameTable {
         &self.name_table

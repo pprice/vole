@@ -69,7 +69,6 @@ where
 }
 
 pub struct LowerVirProgramOutput {
-    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     pub vir_program: VirProgram,
 }
 
@@ -405,10 +404,7 @@ where
     };
     run_vir_monomorphize(&mut vir_program);
 
-    LowerVirProgramOutput {
-        module_programs,
-        vir_program,
-    }
+    LowerVirProgramOutput { vir_program }
 }
 
 /// Build a lookup map from monomorphized mangled NameId to VirFunction index.

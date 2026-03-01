@@ -7,7 +7,6 @@ use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
-use vole_frontend::Program;
 use vole_identity::{ModuleId, MonomorphInstanceTrait, NameId, TypeId};
 use vole_vir::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
@@ -96,7 +95,7 @@ impl Compiler<'_> {
     /// compiled later by the program phase or the demand-driven fixpoint loop.
     pub(super) fn compile_monomorphized_instances(
         &mut self,
-        program: Option<&Program>,
+        is_program_phase: bool,
     ) -> CodegenResult<()> {
         // Collect instances from VirProgram.free_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
@@ -123,7 +122,7 @@ impl Compiler<'_> {
             } else {
                 // Module function — needs module interner for compile_env
                 let found = self.compile_monomorphized_module_function(instance)?;
-                if !found && program.is_some() {
+                if !found && is_program_phase {
                     let func_name = self.analyzed.display_name(instance.original_name);
                     return Err(CodegenError::internal_with_context(
                         "VIR monomorphized function not found",
@@ -149,7 +148,7 @@ impl Compiler<'_> {
             .to_string();
 
         // Need the module interner for compile_env
-        if self.analyzed.module_programs().get(&module_path).is_none() {
+        if !self.analyzed.vir_program().has_module(&module_path) {
             return Ok(false);
         }
 
@@ -200,8 +199,12 @@ impl Compiler<'_> {
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let (_, module_interner) = &self.analyzed.module_programs()[&module_path];
-                let env = compile_env!(self, module_interner, source_file_ptr);
+                let module_interner = self
+                    .analyzed
+                    .vir_program()
+                    .module_interner_rc(&module_path)
+                    .expect("module interner not found for module path");
+                let env = compile_env!(self, &module_interner, source_file_ptr);
                 let mut codegen_ctx = CodegenCtx::new(
                     &mut self.jit.module,
                     &mut self.func_registry,
@@ -349,7 +352,7 @@ impl Compiler<'_> {
                 .name_table()
                 .module_path(module_id)
                 .to_string();
-            !self.analyzed.module_programs().contains_key(&module_path)
+            !self.analyzed.vir_program().has_module(&module_path)
         };
 
         if let Some((type_def_id, type_args)) = self.vir_query_unwrap_class(type_id) {
@@ -460,7 +463,7 @@ impl Compiler<'_> {
     /// types are silently skipped (compiled later during the program phase).
     pub(super) fn compile_class_method_monomorphized_instances(
         &mut self,
-        program: Option<&Program>,
+        is_program_phase: bool,
     ) -> CodegenResult<()> {
         // Collect from VirProgram.class_method_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
@@ -498,7 +501,7 @@ impl Compiler<'_> {
             // reference program-defined types. Their implement-block methods
             // (e.g. Color.hash()) aren't declared yet and compilation would fail.
             // These are compiled later during the program phase.
-            if program.is_none()
+            if !is_program_phase
                 && self.substitutions_depend_on_program_definitions(&instance.substitutions)
             {
                 continue;
@@ -552,9 +555,9 @@ impl Compiler<'_> {
                 )
             })?;
 
-        // Only use module interner if the module is actually in module_programs
+        // Only use module interner if the module is actually loaded
         let effective_module_path =
-            module_path.filter(|p| self.analyzed.module_programs().contains_key(*p));
+            module_path.filter(|p| self.analyzed.vir_program().has_module(p));
 
         // Save/restore module bindings when compiling module code via IIFE.
         // Ensures bindings are restored even when `?` returns early.
@@ -596,10 +599,12 @@ impl Compiler<'_> {
             // Determine module_id for Cg context (needed for expression data lookup)
             let cg_module_id = effective_module_path
                 .map(|_| self.analyzed.name_table().module_of(instance.class_name));
+            // Hoist module interner Rc so it outlives the compile_env borrow.
+            let module_interner_rc = effective_module_path
+                .and_then(|p| self.analyzed.vir_program().module_interner_rc(p));
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = if let Some(path) = effective_module_path {
-                    let (_, interner) = &self.analyzed.module_programs()[path];
+                let env = if let Some(ref interner) = module_interner_rc {
                     compile_env!(self, interner, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
@@ -667,7 +672,7 @@ impl Compiler<'_> {
     /// types are silently skipped (compiled later during the program phase).
     pub(super) fn compile_static_method_monomorphized_instances(
         &mut self,
-        program: Option<&Program>,
+        is_program_phase: bool,
     ) -> CodegenResult<()> {
         // Collect from VirProgram.static_method_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
@@ -693,7 +698,7 @@ impl Compiler<'_> {
             // During the module-only phase, skip instances whose substitutions
             // reference program-defined types. Their implement-block methods
             // aren't declared yet and compilation would fail.
-            if program.is_none()
+            if !is_program_phase
                 && self.substitutions_depend_on_program_definitions(&instance.substitutions)
             {
                 continue;
@@ -747,9 +752,9 @@ impl Compiler<'_> {
                 )
             })?;
 
-        // Only use module interner if the module is actually in module_programs
+        // Only use module interner if the module is actually loaded
         let effective_module_path =
-            module_path.filter(|p| self.analyzed.module_programs().contains_key(*p));
+            module_path.filter(|p| self.analyzed.vir_program().has_module(p));
 
         // Save/restore module bindings when compiling module code via IIFE.
         // Ensures bindings are restored even when `?` returns early.
@@ -786,10 +791,12 @@ impl Compiler<'_> {
             // Determine module_id for Cg context (needed for expression data lookup)
             let cg_module_id = effective_module_path
                 .map(|_| self.analyzed.name_table().module_of(instance.class_name));
+            // Hoist module interner Rc so it outlives the compile_env borrow.
+            let module_interner_rc = effective_module_path
+                .and_then(|p| self.analyzed.vir_program().module_interner_rc(p));
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = if let Some(path) = effective_module_path {
-                    let (_, interner) = &self.analyzed.module_programs()[path];
+                let env = if let Some(ref interner) = module_interner_rc {
                     compile_env!(self, interner, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
@@ -1258,11 +1265,12 @@ impl Compiler<'_> {
                 let source_file_ptr = self.source_file_ptr();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 let cg_module_id = Some(module_id);
+                // Hoist module interner Rc so it outlives the compile_env borrow.
+                let module_interner_rc =
+                    self.analyzed.vir_program().module_interner_rc(&module_path);
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env = if let Some((_, interner)) =
-                        self.analyzed.module_programs().get(&module_path)
-                    {
+                    let env = if let Some(ref interner) = module_interner_rc {
                         compile_env!(self, interner, source_file_ptr)
                     } else {
                         compile_env!(self, source_file_ptr)
@@ -1322,11 +1330,11 @@ impl Compiler<'_> {
     /// compiled later by the program phase or the demand-driven fixpoint loop.
     pub(super) fn compile_all_monomorphized_instances(
         &mut self,
-        program: Option<&Program>,
+        is_program_phase: bool,
     ) -> CodegenResult<()> {
-        self.compile_monomorphized_instances(program)?;
-        self.compile_class_method_monomorphized_instances(program)?;
-        self.compile_static_method_monomorphized_instances(program)?;
+        self.compile_monomorphized_instances(is_program_phase)?;
+        self.compile_class_method_monomorphized_instances(is_program_phase)?;
+        self.compile_static_method_monomorphized_instances(is_program_phase)?;
         Ok(())
     }
 

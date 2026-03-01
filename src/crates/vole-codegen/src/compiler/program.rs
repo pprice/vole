@@ -8,7 +8,7 @@ use super::{Compiler, DeclareMode};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, type_id_to_cranelift};
-use vole_frontend::{Interner, Program, Symbol};
+use vole_frontend::{Interner, Symbol};
 use vole_identity::{NameId, TypeId};
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
@@ -86,10 +86,10 @@ impl Compiler<'_> {
     }
 
     /// Compile a complete program
-    pub fn compile_program(&mut self, program: &Program) -> CodegenResult<()> {
+    pub fn compile_program(&mut self) -> CodegenResult<()> {
         // Compile module functions first (before main program)
         self.compile_module_functions()?;
-        self.compile_program_body(program)
+        self.compile_program_body()
     }
 
     /// Compile only module functions (prelude, imports).
@@ -120,8 +120,8 @@ impl Compiler<'_> {
 
     /// Compile a program without recompiling module functions.
     /// Use with compile_modules_only for batched compilation.
-    pub fn compile_program_only(&mut self, program: &Program) -> CodegenResult<()> {
-        self.compile_program_body(program)
+    pub fn compile_program_only(&mut self) -> CodegenResult<()> {
+        self.compile_program_body()
     }
 
     /// First pass: declare all functions and tests, collect globals, finalize type metadata.
@@ -369,7 +369,7 @@ impl Compiler<'_> {
     }
 
     /// Compile the main program body (functions, tests, classes, etc.)
-    fn compile_program_body(&mut self, program: &Program) -> CodegenResult<()> {
+    fn compile_program_body(&mut self) -> CodegenResult<()> {
         use vole_vir::entity_metadata::VirTypeDefKind;
 
         // Pre-pass: Register all type names from VirEntityMetadata so they're
@@ -422,7 +422,7 @@ impl Compiler<'_> {
         self.compile_program_declarations()?;
 
         // Compile monomorphized instances
-        self.compile_all_monomorphized_instances(Some(program))?;
+        self.compile_all_monomorphized_instances(true)?;
 
         // Compile VIR-monomorphized function bodies.
         self.compile_vir_monomorphized_functions()?;
@@ -558,9 +558,9 @@ impl Compiler<'_> {
         self.build_monomorph_index();
 
         // Pass 1.7: Compile monomorphized instances whose ASTs live in modules.
-        // Passes None for program — instances from the main program are silently
-        // skipped and compiled later in compile_program_body.
-        self.compile_all_monomorphized_instances(None)?;
+        // Passes false for is_program_phase — instances from the main program are
+        // silently skipped and compiled later in compile_program_body.
+        self.compile_all_monomorphized_instances(false)?;
 
         // Pass 2: Compile all function bodies (cross-module calls now resolved)
         for module_path in &module_paths {

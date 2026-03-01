@@ -301,7 +301,7 @@ pub fn compile_and_run(analyzed: &AnalyzedProgram, opts: &RunOptions) -> Result<
             let mut compiler = Compiler::new(&mut jit, analyzed);
             compiler.set_source_file(opts.file_path);
             compiler.set_skip_tests(opts.skip_tests);
-            if let Err(e) = compiler.compile_program(analyzed.program()) {
+            if let Err(e) = compiler.compile_program() {
                 return Err(PipelineError::Codegen(e));
             }
         }

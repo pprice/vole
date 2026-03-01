@@ -163,7 +163,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler
-            .compile_program(analyzed.program())
+            .compile_program()
             .map_err(|e| format!("codegen error: {}", e))?;
     }
     let codegen_ns = codegen_start.elapsed().as_nanos() as u64;
@@ -215,7 +215,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler
-            .compile_program(analyzed.program())
+            .compile_program()
             .map_err(|e| format!("codegen error: {}", e))?;
     }
     jit.finalize()?;
