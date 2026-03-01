@@ -7,7 +7,7 @@
 use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
-use vole_frontend::{FuncBody, Symbol};
+use vole_frontend::Symbol;
 use vole_identity::TypeId;
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
@@ -55,11 +55,7 @@ pub struct FunctionCompileConfig<'a> {
 
 impl<'a> FunctionCompileConfig<'a> {
     /// Create a config for a top-level function (no self, no captures)
-    pub fn top_level(
-        _body: &'a FuncBody,
-        params: Vec<(Symbol, TypeId, Type)>,
-        return_type_id: Option<TypeId>,
-    ) -> Self {
+    pub fn top_level(params: Vec<(Symbol, TypeId, Type)>, return_type_id: Option<TypeId>) -> Self {
         Self {
             params,
             self_binding: None,
@@ -86,7 +82,6 @@ impl<'a> FunctionCompileConfig<'a> {
 
     /// Create a config for a method (has self, no captures)
     pub fn method(
-        _body: &'a FuncBody,
         params: Vec<(Symbol, TypeId, Type)>,
         self_binding: (Symbol, TypeId, Type),
         return_type_id: Option<TypeId>,
@@ -110,7 +105,6 @@ impl<'a> FunctionCompileConfig<'a> {
     /// the closure pointer parameter is still present (for calling convention
     /// consistency) but ignored.
     pub fn lambda(
-        _body: &'a FuncBody,
         params: Vec<(Symbol, TypeId, Type)>,
         return_type_id: TypeId,
         capture_bindings: Option<&'a FxHashMap<Symbol, CaptureBinding>>,

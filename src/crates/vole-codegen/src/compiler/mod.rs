@@ -28,7 +28,6 @@ macro_rules! compile_env {
 
 pub(crate) mod common;
 mod compile_tests;
-mod generic_collection;
 mod impl_dispatch;
 mod impl_monomorph;
 mod impls;

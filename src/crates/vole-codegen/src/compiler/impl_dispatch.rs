@@ -377,12 +377,7 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
             let self_binding = (self_sym, self_type_id, self.pointer_type);
-            let config = FunctionCompileConfig::method(
-                &method.body,
-                params,
-                self_binding,
-                method_return_type_id,
-            );
+            let config = FunctionCompileConfig::method(params, self_binding, method_return_type_id);
             let vir = vir_func.expect("VIR must be available for implement block method");
             compile_function_inner_with_vir(
                 builder,
@@ -462,8 +457,8 @@ impl Compiler<'_> {
             .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
             .collect();
 
-        // Compile method body (must exist for default methods)
-        let body = method.body.as_ref().ok_or_else(|| {
+        // Validate method body exists for default methods
+        let _body = method.body.as_ref().ok_or_else(|| {
             CodegenError::internal_with_context("default method has no body", &*method_name_str)
         })?;
 
@@ -486,8 +481,7 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let config =
-                FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
+            let config = FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
             let vir = vir_func.expect("VIR must be available for default method");
             compile_function_inner_with_vir(
                 builder,
@@ -574,8 +568,8 @@ impl Compiler<'_> {
             .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
             .collect();
 
-        // Compile method body (must exist for default methods)
-        let body = method.body.as_ref().ok_or_else(|| {
+        // Validate method body exists for default methods
+        let _body = method.body.as_ref().ok_or_else(|| {
             CodegenError::internal_with_context("default method has no body", &*method_name_str)
         })?;
 
@@ -601,8 +595,7 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let config =
-                FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
+            let config = FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
             let vir = vir_func.expect("VIR must be available for module default method");
             compile_function_inner_with_vir(
                 builder,
@@ -640,7 +633,7 @@ impl Compiler<'_> {
 
         for method in &statics.methods {
             // Only compile methods with bodies
-            let body = match &method.body {
+            let _body = match &method.body {
                 Some(body) => body,
                 None => continue,
             };
@@ -714,7 +707,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
+                let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
                 let vir = vir_func.expect("VIR must be available for static method");
                 compile_function_inner_with_vir(
                     builder,
@@ -908,12 +901,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::method(
-                    &method.body,
-                    params,
-                    self_binding,
-                    return_type_id,
-                );
+                let config = FunctionCompileConfig::method(params, self_binding, return_type_id);
                 let vir = vir_func.expect("VIR must be available for module method");
                 compile_function_inner_with_vir(
                     builder,
@@ -944,7 +932,7 @@ impl Compiler<'_> {
         type_kind: &str,
     ) -> CodegenResult<()> {
         for method in &statics.methods {
-            let body = match &method.body {
+            let _body = match &method.body {
                 Some(body) => body,
                 None => continue,
             };
@@ -1026,7 +1014,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(body, params, return_type_id);
+                let config = FunctionCompileConfig::top_level(params, return_type_id);
                 let vir = vir_func.expect("VIR must be available for module static method");
                 compile_function_inner_with_vir(
                     builder,

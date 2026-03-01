@@ -847,7 +847,7 @@ impl Compiler<'_> {
                 // Find the interface AST decl and compile the method body
                 let iface_info =
                     self.collect_interface_method_body(&iface_name_str, &method_name_str);
-                let Some((body, method_params, iface_interner, iface_module_id)) = iface_info
+                let Some((_body, method_params, iface_interner, iface_module_id)) = iface_info
                 else {
                     continue;
                 };
@@ -935,12 +935,8 @@ impl Compiler<'_> {
                         &mut self.func_registry,
                         &mut self.pending_monomorphs,
                     );
-                    let mut config = FunctionCompileConfig::method(
-                        &body,
-                        params,
-                        self_binding,
-                        Some(return_type_id),
-                    );
+                    let mut config =
+                        FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
                     // Iterable default method bodies have special RC ownership semantics:
                     // the outer call-site (used_array_iterable_path) transfers closure
                     // ownership to the body, so pipeline methods must NOT rc_inc and
@@ -1173,7 +1169,7 @@ impl Compiler<'_> {
                 // Find the interface AST decl and compile the method body
                 let iface_info =
                     self.collect_interface_method_body(&iface_name_str, &method_name_str);
-                let Some((body, method_params, iface_interner, iface_module_id)) = iface_info
+                let Some((_body, method_params, iface_interner, iface_module_id)) = iface_info
                 else {
                     continue;
                 };
@@ -1261,12 +1257,8 @@ impl Compiler<'_> {
                         &mut self.func_registry,
                         &mut self.pending_monomorphs,
                     );
-                    let mut config = FunctionCompileConfig::method(
-                        &body,
-                        params,
-                        self_binding,
-                        Some(return_type_id),
-                    );
+                    let mut config =
+                        FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
                     // Iterable default method bodies have special RC ownership semantics:
                     // the outer call-site (used_array_iterable_path) transfers closure
                     // ownership to the body, so pipeline methods must NOT rc_inc and
@@ -1425,12 +1417,7 @@ impl Compiler<'_> {
             );
 
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
-            let config = FunctionCompileConfig::method(
-                &method.body,
-                params,
-                self_binding,
-                method_return_type_id,
-            );
+            let config = FunctionCompileConfig::method(params, self_binding, method_return_type_id);
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
@@ -1457,7 +1444,7 @@ impl Compiler<'_> {
     ) -> CodegenResult<()> {
         for method in &statics.methods {
             // Only compile methods with bodies
-            let body = match &method.body {
+            let _body = match &method.body {
                 Some(body) => body,
                 None => continue,
             };
@@ -1530,7 +1517,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(body, params, return_type_id);
+                let config = FunctionCompileConfig::top_level(params, return_type_id);
 
                 // VIR path — all implement block statics are lowered
                 let vir_func = self
@@ -1648,12 +1635,7 @@ impl Compiler<'_> {
             );
 
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
-            let config = FunctionCompileConfig::method(
-                &method.body,
-                params,
-                self_binding,
-                method_return_type_id,
-            );
+            let config = FunctionCompileConfig::method(params, self_binding, method_return_type_id);
 
             // VIR path — all implement block methods are lowered
             let vir_func = self
@@ -1914,7 +1896,7 @@ impl Compiler<'_> {
                 // Find the interface AST method body and compile it
                 let iface_info =
                     self.collect_interface_method_body(&iface_name_str, method_name_str);
-                let Some((body, method_params, iface_interner, iface_module_id)) = iface_info
+                let Some((_body, method_params, iface_interner, iface_module_id)) = iface_info
                 else {
                     continue;
                 };
@@ -1948,13 +1930,9 @@ impl Compiler<'_> {
                         &mut self.func_registry,
                         &mut self.pending_monomorphs,
                     );
-                    let config = FunctionCompileConfig::method(
-                        &body,
-                        params,
-                        self_binding,
-                        Some(return_type_id),
-                    )
-                    .with_iterable_default_body();
+                    let config =
+                        FunctionCompileConfig::method(params, self_binding, Some(return_type_id))
+                            .with_iterable_default_body();
                     let vir_func = self.analyzed.get_vir_method(*semantic_method_id)
                         .unwrap_or_else(|| {
                             panic!("VIR must be available for array iterable default method (MethodId={semantic_method_id:?})")

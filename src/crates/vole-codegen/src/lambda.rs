@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{Block, Capture, FuncBody, Symbol};
+use vole_frontend::{Capture, Symbol};
 use vole_identity::TypeId;
 use vole_sema::type_arena::TypeArena;
 use vole_vir::VirBody;
@@ -203,12 +203,6 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         // Compile the body in a new Cranelift function context.
-        // A dummy AST body is needed for FunctionCompileConfig (never read
-        // on the VIR path).
-        let dummy_body = FuncBody::Block(Block {
-            stmts: Vec::new(),
-            span: vole_identity::Span::default(),
-        });
         let mut lambda_ctx = self.jit_module().make_context();
         lambda_ctx.func.signature = sig;
 
@@ -219,7 +213,6 @@ impl Cg<'_, '_, '_> {
             let builder = FunctionBuilder::new(&mut lambda_ctx.func, &mut builder_ctx);
 
             let config = FunctionCompileConfig::lambda(
-                &dummy_body,
                 params,
                 return_type_id,
                 capture_bindings.as_ref(),

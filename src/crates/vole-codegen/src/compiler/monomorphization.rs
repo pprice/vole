@@ -4,12 +4,10 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext};
 
 use super::Compiler;
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
-use super::generic_collection::GenericTypeMethodsAst;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
-use vole_frontend::ast::InterfaceMethod;
-use vole_frontend::{Decl, FuncDecl, Interner, Program};
+use vole_frontend::Program;
 use vole_identity::{ModuleId, MonomorphInstanceTrait, NameId, TypeId};
 use vole_vir::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
@@ -17,7 +15,6 @@ use vole_vir::monomorph::instance::{
 use vole_vir::types::VirType;
 
 use crate::types::MonomorphIndexEntry;
-use crate::types::function_name_id_with_interner;
 
 /// Data for an expanded class method monomorph (used during template expansion).
 struct ExpandedMethodData {
@@ -27,7 +24,6 @@ struct ExpandedMethodData {
     func_type: vole_identity::FunctionType,
     substitutions: FxHashMap<NameId, TypeId>,
     class_name: NameId,
-    method_name: NameId,
     self_type: TypeId,
     external_info: Option<crate::analyzed::ExternalMethodInfoRef>,
     /// FunctionKey assigned during JIT declaration (set in step 4)
@@ -102,20 +98,6 @@ impl Compiler<'_> {
         &mut self,
         program: Option<&Program>,
     ) -> CodegenResult<()> {
-        // Build a map of generic function names to their ASTs
-        // Include both explicit generics (type_params in AST) and implicit generics
-        // (structural type params that create generic_info in entity registry)
-        // Recursively walks into tests blocks to find scoped generic functions.
-        let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
-        if let Some(program) = program {
-            let program_module = self.program_module();
-            self.collect_generic_func_asts(
-                &program.declarations,
-                program_module,
-                &mut generic_func_asts,
-            );
-        }
-
         // Collect instances from VirProgram.free_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
@@ -125,42 +107,40 @@ impl Compiler<'_> {
             .cloned()
             .collect();
 
+        let program_module = self.program_module();
+
         for instance in &instances {
-            // Skip external functions - they don't have AST bodies
+            // Skip external functions - they don't have VIR bodies
             // Generic externals are called directly with type erasure at call sites
             if self.is_external_func(instance.original_name) {
                 continue;
             }
 
-            // First try the main program's generic functions
-            if let Some(func) = generic_func_asts.get(&instance.original_name) {
-                self.compile_monomorphized_function(func, instance)?;
-                continue;
-            }
-
-            // Then try module programs (for prelude generic functions like print/println)
-            let found = self.compile_monomorphized_module_function(instance)?;
-            if !found && program.is_some() {
-                // Only error when the main program is available — during the module-only
-                // phase, missing ASTs are expected for program-originating monomorphs.
-                let func_name = self.analyzed.display_name(instance.original_name);
-                return Err(CodegenError::internal_with_context(
-                    "generic function AST not found",
-                    func_name,
-                ));
+            // Check if this function belongs to the program module or a loaded module
+            let func_module = self.analyzed.name_table().module_of(instance.original_name);
+            if func_module == program_module {
+                self.compile_monomorphized_function(instance)?;
+            } else {
+                // Module function — needs module interner for compile_env
+                let found = self.compile_monomorphized_module_function(instance)?;
+                if !found && program.is_some() {
+                    let func_name = self.analyzed.display_name(instance.original_name);
+                    return Err(CodegenError::internal_with_context(
+                        "VIR monomorphized function not found",
+                        func_name,
+                    ));
+                }
             }
         }
 
         Ok(())
     }
 
-    /// Compile a monomorphized instance of a module function.
-    /// Searches module programs for the generic function AST.
+    /// Compile a monomorphized instance of a module function via its VIR body.
     fn compile_monomorphized_module_function(
         &mut self,
         instance: &VirMonomorphInfo,
     ) -> CodegenResult<bool> {
-        // Find which module contains this function
         let module_id = self.analyzed.name_table().module_of(instance.original_name);
         let module_path = self
             .analyzed
@@ -168,43 +148,11 @@ impl Compiler<'_> {
             .module_path(module_id)
             .to_string();
 
-        let Some((module_program, module_interner)) =
-            self.analyzed.module_programs().get(&module_path)
-        else {
+        // Need the module interner for compile_env
+        if self.analyzed.module_programs().get(&module_path).is_none() {
             return Ok(false);
-        };
+        }
 
-        // Find the generic function in the module
-        let func = module_program.declarations.iter().find_map(|decl| {
-            if let Decl::Function(func) = decl {
-                let name_id = function_name_id_with_interner(
-                    self.analyzed,
-                    module_interner,
-                    module_id,
-                    func.name,
-                );
-                if name_id == Some(instance.original_name) {
-                    return Some(func);
-                }
-            }
-            None
-        });
-
-        let Some(func) = func else {
-            return Ok(false);
-        };
-
-        self.compile_monomorphized_function_with_module(func, instance, module_interner, module_id)
-    }
-
-    /// Compile a monomorphized function from a module via its VIR body.
-    fn compile_monomorphized_function_with_module(
-        &mut self,
-        func: &FuncDecl,
-        instance: &VirMonomorphInfo,
-        module_interner: &Interner,
-        module_id: ModuleId,
-    ) -> CodegenResult<bool> {
         let mangled_name = self.analyzed.display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
@@ -216,26 +164,29 @@ impl Compiler<'_> {
         }
 
         // Get the VIR function (must be available — module monomorphs are always lowered)
-        let vir_func = self.analyzed.get_vir_monomorph(instance.mangled_name)
-            .unwrap_or_else(|| {
-                panic!("VIR must be available for module monomorphized function (mangled={mangled_name})")
-            });
+        let vir_func = self
+            .analyzed
+            .get_vir_monomorph(instance.mangled_name)
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "VIR module monomorphized function",
+                    format!("{mangled_name} ({:?})", instance.mangled_name),
+                )
+            })?;
 
         // Clear main-program module bindings while compiling module interner code.
         // The IIFE ensures bindings are restored even when `?` returns early.
-        // Note: a panic inside the closure would skip the restore, but panics
-        // during compilation are fatal to the entire process anyway.
         let saved_bindings = std::mem::take(&mut self.global_module_bindings);
         let compile_result = (|| -> CodegenResult<bool> {
             let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
             let return_type_id = instance.func_type.return_type_id;
             let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
-            let params: Vec<_> = func
+            let params: Vec<_> = vir_func
                 .params
                 .iter()
                 .zip(param_type_ids.iter())
                 .zip(param_cranelift_types.iter())
-                .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
                 .collect();
 
             let sig = self.build_signature_from_type_ids(
@@ -249,6 +200,7 @@ impl Compiler<'_> {
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+                let (_, module_interner) = &self.analyzed.module_programs()[&module_path];
                 let env = compile_env!(self, module_interner, source_file_ptr);
                 let mut codegen_ctx = CodegenCtx::new(
                     &mut self.jit.module,
@@ -256,8 +208,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config =
-                    FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
+                let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -280,11 +231,7 @@ impl Compiler<'_> {
     ///
     /// Uses VIR when available; falls back to AST when sema data is
     /// incomplete (e.g. structural type parameter monomorphs).
-    fn compile_monomorphized_function(
-        &mut self,
-        func: &FuncDecl,
-        instance: &VirMonomorphInfo,
-    ) -> CodegenResult<()> {
+    fn compile_monomorphized_function(&mut self, instance: &VirMonomorphInfo) -> CodegenResult<()> {
         let mangled_name = self.analyzed.display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
@@ -295,16 +242,27 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        // Get parameter types and build config
+        // Get VIR function (provides param names and body)
+        let vir_func = self
+            .analyzed
+            .get_vir_monomorph(instance.mangled_name)
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "VIR monomorphized function",
+                    format!("{mangled_name} ({:?})", instance.mangled_name),
+                )
+            })?;
+
+        // Get parameter types and build config using VIR param names
         let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
         let return_type_id = instance.func_type.return_type_id;
         let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
-        let params: Vec<_> = func
+        let params: Vec<_> = vir_func
             .params
             .iter()
             .zip(param_type_ids.iter())
             .zip(param_cranelift_types.iter())
-            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+            .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
             .collect();
 
         // Create function signature from concrete types using shared builder
@@ -326,16 +284,7 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
-            let vir_func = self
-                .analyzed
-                .get_vir_monomorph(instance.mangled_name)
-                .ok_or_else(|| {
-                    CodegenError::not_found(
-                        "VIR monomorphized function",
-                        format!("{mangled_name} ({:?})", instance.mangled_name),
-                    )
-                })?;
+            let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
@@ -506,17 +455,13 @@ impl Compiler<'_> {
 
     /// Compile all monomorphized class method instances.
     ///
-    /// When `program` is `Some`, main-program class ASTs and implement blocks are
-    /// checked. When `None` (module-only phase), only module programs are searched
-    /// and instances whose ASTs aren't found are silently skipped.
+    /// When `program` is `Some`, errors on missing VIR bodies.
+    /// When `None` (module-only phase), instances that depend on program-defined
+    /// types are silently skipped (compiled later during the program phase).
     pub(super) fn compile_class_method_monomorphized_instances(
         &mut self,
         program: Option<&Program>,
     ) -> CodegenResult<()> {
-        let class_asts = program
-            .map(|p| self.build_generic_type_asts(p))
-            .unwrap_or_default();
-
         // Collect from VirProgram.class_method_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
@@ -525,6 +470,8 @@ impl Compiler<'_> {
             .values()
             .cloned()
             .collect();
+
+        let program_module = self.program_module();
 
         tracing::debug!(
             instance_count = instances.len(),
@@ -557,92 +504,20 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let class_name_str = self.analyzed.display_name(instance.class_name);
-            tracing::debug!(
-                class_name = %class_name_str,
-                class_name_id = ?instance.class_name,
-                method_name = ?instance.method_name,
-                "looking for method to compile"
-            );
-
-            // Try to find the method in a class
-            let method_name_str = self.analyzed.display_name(instance.method_name);
-            if let Some(class) = class_asts.get(&instance.class_name) {
-                let method = class
-                    .methods
-                    .iter()
-                    .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
-                if let Some(method) = method {
-                    self.compile_monomorphized_class_method(method, instance, None)?;
-                    continue;
-                }
-            }
-
-            // Fallback: search module programs for generic classes from imported modules (e.g. prelude)
-            // Clone the method AST to avoid borrow conflict with mutable self borrow.
-            {
-                let found = self
-                    .find_class_method_in_modules(instance.class_name, &method_name_str)
-                    .cloned();
-                if let Some(method) = found {
-                    // Determine the module path so compile can look up the correct interner
-                    let module_id = self.analyzed.name_table().module_of(instance.class_name);
-                    let module_path = self
-                        .analyzed
+            // Determine module_path for interner selection
+            let class_module = self.analyzed.name_table().module_of(instance.class_name);
+            let module_path = if class_module == program_module {
+                None
+            } else {
+                Some(
+                    self.analyzed
                         .name_table()
-                        .module_path(module_id)
-                        .to_string();
-                    self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
-                    continue;
-                }
-            }
+                        .module_path(class_module)
+                        .to_string(),
+                )
+            };
 
-            // Fallback: search implement blocks for methods on generic classes
-            if let Some(program) = program {
-                let program_module = self.program_module();
-                if let Some(method) = self.find_implement_block_method(
-                    &program.declarations,
-                    instance.class_name,
-                    &method_name_str,
-                    program_module,
-                ) {
-                    self.compile_monomorphized_class_method(method, instance, None)?;
-                    continue;
-                }
-            }
-
-            // Fallback: search implement blocks in modules
-            {
-                let module_id = self.analyzed.name_table().module_of(instance.class_name);
-                let module_path = self
-                    .analyzed
-                    .name_table()
-                    .module_path(module_id)
-                    .to_string();
-                if let Some((module_program, _)) = self.analyzed.module_programs().get(&module_path)
-                    && let Some(method) = self
-                        .find_implement_block_method(
-                            &module_program.declarations,
-                            instance.class_name,
-                            &method_name_str,
-                            module_id,
-                        )
-                        .cloned()
-                {
-                    self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
-                    continue;
-                }
-            }
-
-            if program.is_some() {
-                // Only error when the main program is available — during the module-only
-                // phase, missing ASTs are expected for program-originating monomorphs.
-                let class_name = self.analyzed.display_name(instance.class_name);
-                return Err(CodegenError::not_found(
-                    "method",
-                    format!("{} in class {}", method_name_str, class_name),
-                ));
-            }
+            self.compile_monomorphized_class_method(instance, module_path.as_deref())?;
         }
 
         Ok(())
@@ -653,7 +528,6 @@ impl Compiler<'_> {
     /// and its symbols must be resolved with that module's interner.
     fn compile_monomorphized_class_method(
         &mut self,
-        method: &FuncDecl,
         instance: &VirClassMethodMonomorphInfo,
         module_path: Option<&str>,
     ) -> CodegenResult<()> {
@@ -667,25 +541,40 @@ impl Compiler<'_> {
             return Ok(());
         }
 
+        // Get VIR function (provides param names and body)
+        let vir_func = self
+            .analyzed
+            .get_vir_monomorph(instance.mangled_name)
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "VIR class method monomorph",
+                    format!("{mangled_name} ({:?})", instance.mangled_name),
+                )
+            })?;
+
+        // Only use module interner if the module is actually in module_programs
+        let effective_module_path =
+            module_path.filter(|p| self.analyzed.module_programs().contains_key(*p));
+
         // Save/restore module bindings when compiling module code via IIFE.
         // Ensures bindings are restored even when `?` returns early.
         // A panic would skip the restore, but panics are fatal anyway.
-        let saved_bindings = if module_path.is_some() {
+        let saved_bindings = if effective_module_path.is_some() {
             Some(std::mem::take(&mut self.global_module_bindings))
         } else {
             None
         };
         let compile_result = (|| -> CodegenResult<()> {
-            // Get param and return types, build config
+            // Get param and return types, build config using VIR param names
             let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
             let return_type_id = instance.func_type.return_type_id;
             let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
-            let params: Vec<_> = method
+            let params: Vec<_> = vir_func
                 .params
                 .iter()
                 .zip(param_type_ids.iter())
                 .zip(param_cranelift_types.iter())
-                .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
                 .collect();
 
             // Create method signature (self + params) with concrete types using shared builder
@@ -705,11 +594,11 @@ impl Compiler<'_> {
             let source_file_ptr = self.source_file_ptr();
             let mut builder_ctx = FunctionBuilderContext::new();
             // Determine module_id for Cg context (needed for expression data lookup)
-            let cg_module_id =
-                module_path.map(|_| self.analyzed.name_table().module_of(instance.class_name));
+            let cg_module_id = effective_module_path
+                .map(|_| self.analyzed.name_table().module_of(instance.class_name));
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = if let Some(path) = module_path {
+                let env = if let Some(path) = effective_module_path {
                     let (_, interner) = &self.analyzed.module_programs()[path];
                     compile_env!(self, interner, source_file_ptr)
                 } else {
@@ -721,21 +610,8 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::method(
-                    &method.body,
-                    params,
-                    self_binding,
-                    Some(return_type_id),
-                );
-                let vir_func = self
-                    .analyzed
-                    .get_vir_monomorph(instance.mangled_name)
-                    .ok_or_else(|| {
-                        CodegenError::not_found(
-                            "VIR class method monomorph",
-                            format!("{mangled_name} ({:?})", instance.mangled_name),
-                        )
-                    })?;
+                let config =
+                    FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -787,16 +663,12 @@ impl Compiler<'_> {
     /// Compile all monomorphized static method instances.
     ///
     /// When `program` is `Some`, main-program class ASTs are checked first.
-    /// When `None` (module-only phase), only module programs are searched
-    /// and instances whose ASTs aren't found are silently skipped.
+    /// When `None` (module-only phase), instances that depend on program-defined
+    /// types are silently skipped (compiled later during the program phase).
     pub(super) fn compile_static_method_monomorphized_instances(
         &mut self,
         program: Option<&Program>,
     ) -> CodegenResult<()> {
-        let class_asts = program
-            .map(|p| self.build_generic_type_asts(p))
-            .unwrap_or_default();
-
         // Collect from VirProgram.static_method_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
@@ -805,6 +677,8 @@ impl Compiler<'_> {
             .values()
             .cloned()
             .collect();
+
+        let program_module = self.program_module();
 
         tracing::debug!(
             instance_count = instances.len(),
@@ -825,72 +699,30 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let class_name_str = self.analyzed.display_name(instance.class_name);
-            tracing::debug!(
-                class_name = %class_name_str,
-                class_name_id = ?instance.class_name,
-                method_name = ?instance.method_name,
-                "looking for static method to compile"
-            );
-
-            let method_name_str = self.analyzed.display_name(instance.method_name);
-
-            // Try to find the static method in a class from the main program
-            if let Some(class) = class_asts.get(&instance.class_name)
-                && let Some(statics) = class.statics
-            {
-                let method = statics
-                    .methods
-                    .iter()
-                    .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
-                if let Some(method) = method {
-                    self.compile_monomorphized_static_method(method, instance, None)?;
-                    continue;
-                }
-            }
-
-            // Fallback: search module programs for generic classes from imported modules
-            {
-                let found = self
-                    .find_static_method_in_modules(instance.class_name, &method_name_str)
-                    .cloned();
-                if let Some(method) = found {
-                    let module_id = self.analyzed.name_table().module_of(instance.class_name);
-                    let module_path = self
-                        .analyzed
+            // Determine module_path for interner selection
+            let class_module = self.analyzed.name_table().module_of(instance.class_name);
+            let module_path = if class_module == program_module {
+                None
+            } else {
+                Some(
+                    self.analyzed
                         .name_table()
-                        .module_path(module_id)
-                        .to_string();
-                    self.compile_monomorphized_static_method(
-                        &method,
-                        instance,
-                        Some(&module_path),
-                    )?;
-                    continue;
-                }
-            }
+                        .module_path(class_module)
+                        .to_string(),
+                )
+            };
 
-            if program.is_some() {
-                // Only error when the main program is available — during the module-only
-                // phase, missing ASTs are expected for program-originating monomorphs.
-                let class_name = self.analyzed.display_name(instance.class_name);
-                let method_name = self.analyzed.display_name(instance.method_name);
-                return Err(CodegenError::not_found(
-                    "static method",
-                    format!("{} in class {}", method_name, class_name),
-                ));
-            }
+            self.compile_monomorphized_static_method(instance, module_path.as_deref())?;
         }
 
         Ok(())
     }
 
     /// Compile a single monomorphized static method instance.
-    /// When `module_path` is Some, the method AST comes from a loaded module
+    /// When `module_path` is Some, the method comes from a loaded module
     /// and its symbols must be resolved with that module's interner.
     fn compile_monomorphized_static_method(
         &mut self,
-        method: &InterfaceMethod,
         instance: &VirStaticMethodMonomorphInfo,
         module_path: Option<&str>,
     ) -> CodegenResult<()> {
@@ -904,25 +736,40 @@ impl Compiler<'_> {
             return Ok(());
         }
 
+        // Get VIR function (provides param names and body)
+        let vir_func = self
+            .analyzed
+            .get_vir_monomorph(instance.mangled_name)
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "VIR static method monomorph",
+                    format!("{mangled_name} ({:?})", instance.mangled_name),
+                )
+            })?;
+
+        // Only use module interner if the module is actually in module_programs
+        let effective_module_path =
+            module_path.filter(|p| self.analyzed.module_programs().contains_key(*p));
+
         // Save/restore module bindings when compiling module code via IIFE.
         // Ensures bindings are restored even when `?` returns early.
         // A panic would skip the restore, but panics are fatal anyway.
-        let saved_bindings = if module_path.is_some() {
+        let saved_bindings = if effective_module_path.is_some() {
             Some(std::mem::take(&mut self.global_module_bindings))
         } else {
             None
         };
         let compile_result = (|| -> CodegenResult<()> {
-            // Get param and return types, build config
+            // Get param and return types, build config using VIR param names
             let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
             let return_type_id = instance.func_type.return_type_id;
             let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
-            let params: Vec<_> = method
+            let params: Vec<_> = vir_func
                 .params
                 .iter()
                 .zip(param_type_ids.iter())
                 .zip(param_cranelift_types.iter())
-                .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
                 .collect();
 
             // Create signature (no self parameter) with concrete types using shared builder
@@ -933,20 +780,15 @@ impl Compiler<'_> {
             );
             self.jit.ctx.func.signature = sig;
 
-            // Get method body
-            let body = method.body.as_ref().ok_or_else(|| {
-                CodegenError::internal_with_context("static method has no body", &mangled_name)
-            })?;
-
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
             let mut builder_ctx = FunctionBuilderContext::new();
             // Determine module_id for Cg context (needed for expression data lookup)
-            let cg_module_id =
-                module_path.map(|_| self.analyzed.name_table().module_of(instance.class_name));
+            let cg_module_id = effective_module_path
+                .map(|_| self.analyzed.name_table().module_of(instance.class_name));
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = if let Some(path) = module_path {
+                let env = if let Some(path) = effective_module_path {
                     let (_, interner) = &self.analyzed.module_programs()[path];
                     compile_env!(self, interner, source_file_ptr)
                 } else {
@@ -958,16 +800,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
-                let vir_func = self
-                    .analyzed
-                    .get_vir_monomorph(instance.mangled_name)
-                    .ok_or_else(|| {
-                        CodegenError::not_found(
-                            "VIR static method monomorph",
-                            format!("{mangled_name} ({:?})", instance.mangled_name),
-                        )
-                    })?;
+                let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -1319,7 +1152,6 @@ impl Compiler<'_> {
                     func_type: concrete_func_type,
                     substitutions: concrete_class_subs,
                     class_name: tmpl.class_name,
-                    method_name: tmpl.method_name,
                     self_type: concrete_self_type,
                     external_info: tmpl
                         .external_info
@@ -1371,7 +1203,6 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let method_name_str = self.analyzed.display_name(data.method_name);
             let func_key = data.func_key.expect("func_key should be set in step 4");
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found("expanded class method", &data.mangled_name_str)
@@ -1381,47 +1212,18 @@ impl Compiler<'_> {
                 continue;
             }
 
-            // Find the method body AST
-            let method_ast = self
-                .find_class_method_in_modules(data.class_name, &method_name_str)
-                .cloned();
-
-            let method_ast = if let Some(ast) = method_ast {
-                ast
-            } else {
-                // Try implement block methods
-                let module_id = self.analyzed.name_table().module_of(data.class_name);
-                let module_path = self
-                    .analyzed
-                    .name_table()
-                    .module_path(module_id)
-                    .to_string();
-                if let Some((module_program, _)) = self.analyzed.module_programs().get(&module_path)
-                {
-                    self.find_implement_block_method(
-                        &module_program.declarations,
-                        data.class_name,
-                        &method_name_str,
-                        module_id,
+            // Get VIR function (provides param names and body)
+            let vir_func = self
+                .analyzed
+                .get_vir_monomorph(data.template_mangled_name)
+                .ok_or_else(|| {
+                    CodegenError::not_found(
+                        "VIR expanded class method monomorph template",
+                        format!("{:?}", data.template_mangled_name),
                     )
-                    .cloned()
-                    .ok_or_else(|| {
-                        let class_name = self.analyzed.display_name(data.class_name);
-                        CodegenError::not_found(
-                            "expanded class method",
-                            format!("{} in class {}", method_name_str, class_name),
-                        )
-                    })?
-                } else {
-                    let class_name = self.analyzed.display_name(data.class_name);
-                    return Err(CodegenError::not_found(
-                        "expanded class method",
-                        format!("{} in class {}", method_name_str, class_name),
-                    ));
-                }
-            };
+                })?;
 
-            // Compile the method body (adapted from compile_monomorphized_class_method)
+            // Compile the method body
             let module_id = self.analyzed.name_table().module_of(data.class_name);
             let module_path = self
                 .analyzed
@@ -1434,12 +1236,12 @@ impl Compiler<'_> {
                 let param_type_ids: Vec<TypeId> = data.func_type.params_id.to_vec();
                 let return_type_id = data.func_type.return_type_id;
                 let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
-                let params: Vec<_> = method_ast
+                let params: Vec<_> = vir_func
                     .params
                     .iter()
                     .zip(param_type_ids.iter())
                     .zip(param_cranelift_types.iter())
-                    .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                    .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
                     .collect();
 
                 let sig = self.build_signature_from_type_ids(
@@ -1452,16 +1254,6 @@ impl Compiler<'_> {
                 let self_type_id = data.self_type;
                 let self_sym = self.self_symbol();
                 let self_binding = (self_sym, self_type_id, self.pointer_type);
-                let vir_body = self
-                    .analyzed
-                    .get_vir_monomorph(data.template_mangled_name)
-                    .map(|vf| vf.body.clone())
-                    .ok_or_else(|| {
-                        CodegenError::not_found(
-                            "VIR expanded class method monomorph template",
-                            format!("{:?}", data.template_mangled_name),
-                        )
-                    })?;
 
                 let source_file_ptr = self.source_file_ptr();
                 let mut builder_ctx = FunctionBuilderContext::new();
@@ -1481,18 +1273,14 @@ impl Compiler<'_> {
                         &mut self.pending_monomorphs,
                     );
 
-                    let config = FunctionCompileConfig::method(
-                        &method_ast.body,
-                        params,
-                        self_binding,
-                        Some(return_type_id),
-                    );
+                    let config =
+                        FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
                     compile_function_inner_with_vir(
                         builder,
                         &mut codegen_ctx,
                         &env,
                         config,
-                        &vir_body,
+                        &vir_func.body,
                         cg_module_id,
                         Some(&data.substitutions),
                     )?;
@@ -1554,32 +1342,12 @@ impl Compiler<'_> {
     /// monomorphs and compiles their bodies. Since compiling one body may trigger
     /// further demand-declarations, this repeats until the queue is empty (fixpoint).
     ///
-    /// `program` is `Some` when called from `compile_program_body` (needed to find
-    /// main-program generic function ASTs) and `None` when called from
-    /// `compile_module_functions` (all monomorphs live in modules).
-    pub(super) fn compile_pending_monomorphs(
-        &mut self,
-        program: Option<&Program>,
-    ) -> CodegenResult<()> {
+    pub(super) fn compile_pending_monomorphs(&mut self) -> CodegenResult<()> {
         use crate::types::PendingMonomorph;
 
         const MAX_FIXPOINT_ITERATIONS: usize = 100;
 
-        // Build AST lookup maps once before the fixpoint loop to avoid
-        // O(M x |decls|) per pending monomorph.
-        let class_asts: FxHashMap<NameId, GenericTypeMethodsAst<'_>> = program
-            .map(|p| self.build_generic_type_asts(p))
-            .unwrap_or_default();
-
-        let generic_func_asts: FxHashMap<NameId, &FuncDecl> = if let Some(program) = program {
-            let mut map = FxHashMap::default();
-            let program_module = self.program_module();
-            self.collect_generic_func_asts(&program.declarations, program_module, &mut map);
-            map
-        } else {
-            FxHashMap::default()
-        };
-
+        let program_module = self.program_module();
         let mut prev_batch_size: usize = 0;
 
         for iteration in 0..MAX_FIXPOINT_ITERATIONS {
@@ -1611,13 +1379,13 @@ impl Compiler<'_> {
             for pending in &batch {
                 match pending {
                     PendingMonomorph::Function(instance) => {
-                        self.compile_pending_function(instance, &generic_func_asts)?;
+                        self.compile_pending_function(instance, program_module)?;
                     }
                     PendingMonomorph::ClassMethod(instance) => {
-                        self.compile_pending_class_method(instance, program, &class_asts)?;
+                        self.compile_pending_class_method(instance, program_module)?;
                     }
                     PendingMonomorph::StaticMethod(instance) => {
-                        self.compile_pending_static_method(instance, &class_asts)?;
+                        self.compile_pending_static_method(instance, program_module)?;
                     }
                 }
             }
@@ -1714,27 +1482,25 @@ impl Compiler<'_> {
     fn compile_pending_function(
         &mut self,
         instance: &VirMonomorphInfo,
-        generic_func_asts: &FxHashMap<NameId, &FuncDecl>,
+        program_module: ModuleId,
     ) -> CodegenResult<()> {
         // Skip external functions
         if self.is_external_func(instance.original_name) {
             return Ok(());
         }
 
-        // Try main program generic functions first (using pre-built map)
-        if let Some(func) = generic_func_asts.get(&instance.original_name) {
-            self.compile_monomorphized_function(func, instance)?;
-            return Ok(());
-        }
-
-        // Fallback: search module programs
-        let found = self.compile_monomorphized_module_function(instance)?;
-        if !found {
-            let func_name = self.analyzed.display_name(instance.original_name);
-            return Err(CodegenError::internal_with_context(
-                "pending monomorph: generic function AST not found",
-                func_name,
-            ));
+        let func_module = self.analyzed.name_table().module_of(instance.original_name);
+        if func_module == program_module {
+            self.compile_monomorphized_function(instance)?;
+        } else {
+            let found = self.compile_monomorphized_module_function(instance)?;
+            if !found {
+                let func_name = self.analyzed.display_name(instance.original_name);
+                return Err(CodegenError::internal_with_context(
+                    "pending monomorph: VIR function not found",
+                    func_name,
+                ));
+            }
         }
         Ok(())
     }
@@ -1743,8 +1509,7 @@ impl Compiler<'_> {
     fn compile_pending_class_method(
         &mut self,
         instance: &VirClassMethodMonomorphInfo,
-        program: Option<&Program>,
-        class_asts: &FxHashMap<NameId, GenericTypeMethodsAst<'_>>,
+        program_module: ModuleId,
     ) -> CodegenResult<()> {
         // Skip external and abstract instances
         if instance.external_info.is_some() {
@@ -1754,123 +1519,44 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let method_name_str = self.analyzed.display_name(instance.method_name);
+        let class_module = self.analyzed.name_table().module_of(instance.class_name);
+        let module_path = if class_module == program_module {
+            None
+        } else {
+            Some(
+                self.analyzed
+                    .name_table()
+                    .module_path(class_module)
+                    .to_string(),
+            )
+        };
 
-        // Try main program class ASTs (using pre-built map)
-        if let Some(class) = class_asts.get(&instance.class_name) {
-            let method = class
-                .methods
-                .iter()
-                .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
-            if let Some(method) = method {
-                self.compile_monomorphized_class_method(method, instance, None)?;
-                return Ok(());
-            }
-        }
-
-        // Try implement blocks in the main program
-        if let Some(program) = program {
-            let program_module = self.program_module();
-            if let Some(method) = self.find_implement_block_method(
-                &program.declarations,
-                instance.class_name,
-                &method_name_str,
-                program_module,
-            ) {
-                self.compile_monomorphized_class_method(method, instance, None)?;
-                return Ok(());
-            }
-        }
-
-        // Fallback: search module programs for class methods
-        if let Some(method) = self
-            .find_class_method_in_modules(instance.class_name, &method_name_str)
-            .cloned()
-        {
-            let module_id = self.analyzed.name_table().module_of(instance.class_name);
-            let module_path = self
-                .analyzed
-                .name_table()
-                .module_path(module_id)
-                .to_string();
-            self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
-            return Ok(());
-        }
-
-        // Fallback: search implement blocks in modules
-        let module_id = self.analyzed.name_table().module_of(instance.class_name);
-        let module_path = self
-            .analyzed
-            .name_table()
-            .module_path(module_id)
-            .to_string();
-        if let Some((module_program, _)) = self.analyzed.module_programs().get(&module_path)
-            && let Some(method) = self
-                .find_implement_block_method(
-                    &module_program.declarations,
-                    instance.class_name,
-                    &method_name_str,
-                    module_id,
-                )
-                .cloned()
-        {
-            self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
-            return Ok(());
-        }
-
-        let class_name = self.analyzed.display_name(instance.class_name);
-        Err(CodegenError::not_found(
-            "pending monomorph: class method",
-            format!("{} in class {}", method_name_str, class_name),
-        ))
+        self.compile_monomorphized_class_method(instance, module_path.as_deref())
     }
 
     /// Compile a single pending static method monomorph.
     fn compile_pending_static_method(
         &mut self,
         instance: &VirStaticMethodMonomorphInfo,
-        class_asts: &FxHashMap<NameId, GenericTypeMethodsAst<'_>>,
+        program_module: ModuleId,
     ) -> CodegenResult<()> {
         if self.is_abstract_vir_static_method_monomorph(instance) {
             return Ok(());
         }
 
-        let method_name_str = self.analyzed.display_name(instance.method_name);
+        let class_module = self.analyzed.name_table().module_of(instance.class_name);
+        let module_path = if class_module == program_module {
+            None
+        } else {
+            Some(
+                self.analyzed
+                    .name_table()
+                    .module_path(class_module)
+                    .to_string(),
+            )
+        };
 
-        // Try main program class ASTs (using pre-built map)
-        if let Some(class) = class_asts.get(&instance.class_name)
-            && let Some(statics) = class.statics
-        {
-            let method = statics
-                .methods
-                .iter()
-                .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
-            if let Some(method) = method {
-                self.compile_monomorphized_static_method(method, instance, None)?;
-                return Ok(());
-            }
-        }
-
-        // Fallback: search module programs
-        if let Some(method) = self
-            .find_static_method_in_modules(instance.class_name, &method_name_str)
-            .cloned()
-        {
-            let module_id = self.analyzed.name_table().module_of(instance.class_name);
-            let module_path = self
-                .analyzed
-                .name_table()
-                .module_path(module_id)
-                .to_string();
-            self.compile_monomorphized_static_method(&method, instance, Some(&module_path))?;
-            return Ok(());
-        }
-
-        let class_name = self.analyzed.display_name(instance.class_name);
-        Err(CodegenError::not_found(
-            "pending monomorph: static method",
-            format!("{} in class {}", method_name_str, class_name),
-        ))
+        self.compile_monomorphized_static_method(instance, module_path.as_deref())
     }
 
     /// Build the monomorph name index from VirProgram's monomorph maps.

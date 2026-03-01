@@ -372,7 +372,7 @@ impl Compiler<'_> {
         // Compile any monomorphs that were lazily declared during expression compilation.
         // This fixpoint loop handles transitive demand-declarations: compiling one pending
         // monomorph body may trigger demand-declaration of another.
-        self.compile_pending_monomorphs(Some(program))?;
+        self.compile_pending_monomorphs()?;
 
         Ok(())
     }
@@ -500,7 +500,7 @@ impl Compiler<'_> {
         // Compile any monomorphs that were lazily declared during module body compilation.
         // No main-program AST is available here; all pending monomorphs should originate
         // from module code.
-        self.compile_pending_monomorphs(None)?;
+        self.compile_pending_monomorphs()?;
 
         tracing::debug!("compile_module_functions complete");
         Ok(())
@@ -776,7 +776,7 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
+            let config = FunctionCompileConfig::top_level(params, return_type_id);
             let vir = vir_func.expect("VIR must be available for module function");
             compile_function_inner_with_vir(
                 builder,
@@ -880,7 +880,7 @@ impl Compiler<'_> {
 
             // Use pre-resolved return type (None for void)
             let return_type_opt = Some(return_type_id).filter(|id| !id.is_void());
-            let config = FunctionCompileConfig::top_level(&func.body, params, return_type_opt);
+            let config = FunctionCompileConfig::top_level(params, return_type_opt);
             let vir = vir_func.unwrap_or_else(|| {
                 panic!(
                     "VIR must be available for non-generic, non-generator function '{}'",

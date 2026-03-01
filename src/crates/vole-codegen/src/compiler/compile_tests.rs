@@ -351,7 +351,7 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
+            let config = FunctionCompileConfig::top_level(params, return_type_id);
             let vir_func = self.analyzed.get_vir_function(semantic_func_id)
                 .unwrap_or_else(|| {
                     panic!("VIR must be available for test-scoped function (FunctionId={semantic_func_id:?})")
