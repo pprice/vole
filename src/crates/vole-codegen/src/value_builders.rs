@@ -81,7 +81,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create an integer constant with a specific Vole type
     pub fn int_const(&mut self, n: i64, type_id: TypeId) -> CompiledValue {
         let ty = self.cranelift_type(type_id);
-        let arena = self.arena();
         // If bidirectional inference produced a float type for an integer literal
         // (can happen in generic contexts where the type parameter resolves to f64
         // during sema but codegen uses i64 for the type param), fall back to i64.
@@ -91,11 +90,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Likewise, if sema contextual typing labels an int literal as a union
         // element, keep the literal concrete here and let explicit union boxing
         // happen at coercion/assignment boundaries.
-        let (ty, type_id) = if ty == types::F64 || ty == types::F32 || arena.is_union(type_id) {
-            (types::I64, TypeId::I64)
-        } else {
-            (ty, type_id)
-        };
+        let (ty, type_id) =
+            if ty == types::F64 || ty == types::F32 || self.vir_query_is_union(type_id) {
+                (types::I64, TypeId::I64)
+            } else {
+                (ty, type_id)
+            };
         // Cranelift's iconst doesn't support I128 directly - we need to create
         // an i64 constant and sign-extend it to i128.
         // For f128, use the runtime software representation (f64 payload in low 64 bits).
@@ -172,8 +172,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
-        let arena = self.arena();
-        if arena.is_union(type_id) {
+        if self.vir_query_is_union(type_id) {
             let v = self.builder.ins().f64const(n);
             return CompiledValue::new(v, types::F64, TypeId::F64);
         }
@@ -632,7 +631,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Check for fallible multi-value return (2 results: tag, payload)
-        if results.len() == 2 && self.arena().unwrap_fallible(return_type_id).is_some() {
+        if results.len() == 2 && self.vir_query_unwrap_fallible(return_type_id).is_some() {
             let tag = results[0];
             let payload = results[1];
 

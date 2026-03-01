@@ -71,15 +71,13 @@ pub(super) fn build_field_meta_array(
     // arena is immutable in codegen. If not found, fall back to the sema-provided
     // type from the TypeMeta fields definition.
     let array_type_id = cg
-        .arena()
-        .lookup_array(info.field_meta_type_id)
+        .vir_query_lookup_array(info.field_meta_type_id)
         .unwrap_or(info.field_meta_type_id);
     Ok(CompiledValue::new(arr_ptr, cg.ptr_type(), array_type_id))
 }
 
 /// Collect field info tuples for all fields, including VIR-lowered annotations.
 fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
-    let arena = cg.arena();
     let vir_program = cg.analyzed().vir_program();
     cg.analyzed()
         .fields_on_type(type_def_id)
@@ -89,7 +87,7 @@ fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
                 .name_table()
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
-            let type_name = arena.display_basic(field.sema_type_id);
+            let type_name = cg.vir_query_display_basic(field.sema_type_id);
             let annotations = vir_program
                 .get_field_annotations(field_id)
                 .map(|anns| anns.to_vec())
@@ -196,7 +194,7 @@ fn build_annotations_array(
         return Ok(CompiledValue::new(
             arr_ptr,
             cg.ptr_type(),
-            cg.arena().unknown(),
+            cg.vir_query_unknown(),
         ));
     }
 
@@ -211,7 +209,7 @@ fn build_annotations_array(
     Ok(CompiledValue::new(
         arr_ptr,
         cg.ptr_type(),
-        cg.arena().unknown(),
+        cg.vir_query_unknown(),
     ))
 }
 

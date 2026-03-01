@@ -227,7 +227,7 @@ impl Cg<'_, '_, '_> {
 
         // TEMP(N279-C): if VIR iterator metadata degraded to `unknown`, recover
         // element typing/storage from the compiled iterable value.
-        if let Some(arr_elem_type_id) = self.arena().unwrap_array(arr.type_id) {
+        if let Some(arr_elem_type_id) = self.vir_query_unwrap_array(arr.type_id) {
             elem_type_id = arr_elem_type_id;
             if union_storage.is_none() && self.vir_query_is_union(arr_elem_type_id) {
                 union_storage = Some(
@@ -376,17 +376,14 @@ impl Cg<'_, '_, '_> {
             VirIterKind::IteratorInterface { elem_type, .. } => {
                 let hint = self.sema_type_from_vir(*elem_type);
                 let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
-                // NOTE: arena() retained — wrap_interface_iter requires sema TypeId.
-                // Remove when iterator dispatch uses VirTypeId (Phase D).
-                let (elem_type_id, is_interface_iter) = {
-                    let arena = self.arena();
-                    if let Some(elem_id) = arena.unwrap_runtime_iterator(iter.type_id) {
-                        (elem_id, false)
-                    } else if let Some((_, type_args)) = arena.unwrap_interface(iter.type_id) {
-                        (type_args.first().copied().unwrap_or(hint), true)
-                    } else {
-                        (hint, false)
-                    }
+                let (elem_type_id, is_interface_iter) = if let Some(elem_id) =
+                    self.vir_query_unwrap_runtime_iterator(iter.type_id)
+                {
+                    (elem_id, false)
+                } else if let Some((_, type_args)) = self.vir_query_unwrap_interface(iter.type_id) {
+                    (type_args.first().copied().unwrap_or(hint), true)
+                } else {
+                    (hint, false)
                 };
                 if is_interface_iter {
                     iter = self.wrap_interface_iter(iter, elem_type_id)?;
@@ -402,12 +399,8 @@ impl Cg<'_, '_, '_> {
                     .well_known
                     .iterator_type_def
                     .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
-                // NOTE: arena() retained — box_interface_value requires sema TypeId
-                // for the interface type.  Remove when interface boxing uses VirTypeId
-                // (Phase D).
                 let interface_type_id = self
-                    .arena()
-                    .lookup_interface(iterator_type_def, smallvec![elem_type_id])
+                    .vir_query_lookup_interface(iterator_type_def, smallvec![elem_type_id])
                     .ok_or_else(|| {
                         CodegenError::internal("Iterator<T> interface type not found in arena")
                     })?;
@@ -444,8 +437,7 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
     ) -> super::types::CompiledValue {
         let runtime_iter_type_id = self
-            .arena()
-            .lookup_runtime_iterator(elem_type_id)
+            .vir_query_lookup_runtime_iterator(elem_type_id)
             .unwrap_or(TypeId::STRING);
         super::types::CompiledValue::owned(raw, types::I64, runtime_iter_type_id)
     }
@@ -522,15 +514,9 @@ impl Cg<'_, '_, '_> {
         iterable: &super::types::CompiledValue,
         _elem_type_id: TypeId,
     ) -> CodegenResult<super::types::CompiledValue> {
-        let type_def_id = {
-            let arena = self.arena();
-            let (tdef, _, _) = arena
-                .unwrap_class_or_struct(iterable.type_id)
-                .ok_or_else(|| {
-                    CodegenError::internal("for_iterable: expected class/struct type")
-                })?;
-            tdef
-        };
+        let type_def_id = self
+            .vir_query_unwrap_nominal(iterable.type_id)
+            .ok_or_else(|| CodegenError::internal("for_iterable: expected class/struct type"))?;
         let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
 
         let iter_name_id = self

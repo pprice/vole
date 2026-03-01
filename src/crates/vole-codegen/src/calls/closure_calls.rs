@@ -12,7 +12,7 @@ use vole_identity::{NodeId, TypeId};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::methods::ArgSource;
-use crate::types::{CompiledValue, is_wide_fallible, type_id_to_cranelift};
+use crate::types::CompiledValue;
 use crate::union_layout;
 
 use super::super::RuntimeKey;
@@ -56,18 +56,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         func_type_id: TypeId,
     ) -> CodegenResult<(Signature, Vec<TypeId>, TypeId)> {
         // Get function components from arena
-        let (params, ret, _is_closure) = {
-            let arena = self.arena();
-            let (params, ret, is_closure) =
-                arena.unwrap_function(func_type_id).ok_or_else(|| {
+        let (params, ret, _is_closure) =
+            self.vir_query_unwrap_function(func_type_id)
+                .ok_or_else(|| {
                     CodegenError::type_mismatch(
                         "call_actual_closure",
                         "function type",
                         "non-function type",
                     )
                 })?;
-            (params.clone(), ret, is_closure)
-        };
 
         // Build signature (closure ptr + params)
         let mut sig = self.jit_module().make_signature();
@@ -76,27 +73,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             sig.params
                 .push(AbiParam::new(self.cranelift_type(param_type_id)));
         }
-        let arena = self.arena();
-        if !arena.is_void(ret) {
+        if !self.vir_query_is_void(ret) {
             // For fallible returns, use multi-value return (tag: i64, payload: i64)
             // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
-            if is_wide_fallible(ret, arena) {
+            if self.vir_query_is_wide_fallible(ret) {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // low
                 sig.returns.push(AbiParam::new(types::I64)); // high
-            } else if arena.unwrap_fallible(ret).is_some() {
+            } else if self.vir_query_unwrap_fallible(ret).is_some() {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // payload
             } else {
-                sig.returns.push(AbiParam::new(type_id_to_cranelift(
-                    ret,
-                    arena,
-                    self.ptr_type(),
-                )));
+                sig.returns
+                    .push(AbiParam::new(self.vir_query_type_to_cranelift(ret)));
             }
         }
 
-        Ok((sig, params.to_vec(), ret))
+        Ok((sig, params, ret))
     }
 
     /// Call an actual closure (with closure pointer).
@@ -182,7 +175,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         if results.is_empty() {
             Ok(self.void_value())
-        } else if results.len() == 2 && self.arena().unwrap_fallible(ret).is_some() {
+        } else if results.len() == 2 && self.vir_query_unwrap_fallible(ret).is_some() {
             // Fallible multi-value return: pack (tag, payload) into stack slot
             let tag = results[0];
             let payload = results[1];

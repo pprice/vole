@@ -35,8 +35,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - The class has no type args (non-generic)
     /// - None of the field types involve type parameters
     pub fn mono_instance_type_id(&self, base_type_id: u32, result_type_id: TypeId) -> u32 {
-        let arena = self.arena();
-        let Some((type_def_id, type_args)) = arena.unwrap_class(result_type_id) else {
+        let Some((type_def_id, type_args)) = self.vir_query_unwrap_class(result_type_id) else {
             return base_type_id;
         };
         if type_args.is_empty() {
@@ -60,8 +59,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return base_type_id;
         }
 
-        let arena = self.arena();
-
         // Check if any field type is a TypeParam that maps to an RC type
         let type_def = self.analyzed().type_def(type_def_id);
         if type_def.type_params.is_empty() {
@@ -82,7 +79,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Substitute field types to get concrete types
         let concrete_field_types: Vec<TypeId> = sema_field_types
             .iter()
-            .map(|&ft| arena.expect_substitute(ft, &subs, "mono_instance_type_id"))
+            .map(|&ft| self.vir_query_expect_substitute(ft, &subs, "mono_instance_type_id"))
             .collect();
 
         // Check if any field type changes its cleanup tag after substitution.
@@ -526,8 +523,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             FieldTypeTag::Interface
         } else if self.rc_state(type_id).needs_cleanup() {
             FieldTypeTag::Rc
-        } else if let Some(variants) = self.arena().unwrap_union(type_id) {
-            for &variant in variants {
+        } else if let Some(variants) = self.vir_query_unwrap_union(type_id) {
+            for &variant in &variants {
                 if self.rc_state(variant).needs_cleanup() {
                     return FieldTypeTag::UnionHeap;
                 }

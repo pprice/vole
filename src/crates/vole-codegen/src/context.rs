@@ -1089,6 +1089,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Check if a sema `TypeId` is a numeric type (integer or float).
+    ///
+    /// Constant check — delegates to `TypeId::is_numeric()`, no arena state needed.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_is_numeric(&self, type_id: TypeId) -> bool {
+        self.arena().is_numeric(type_id)
+    }
+
+    /// Get the `TypeId` for the `unknown` type.
+    ///
+    /// Constant — always `TypeId::UNKNOWN`.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_unknown(&self) -> TypeId {
+        self.arena().unknown()
+    }
+
+    /// Look up an existing interface type by `TypeDefId` and type arguments.
+    ///
+    /// Arena-only operation (type construction lookup).
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_lookup_interface(
+        &self,
+        type_def_id: vole_identity::TypeDefId,
+        type_args: vole_identity::TypeIdVec,
+    ) -> Option<TypeId> {
+        self.arena().lookup_interface(type_def_id, type_args)
+    }
+
     /// Access the arena's pre-interned primitive types.
     ///
     /// Arena-only accessor — primitive TypeIds are constants.

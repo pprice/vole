@@ -153,30 +153,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let mut resolved_value = value;
         resolved_value.type_id = resolved_value_type_id;
 
-        let (
-            is_target_interface,
-            is_value_interface,
-            is_target_union,
-            is_value_union,
-            is_target_unknown,
-            is_value_unknown,
-            is_value_runtime_iterator,
-            is_target_numeric,
-            is_value_numeric,
-        ) = {
-            let arena = self.arena();
-            (
-                arena.is_interface(resolved_target_type_id),
-                arena.is_interface(resolved_value_type_id),
-                arena.is_union(resolved_target_type_id),
-                arena.is_union(resolved_value_type_id),
-                arena.is_unknown(resolved_target_type_id),
-                arena.is_unknown(resolved_value_type_id),
-                arena.is_runtime_iterator(resolved_value_type_id),
-                arena.is_numeric(resolved_target_type_id),
-                arena.is_numeric(resolved_value_type_id),
-            )
-        };
+        let is_target_interface = self.vir_query_is_interface(resolved_target_type_id);
+        let is_value_interface = self.vir_query_is_interface(resolved_value_type_id);
+        let is_target_union = self.vir_query_is_union(resolved_target_type_id);
+        let is_value_union = self.vir_query_is_union(resolved_value_type_id);
+        let is_target_unknown = self.vir_query_is_unknown(resolved_target_type_id);
+        let is_value_unknown = self.vir_query_is_unknown(resolved_value_type_id);
+        let is_value_runtime_iterator = self.vir_query_is_runtime_iterator(resolved_value_type_id);
+        let is_target_numeric = self.vir_query_is_numeric(resolved_target_type_id);
+        let is_value_numeric = self.vir_query_is_numeric(resolved_value_type_id);
 
         if is_target_numeric
             && is_value_numeric
@@ -416,7 +401,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .bitcast(types::I32, MemFlags::new(), value.value);
             uextend_const(self.builder, types::I64, i32_val)
         } else if value.ty.is_int() && value.ty.bytes() < 8 {
-            if self.arena().is_unsigned(value.type_id) {
+            if self.vir_query_is_unsigned(value.type_id) {
                 uextend_const(self.builder, types::I64, value.value)
             } else {
                 sextend_const(self.builder, types::I64, value.value)
@@ -496,7 +481,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             {
                 let new_value = if expected_ty.bits() < compiled.ty.bits() {
                     self.builder.ins().ireduce(expected_ty, compiled.value)
-                } else if self.arena().is_unsigned(param_type_id) {
+                } else if self.vir_query_is_unsigned(param_type_id) {
                     uextend_const(self.builder, expected_ty, compiled.value)
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
@@ -557,7 +542,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             {
                 let new_value = if expected_ty.bits() < compiled.ty.bits() {
                     self.builder.ins().ireduce(expected_ty, compiled.value)
-                } else if self.arena().is_unsigned(param_type_id) {
+                } else if self.vir_query_is_unsigned(param_type_id) {
                     uextend_const(self.builder, expected_ty, compiled.value)
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
@@ -615,7 +600,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             {
                 let new_value = if expected_ty.bits() < compiled.ty.bits() {
                     self.builder.ins().ireduce(expected_ty, compiled.value)
-                } else if self.arena().is_unsigned(param_type_id) {
+                } else if self.vir_query_is_unsigned(param_type_id) {
                     uextend_const(self.builder, expected_ty, compiled.value)
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)

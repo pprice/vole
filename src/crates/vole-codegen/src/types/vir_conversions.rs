@@ -657,16 +657,16 @@ pub(crate) fn vir_display_basic(vir_ty: VirTypeId, table: &VirTypeTable) -> Stri
             VirPrimitiveKind::F32 => "f32".into(),
             VirPrimitiveKind::F64 => "f64".into(),
             VirPrimitiveKind::Bool => "bool".into(),
-            VirPrimitiveKind::String => "String".into(),
-            VirPrimitiveKind::Handle => "Handle".into(),
+            VirPrimitiveKind::String => "string".into(),
+            VirPrimitiveKind::Handle => "handle".into(),
         },
         VirType::Void => "void".into(),
         VirType::Nil => "nil".into(),
         VirType::Done => "Done".into(),
         VirType::Never => "never".into(),
         VirType::Unknown => "unknown".into(),
-        VirType::Range => "Range".into(),
-        VirType::MetaType => "TypeMeta".into(),
+        VirType::Range => "range".into(),
+        VirType::MetaType => "type".into(),
         VirType::Class { def, .. } => format!("Class({:?})", def),
         VirType::Struct { def, .. } => format!("Struct({:?})", def),
         VirType::Interface { def, .. } => format!("Interface({:?})", def),
@@ -1728,7 +1728,7 @@ mod tests {
     fn display_basic_primitives() {
         let table = test_table();
         assert_eq!(vir_display_basic(VirTypeId::I64, &table), "i64");
-        assert_eq!(vir_display_basic(VirTypeId::STRING, &table), "String");
+        assert_eq!(vir_display_basic(VirTypeId::STRING, &table), "string");
         assert_eq!(vir_display_basic(VirTypeId::BOOL, &table), "bool");
         assert_eq!(vir_display_basic(VirTypeId::VOID, &table), "void");
         assert_eq!(vir_display_basic(VirTypeId::NIL, &table), "nil");

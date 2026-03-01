@@ -477,7 +477,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Keep an extra retained reference for values that are sent by inline
         // tag/payload representation.
         let can_classify_rc = payload.type_id != TypeId::VOID
-            && self.arena().unwrap_type_param(payload.type_id).is_none();
+            && self.vir_query_unwrap_type_param(payload.type_id).is_none();
         let payload_is_union = self.vir_query_is_union(payload.type_id);
 
         let (tag_val, payload_bits) = if payload_is_union {
@@ -542,14 +542,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         let elem_type_id = self
-            .arena()
-            .unwrap_union(return_type_id)
+            .vir_query_unwrap_union(return_type_id)
             .and_then(|variants| variants.iter().copied().find(|&ty| ty != TypeId::DONE))
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "task_channel_try_recv return type",
                     "union containing Done",
-                    self.arena().display_basic(return_type_id),
+                    self.vir_query_display_basic(return_type_id),
                 )
             })?;
 
@@ -624,8 +623,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let closure = typed_args[0];
         let closure_return_type = self
-            .arena()
-            .unwrap_function(closure.type_id)
+            .vir_query_unwrap_function(closure.type_id)
             .map(|(_, ret, _)| self.try_substitute_type(ret))
             .unwrap_or(TypeId::I64);
         let tag = {

@@ -67,7 +67,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Check if it's a closure variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
-            && self.arena().is_function(*type_id)
+            && self.vir_query_is_function(*type_id)
         {
             return self.call_closure(*var, *type_id, arg_source, call_expr_id);
         }
@@ -75,7 +75,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Check if it's a captured closure (e.g., recursive lambda or captured function)
         if self.has_captures()
             && let Some(binding) = self.get_capture(&callee_sym).copied()
-            && self.arena().is_function(binding.vole_type)
+            && self.vir_query_is_function(binding.vole_type)
         {
             let captured = self.load_capture(&binding)?;
             return self.call_closure_value(
@@ -313,7 +313,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // If it's a function type, call as closure
         // Note: Global lambdas don't support default params lookup (call_expr_id is a placeholder)
-        if self.arena().is_function(lambda_val.type_id) {
+        if self.vir_query_is_function(lambda_val.type_id) {
             let result = self.call_closure_value(
                 lambda_val.value,
                 lambda_val.type_id,

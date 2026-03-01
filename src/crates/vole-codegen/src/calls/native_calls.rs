@@ -309,7 +309,7 @@ impl Cg<'_, '_, '_> {
         if exact_matches.len() > 1 {
             let mut matches_display: Vec<String> = exact_matches
                 .iter()
-                .map(|(ty, key)| format!("{} => \"{}\"", self.arena().display_basic(*ty), key))
+                .map(|(ty, key)| format!("{} => \"{}\"", self.vir_query_display_basic(*ty), key))
                 .collect();
             matches_display.sort();
             matches_display.dedup();
@@ -329,7 +329,7 @@ impl Cg<'_, '_, '_> {
         let mut concrete_types: Vec<String> = substitutions
             .values()
             .copied()
-            .map(|ty| self.arena().display_basic(ty))
+            .map(|ty| self.vir_query_display_basic(ty))
             .collect();
         concrete_types.sort();
         concrete_types.dedup();
@@ -464,7 +464,7 @@ impl Cg<'_, '_, '_> {
         let concrete_param_type_ids: Vec<TypeId> = param_type_ids
             .iter()
             .map(|&ty| {
-                self.arena().expect_substitute(
+                self.vir_query_expect_substitute(
                     ty,
                     &substitutions,
                     "generic external intrinsic args",
@@ -552,7 +552,7 @@ impl Cg<'_, '_, '_> {
 
         let param_type_display: Vec<String> = param_types_raw
             .iter()
-            .map(|&ty| self.arena().display_basic(ty))
+            .map(|&ty| self.vir_query_display_basic(ty))
             .collect();
         tracing::debug!(
             call_expr_id = ?call_expr_id,
@@ -572,10 +572,11 @@ impl Cg<'_, '_, '_> {
 
         let func_key = self.funcs().intern_name_id(mangled_name);
         if let Some(func_id) = self.funcs().func_id(func_key) {
-            let arena = self.arena();
             let param_type_ids: Vec<TypeId> = param_types_raw
                 .iter()
-                .map(|&ty| arena.expect_substitute(ty, &substitutions, "monomorph call args"))
+                .map(|&ty| {
+                    self.vir_query_expect_substitute(ty, &substitutions, "monomorph call args")
+                })
                 .collect();
             tracing::trace!("found func_id, using regular path");
             return self
@@ -609,7 +610,7 @@ impl Cg<'_, '_, '_> {
             let concrete_param_type_ids: Vec<TypeId> = param_types_raw
                 .iter()
                 .map(|&ty| {
-                    self.arena().expect_substitute(
+                    self.vir_query_expect_substitute(
                         ty,
                         &substitutions,
                         "generic external intrinsic args",
