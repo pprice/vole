@@ -24,8 +24,8 @@ impl Cg<'_, '_, '_> {
         let field_is_union = self.vir_query_is_union(field_type_id);
         let field_is_interface = self.vir_query_is_interface(field_type_id);
         let field_is_unknown = self.vir_query_is_unknown(field_type_id);
-        let value_is_union = self.vir_query_is_union(self.cv_type_id(&value));
-        let value_is_unknown = self.vir_query_is_unknown(self.cv_type_id(&value));
+        let value_is_union = self.vir_query_is_union_v(value.type_id);
+        let value_is_unknown = self.vir_query_is_unknown_v(value.type_id);
 
         if field_is_unknown && !value_is_unknown {
             // Box the value into a heap-allocated TaggedValue.
@@ -44,7 +44,7 @@ impl Cg<'_, '_, '_> {
             // The value may be stack-allocated (from construct_union_id),
             // so copy the 16-byte buffer to the heap.
             self.copy_union_to_heap(value)
-        } else if field_is_interface && self.vir_query_is_interface(self.cv_type_id(&value)) {
+        } else if field_is_interface && self.vir_query_is_interface_v(value.type_id) {
             // Value is already an interface fat pointer. Copy it into a new
             // heap allocation so instance_drop can free it independently.
             self.copy_interface_fat_ptr(value)
@@ -70,7 +70,7 @@ impl Cg<'_, '_, '_> {
             })?;
 
         // If the value is already the same union type, just return it
-        if self.cv_type_id(&value) == union_type_id {
+        if value.type_id == self.vir_lookup(union_type_id) {
             return Ok(value);
         }
 
@@ -132,7 +132,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
         let ptr_type = self.ptr_type();
-        let union_size = self.type_size(self.cv_type_id(&value));
+        let union_size = self.type_size_v(value.type_id);
         let size_val = self.iconst_cached(ptr_type, union_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
@@ -190,11 +190,7 @@ impl Cg<'_, '_, '_> {
         self.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
 
-        Ok(CompiledValue::new(
-            heap_ptr,
-            ptr_type,
-            self.vir_lookup(self.cv_type_id(&value)),
-        ))
+        Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
     }
 
     /// Copy an interface fat pointer into a new heap allocation.
@@ -238,11 +234,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .store(MemFlags::new(), vtable_ptr, heap_ptr, word_bytes as i32);
 
-        Ok(CompiledValue::new(
-            heap_ptr,
-            ptr_type,
-            self.vir_lookup(self.cv_type_id(&value)),
-        ))
+        Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
     }
 
     /// Copy an unknown-typed TaggedValue to a new heap allocation.
@@ -297,7 +289,7 @@ impl Cg<'_, '_, '_> {
         slot: StackSlot,
         offset: i32,
     ) -> CodegenResult<()> {
-        let field_flat_slots = self.struct_flat_slot_count(self.cv_type_id(&value));
+        let field_flat_slots = self.vir_struct_flat_slot_count(value.type_id);
         if let Some(nested_flat) = field_flat_slots {
             for i in 0..nested_flat {
                 let src_off = (i as i32) * 8;
@@ -308,7 +300,7 @@ impl Cg<'_, '_, '_> {
                         .load(types::I64, MemFlags::new(), value.value, src_off);
                 self.builder.ins().stack_store(val, slot, dst_off);
             }
-        } else if self.vir_query_is_payload_union(self.cv_type_id(&value)) {
+        } else if self.vir_query_is_payload_union_v(value.type_id) {
             // Union values are pointers to 16-byte buffers (tag + payload).
             // Copy both words inline into the struct's slot.
             let word0 = self
