@@ -22,7 +22,9 @@ use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};
 
-use super::vir_struct_helpers::{VirStructEntityLookup, vir_struct_total_byte_size};
+use super::vir_struct_helpers::{
+    VirStructEntityLookup, sema_to_vir_hint, vir_struct_flat_slot_count, vir_struct_total_byte_size,
+};
 
 /// Temporary bridge from `VirTypeId` to sema `TypeId`.
 ///
@@ -1334,6 +1336,318 @@ pub(crate) fn vir_fallible_error_tag_by_id(
 // Callers import directly from that submodule.
 
 // ============================================================================
+// VIR-native RC state computation (Phase 3b)
+//
+// VIR equivalent of `compute_rc_state()` in rc_state.rs.
+// Uses VirTypeTable instead of TypeArena for all type queries.
+// ============================================================================
+
+use crate::rc_state::RcState;
+
+/// Check if a VIR type is a simple RC type (single pointer to RC-managed heap object).
+///
+/// Simple RC types: String, Array, Function, Class, Handle, Interface,
+/// RuntimeIterator. NOT simple: Struct (stack-allocated), sentinels, primitives.
+fn vir_is_simple_rc_type(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    vir_is_string(vir_ty, table)
+        || vir_is_array(vir_ty, table)
+        || vir_is_function(vir_ty, table)
+        || vir_is_class(vir_ty, table)
+        || vir_is_handle(vir_ty, table)
+        || vir_is_interface(vir_ty, table)
+        || vir_is_runtime_iterator(vir_ty, table)
+}
+
+/// Check if a VIR type qualifies for capture RC management in closures.
+///
+/// Subset of simple RC types — excludes handles and iterators.
+fn vir_is_capture_rc_type(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    vir_is_string(vir_ty, table)
+        || vir_is_array(vir_ty, table)
+        || vir_is_function(vir_ty, table)
+        || vir_is_class(vir_ty, table)
+}
+
+/// Compute which union variant tags correspond to RC types (VIR version).
+fn vir_compute_union_rc_variants(variants: &[VirTypeId], table: &VirTypeTable) -> Vec<(u8, bool)> {
+    variants
+        .iter()
+        .enumerate()
+        .filter(|(_, variant_ty)| vir_is_simple_rc_type(**variant_ty, table))
+        .map(|(i, variant_ty)| (i as u8, vir_is_interface(*variant_ty, table)))
+        .collect()
+}
+
+/// Compute the RC state for a VIR type.
+///
+/// VIR equivalent of `compute_rc_state()` in rc_state.rs.
+/// Analyzes VIR type structure via VirTypeTable and returns the appropriate
+/// RcState variant. The result can be cached per VirTypeId.
+pub(crate) fn vir_compute_rc_state(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &impl VirStructEntityLookup,
+) -> RcState {
+    // Check for simple RC types first (most common case for RC values)
+    if vir_is_simple_rc_type(vir_ty, table) {
+        let is_capture = vir_is_capture_rc_type(vir_ty, table);
+        return RcState::Simple { is_capture };
+    }
+
+    // Check for union/optional types with RC variants
+    match table.get(vir_ty) {
+        VirType::Optional { inner } => {
+            // Optional<T> is always a payload union; check if inner is RC
+            let rc_variants = if vir_is_simple_rc_type(*inner, table) {
+                // Inner type is RC (tag 0 = inner, tag 1 = nil)
+                vec![(0u8, vir_is_interface(*inner, table))]
+            } else {
+                vec![]
+            };
+            if !rc_variants.is_empty() {
+                return RcState::Union { rc_variants };
+            }
+            return RcState::None;
+        }
+        VirType::Union { variants } => {
+            let rc_variants = vir_compute_union_rc_variants(variants, table);
+            if !rc_variants.is_empty() {
+                return RcState::Union { rc_variants };
+            }
+            return RcState::None;
+        }
+        _ => {}
+    }
+
+    // Check for composite types (struct, tuple, fixed array) with RC fields
+    if let Some((shallow_offsets, deep_offsets, union_fields)) =
+        vir_compute_composite_rc_offsets(vir_ty, table, entities)
+    {
+        return RcState::Composite {
+            shallow_offsets,
+            deep_offsets,
+            union_fields,
+        };
+    }
+
+    RcState::None
+}
+
+/// Composite RC offsets: (shallow_offsets, deep_offsets, union_fields).
+type VirCompositeRcOffsets = (Vec<i32>, Vec<i32>, Vec<(i32, Vec<(u8, bool)>)>);
+
+/// Compute the byte offsets of RC fields within a VIR composite type.
+///
+/// Returns `Some((shallow_offsets, deep_offsets, union_fields))` if the type
+/// has RC fields, or `None` if the type has no RC fields needing cleanup.
+fn vir_compute_composite_rc_offsets(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &impl VirStructEntityLookup,
+) -> Option<VirCompositeRcOffsets> {
+    // Struct: iterate fields, collect offsets of RC-typed fields
+    if let Some((type_def_id, _type_args)) = vir_unwrap_struct(vir_ty, table) {
+        let mut shallow_offsets = Vec::new();
+        let mut deep_offsets = Vec::new();
+        let mut union_fields = Vec::new();
+        let mut byte_offset = 0i32;
+
+        for field_id in entities.field_ids_on_type(type_def_id) {
+            let field_sema_ty = entities.field_type(field_id);
+            let field_vir = sema_to_vir_hint(field_sema_ty);
+            let slots = vir_field_flat_slots(field_vir, table, entities);
+
+            // Shallow: only direct RC fields
+            if vir_is_simple_rc_type(field_vir, table) {
+                shallow_offsets.push(byte_offset);
+                deep_offsets.push(byte_offset);
+            } else if let Some(variants) = vir_unwrap_union(field_vir, table) {
+                // Inline union field: collect RC variant tags for tag-based cleanup
+                let rc_tags = vir_compute_union_rc_variants(variants, table);
+                if !rc_tags.is_empty() {
+                    union_fields.push((byte_offset, rc_tags));
+                }
+            } else if matches!(table.get(field_vir), VirType::Optional { .. }) {
+                // Optional field: check inner type for RC
+                if let VirType::Optional { inner } = table.get(field_vir)
+                    && vir_is_simple_rc_type(*inner, table)
+                {
+                    let rc_tags = vec![(0u8, vir_is_interface(*inner, table))];
+                    union_fields.push((byte_offset, rc_tags));
+                }
+            } else {
+                // Deep: recursively collect from nested structs
+                if let Some((_, nested_deep, nested_unions)) =
+                    vir_compute_composite_rc_offsets(field_vir, table, entities)
+                {
+                    for off in nested_deep {
+                        deep_offsets.push(byte_offset + off);
+                    }
+                    for (off, tags) in nested_unions {
+                        union_fields.push((byte_offset + off, tags));
+                    }
+                }
+            }
+
+            byte_offset += (slots as i32) * 8;
+        }
+
+        if shallow_offsets.is_empty() && deep_offsets.is_empty() && union_fields.is_empty() {
+            return None;
+        }
+        return Some((shallow_offsets, deep_offsets, union_fields));
+    }
+
+    // Fixed array: if element type is RC, all elements need cleanup
+    if let Some((elem_vir, len)) = vir_unwrap_fixed_array(vir_ty, table) {
+        if vir_is_simple_rc_type(elem_vir, table) {
+            let offsets: Vec<i32> = (0..len).map(|i| (i as i32) * 8).collect();
+            return Some((offsets.clone(), offsets, Vec::new()));
+        }
+        return None;
+    }
+
+    // Tuple: compute offsets based on element sizes, then filter RC elements
+    if let Some(elem_types) = vir_unwrap_tuple(vir_ty, table) {
+        let all_offsets = vir_compute_tuple_offsets(elem_types, table, entities);
+        let rc_offsets: Vec<i32> = elem_types
+            .iter()
+            .enumerate()
+            .filter(|(_, elem_ty)| vir_is_simple_rc_type(**elem_ty, table))
+            .map(|(i, _)| all_offsets[i])
+            .collect();
+
+        if rc_offsets.is_empty() {
+            return None;
+        }
+        return Some((rc_offsets.clone(), rc_offsets, Vec::new()));
+    }
+
+    None
+}
+
+/// Compute the number of flat 8-byte slots a single VIR field occupies.
+///
+/// Used by `vir_compute_composite_rc_offsets` for offset computation.
+/// This duplicates the logic from `vir_field_flat_slots_recursive` in
+/// vir_struct_helpers to avoid a circular dependency.
+fn vir_field_flat_slots(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &impl VirStructEntityLookup,
+) -> usize {
+    if let Some(count) = vir_struct_flat_slot_count(vir_ty, table, entities) {
+        return count;
+    }
+    if super::vir_struct_helpers::vir_is_payload_union(vir_ty, table, entities) {
+        return 2;
+    }
+    vir_field_slot_count(vir_ty, table)
+}
+
+/// Compute byte offsets for VIR tuple elements.
+///
+/// Each element is aligned to 8 bytes. This matches `vir_tuple_layout`
+/// but doesn't require a Cranelift pointer type.
+fn vir_compute_tuple_offsets(
+    elem_types: &[VirTypeId],
+    table: &VirTypeTable,
+    entities: &impl VirStructEntityLookup,
+) -> Vec<i32> {
+    let mut offsets = Vec::with_capacity(elem_types.len());
+    let mut offset = 0i32;
+
+    for &elem in elem_types {
+        offsets.push(offset);
+        let elem_size = vir_compute_type_size_aligned(elem, table, entities);
+        offset += elem_size;
+    }
+
+    offsets
+}
+
+/// Compute the size of a VIR type in bytes, aligned to 8 bytes.
+///
+/// Simplified version of `vir_type_id_size` that assumes 64-bit pointers
+/// and aligns all sizes to 8 bytes (matching tuple layout behavior).
+fn vir_compute_type_size_aligned(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &impl VirStructEntityLookup,
+) -> i32 {
+    // Sentinel types are zero-sized
+    if vir_is_sentinel(vir_ty, table) {
+        return 0;
+    }
+
+    let raw_size: i32 = match table.get(vir_ty) {
+        VirType::Primitive(kind) => match kind {
+            VirPrimitiveKind::I8 | VirPrimitiveKind::U8 | VirPrimitiveKind::Bool => 1,
+            VirPrimitiveKind::I16 | VirPrimitiveKind::U16 => 2,
+            VirPrimitiveKind::I32 | VirPrimitiveKind::U32 | VirPrimitiveKind::F32 => 4,
+            VirPrimitiveKind::I64 | VirPrimitiveKind::U64 | VirPrimitiveKind::F64 => 8,
+            VirPrimitiveKind::I128 => 16,
+            VirPrimitiveKind::String | VirPrimitiveKind::Handle => 8,
+        },
+
+        VirType::Void => 0,
+        VirType::Range => 16,   // start + end
+        VirType::Unknown => 16, // TaggedValue: 8-byte tag + 8-byte value
+
+        // Heap-allocated RC types: pointer-sized
+        VirType::Array { .. }
+        | VirType::Class { .. }
+        | VirType::RuntimeIterator { .. }
+        | VirType::Function { .. }
+        | VirType::Interface { .. }
+        | VirType::Error { .. }
+        | VirType::Fallible { .. } => 8,
+
+        // Struct types: use flat slot count
+        VirType::Struct { .. } => vir_struct_total_byte_size(vir_ty, table, entities)
+            .expect("INTERNAL: valid struct must have computable size")
+            as i32,
+
+        // Union: tag + max variant payload, aligned
+        VirType::Union { variants } => {
+            let max_payload = variants
+                .iter()
+                .map(|&v| vir_compute_type_size_aligned(v, table, entities))
+                .max()
+                .unwrap_or(0);
+            crate::union_layout::TAG_ONLY_SIZE as i32 + max_payload
+        }
+
+        // Optional: treated like union with nil variant
+        VirType::Optional { inner } => {
+            let inner_size = vir_compute_type_size_aligned(*inner, table, entities);
+            crate::union_layout::TAG_ONLY_SIZE as i32 + inner_size
+        }
+
+        // Tuple: sum of aligned element sizes
+        VirType::Tuple { elems } => elems
+            .iter()
+            .map(|&e| vir_compute_type_size_aligned(e, table, entities))
+            .sum(),
+
+        // Fixed array: element size * count
+        VirType::FixedArray { elem, len } => {
+            let elem_size = vir_compute_type_size_aligned(*elem, table, entities);
+            elem_size * (*len as i32)
+        }
+
+        // Sentinel types already handled above, but catch the patterns
+        VirType::Nil | VirType::Done => 0,
+
+        // Erased types: pointer-sized
+        VirType::Never | VirType::MetaType | VirType::Param { .. } => 8,
+    };
+
+    // Align to 8 bytes
+    ((raw_size + 7) / 8) * 8
+}
+
+// ============================================================================
 // Unit tests
 // ============================================================================
 
@@ -2294,5 +2608,227 @@ mod tests {
             None,
         );
         assert!(vir_display_basic(class_ty, &table).starts_with("Class("));
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_compute_rc_state
+    // -----------------------------------------------------------------------
+
+    use vole_sema::entity_registry::EntityRegistry;
+
+    #[test]
+    fn rc_state_primitives_not_rc() {
+        let table = test_table();
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(VirTypeId::I8, &table, &entities),
+            RcState::None
+        );
+        assert_eq!(
+            vir_compute_rc_state(VirTypeId::I64, &table, &entities),
+            RcState::None
+        );
+        assert_eq!(
+            vir_compute_rc_state(VirTypeId::BOOL, &table, &entities),
+            RcState::None
+        );
+        assert_eq!(
+            vir_compute_rc_state(VirTypeId::F64, &table, &entities),
+            RcState::None
+        );
+    }
+
+    #[test]
+    fn rc_state_string_is_simple_capture() {
+        let table = test_table();
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(VirTypeId::STRING, &table, &entities),
+            RcState::Simple { is_capture: true }
+        );
+    }
+
+    #[test]
+    fn rc_state_handle_is_simple_not_capture() {
+        let table = test_table();
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(VirTypeId::HANDLE, &table, &entities),
+            RcState::Simple { is_capture: false }
+        );
+    }
+
+    #[test]
+    fn rc_state_void_not_rc() {
+        let table = test_table();
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(VirTypeId::VOID, &table, &entities),
+            RcState::None
+        );
+    }
+
+    #[test]
+    fn rc_state_array_is_simple_capture() {
+        let mut table = test_table();
+        let layout = VirTypeLayout {
+            is_rc: true,
+            is_heap: true,
+            is_wide: false,
+            slot_count: 1,
+            storage: StorageClass::Pointer,
+        };
+        let arr = table.intern(
+            VirType::Array {
+                elem: VirTypeId::I64,
+            },
+            Some(layout),
+        );
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(arr, &table, &entities),
+            RcState::Simple { is_capture: true }
+        );
+    }
+
+    #[test]
+    fn rc_state_class_is_simple_capture() {
+        let mut table = test_table();
+        let class_ty = table.intern(
+            VirType::Class {
+                def: TypeDefId::new(42),
+                type_args: vec![],
+            },
+            None,
+        );
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(class_ty, &table, &entities),
+            RcState::Simple { is_capture: true }
+        );
+    }
+
+    #[test]
+    fn rc_state_union_with_no_rc_variants() {
+        let mut table = test_table();
+        let union_ty = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::I64, VirTypeId::BOOL],
+            },
+            None,
+        );
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(union_ty, &table, &entities),
+            RcState::None
+        );
+    }
+
+    #[test]
+    fn rc_state_union_with_rc_variant() {
+        let mut table = test_table();
+        let union_ty = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::I64, VirTypeId::STRING],
+            },
+            None,
+        );
+        let entities = EntityRegistry::new();
+        match vir_compute_rc_state(union_ty, &table, &entities) {
+            RcState::Union { rc_variants } => {
+                assert!(!rc_variants.is_empty());
+                // String is at index 1
+                assert!(rc_variants.contains(&(1u8, false)));
+            }
+            other => panic!("Expected RcState::Union, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rc_state_fixed_array_of_rc_type() {
+        let mut table = test_table();
+        let fa = table.intern(
+            VirType::FixedArray {
+                elem: VirTypeId::STRING,
+                len: 3,
+            },
+            None,
+        );
+        let entities = EntityRegistry::new();
+        match vir_compute_rc_state(fa, &table, &entities) {
+            RcState::Composite {
+                shallow_offsets,
+                deep_offsets,
+                ..
+            } => {
+                assert_eq!(shallow_offsets, vec![0, 8, 16]);
+                assert_eq!(deep_offsets, vec![0, 8, 16]);
+            }
+            other => panic!("Expected RcState::Composite, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rc_state_fixed_array_of_non_rc_type() {
+        let mut table = test_table();
+        let fa = table.intern(
+            VirType::FixedArray {
+                elem: VirTypeId::I64,
+                len: 3,
+            },
+            None,
+        );
+        let entities = EntityRegistry::new();
+        assert_eq!(vir_compute_rc_state(fa, &table, &entities), RcState::None);
+    }
+
+    #[test]
+    fn rc_state_tuple_with_mixed_types() {
+        let mut table = test_table();
+        let tuple_ty = table.intern(
+            VirType::Tuple {
+                elems: vec![VirTypeId::I64, VirTypeId::STRING, VirTypeId::BOOL],
+            },
+            None,
+        );
+        let entities = EntityRegistry::new();
+        match vir_compute_rc_state(tuple_ty, &table, &entities) {
+            RcState::Composite {
+                shallow_offsets,
+                deep_offsets,
+                ..
+            } => {
+                // String is at offset 8 (after i64)
+                assert_eq!(shallow_offsets, vec![8]);
+                assert_eq!(deep_offsets, vec![8]);
+            }
+            other => panic!("Expected RcState::Composite, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rc_state_tuple_with_no_rc_types() {
+        let mut table = test_table();
+        let tuple_ty = table.intern(
+            VirType::Tuple {
+                elems: vec![VirTypeId::I64, VirTypeId::BOOL],
+            },
+            None,
+        );
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(tuple_ty, &table, &entities),
+            RcState::None
+        );
+    }
+
+    #[test]
+    fn rc_state_range_not_rc() {
+        let table = test_table();
+        let entities = EntityRegistry::new();
+        assert_eq!(
+            vir_compute_rc_state(VirTypeId::RANGE, &table, &entities),
+            RcState::None
+        );
     }
 }

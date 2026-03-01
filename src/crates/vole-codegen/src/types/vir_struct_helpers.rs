@@ -93,7 +93,7 @@ fn vir_is_sentinel_or_void(
     }
 }
 
-fn sema_to_vir_hint(sema_ty: TypeId) -> VirTypeId {
+pub(crate) fn sema_to_vir_hint(sema_ty: TypeId) -> VirTypeId {
     // Temporary bridge after removing VirTypeTable's sema TypeId cache.
     // This helper intentionally maps only reserved IDs by index; dynamic
     // IDs fall back to UNKNOWN until field metadata is VirTypeId-native

@@ -1436,6 +1436,68 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_array_element_tag_id(vir_ty, self.vir_type_table())
     }
 
+    /// Compute the RC state for a VIR type.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_compute_rc_state(&self, vir_ty: VirTypeId) -> crate::rc_state::RcState {
+        crate::types::vir_conversions::vir_compute_rc_state(
+            vir_ty,
+            self.vir_type_table(),
+            self.analyzed(),
+        )
+    }
+
+    /// Get the flat slot count for a VIR struct type.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_struct_flat_slot_count(&self, vir_ty: VirTypeId) -> Option<usize> {
+        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+            vir_ty,
+            self.vir_type_table(),
+            self.analyzed(),
+        )
+    }
+
+    // =====================================================================
+    // VIR query wrappers with TypeId input (legacy bridge)
+    //
+    // These accept sema `TypeId`, translate via `vir_lookup`, and fall back
+    // to arena when the VIR lookup returns UNKNOWN.
+    // =====================================================================
+
+    /// Compute the RC state for a type, using VirTypeTable with arena fallback.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_compute_rc_state(&self, type_id: TypeId) -> crate::rc_state::RcState {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            crate::rc_state::compute_rc_state(self.arena(), self.analyzed(), type_id)
+        } else {
+            crate::types::vir_conversions::vir_compute_rc_state(
+                vir_ty,
+                self.vir_type_table(),
+                self.analyzed(),
+            )
+        }
+    }
+
+    /// Get the flat slot count for a struct type, using VirTypeTable with arena
+    /// fallback.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_struct_flat_slot_count(&self, type_id: TypeId) -> Option<usize> {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            crate::structs::struct_flat_slot_count(type_id, self.arena(), self.analyzed())
+        } else {
+            crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+                vir_ty,
+                self.vir_type_table(),
+                self.analyzed(),
+            )
+        }
+    }
+
     /// Get expression type from VIR-stashed `vir_call_return_type`.
     ///
     /// Set during VIR call dispatch (`compile_vir_unresolved_call` and friends).
