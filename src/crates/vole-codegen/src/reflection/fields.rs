@@ -68,11 +68,16 @@ pub(super) fn build_field_meta_array(
     }
 
     // The array type is [FieldMeta]. Use lookup_array (read-only) since the
-    // arena is immutable in codegen. If not found, fall back to the sema-provided
-    // type from the TypeMeta fields definition.
+    // arena is immutable in codegen. The [FieldMeta] type is always interned
+    // by sema when reflection metadata is present.
     let array_type_id = cg
         .vir_query_lookup_array(info.field_meta_type_id)
-        .unwrap_or(info.field_meta_type_id);
+        .unwrap_or_else(|| {
+            panic!(
+                "INTERNAL: compile_field_meta_array: [FieldMeta] array type not pre-interned (elem={:?})",
+                info.field_meta_type_id,
+            )
+        });
     Ok(CompiledValue::new(
         arr_ptr,
         cg.ptr_type(),

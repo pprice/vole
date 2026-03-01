@@ -797,15 +797,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().lookup_array(elem)
     }
 
-    /// Look up any existing array `TypeId` in the arena.
-    ///
-    /// Arena-only operation (returns a representative array type).
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_lookup_any_array(&self) -> Option<TypeId> {
-        self.arena().lookup_any_array()
-    }
-
     /// Look up an existing union type by variant `TypeId`s in the arena.
     ///
     /// Arena-only operation (type construction lookup, not a type predicate).

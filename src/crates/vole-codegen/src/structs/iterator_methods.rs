@@ -103,18 +103,10 @@ impl Cg<'_, '_, '_> {
             "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
             | "flatten" | "flat_map" | "filter_map" => arena.lookup_runtime_iterator(elem_type_id),
 
-            // Methods returning Iterator<[i64, T]> for enumerate
-            "enumerate" => {
-                // [i64, T] element type
-                let tuple_type = arena.lookup_array(TypeId::I64).or_else(|| {
-                    // Fall back to any array if [i64] not found
-                    arena.lookup_runtime_iterator(elem_type_id)
-                });
-                // We need Iterator<[i64, T]> but that may not be in the arena.
-                // Return the same RuntimeIterator<elem_type_id> as a best-effort fallback.
-                // The actual element type tag will be set at runtime.
-                tuple_type.and_then(|_| arena.lookup_runtime_iterator(elem_type_id))
-            }
+            // Methods returning Iterator<[i64, T]> for enumerate.
+            // The actual enumerate element is [i64, T], but the RuntimeIterator
+            // is keyed on the base elem_type_id. Return that if it exists.
+            "enumerate" => arena.lookup_runtime_iterator(elem_type_id),
 
             // Methods returning Iterator<[T, T]> for zip
             "zip" => arena.lookup_runtime_iterator(elem_type_id),
@@ -177,7 +169,10 @@ impl Cg<'_, '_, '_> {
             .arena()
             .lookup_interface(iterator_type_def, smallvec![elem_type_id])
             .ok_or_else(|| {
-                CodegenError::internal("Iterator<T> interface type not found in arena")
+                CodegenError::internal_with_context(
+                    "Iterator<T> interface type not pre-interned by sema",
+                    format!("elem_type_id={elem_type_id:?}"),
+                )
             })?;
 
         // Box the class instance as Iterator<T>
@@ -189,10 +184,14 @@ impl Cg<'_, '_, '_> {
         let mut boxed_iface = boxed;
         self.consume_rc_value(&mut boxed_iface)?;
 
+        // Fall back to RuntimeIterator<i64> when the specific element type
+        // wasn't pre-interned (e.g. propagated class method monomorphs).
+        // All RuntimeIterator types share the same RC-pointer layout.
         let runtime_iter_type_id = self
             .arena()
             .lookup_runtime_iterator(elem_type_id)
-            .unwrap_or(TypeId::STRING);
+            .or_else(|| self.arena().lookup_runtime_iterator(TypeId::I64))
+            .expect("RuntimeIterator<i64> must always be pre-interned");
         Ok(CompiledValue::owned(
             wrapped,
             types::I64,

@@ -406,7 +406,10 @@ impl Cg<'_, '_, '_> {
                 let interface_type_id = self
                     .vir_query_lookup_interface(iterator_type_def, smallvec![elem_type_id])
                     .ok_or_else(|| {
-                        CodegenError::internal("Iterator<T> interface type not found in arena")
+                        CodegenError::internal_with_context(
+                            "Iterator<T> interface type not pre-interned by sema",
+                            format!("elem_type_id={elem_type_id:?}"),
+                        )
                     })?;
                 let boxed = self.box_interface_value(iterable, interface_type_id)?;
                 let iter = self.wrap_interface_iter(boxed, elem_type_id)?;
@@ -435,6 +438,11 @@ impl Cg<'_, '_, '_> {
     // =========================================================================
 
     /// Create a `CompiledValue` for a `RuntimeIterator<T>` from a raw pointer.
+    ///
+    /// Falls back to `RuntimeIterator<i64>` when sema did not pre-intern
+    /// the specific element type (e.g. propagated class method monomorphs).
+    /// All RuntimeIterator types share the same physical layout (RC pointer),
+    /// so the fallback is layout-safe; only VIR type metadata differs.
     pub(crate) fn make_runtime_iter_value(
         &self,
         raw: Value,
@@ -442,7 +450,8 @@ impl Cg<'_, '_, '_> {
     ) -> super::types::CompiledValue {
         let runtime_iter_type_id = self
             .vir_query_lookup_runtime_iterator(elem_type_id)
-            .unwrap_or(TypeId::STRING);
+            .or_else(|| self.vir_query_lookup_runtime_iterator(TypeId::I64))
+            .expect("RuntimeIterator<i64> must always be pre-interned");
         super::types::CompiledValue::owned(raw, types::I64, self.vir_lookup(runtime_iter_type_id))
     }
 
