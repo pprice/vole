@@ -4,17 +4,24 @@
 // lowering.  This is the bridge that converts sema entity definitions
 // (TypeDef, FieldDef, MethodDef, FunctionDef) into VIR-native metadata.
 
-use vole_identity::{Interner, NameTable, VirTypeId};
+use std::collections::HashSet;
+use std::rc::Rc;
+
+use rustc_hash::FxHashMap;
+use vole_identity::{
+    Interner, MethodId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId, TypeId, VirTypeId,
+};
 
 use crate::LoweringEntityLookup;
 use crate::TypeArena;
 use crate::entity_defs::{self, TypeDefKind};
 use crate::implement_registry::PrimitiveTypeId;
 use crate::vir_lower::type_translate::translate_type_id;
+use vole_frontend::{Decl, Program};
 use vole_vir::VirExternalMethodInfo;
 use vole_vir::entity_metadata::{
-    VirEntityMetadata, VirFieldDef, VirFunctionDef, VirGlobalDef, VirImplementation,
-    VirMethodBinding, VirMethodDef, VirTypeDef, VirTypeDefKind,
+    VirEntityMetadata, VirFieldDef, VirFunctionDef, VirGlobalDef, VirImplementBlockEntry,
+    VirImplementation, VirMethodBinding, VirMethodDef, VirTypeDef, VirTypeDefKind,
 };
 use vole_vir::type_table::VirTypeTable;
 
@@ -239,7 +246,7 @@ fn populate_method_defs(
 /// Returns empty params and `VirTypeId::VOID` if the signature cannot
 /// be unwrapped (e.g. for builtins with unresolved signatures).
 fn translate_method_signature(
-    signature_id: vole_identity::TypeId,
+    signature_id: TypeId,
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
 ) -> (Vec<VirTypeId>, VirTypeId) {
@@ -371,5 +378,304 @@ fn populate_impl_type_names(
             PrimitiveTypeId::Handle => type_arena.primitives.handle,
         };
         meta.insert_impl_type_name(type_id, name_id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Implement block entry population
+// ---------------------------------------------------------------------------
+
+/// Build a reverse map from `NameId` to sema `TypeId` for primitive types.
+///
+/// This allows `resolve_self_type_id` to find the sema TypeId for a
+/// primitive TypeDef without walking the AST's `TypeExprKind`.
+fn build_name_to_type_id_map(
+    registry: &crate::EntityRegistry,
+    type_arena: &TypeArena,
+) -> FxHashMap<NameId, TypeId> {
+    let mut map = FxHashMap::default();
+    for (prim_id, name_id) in registry.primitive_name_entries() {
+        let type_id = match prim_id {
+            PrimitiveTypeId::I8 => type_arena.primitives.i8,
+            PrimitiveTypeId::I16 => type_arena.primitives.i16,
+            PrimitiveTypeId::I32 => type_arena.primitives.i32,
+            PrimitiveTypeId::I64 => type_arena.primitives.i64,
+            PrimitiveTypeId::I128 => type_arena.primitives.i128,
+            PrimitiveTypeId::U8 => type_arena.primitives.u8,
+            PrimitiveTypeId::U16 => type_arena.primitives.u16,
+            PrimitiveTypeId::U32 => type_arena.primitives.u32,
+            PrimitiveTypeId::U64 => type_arena.primitives.u64,
+            PrimitiveTypeId::F32 => type_arena.primitives.f32,
+            PrimitiveTypeId::F64 => type_arena.primitives.f64,
+            PrimitiveTypeId::F128 => type_arena.primitives.f128,
+            PrimitiveTypeId::Bool => type_arena.primitives.bool,
+            PrimitiveTypeId::String => type_arena.primitives.string,
+            PrimitiveTypeId::Range => type_arena.primitives.range,
+            PrimitiveTypeId::Handle => type_arena.primitives.handle,
+        };
+        map.insert(name_id, type_id);
+    }
+    map
+}
+
+/// Resolve the sema `TypeId` for a type definition's self binding.
+///
+/// For Class/Struct/Sentinel: uses `TypeDef.base_type_id`.
+/// For Primitive/Range/Handle: uses the pre-computed name-to-type-id map.
+/// For Array: uses any existing array TypeId from the arena.
+fn resolve_self_type_id(
+    type_def_id: TypeDefId,
+    entities: &dyn LoweringEntityLookup,
+    name_to_type_id: &FxHashMap<NameId, TypeId>,
+    type_arena: &TypeArena,
+) -> Option<TypeId> {
+    let td = entities.get_type(type_def_id);
+    // Class/Struct/Sentinel types have base_type_id pre-computed by sema.
+    if let Some(base_type_id) = td.base_type_id {
+        return Some(base_type_id);
+    }
+    // Primitive/Range/Handle types: look up via the name-to-TypeId map.
+    if let Some(&type_id) = name_to_type_id.get(&td.name_id) {
+        return Some(type_id);
+    }
+    // Array type: find any existing array TypeId from the arena.
+    if let Some(array_name_id) = entities.array_name_id()
+        && td.name_id == array_name_id
+    {
+        return type_arena.lookup_any_array();
+    }
+    None
+}
+
+/// Collect instance and static MethodIds for an implement block.
+///
+/// Resolves method names from the AST implement block against the entity
+/// registry to find their MethodIds.  Returns `(instance_methods, static_methods)`.
+fn collect_implement_method_ids(
+    impl_block: &vole_frontend::ast::ImplementBlock,
+    type_def_id: TypeDefId,
+    interner: &Interner,
+    names: &NameTable,
+    entities: &dyn LoweringEntityLookup,
+) -> (Vec<MethodId>, Vec<MethodId>) {
+    let namer = NamerLookup::new(names, interner);
+
+    // Instance methods
+    let instance_methods: Vec<MethodId> = impl_block
+        .methods
+        .iter()
+        .filter_map(|method| {
+            let method_name_id = namer.method(method.name)?;
+            entities.find_method_on_type(type_def_id, method_name_id)
+        })
+        .collect();
+
+    // Static methods
+    let static_methods: Vec<MethodId> = impl_block
+        .statics
+        .as_ref()
+        .map(|statics| {
+            statics
+                .methods
+                .iter()
+                .filter_map(|method| {
+                    method.body.as_ref()?;
+                    let method_name_id = namer.method(method.name)?;
+                    entities.find_static_method_on_type(type_def_id, method_name_id)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    (instance_methods, static_methods)
+}
+
+/// Arguments for populating implement block entries on VirEntityMetadata.
+pub struct PopulateImplementBlockEntriesArgs<'a> {
+    pub program: &'a Program,
+    pub interner: &'a Interner,
+    pub names: &'a NameTable,
+    pub entities: &'a dyn LoweringEntityLookup,
+    pub type_arena: &'a TypeArena,
+    pub module_id: ModuleId,
+    pub module_programs: &'a FxHashMap<String, (Program, Rc<Interner>)>,
+    pub modules_with_errors: &'a HashSet<String>,
+    pub meta: &'a mut VirEntityMetadata,
+}
+
+/// Populate `VirImplementBlockEntry` records on `VirEntityMetadata`.
+///
+/// Iterates implement blocks in both the main program and imported modules,
+/// resolving each to a `(TypeDefId, self_type_id, instance_methods, static_methods)`
+/// tuple stored as a `VirImplementBlockEntry`.  Codegen iterates these instead
+/// of walking AST `Decl::Implement` nodes.
+pub fn populate_implement_block_entries(args: PopulateImplementBlockEntriesArgs<'_>) {
+    let PopulateImplementBlockEntriesArgs {
+        program,
+        interner,
+        names,
+        entities,
+        type_arena,
+        module_id,
+        module_programs,
+        modules_with_errors,
+        meta,
+    } = args;
+
+    let registry = entities.as_entity_registry();
+    let name_to_type_id = build_name_to_type_id_map(registry, type_arena);
+
+    // Main program implement blocks
+    for decl in &program.declarations {
+        let Decl::Implement(impl_block) = decl else {
+            continue;
+        };
+        let Some(type_def_id) = super::implement_blocks::resolve_implement_target(
+            &impl_block.target_type,
+            interner,
+            names,
+            entities,
+            module_id,
+        ) else {
+            continue;
+        };
+        let Some(self_type_id) =
+            resolve_self_type_id(type_def_id, entities, &name_to_type_id, type_arena)
+        else {
+            continue;
+        };
+        let (instance_methods, static_methods) =
+            collect_implement_method_ids(impl_block, type_def_id, interner, names, entities);
+
+        meta.insert_implement_block(VirImplementBlockEntry {
+            type_def_id,
+            self_type_id,
+            instance_methods,
+            static_methods,
+            module_id,
+        });
+    }
+
+    // Also collect implement blocks from tests blocks (recursively)
+    collect_tests_implement_blocks(
+        &program.declarations,
+        interner,
+        names,
+        entities,
+        type_arena,
+        module_id,
+        &name_to_type_id,
+        meta,
+    );
+
+    // Module implement blocks
+    for (module_path, (mod_program, mod_interner)) in module_programs {
+        if modules_with_errors.contains(module_path.as_str()) {
+            continue;
+        }
+        let mod_module_id = names
+            .module_id_if_known(module_path)
+            .unwrap_or_else(|| names.main_module());
+
+        for decl in &mod_program.declarations {
+            let Decl::Implement(impl_block) = decl else {
+                continue;
+            };
+            let Some(type_def_id) = super::implement_blocks::resolve_implement_target(
+                &impl_block.target_type,
+                mod_interner,
+                names,
+                entities,
+                mod_module_id,
+            ) else {
+                continue;
+            };
+            let Some(self_type_id) =
+                resolve_self_type_id(type_def_id, entities, &name_to_type_id, type_arena)
+            else {
+                continue;
+            };
+            let (instance_methods, static_methods) = collect_implement_method_ids(
+                impl_block,
+                type_def_id,
+                mod_interner,
+                names,
+                entities,
+            );
+
+            meta.insert_module_implement_block(
+                module_path.clone(),
+                VirImplementBlockEntry {
+                    type_def_id,
+                    self_type_id,
+                    instance_methods,
+                    static_methods,
+                    module_id: mod_module_id,
+                },
+            );
+        }
+    }
+}
+
+/// Recursively collect implement blocks from tests { } blocks.
+#[allow(clippy::too_many_arguments)]
+fn collect_tests_implement_blocks(
+    decls: &[Decl],
+    interner: &Interner,
+    names: &NameTable,
+    entities: &dyn LoweringEntityLookup,
+    type_arena: &TypeArena,
+    module_id: ModuleId,
+    name_to_type_id: &FxHashMap<NameId, TypeId>,
+    meta: &mut VirEntityMetadata,
+) {
+    for decl in decls {
+        if let Decl::Tests(tests) = decl {
+            for inner_decl in &tests.decls {
+                if let Decl::Implement(impl_block) = inner_decl {
+                    let Some(type_def_id) = super::implement_blocks::resolve_implement_target(
+                        &impl_block.target_type,
+                        interner,
+                        names,
+                        entities,
+                        module_id,
+                    ) else {
+                        continue;
+                    };
+                    let Some(self_type_id) =
+                        resolve_self_type_id(type_def_id, entities, name_to_type_id, type_arena)
+                    else {
+                        continue;
+                    };
+                    let (instance_methods, static_methods) = collect_implement_method_ids(
+                        impl_block,
+                        type_def_id,
+                        interner,
+                        names,
+                        entities,
+                    );
+
+                    meta.insert_implement_block(VirImplementBlockEntry {
+                        type_def_id,
+                        self_type_id,
+                        instance_methods,
+                        static_methods,
+                        module_id,
+                    });
+                }
+            }
+
+            // Recursively handle nested tests blocks
+            collect_tests_implement_blocks(
+                &tests.decls,
+                interner,
+                names,
+                entities,
+                type_arena,
+                module_id,
+                name_to_type_id,
+                meta,
+            );
+        }
     }
 }

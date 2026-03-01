@@ -339,12 +339,6 @@ impl<'a> Compiler<'a> {
             .unwrap_or(VirTypeId::UNKNOWN)
     }
 
-    /// Look up any existing array `TypeId` in the arena.
-    #[inline]
-    fn vir_query_lookup_any_array(&self) -> Option<TypeId> {
-        self.arena().lookup_any_array()
-    }
-
     /// Look up an existing array type by element `TypeId` in the arena.
     #[inline]
     fn vir_query_lookup_array(&self, elem: TypeId) -> Option<TypeId> {

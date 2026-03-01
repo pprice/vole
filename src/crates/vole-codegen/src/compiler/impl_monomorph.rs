@@ -6,7 +6,7 @@
 //! - Module implement block compilation: `compile_module_implement_block`
 //! - Individual implement method compilation: `compile_implement_method`, `compile_module_implement_method`
 //! - Implement statics compilation: `compile_implement_statics`
-//! - Interface method body collection: `collect_interface_method_body`
+//! - Interface interner resolution: `find_interface_method_interner`
 //! - Array iterable default methods: `compile_array_iterable_default_methods`, `import_array_iterable_default_methods`
 
 use std::rc::Rc;
@@ -14,867 +14,87 @@ use std::rc::Rc;
 use rustc_hash::FxHashMap;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
-use super::impls::primitive_type_id_by_name;
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{
-    CodegenCtx, MethodInfo, ast_primitive_type_id, method_name_id_with_interner,
-    type_id_to_cranelift,
-};
+use crate::types::{CodegenCtx, MethodInfo, type_id_to_cranelift};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
-use vole_frontend::ast::{ImplementBlock, StaticsBlock};
-use vole_frontend::{FuncDecl, Interner, Symbol, TypeExprKind};
+use vole_frontend::{Interner, Symbol};
 use vole_identity::{MethodId, ModuleId, NameId, TypeDefId, TypeId};
+use vole_vir::VirImplementBlockEntry;
 
 impl Compiler<'_> {
-    /// Register implement block methods (first pass)
+    /// Register implement block methods (first pass).
+    ///
+    /// Takes pre-resolved VIR metadata instead of walking AST `ImplementBlock`.
     pub(super) fn register_implement_block(
         &mut self,
-        impl_block: &ImplementBlock,
+        entry: &VirImplementBlockEntry,
     ) -> CodegenResult<()> {
-        let module_id = self.program_module();
-        self.register_implement_block_in_module(impl_block, module_id)
+        self.register_implement_block_inner(entry, None)
     }
 
-    /// Register implement block methods using a specific module for type lookups.
-    pub(super) fn register_implement_block_in_module(
+    /// Register implement block methods using a specific module interner.
+    ///
+    /// The `interner_override` is used for module implement blocks where
+    /// symbols come from the module's interner rather than the main program.
+    pub(super) fn register_implement_block_with_module_interner(
         &mut self,
-        impl_block: &ImplementBlock,
-        module_id: ModuleId,
+        entry: &VirImplementBlockEntry,
+        interner: &Rc<Interner>,
     ) -> CodegenResult<()> {
-        let interner = self.analyzed.interner_rc();
-        self.register_implement_block_with_interner(impl_block, &interner, module_id)
+        self.register_implement_block_inner(entry, Some(interner))
     }
 
     /// Import all methods (instance + static) from a module implement block.
     /// Uses Linkage::Import for pre-compiled modules in shared cache.
+    ///
+    /// Takes pre-resolved VIR metadata instead of walking AST `ImplementBlock`.
     pub(super) fn import_module_implement_block(
         &mut self,
-        impl_block: &ImplementBlock,
-        interner: &Interner,
-        module_id: ModuleId,
+        entry: &VirImplementBlockEntry,
     ) -> CodegenResult<()> {
-        // Use module-specific interner for symbol resolution
-        let Some(type_name) =
-            self.get_type_name_from_expr_with_interner(&impl_block.target_type, interner)
-        else {
-            return Ok(());
-        };
-
-        // Get TypeId for self binding (same as register_implement_block_with_interner).
-        // Handles primitive types, handle, array, and named/generic types.
-        let (self_type_id, impl_type_name_id) = match &impl_block.target_type.kind {
-            TypeExprKind::Primitive(p) => {
-                let type_id = ast_primitive_type_id(*p);
-                let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
-                (type_id, impl_id)
-            }
-            TypeExprKind::Handle => {
-                let type_id = TypeId::HANDLE;
-                let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
-                (type_id, impl_id)
-            }
-            // Array target type: `extend [T] with Iterable<T>`.
-            TypeExprKind::Array(_) => {
-                let type_id = match self.vir_query_lookup_any_array() {
-                    Some(id) => id,
-                    None => return Ok(()), // No array type in arena yet, skip
-                };
-                let array_name_id = match self.analyzed.array_type_name_id() {
-                    Some(id) => id,
-                    None => return Ok(()),
-                };
-                let impl_id = Some(array_name_id);
-                (type_id, impl_id)
-            }
-            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                // Check if this is a named primitive (e.g., "range").
-                let type_name_str = interner.resolve(*sym).to_string();
-                let primitive_type_id = primitive_type_id_by_name(&type_name_str);
-                if !primitive_type_id.is_invalid() {
-                    let impl_id = self
-                        .analyzed
-                        .impl_type_name_id_from_type_id(primitive_type_id);
-                    (primitive_type_id, impl_id)
-                } else {
-                    // Use module-specific interner for symbol resolution
-                    let type_def_id = self
-                        .analyzed
-                        .try_name_id_with_interner(module_id, &[*sym], interner)
-                        .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-                        .ok_or_else(|| {
-                            CodegenError::internal_with_context(
-                                "import_module_implement_block: type not found",
-                                type_name.clone(),
-                            )
-                        })?;
-                    let metadata = self.state.type_metadata.get(&type_def_id).ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "import_module_implement_block: type not in type_metadata",
-                            format!("{:?}", type_def_id),
-                        )
-                    })?;
-                    let impl_id = self
-                        .analyzed
-                        .impl_type_name_id_from_type_id(metadata.vole_type);
-                    (metadata.vole_type, impl_id)
-                }
-            }
-            _ => {
-                return Err(CodegenError::internal(
-                    "import_module_implement_block: unsupported target type",
-                ));
-            }
-        };
-
-        let impl_type_name_id_for_def = impl_type_name_id;
-        let type_def_id_opt =
-            impl_type_name_id_for_def.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
+        let type_def_id = entry.type_def_id;
+        let self_type_id = entry.self_type_id;
+        let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
 
         // Import explicitly declared instance methods
-        for method in &impl_block.methods {
-            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
-            let type_def_id = impl_type_name_id_for_def
-                .and_then(|name_id| self.analyzed.try_type_def_id(name_id));
-
-            let (sig, semantic_method_id) = {
-                let tdef_id = type_def_id.ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "import: type_def_id missing for instance method",
-                        format!("{}.{}", type_name, interner.resolve(method.name)),
-                    )
-                })?;
-                let name_id = method_name_id.ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "import: method_name_id missing for instance method",
-                        format!("{}.{}", type_name, interner.resolve(method.name)),
-                    )
-                })?;
-                let method_id = self.analyzed.find_method(tdef_id, name_id).ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "import: method not in entity_registry",
-                        format!("{}.{}", type_name, interner.resolve(method.name)),
-                    )
-                })?;
-                let sig =
-                    self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
-                (sig, method_id)
-            };
-            let func_key = self.register_method_func(semantic_method_id, &sig, DeclareMode::Import);
-
-            if let Some(tdef_id) = type_def_id
-                && let Some(name_id) = method_name_id
-            {
-                let type_name_id = self.analyzed.entity_type_name_id(tdef_id);
-                self.state
-                    .method_func_keys
-                    .insert((type_name_id, name_id), func_key);
-            }
+        for &method_id in &entry.instance_methods {
+            let method_def = self.analyzed.get_method(method_id);
+            let sig = self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
+            let func_key = self.register_method_func(method_id, &sig, DeclareMode::Import);
+            self.state
+                .method_func_keys
+                .insert((type_name_id, method_def.name_id), func_key);
         }
 
         // Import interface default methods (concrete ones, not abstract/generic).
-        // These were compiled as part of the module (in register_implement_block_with_interner
-        // + compile_module_implement_block) and must be imported when using the module cache.
-        if let Some(type_def_id) = type_def_id_opt {
-            let direct_method_name_strs: std::collections::HashSet<String> = impl_block
-                .methods
-                .iter()
-                .map(|m| interner.resolve(m.name).to_string())
-                .collect();
+        // These were compiled as part of the module and must be imported when using the module cache.
+        let direct_method_name_ids: std::collections::HashSet<NameId> = entry
+            .instance_methods
+            .iter()
+            .map(|&mid| self.analyzed.get_method(mid).name_id)
+            .collect();
 
-            let iface_default_methods: Vec<(MethodId, NameId, TypeDefId)> = {
-                let query = self.analyzed;
-                let mut results = Vec::new();
-                for interface_tdef_id in query.implemented_interfaces(type_def_id) {
-                    for iface_method_id in query.type_methods(interface_tdef_id) {
-                        let method_def = query.get_method(iface_method_id);
-                        if !method_def.has_default || method_def.external_binding.is_some() {
-                            continue;
-                        }
-                        let method_name_str =
-                            query.last_segment(method_def.name_id).unwrap_or_default();
-                        if direct_method_name_strs.contains(&method_name_str) {
-                            continue;
-                        }
-                        if let Some(impl_method_id) =
-                            query.find_method(type_def_id, method_def.name_id)
-                        {
-                            results.push((impl_method_id, method_def.name_id, interface_tdef_id));
-                        }
-                    }
-                }
-                results
-            };
+        let iface_default_methods =
+            self.collect_iface_default_methods(type_def_id, &direct_method_name_ids);
 
-            let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
-            for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
-                // Build TypeParam substitution map for this interface implementation.
-                let type_param_subs = self
-                    .analyzed
-                    .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
-                // Skip abstract/generic default methods (not compiled in the module).
-                if !type_param_subs.is_empty() {
-                    let has_abstract = type_param_subs
-                        .values()
-                        .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
-                    if has_abstract {
-                        continue;
-                    }
-                }
-                let sig = {
-                    let method_def = self.analyzed.get_method(semantic_method_id);
-                    let (param_type_ids, return_type_id) =
-                        match self.vir_query_unwrap_function(method_def.signature_id) {
-                            Some((params, ret, _)) => {
-                                let subst_params: Vec<TypeId> = params
-                                    .iter()
-                                    .map(|&p| {
-                                        if self.vir_query_is_self_type(p) {
-                                            self_type_id
-                                        } else {
-                                            self.vir_query_lookup_substitute(p, &type_param_subs)
-                                                .unwrap_or(p)
-                                        }
-                                    })
-                                    .collect();
-                                let subst_ret = if self.vir_query_is_self_type(ret) {
-                                    self_type_id
-                                } else {
-                                    self.vir_query_lookup_substitute(ret, &type_param_subs)
-                                        .unwrap_or(ret)
-                                };
-                                (subst_params, subst_ret)
-                            }
-                            None => (vec![], self.vir_query_void()),
-                        };
-                    self.build_signature_from_type_ids(
-                        &param_type_ids,
-                        Some(return_type_id),
-                        SelfParam::TypedId(self_type_id),
-                    )
-                };
-                let func_key =
-                    self.register_method_func(semantic_method_id, &sig, DeclareMode::Import);
-                self.state
-                    .method_func_keys
-                    .insert((type_name_id, method_name_id), func_key);
-            }
-        }
-
-        // Import static methods
-        if let Some(ref statics) = impl_block.statics {
-            self.import_implement_statics_block(statics, &type_name, interner, module_id)?;
-        }
-
-        Ok(())
-    }
-
-    /// Import static methods from a statics block.
-    fn import_implement_statics_block(
-        &mut self,
-        statics: &StaticsBlock,
-        type_name: &str,
-        interner: &Interner,
-        module_id: ModuleId,
-    ) -> CodegenResult<()> {
-        let type_def_id = self.analyzed.resolve_type_def_by_str(module_id, type_name);
-
-        for method in &statics.methods {
-            if method.body.is_none() {
-                continue;
-            }
-            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
-            let (sig, semantic_method_id) = {
-                let tdef_id = type_def_id.ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "import: type_def_id missing for static method",
-                        format!("{}.{}", type_name, interner.resolve(method.name)),
-                    )
-                })?;
-                let name_id = method_name_id.ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "import: method_name_id missing for static method",
-                        format!("{}.{}", type_name, interner.resolve(method.name)),
-                    )
-                })?;
-                let method_id = self
-                    .analyzed
-                    .find_static_method(tdef_id, name_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "import: static method not in entity_registry",
-                            format!("{}.{}", type_name, interner.resolve(method.name)),
-                        )
-                    })?;
-                let sig = self.build_signature_for_method(method_id, SelfParam::None);
-                (sig, method_id)
-            };
-            let func_key = self.register_method_func(semantic_method_id, &sig, DeclareMode::Import);
-
-            let type_name_id = self
+        for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
+            // Build TypeParam substitution map for this interface implementation.
+            let type_param_subs = self
                 .analyzed
-                .entity_type_name_id(type_def_id.ok_or_else(|| {
-                    CodegenError::internal("import statics: missing type_def_id")
-                })?);
-            self.state.method_func_keys.insert(
-                (
-                    type_name_id,
-                    method_name_id.ok_or_else(|| {
-                        CodegenError::internal("import statics: missing method_name_id")
-                    })?,
-                ),
-                func_key,
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Register implement block methods with a specific interner and module (for module programs)
-    pub(super) fn register_implement_block_with_interner(
-        &mut self,
-        impl_block: &ImplementBlock,
-        interner: &Interner,
-        module_id: ModuleId,
-    ) -> CodegenResult<()> {
-        // Get type name string using module-specific interner
-        let Some(type_name) =
-            self.get_type_name_from_expr_with_interner(&impl_block.target_type, interner)
-        else {
-            return Ok(()); // Unsupported type for implement block
-        };
-
-        // For named types (records/classes), look up in type_metadata since they're not in type_aliases
-        // Get type_id directly from metadata to avoid to_type() conversion
-        let (self_type_id, impl_type_name_id) = match &impl_block.target_type.kind {
-            TypeExprKind::Primitive(p) => {
-                let type_id = ast_primitive_type_id(*p);
-                let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
-                (type_id, impl_id)
-            }
-            TypeExprKind::Handle => {
-                let type_id = TypeId::HANDLE;
-                let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
-                (type_id, impl_id)
-            }
-            // Array target type: `extend [T] with Iterable<T>`.
-            // All array TypeIds map to pointer_type in Cranelift, so any existing
-            // array TypeId can be used as self_type_id for signature building.
-            // The implement type key is derived from the entity registry's array_name_id,
-            // which is independent of the element type.
-            TypeExprKind::Array(_) => {
-                // Find any existing array TypeId (arena is immutable in codegen).
-                // The prelude always interns [i64] arrays, so this should succeed.
-                let type_id = self.vir_query_lookup_any_array().ok_or_else(|| {
-                    CodegenError::internal(
-                        "extend [T] with Iterable<T>: no array type found in arena (prelude not loaded?)",
-                    )
-                })?;
-                // Use array_name_id directly as the implement type key.
-                let array_name_id = self.analyzed.array_type_name_id().ok_or_else(|| {
-                    CodegenError::internal(
-                        "extend [T] with Iterable<T>: array_name_id not registered in entity registry",
-                    )
-                })?;
-                let impl_id = Some(array_name_id);
-                (type_id, impl_id)
-            }
-            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                // Resolve the symbol string first. If it matches a known primitive name
-                // (e.g. "range", which parses as Named since it is not a lexer keyword),
-                // use primitive_type_id_by_name directly instead of looking up in the
-                // entity registry (builtins are only registered in the builtin module's
-                // namespace, not in module-specific namespace).
-                let type_name_str = interner.resolve(*sym).to_string();
-                let primitive_type_id = primitive_type_id_by_name(&type_name_str);
-                if !primitive_type_id.is_invalid() {
-                    let type_id = primitive_type_id;
-                    let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
-                    (type_id, impl_id)
-                } else {
-                    // Look up TypeDefId from Symbol (for Generic, uses the base class name)
-                    // Use the module-specific interner to resolve symbols from that module's AST
-                    // Try given module first, then fall back to program module
-                    // (implement blocks in tests blocks may target parent-scope types)
-                    let type_def_id = self
-                        .analyzed
-                        .try_name_id_with_interner(module_id, &[*sym], interner)
-                        .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-                        .or_else(|| {
-                            let prog_mod = self.program_module();
-                            if prog_mod != module_id {
-                                // Fall back to program module using its interner
-                                self.analyzed
-                                    .try_name_id(prog_mod, &[*sym])
-                                    .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-                            } else {
-                                None
-                            }
-                        })
-                        .ok_or_else(|| {
-                            CodegenError::internal_with_context(
-                                "implement block target type not in entity registry",
-                                format!("{:?}", sym),
-                            )
-                        })?;
-                    let metadata = self.state.type_metadata.get(&type_def_id).ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "implement block target type not in type_metadata",
-                            format!("{:?}", type_def_id),
-                        )
-                    })?;
-                    // Use TypeId directly
-                    let impl_id = self
-                        .analyzed
-                        .impl_type_name_id_from_type_id(metadata.vole_type);
-                    (metadata.vole_type, impl_id)
-                }
-            }
-            _ => {
-                return Err(CodegenError::internal(
-                    "register_implement_block: target type was not Primitive, Handle, Named, Generic, or Array, but passed get_type_name_from_expr check",
-                ));
-            }
-        };
-
-        // Declare methods as functions: TypeName::methodName (implement block convention)
-        for method in &impl_block.methods {
-            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
-            // Get TypeDefId if available
-            let type_def_id =
-                impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
-
-            // Build signature from pre-resolved types via sema
-            let (sig, semantic_method_id) = {
-                let tdef_id = type_def_id.ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "implement block instance method without TypeDefId",
-                        format!("{}.{}", type_name, interner.resolve(method.name)),
-                    )
-                })?;
-                let name_id = method_name_id.ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "implement block instance method without NameId",
-                        format!("{}.{}", type_name, interner.resolve(method.name)),
-                    )
-                })?;
-                let semantic_method_id =
-                    self.analyzed.find_method(tdef_id, name_id).ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "implement block instance method not in entity_registry",
-                            format!(
-                                "{}.{} (type_def_id={:?}, method_name_id={:?})",
-                                type_name,
-                                interner.resolve(method.name),
-                                tdef_id,
-                                name_id
-                            ),
-                        )
-                    })?;
-                let sig = self.build_signature_for_method(
-                    semantic_method_id,
-                    SelfParam::TypedId(self_type_id),
-                );
-                (sig, semantic_method_id)
-            };
-            let func_key =
-                self.register_method_func(semantic_method_id, &sig, DeclareMode::Declare);
-            // Populate method_func_keys for method lookup using type's NameId for stable lookup
-            if let Some(tdef_id) = type_def_id
-                && let Some(name_id) = method_name_id
-            {
-                let type_name_id = self.analyzed.entity_type_name_id(tdef_id);
-                self.state
-                    .method_func_keys
-                    .insert((type_name_id, name_id), func_key);
-            }
-        }
-
-        // Register interface default methods (if this is an implement block with a trait).
-        // The explicit methods in impl_block.methods have been registered above.
-        // Default methods (not overridden) also need to be registered so that
-        // codegen can find them via method_func_keys at call sites.
-        if let Some(type_def_id) =
-            impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-        {
-            // Collect direct method names (to skip explicitly implemented ones)
-            let direct_method_name_strs: std::collections::HashSet<String> = impl_block
-                .methods
-                .iter()
-                .map(|m| interner.resolve(m.name).to_string())
-                .collect();
-
-            // Get all interface default methods registered on this type by sema.
-            // Sema's register_interface_default_methods_on_implementing_type already
-            // copied default methods onto the implementing type in the entity registry.
-            // We just need to find them and register their JIT functions.
-            let iface_default_methods: Vec<(MethodId, NameId, TypeDefId)> = {
-                let query = self.analyzed;
-                // For each interface the type implements, collect its default methods
-                let mut results = Vec::new();
-                for interface_tdef_id in query.implemented_interfaces(type_def_id) {
-                    for iface_method_id in query.type_methods(interface_tdef_id) {
-                        let method_def = query.get_method(iface_method_id);
-                        if !method_def.has_default {
-                            continue;
-                        }
-                        // Skip external default methods - they are provided by the runtime,
-                        // not compiled from Vole source. Declaring them without compiling
-                        // would cause a JIT "function must be compiled before finalized" panic.
-                        if method_def.external_binding.is_some() {
-                            continue;
-                        }
-                        let method_name_str =
-                            query.last_segment(method_def.name_id).unwrap_or_default();
-                        if direct_method_name_strs.contains(&method_name_str) {
-                            continue; // Explicitly implemented, skip
-                        }
-                        // Find the method as registered on the implementing type
-                        if let Some(impl_method_id) =
-                            query.find_method(type_def_id, method_def.name_id)
-                        {
-                            results.push((impl_method_id, method_def.name_id, interface_tdef_id));
-                        }
-                    }
-                }
-                results
-            };
-
-            // Register each default method in the JIT function registry and method_func_keys.
-            // Build signatures with Placeholder(SelfType) substituted by self_type_id, and
-            // TypeParam(T) substituted with the concrete interface type arg (e.g., i64 for
-            // Iterable<i64>), so that the JIT function declaration signature matches what
-            // the compiler will emit.
-            let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
-            for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
-                // Build TypeParam substitution map for this interface's implementation.
-                let type_param_subs = self
-                    .analyzed
-                    .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
-                // Skip registration if any substitution value is still a TypeParam (abstract).
-                // Generic interface implementations (e.g., `extend [T] with Iterable<T>`) are
-                // handled via monomorphization at the call site, not registered here.
-                if !type_param_subs.is_empty() {
-                    let has_abstract = type_param_subs
-                        .values()
-                        .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
-                    if has_abstract {
-                        continue;
-                    }
-                }
-                let sig = {
-                    let method_def = self.analyzed.get_method(semantic_method_id);
-                    let (param_type_ids, return_type_id) =
-                        match self.vir_query_unwrap_function(method_def.signature_id) {
-                            Some((params, ret, _)) => {
-                                let subst_params: Vec<TypeId> = params
-                                    .iter()
-                                    .map(|&p| {
-                                        if self.vir_query_is_self_type(p) {
-                                            self_type_id
-                                        } else {
-                                            self.vir_query_lookup_substitute(p, &type_param_subs)
-                                                .unwrap_or(p)
-                                        }
-                                    })
-                                    .collect();
-                                let subst_ret = if self.vir_query_is_self_type(ret) {
-                                    self_type_id
-                                } else {
-                                    self.vir_query_lookup_substitute(ret, &type_param_subs)
-                                        .unwrap_or(ret)
-                                };
-                                (subst_params, subst_ret)
-                            }
-                            None => (vec![], self.vir_query_void()),
-                        };
-                    self.build_signature_from_type_ids(
-                        &param_type_ids,
-                        Some(return_type_id),
-                        SelfParam::TypedId(self_type_id),
-                    )
-                };
-                let func_key =
-                    self.register_method_func(semantic_method_id, &sig, DeclareMode::Declare);
-                self.state
-                    .method_func_keys
-                    .insert((type_name_id, method_name_id), func_key);
-            }
-        }
-
-        // Register static methods from statics block (if present)
-        if let Some(ref statics) = impl_block.statics {
-            // Reuse the already-resolved impl type identity.
-            // This works for module-local types and avoids program_module()-only lookup.
-            let type_def_id =
-                impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
-
-            for method in &statics.methods {
-                // Only register methods with bodies
-                if method.body.is_none() {
+                .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
+            // Skip abstract/generic default methods (not compiled in the module).
+            if !type_param_subs.is_empty() {
+                let has_abstract = type_param_subs
+                    .values()
+                    .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
+                if has_abstract {
                     continue;
                 }
-
-                // Get method name id for lookup
-                let method_name_id =
-                    method_name_id_with_interner(self.analyzed, interner, method.name);
-
-                // Build signature from pre-resolved types via sema
-                let (sig, semantic_method_id) = {
-                    let tdef_id = type_def_id.ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "implement statics method without TypeDefId",
-                            format!("{}.{}", type_name, interner.resolve(method.name)),
-                        )
-                    })?;
-                    let name_id = method_name_id.ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "implement statics method without NameId",
-                            format!("{}.{}", type_name, interner.resolve(method.name)),
-                        )
-                    })?;
-                    let method_id = self
-                        .analyzed
-                        .find_static_method(tdef_id, name_id)
-                        .ok_or_else(|| {
-                            CodegenError::internal_with_context(
-                                "implement statics method not in entity_registry",
-                                format!(
-                                    "{}.{} (type_def_id={:?}, method_name_id={:?})",
-                                    type_name,
-                                    interner.resolve(method.name),
-                                    tdef_id,
-                                    name_id
-                                ),
-                            )
-                        })?;
-                    let sig = self.build_signature_for_method(method_id, SelfParam::None);
-                    (sig, method_id)
-                };
-
-                let func_key =
-                    self.register_method_func(semantic_method_id, &sig, DeclareMode::Declare);
-
-                // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
-                let tdef_id = type_def_id.ok_or_else(|| {
-                    CodegenError::internal("register_implement_block statics: missing type_def_id")
-                })?;
-                let type_name_id = self.analyzed.entity_type_name_id(tdef_id);
-                self.state.method_func_keys.insert(
-                    (
-                        type_name_id,
-                        method_name_id.ok_or_else(|| {
-                            CodegenError::internal(
-                                "register_implement_block statics: missing method_name_id",
-                            )
-                        })?,
-                    ),
-                    func_key,
-                );
             }
-        }
-
-        Ok(())
-    }
-
-    /// Compile implement block methods (second pass)
-    pub(super) fn compile_implement_block(
-        &mut self,
-        impl_block: &ImplementBlock,
-    ) -> CodegenResult<()> {
-        let module_id = self.program_module();
-        self.compile_implement_block_in_module(impl_block, module_id)
-    }
-
-    /// Compile implement block methods using a specific module for type lookups.
-    pub(super) fn compile_implement_block_in_module(
-        &mut self,
-        impl_block: &ImplementBlock,
-        module_id: ModuleId,
-    ) -> CodegenResult<()> {
-        // Get type name string (works for primitives and named types)
-        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
-            return Ok(()); // Unsupported type for implement block
-        };
-
-        // Get the TypeId for `self` binding
-        // For named types (records/classes), look up in type_metadata since they're not in type_aliases
-        let self_type_id = match &impl_block.target_type.kind {
-            TypeExprKind::Primitive(p) => ast_primitive_type_id(*p),
-            TypeExprKind::Handle => TypeId::HANDLE,
-            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                // Try given module first, then fall back to program module
-                let type_def_id = self
-                    .analyzed
-                    .try_name_id(module_id, &[*sym])
-                    .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-                    .or_else(|| {
-                        let prog_mod = self.program_module();
-                        if prog_mod != module_id {
-                            self.analyzed
-                                .try_name_id(prog_mod, &[*sym])
-                                .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "implement block self type not in entity registry",
-                            format!("{:?}", sym),
-                        )
-                    })?;
-                self.state
-                    .type_metadata
-                    .get(&type_def_id)
-                    .map(|m| m.vole_type)
-                    .ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "implement block self type not in type_metadata",
-                            format!("{:?}", type_def_id),
-                        )
-                    })?
-            }
-            _ => {
-                return Err(CodegenError::internal(
-                    "compile_implement_block: self type was not Primitive, Handle, Named, or Generic, but passed get_type_name_from_expr check",
-                ));
-            }
-        };
-        // Get TypeDefId for method lookup via method_func_keys
-        let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
-        let type_def_id =
-            impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
-
-        for method in &impl_block.methods {
-            let method_key = if let Some(type_def_id) = type_def_id {
-                // Use type's NameId for stable lookup across analyzer instances
-                let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
-                let method_id = self.method_name_id(method.name)?;
-                self.state
-                    .method_func_keys
-                    .get(&(type_name_id, method_id))
-                    .map(|&func_key| MethodInfo { func_key })
-            } else {
-                None
-            };
-            self.compile_implement_method(method, self_type_id, method_key)?;
-        }
-
-        // Compile interface default methods (if this is a trait implement block).
-        // These are default methods from the interface that are NOT explicitly implemented
-        // in impl_block.methods. They've been registered in pass 1; now compile their bodies.
-        if let Some(type_def_id) = type_def_id {
-            let direct_method_name_strs: std::collections::HashSet<String> = impl_block
-                .methods
-                .iter()
-                .map(|m| self.resolve_symbol(m.name))
-                .collect();
-
-            // Collect (interface_name_str, default_method_name_id, interface_tdef_id) triples.
-            let iface_default_method_ids: Vec<(String, MethodId, NameId, TypeDefId)> = {
-                let query = self.analyzed;
-                let mut results = Vec::new();
-                for interface_tdef_id in query.implemented_interfaces(type_def_id) {
-                    let iface_name_str = query
-                        .last_segment(query.entity_type_name_id(interface_tdef_id))
-                        .unwrap_or_default();
-                    for iface_method_id in query.type_methods(interface_tdef_id) {
-                        let method_def = query.get_method(iface_method_id);
-                        if !method_def.has_default {
-                            continue;
-                        }
-                        // Skip external default methods - only Vole-implemented defaults have bodies.
-                        if method_def.external_binding.is_some() {
-                            continue;
-                        }
-                        let method_name_str =
-                            query.last_segment(method_def.name_id).unwrap_or_default();
-                        if direct_method_name_strs.contains(&method_name_str) {
-                            continue;
-                        }
-                        if let Some(impl_method_id) =
-                            query.find_method(type_def_id, method_def.name_id)
-                        {
-                            results.push((
-                                iface_name_str.clone(),
-                                impl_method_id,
-                                method_def.name_id,
-                                interface_tdef_id,
-                            ));
-                        }
-                    }
-                }
-                results
-            };
-
-            // Compile each default method body using the appropriate interner.
-            // We need the InterfaceMethod AST node (with the body) from the right program.
-            for (iface_name_str, semantic_method_id, method_name_id, interface_tdef_id) in
-                iface_default_method_ids
-            {
-                // Look up function key (registered in pass 1)
-                let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
-                let func_key = match self
-                    .state
-                    .method_func_keys
-                    .get(&(type_name_id, method_name_id))
-                {
-                    Some(&k) => k,
-                    None => continue, // Not registered, skip
-                };
-                let func_id = match self.func_registry.func_id(func_key) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                // Skip if the function was imported from cache (Import linkage), not declared
-                // for local compilation (Export linkage). This happens when a user file has
-                // `implement string { ... }` and the prelude (which already compiled string::lt,
-                // string::gt, etc.) is cached — those default methods are already available as
-                // imports and must not be redefined.
-                if !self.jit.is_local_func_id(func_id) {
-                    continue;
-                }
-
-                // Collect method_name_str for searching the interface decl
-                let method_name_str = self
-                    .analyzed
-                    .name_table()
-                    .last_segment_str(method_name_id)
-                    .unwrap_or_default();
-
-                // Find the interface AST decl and compile the method body
-                let iface_info =
-                    self.collect_interface_method_body(&iface_name_str, &method_name_str);
-                let Some((_body, method_params, iface_interner, iface_module_id)) = iface_info
-                else {
-                    continue;
-                };
-
-                // Build type-parameter substitution map for this interface implementation.
-                // E.g., for `extend range with Iterable<i64>`, maps T_name_id -> i64.
-                let type_param_subs = self
-                    .analyzed
-                    .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
-
-                // Skip compilation if any substitution value is still a TypeParam (abstract/generic).
-                // This handles `extend [T] with Iterable<T>` where T is unresolved — those default
-                // methods are instantiated at the call site via monomorphization, not compiled here.
-                if !type_param_subs.is_empty() {
-                    let has_abstract = type_param_subs
-                        .values()
-                        .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
-                    if has_abstract {
-                        continue;
-                    }
-                }
-
-                // Get signature data from sema, substituting:
-                //   1. Placeholder(SelfType) -> self_type_id
-                //   2. TypeParam(T) -> concrete element type (via type_param_subs)
-                let (param_type_ids, return_type_id) = {
-                    let method_def = self.analyzed.get_method(semantic_method_id);
+            let sig = {
+                let method_def = self.analyzed.get_method(semantic_method_id);
+                let (param_type_ids, return_type_id) =
                     match self.vir_query_unwrap_function(method_def.signature_id) {
                         Some((params, ret, _)) => {
                             let subst_params: Vec<TypeId> = params
@@ -896,187 +116,211 @@ impl Compiler<'_> {
                             };
                             (subst_params, subst_ret)
                         }
-                        None => continue,
-                    }
-                };
-
-                // Build signature from substituted types (not via build_signature_for_method
-                // which uses the unsubstituted signature_id from sema).
-                let sig = self.build_signature_from_type_ids(
+                        None => (vec![], self.vir_query_void()),
+                    };
+                self.build_signature_from_type_ids(
                     &param_type_ids,
                     Some(return_type_id),
                     SelfParam::TypedId(self_type_id),
-                );
-                self.jit.ctx.func.signature = sig;
-
-                let param_types = self.type_ids_to_cranelift(&param_type_ids);
-                let params: Vec<_> = method_params
-                    .iter()
-                    .zip(param_type_ids.iter())
-                    .zip(param_types.iter())
-                    .map(|((p, &type_id), &cranelift_type)| (*p, type_id, cranelift_type))
-                    .collect();
-
-                let self_sym = iface_interner
-                    .lookup("self")
-                    .unwrap_or_else(|| self.self_symbol());
-
-                let source_file_ptr = self.source_file_ptr();
-                let self_cranelift_type =
-                    type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
-                let self_binding = (self_sym, self_type_id, self_cranelift_type);
-
-                let mut builder_ctx = FunctionBuilderContext::new();
-                {
-                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env = compile_env!(self, &iface_interner, source_file_ptr);
-                    let mut codegen_ctx = CodegenCtx::new(
-                        &mut self.jit.module,
-                        &mut self.func_registry,
-                        &mut self.pending_monomorphs,
-                    );
-                    let mut config =
-                        FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
-                    // Iterable default method bodies have special RC ownership semantics:
-                    // the outer call-site (used_array_iterable_path) transfers closure
-                    // ownership to the body, so pipeline methods must NOT rc_inc and
-                    // terminal methods must emit rc_dec after the runtime call.
-                    if self
-                        .analyzed
-                        .name_table()
-                        .well_known
-                        .is_iterable_type_def(interface_tdef_id)
-                    {
-                        config = config.with_iterable_default_body();
-                    }
-                    // Pass type parameter substitutions so that abstract type params
-                    // (e.g. T in Iterable<T>) are resolved to concrete types (e.g. string)
-                    // when compiling the default method body. Without this, calls like
-                    // `self.iter().take(n)` inside the Iterable::take default body would
-                    // see the return of self.iter() as Iterator<T> (abstract interface type)
-                    // and use vtable dispatch for the chained .take(n) call, causing a
-                    // segfault when the actual runtime value is a raw *mut RcIterator.
-                    let subs = if type_param_subs.is_empty() {
-                        None
-                    } else {
-                        Some(&type_param_subs)
-                    };
-                    // VIR path — all implement block default methods are lowered
-                    let vir_func = self
-                        .analyzed
-                        .get_vir_method(semantic_method_id)
-                        .expect("implement block default method should have VIR");
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir_func.body,
-                        iface_module_id,
-                        subs,
-                    )?;
-                }
-                self.finalize_function(func_id)?;
-            }
+                )
+            };
+            let func_key = self.register_method_func(semantic_method_id, &sig, DeclareMode::Import);
+            self.state
+                .method_func_keys
+                .insert((type_name_id, method_name_id), func_key);
         }
 
-        // Compile static methods from statics block (if present)
-        if let Some(ref statics) = impl_block.statics {
-            let interner = self.analyzed.interner_rc();
-            self.compile_implement_statics(statics, &type_name, type_def_id, None, &interner)?;
+        // Import static methods
+        for &method_id in &entry.static_methods {
+            let method_def = self.analyzed.get_method(method_id);
+            let sig = self.build_signature_for_method(method_id, SelfParam::None);
+            let func_key = self.register_method_func(method_id, &sig, DeclareMode::Import);
+            self.state
+                .method_func_keys
+                .insert((type_name_id, method_def.name_id), func_key);
         }
 
         Ok(())
     }
 
-    /// Compile implement block methods from a module, using the module interner.
+    /// Register implement block methods with pre-resolved VIR metadata.
+    ///
+    /// `interner_override` is `Some` for module implement blocks (where symbols
+    /// come from the module's interner rather than the main program interner).
+    fn register_implement_block_inner(
+        &mut self,
+        entry: &VirImplementBlockEntry,
+        _interner_override: Option<&Rc<Interner>>,
+    ) -> CodegenResult<()> {
+        let type_def_id = entry.type_def_id;
+        let self_type_id = entry.self_type_id;
+        let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
+
+        // Declare instance methods as functions
+        for &method_id in &entry.instance_methods {
+            let method_def = self.analyzed.get_method(method_id);
+            let sig = self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
+            let func_key = self.register_method_func(method_id, &sig, DeclareMode::Declare);
+            self.state
+                .method_func_keys
+                .insert((type_name_id, method_def.name_id), func_key);
+        }
+
+        // Register interface default methods (if this is an implement block with a trait).
+        // The explicit methods have been registered above.
+        // Default methods (not overridden) also need to be registered so that
+        // codegen can find them via method_func_keys at call sites.
+        let direct_method_name_ids: std::collections::HashSet<NameId> = entry
+            .instance_methods
+            .iter()
+            .map(|&mid| self.analyzed.get_method(mid).name_id)
+            .collect();
+
+        let iface_default_methods =
+            self.collect_iface_default_methods(type_def_id, &direct_method_name_ids);
+
+        // Register each default method in the JIT function registry and method_func_keys.
+        // Build signatures with Placeholder(SelfType) substituted by self_type_id, and
+        // TypeParam(T) substituted with the concrete interface type arg (e.g., i64 for
+        // Iterable<i64>), so that the JIT function declaration signature matches what
+        // the compiler will emit.
+        for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
+            // Build TypeParam substitution map for this interface's implementation.
+            let type_param_subs = self
+                .analyzed
+                .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
+            // Skip registration if any substitution value is still a TypeParam (abstract).
+            // Generic interface implementations (e.g., `extend [T] with Iterable<T>`) are
+            // handled via monomorphization at the call site, not registered here.
+            if !type_param_subs.is_empty() {
+                let has_abstract = type_param_subs
+                    .values()
+                    .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
+                if has_abstract {
+                    continue;
+                }
+            }
+            let sig = {
+                let method_def = self.analyzed.get_method(semantic_method_id);
+                let (param_type_ids, return_type_id) =
+                    match self.vir_query_unwrap_function(method_def.signature_id) {
+                        Some((params, ret, _)) => {
+                            let subst_params: Vec<TypeId> = params
+                                .iter()
+                                .map(|&p| {
+                                    if self.vir_query_is_self_type(p) {
+                                        self_type_id
+                                    } else {
+                                        self.vir_query_lookup_substitute(p, &type_param_subs)
+                                            .unwrap_or(p)
+                                    }
+                                })
+                                .collect();
+                            let subst_ret = if self.vir_query_is_self_type(ret) {
+                                self_type_id
+                            } else {
+                                self.vir_query_lookup_substitute(ret, &type_param_subs)
+                                    .unwrap_or(ret)
+                            };
+                            (subst_params, subst_ret)
+                        }
+                        None => (vec![], self.vir_query_void()),
+                    };
+                self.build_signature_from_type_ids(
+                    &param_type_ids,
+                    Some(return_type_id),
+                    SelfParam::TypedId(self_type_id),
+                )
+            };
+            let func_key =
+                self.register_method_func(semantic_method_id, &sig, DeclareMode::Declare);
+            self.state
+                .method_func_keys
+                .insert((type_name_id, method_name_id), func_key);
+        }
+
+        // Register static methods (VirImplementBlockEntry only includes methods with bodies)
+        for &method_id in &entry.static_methods {
+            let method_def = self.analyzed.get_method(method_id);
+            let sig = self.build_signature_for_method(method_id, SelfParam::None);
+            let func_key = self.register_method_func(method_id, &sig, DeclareMode::Declare);
+            self.state
+                .method_func_keys
+                .insert((type_name_id, method_def.name_id), func_key);
+        }
+
+        Ok(())
+    }
+
+    /// Compile implement block methods (second pass).
+    ///
+    /// Takes pre-resolved VIR metadata instead of walking AST `ImplementBlock`.
+    pub(super) fn compile_implement_block(
+        &mut self,
+        entry: &VirImplementBlockEntry,
+    ) -> CodegenResult<()> {
+        self.compile_implement_block_inner(entry, None)
+    }
+
+    /// Inner implementation for compiling implement block methods.
+    ///
+    /// `override_module_id` is used for test-scoped implement blocks that need
+    /// to resolve types under a virtual module.
+    fn compile_implement_block_inner(
+        &mut self,
+        entry: &VirImplementBlockEntry,
+        override_module_id: Option<ModuleId>,
+    ) -> CodegenResult<()> {
+        let type_def_id = entry.type_def_id;
+        let self_type_id = entry.self_type_id;
+        let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
+
+        // Compile instance methods
+        for &method_id in &entry.instance_methods {
+            let method_def = self.analyzed.get_method(method_id);
+            let method_key = self
+                .state
+                .method_func_keys
+                .get(&(type_name_id, method_def.name_id))
+                .map(|&func_key| MethodInfo { func_key });
+            self.compile_implement_method_by_id(method_id, self_type_id, method_key, None)?;
+        }
+
+        // Compile interface default methods (if this is a trait implement block).
+        // These are default methods from the interface that are NOT explicitly implemented.
+        // They've been registered in pass 1; now compile their bodies.
+        self.compile_iface_default_methods(entry, override_module_id)?;
+
+        // Compile static methods
+        self.compile_implement_statics_by_ids(&entry.static_methods, type_def_id, None)?;
+
+        Ok(())
+    }
+
+    /// Compile implement block methods from a module.
     /// Handles both instance methods and statics.
+    ///
+    /// Takes pre-resolved VIR metadata instead of walking AST `ImplementBlock`.
     pub(super) fn compile_module_implement_block(
         &mut self,
-        impl_block: &ImplementBlock,
+        entry: &VirImplementBlockEntry,
         interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        // Use module-specific interner for symbol resolution
-        let Some(type_name) =
-            self.get_type_name_from_expr_with_interner(&impl_block.target_type, interner)
-        else {
-            return Ok(());
-        };
-
-        // Get the TypeId for `self` binding
-        let self_type_id = match &impl_block.target_type.kind {
-            TypeExprKind::Primitive(p) => ast_primitive_type_id(*p),
-            TypeExprKind::Handle => TypeId::HANDLE,
-            // Array target type: `extend [T] with Iterable<T>`.
-            // All array TypeIds map to pointer_type in Cranelift, so use any existing
-            // array TypeId from the arena as self_type_id.
-            TypeExprKind::Array(_) => self.vir_query_lookup_any_array().ok_or_else(|| {
-                CodegenError::internal(
-                    "compile_module_implement_block: extend [T] with ...: no array type in arena",
-                )
-            })?,
-            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                // Resolve the symbol string first. If it matches a known primitive name
-                // (e.g. "range", which parses as Named since it is not a lexer keyword),
-                // use primitive_type_id_by_name directly instead of looking up in the
-                // entity registry (builtins are only registered in the builtin module's
-                // namespace, not in module-specific namespaces).
-                let type_name_str = interner.resolve(*sym).to_string();
-                let primitive_type_id = primitive_type_id_by_name(&type_name_str);
-                if !primitive_type_id.is_invalid() {
-                    primitive_type_id
-                } else {
-                    // Use module-specific interner for symbol resolution
-                    let type_def_id = self
-                        .analyzed
-                        .try_name_id_with_interner(module_id, &[*sym], interner)
-                        .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-                        .ok_or_else(|| {
-                            CodegenError::internal_with_context(
-                                "implement block self type not in entity registry",
-                                format!("{:?}", sym),
-                            )
-                        })?;
-                    self.state
-                        .type_metadata
-                        .get(&type_def_id)
-                        .map(|m| m.vole_type)
-                        .ok_or_else(|| {
-                            CodegenError::internal_with_context(
-                                "implement block self type not in type_metadata",
-                                format!("{:?}", type_def_id),
-                            )
-                        })?
-                }
-            }
-            _ => {
-                return Err(CodegenError::internal(
-                    "compile_implement_block: target type was not Primitive, Handle, Named, Generic, or Array",
-                ));
-            }
-        };
-
-        let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
-        let type_def_id =
-            impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
+        let type_def_id = entry.type_def_id;
+        let self_type_id = entry.self_type_id;
+        let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
 
         // Compile instance methods using module interner for name resolution
-        for method in &impl_block.methods {
-            let method_key = type_def_id.and_then(|type_def_id| {
-                let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
-                // Use module interner for method name lookup (cross-interner safe)
-                let method_name_id =
-                    method_name_id_with_interner(self.analyzed, interner, method.name);
-                method_name_id.and_then(|mid| {
-                    self.state
-                        .method_func_keys
-                        .get(&(type_name_id, mid))
-                        .map(|&func_key| MethodInfo { func_key })
-                })
-            });
-            self.compile_module_implement_method(
-                method,
+        for &method_id in &entry.instance_methods {
+            let method_def = self.analyzed.get_method(method_id);
+            let method_key = self
+                .state
+                .method_func_keys
+                .get(&(type_name_id, method_def.name_id))
+                .map(|&func_key| MethodInfo { func_key });
+            self.compile_module_implement_method_by_id(
+                method_id,
                 self_type_id,
                 method_key,
                 interner,
@@ -1085,325 +329,60 @@ impl Compiler<'_> {
         }
 
         // Compile interface default methods (if this is a trait implement block).
-        // These are default methods from the interface that are NOT explicitly implemented
-        // in impl_block.methods. They've been registered in pass 1; now compile their bodies.
-        if let Some(type_def_id) = type_def_id {
-            let direct_method_name_strs: std::collections::HashSet<String> = impl_block
-                .methods
-                .iter()
-                .map(|m| interner.resolve(m.name).to_string())
-                .collect();
-
-            // Collect (interface_name_str, default_method_name_id, interface_tdef_id) triples.
-            let iface_default_method_ids: Vec<(String, MethodId, NameId, TypeDefId)> = {
-                let query = self.analyzed;
-                let mut results = Vec::new();
-                for interface_tdef_id in query.implemented_interfaces(type_def_id) {
-                    let iface_name_str = query
-                        .last_segment(query.entity_type_name_id(interface_tdef_id))
-                        .unwrap_or_default();
-                    for iface_method_id in query.type_methods(interface_tdef_id) {
-                        let method_def = query.get_method(iface_method_id);
-                        if !method_def.has_default {
-                            continue;
-                        }
-                        // Skip external default methods - only Vole-implemented defaults have bodies.
-                        if method_def.external_binding.is_some() {
-                            continue;
-                        }
-                        let method_name_str =
-                            query.last_segment(method_def.name_id).unwrap_or_default();
-                        if direct_method_name_strs.contains(&method_name_str) {
-                            continue;
-                        }
-                        if let Some(impl_method_id) =
-                            query.find_method(type_def_id, method_def.name_id)
-                        {
-                            results.push((
-                                iface_name_str.clone(),
-                                impl_method_id,
-                                method_def.name_id,
-                                interface_tdef_id,
-                            ));
-                        }
-                    }
-                }
-                results
-            };
-
-            // Compile each default method body using the appropriate interner.
-            for (iface_name_str, semantic_method_id, method_name_id, interface_tdef_id) in
-                iface_default_method_ids
-            {
-                // Look up function key (registered in pass 1)
-                let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
-                let func_key = match self
-                    .state
-                    .method_func_keys
-                    .get(&(type_name_id, method_name_id))
-                {
-                    Some(&k) => k,
-                    None => continue, // Not registered, skip
-                };
-                let func_id = match self.func_registry.func_id(func_key) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                // Skip if the function was imported from cache (Import linkage), not declared
-                // for local compilation (Export linkage). This happens when a user file has
-                // `implement string { ... }` and the prelude (which already compiled string::lt,
-                // string::gt, etc.) is cached — those default methods are already available as
-                // imports and must not be redefined.
-                if !self.jit.is_local_func_id(func_id) {
-                    continue;
-                }
-
-                // Collect method_name_str for searching the interface decl
-                let method_name_str = self
-                    .analyzed
-                    .name_table()
-                    .last_segment_str(method_name_id)
-                    .unwrap_or_default();
-
-                // Find the interface AST decl and compile the method body
-                let iface_info =
-                    self.collect_interface_method_body(&iface_name_str, &method_name_str);
-                let Some((_body, method_params, iface_interner, iface_module_id)) = iface_info
-                else {
-                    continue;
-                };
-
-                // Build type-parameter substitution map for this interface implementation.
-                // E.g., for `extend range with Iterable<i64>`, maps T_name_id -> i64.
-                let type_param_subs = self
-                    .analyzed
-                    .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
-
-                // Skip compilation if any substitution value is still a TypeParam (abstract/generic).
-                // This handles `extend [T] with Iterable<T>` where T is unresolved — those default
-                // methods are instantiated at the call site via monomorphization, not compiled here.
-                if !type_param_subs.is_empty() {
-                    let has_abstract = type_param_subs
-                        .values()
-                        .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
-                    if has_abstract {
-                        continue;
-                    }
-                }
-
-                // Get signature data from sema, substituting:
-                //   1. Placeholder(SelfType) -> self_type_id
-                //   2. TypeParam(T) -> concrete element type (via type_param_subs)
-                let (param_type_ids, return_type_id) = {
-                    let method_def = self.analyzed.get_method(semantic_method_id);
-                    match self.vir_query_unwrap_function(method_def.signature_id) {
-                        Some((params, ret, _)) => {
-                            let subst_params: Vec<TypeId> = params
-                                .iter()
-                                .map(|&p| {
-                                    if self.vir_query_is_self_type(p) {
-                                        self_type_id
-                                    } else {
-                                        self.vir_query_lookup_substitute(p, &type_param_subs)
-                                            .unwrap_or(p)
-                                    }
-                                })
-                                .collect();
-                            let subst_ret = if self.vir_query_is_self_type(ret) {
-                                self_type_id
-                            } else {
-                                self.vir_query_lookup_substitute(ret, &type_param_subs)
-                                    .unwrap_or(ret)
-                            };
-                            (subst_params, subst_ret)
-                        }
-                        None => continue,
-                    }
-                };
-
-                // Build signature from substituted types (not via build_signature_for_method
-                // which uses the unsubstituted signature_id from sema).
-                let sig = self.build_signature_from_type_ids(
-                    &param_type_ids,
-                    Some(return_type_id),
-                    SelfParam::TypedId(self_type_id),
-                );
-                self.jit.ctx.func.signature = sig;
-
-                let param_types = self.type_ids_to_cranelift(&param_type_ids);
-                let params: Vec<_> = method_params
-                    .iter()
-                    .zip(param_type_ids.iter())
-                    .zip(param_types.iter())
-                    .map(|((p, &type_id), &cranelift_type)| (*p, type_id, cranelift_type))
-                    .collect();
-
-                let self_sym = iface_interner
-                    .lookup("self")
-                    .unwrap_or_else(|| self.self_symbol());
-
-                let source_file_ptr = self.source_file_ptr();
-                let self_cranelift_type =
-                    type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
-                let self_binding = (self_sym, self_type_id, self_cranelift_type);
-
-                let mut builder_ctx = FunctionBuilderContext::new();
-                {
-                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env = compile_env!(self, &iface_interner, source_file_ptr);
-                    let mut codegen_ctx = CodegenCtx::new(
-                        &mut self.jit.module,
-                        &mut self.func_registry,
-                        &mut self.pending_monomorphs,
-                    );
-                    let mut config =
-                        FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
-                    // Iterable default method bodies have special RC ownership semantics:
-                    // the outer call-site (used_array_iterable_path) transfers closure
-                    // ownership to the body, so pipeline methods must NOT rc_inc and
-                    // terminal methods must emit rc_dec after the runtime call.
-                    if self
-                        .analyzed
-                        .name_table()
-                        .well_known
-                        .is_iterable_type_def(interface_tdef_id)
-                    {
-                        config = config.with_iterable_default_body();
-                    }
-                    // Pass type parameter substitutions so that abstract type params
-                    // (e.g. T in Iterable<T>) are resolved to concrete types (e.g. string)
-                    // when compiling the default method body. Without this, calls like
-                    // `self.iter().take(n)` inside the Iterable::take default body would
-                    // see the return of self.iter() as Iterator<T> (abstract interface type)
-                    // and use vtable dispatch for the chained .take(n) call, causing a
-                    // segfault when the actual runtime value is a raw *mut RcIterator.
-                    let subs = if type_param_subs.is_empty() {
-                        None
-                    } else {
-                        Some(&type_param_subs)
-                    };
-                    // VIR path — all implement block default methods are lowered
-                    let vir = self
-                        .analyzed
-                        .get_vir_method(semantic_method_id)
-                        .expect("implement block default method should have VIR");
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir.body,
-                        iface_module_id,
-                        subs,
-                    )?;
-                }
-                self.finalize_function(func_id)?;
-            }
-        }
+        self.compile_iface_default_methods(entry, None)?;
 
         // Compile static methods
-        if let Some(ref statics) = impl_block.statics {
-            self.compile_implement_statics(
-                statics,
-                &type_name,
-                type_def_id,
-                Some(module_id),
-                interner,
-            )?;
-        }
+        self.compile_implement_statics_by_ids(&entry.static_methods, type_def_id, Some(module_id))?;
 
         Ok(())
     }
 
     /// Compile a single method from a module implement block, using a module interner.
-    fn compile_module_implement_method(
+    ///
+    /// Takes a pre-resolved `MethodId` instead of walking an AST `FuncDecl`.
+    fn compile_module_implement_method_by_id(
         &mut self,
-        method: &FuncDecl,
+        method_id: MethodId,
         self_type_id: TypeId,
         method_info: Option<MethodInfo>,
         interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
-        let type_def_id =
-            impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
-        let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name)
-            .ok_or_else(|| {
-                CodegenError::internal_with_context(
-                    "method name_id not found",
-                    interner.resolve(method.name).to_string(),
-                )
-            })?;
-
-        let semantic_method_id = type_def_id
-            .and_then(|tdef_id| self.analyzed.find_method(tdef_id, method_name_id))
-            .ok_or_else(|| {
-                CodegenError::internal_with_context(
-                    "implement block method not registered",
-                    format!(
-                        "{} (type_def_id={:?})",
-                        interner.resolve(method.name),
-                        type_def_id
-                    ),
-                )
-            })?;
-
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else {
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(method_id);
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             CodegenError::not_found("method", self.func_registry.display(func_key))
         })?;
 
-        let sig =
-            self.build_signature_for_method(semantic_method_id, SelfParam::TypedId(self_type_id));
+        let sig = self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
         self.jit.ctx.func.signature = sig;
 
         let self_cranelift_type =
             type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
 
         let source_file_ptr = self.source_file_ptr();
-        // Use module interner to look up "self" since param names come from the module AST
+        // Use module interner to look up "self"
         let self_sym = interner.lookup("self").ok_or_else(|| {
             CodegenError::internal("'self' keyword not interned in module interner")
         })?;
 
-        // Build params: skip explicit `self` params — they are handled via the separate self_binding.
-        let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let method_def = self.analyzed.get_method(semantic_method_id);
-            let (param_type_ids, _, _) = self
-                .vir_query_unwrap_function(method_def.signature_id)
-                .ok_or_else(|| {
-                    CodegenError::internal("method compilation: missing function signature")
-                })?;
-            method
-                .params
-                .iter()
-                .filter(|p| p.name != self_sym)
-                .zip(param_type_ids.iter())
-                .map(|(param, &type_id)| {
-                    let cranelift_type =
-                        type_id_to_cranelift(type_id, self.arena(), self.pointer_type);
-                    (param.name, type_id, cranelift_type)
-                })
-                .collect()
-        };
+        // Build params from VirMethodDef.param_names (excluding self).
+        let params = self.build_method_params_from_vir(method_id, interner)?;
 
         let method_return_type_id = {
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(method_id);
             self.vir_query_unwrap_function(method_def.signature_id)
                 .map(|(_, ret, _)| ret)
         };
 
         // Get the VIR function (must be available — implement block methods are always lowered)
-        let vir_func = self.analyzed.get_vir_method(semantic_method_id)
-            .unwrap_or_else(|| {
-                panic!("VIR must be available for module implement method (MethodId={semantic_method_id:?})")
-            });
+        let vir_func = self.analyzed.get_vir_method(method_id).unwrap_or_else(|| {
+            panic!("VIR must be available for module implement method (MethodId={method_id:?})")
+        });
 
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -1433,36 +412,17 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile static methods from an implement block's statics section (TypeId-native)
-    fn compile_implement_statics(
+    /// Compile static methods from pre-resolved MethodIds.
+    ///
+    /// Takes a slice of `MethodId`s (from `VirImplementBlockEntry.static_methods`)
+    /// instead of walking an AST `StaticsBlock`.
+    fn compile_implement_statics_by_ids(
         &mut self,
-        statics: &StaticsBlock,
-        type_name: &str,
-        type_def_id: Option<TypeDefId>,
+        static_method_ids: &[MethodId],
+        type_def_id: TypeDefId,
         module_id: Option<ModuleId>,
-        interner: &Interner,
     ) -> CodegenResult<()> {
-        for method in &statics.methods {
-            // Only compile methods with bodies
-            let _body = match &method.body {
-                Some(body) => body,
-                None => continue,
-            };
-
-            // Resolve MethodId for this static method
-            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
-            let semantic_method_id = type_def_id
-                .zip(method_name_id)
-                .and_then(|(tdef_id, name_id)| self.analyzed.find_static_method(tdef_id, name_id));
-
-            let method_id = semantic_method_id.ok_or_else(|| {
-                let method_name_str = interner.resolve(method.name);
-                CodegenError::internal_with_context(
-                    "static method not found in entity registry",
-                    format!("{}::{}", type_name, method_name_str),
-                )
-            })?;
-
+        for &method_id in static_method_ids {
             // Look up the registered function via its full NameId
             let func_key = self
                 .func_registry
@@ -1470,44 +430,51 @@ impl Compiler<'_> {
             let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found(
                     "static method",
-                    format!("{}::{}", type_name, interner.resolve(method.name)),
+                    format!("{:?}::{:?}", type_def_id, method_id),
                 )
             })?;
 
             // Use pre-resolved signature from MethodDef
             let method_def = self.analyzed.get_method(method_id);
-            let (params, ret, _) = self
+            let (param_type_ids, ret, _) = self
                 .vir_query_unwrap_function(method_def.signature_id)
                 .ok_or_else(|| {
                     CodegenError::internal("method compilation: missing function signature")
                 })?;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
-            let (param_type_ids, return_type_id) = (params, Some(ret).filter(|r| !r.is_void()));
+            let return_type_id = Some(ret).filter(|r| !r.is_void());
             self.jit.ctx.func.signature = sig;
 
-            // Build param info for compilation
+            // Build param info from VirMethodDef.param_names
+            let interner = self.interner_for_module(module_id);
             let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
-            let params: Vec<_> = method
-                .params
+            let method_def = self.analyzed.get_method(method_id);
+            let params: Vec<_> = method_def
+                .param_names
                 .iter()
                 .zip(param_type_ids.iter())
                 .zip(param_cranelift_types.iter())
-                .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                .map(|((name_str, &type_id), &cranelift_type)| {
+                    let sym = interner.lookup(name_str).unwrap_or_else(|| {
+                        self.analyzed
+                            .interner()
+                            .lookup(name_str)
+                            .unwrap_or_else(|| panic!("param name '{}' not interned", name_str))
+                    });
+                    (sym, type_id, cranelift_type)
+                })
                 .collect();
 
-            // Get source file pointer and module_id
+            // Get source file pointer
             let source_file_ptr = self.source_file_ptr();
-            let resolved_module_id = module_id;
 
             // Create function builder and compile
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                // Use module interner + module_id when compiling module statics,
-                // otherwise AST Symbols from the module interner are resolved against
-                // the main program interner (which has different indices).
-                let env = if let Some(_mid) = resolved_module_id {
-                    compile_env!(self, interner, source_file_ptr)
+                // Use module interner when compiling module statics
+                let env = if module_id.is_some() {
+                    compile_env!(self, &interner, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
                 };
@@ -1530,7 +497,7 @@ impl Compiler<'_> {
                     &env,
                     config,
                     &vir_func.body,
-                    resolved_module_id,
+                    module_id,
                     None,
                 )?;
             }
@@ -1542,45 +509,28 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile a method from an implement block (TypeId-native version)
-    fn compile_implement_method(
+    /// Compile a method from an implement block by MethodId.
+    ///
+    /// Takes a pre-resolved `MethodId` instead of walking an AST `FuncDecl`.
+    /// `interner_override` is for module methods; pass `None` for main program.
+    fn compile_implement_method_by_id(
         &mut self,
-        method: &FuncDecl,
+        method_id: MethodId,
         self_type_id: TypeId,
         method_info: Option<MethodInfo>,
+        interner_override: Option<&Interner>,
     ) -> CodegenResult<()> {
-        // Look up MethodId from entity_registry first (needed for func_key and signature)
-        let type_def_id = self
-            .analyzed
-            .impl_type_name_id_from_type_id(self_type_id)
-            .and_then(|name_id| self.analyzed.try_type_def_id(name_id));
-        let method_name_id = self.method_name_id(method.name)?;
-
-        let semantic_method_id = type_def_id
-            .and_then(|tdef_id| self.analyzed.find_method(tdef_id, method_name_id))
-            .ok_or_else(|| {
-                let method_name_str = self.resolve_symbol(method.name);
-                CodegenError::internal_with_context(
-                    "implement block method not registered in entity_registry",
-                    format!(
-                        "{} (type_def_id={:?}, method_name_id={:?})",
-                        method_name_str, type_def_id, method_name_id
-                    ),
-                )
-            })?;
-
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else {
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(method_id);
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             CodegenError::not_found("method", self.func_registry.display(func_key))
         })?;
 
-        let sig =
-            self.build_signature_for_method(semantic_method_id, SelfParam::TypedId(self_type_id));
+        let sig = self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
         self.jit.ctx.func.signature = sig;
 
         // Get the Cranelift type for self (using TypeId)
@@ -1591,32 +541,13 @@ impl Compiler<'_> {
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
 
-        // Build params: Vec<(Symbol, TypeId, Type)>
-        // Get param TypeIds from the method signature and pair with AST param names.
-        // Skip explicit `self` params — they are handled via the separate self_binding.
-        let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let method_def = self.analyzed.get_method(semantic_method_id);
-            let (param_type_ids, _, _) = self
-                .vir_query_unwrap_function(method_def.signature_id)
-                .ok_or_else(|| {
-                    CodegenError::internal("method compilation: missing function signature")
-                })?;
-            method
-                .params
-                .iter()
-                .filter(|p| p.name != self_sym)
-                .zip(param_type_ids.iter())
-                .map(|(param, &type_id)| {
-                    let cranelift_type =
-                        type_id_to_cranelift(type_id, self.arena(), self.pointer_type);
-                    (param.name, type_id, cranelift_type)
-                })
-                .collect()
-        };
+        // Build params from VirMethodDef.param_names (excluding self)
+        let interner = interner_override.unwrap_or(self.analyzed.interner());
+        let params = self.build_method_params_from_vir(method_id, interner)?;
 
         // Get the method's return type from the pre-resolved signature
         let method_return_type_id = {
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(method_id);
             self.vir_query_unwrap_function(method_def.signature_id)
                 .map(|(_, ret, _)| ret)
         };
@@ -1640,7 +571,7 @@ impl Compiler<'_> {
             // VIR path — all implement block methods are lowered
             let vir_func = self
                 .analyzed
-                .get_vir_method(semantic_method_id)
+                .get_vir_method(method_id)
                 .expect("implement block method should have VIR");
             compile_function_inner_with_vir(
                 builder,
@@ -1659,24 +590,18 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Collect the body and parameter names for a default method from an interface.
+    /// Find the interner and module_id for an interface's default method.
     ///
     /// Searches main program and all module programs for the interface by name,
-    /// then finds the method by name. Returns the body, parameter symbols,
-    /// the interner that owns those symbols, and the module_id (if from a module).
+    /// then finds the method by name. Returns the interner that owns the method's
+    /// symbols and the module_id (if from a module).
     ///
     /// Returns None if the interface or method is not found.
-    #[allow(clippy::type_complexity)]
-    pub(super) fn collect_interface_method_body(
+    fn find_interface_method_interner(
         &self,
         interface_name_str: &str,
         method_name_str: &str,
-    ) -> Option<(
-        vole_frontend::FuncBody,
-        Vec<Symbol>,
-        Rc<Interner>,
-        Option<ModuleId>,
-    )> {
+    ) -> Option<(Rc<Interner>, Option<ModuleId>)> {
         // Search main program first
         for decl in &self.analyzed.program().declarations {
             if let vole_frontend::Decl::Interface(iface) = decl {
@@ -1686,20 +611,16 @@ impl Compiler<'_> {
                 }
                 for method in &iface.methods {
                     let m_name = self.analyzed.interner().resolve(method.name);
-                    if m_name == method_name_str
-                        && let Some(body) = &method.body
-                    {
-                        let param_syms: Vec<Symbol> =
-                            method.params.iter().map(|p| p.name).collect();
-                        return Some((body.clone(), param_syms, self.analyzed.interner_rc(), None));
+                    if m_name == method_name_str && method.body.is_some() {
+                        return Some((self.analyzed.interner_rc(), None));
                     }
                 }
             }
         }
 
         // Search module programs
-        for (module_path, (program, interner)) in self.analyzed.module_programs() {
-            for decl in &program.declarations {
+        for (module_path, (_program, interner)) in self.analyzed.module_programs() {
+            for decl in &_program.declarations {
                 if let vole_frontend::Decl::Interface(iface) = decl {
                     let iface_name = interner.resolve(iface.name);
                     if iface_name != interface_name_str {
@@ -1707,13 +628,9 @@ impl Compiler<'_> {
                     }
                     for method in &iface.methods {
                         let m_name = interner.resolve(method.name);
-                        if m_name == method_name_str
-                            && let Some(body) = &method.body
-                        {
-                            let param_syms: Vec<Symbol> =
-                                method.params.iter().map(|p| p.name).collect();
+                        if m_name == method_name_str && method.body.is_some() {
                             let module_id = self.analyzed.module_id_if_known(module_path);
-                            return Some((body.clone(), param_syms, interner.clone(), module_id));
+                            return Some((interner.clone(), module_id));
                         }
                     }
                 }
@@ -1721,6 +638,304 @@ impl Compiler<'_> {
         }
 
         None
+    }
+
+    /// Build `(Symbol, TypeId, cranelift::Type)` param triples from VirMethodDef.
+    ///
+    /// Uses `VirMethodDef.param_names` to look up Symbols in the given interner.
+    /// Excludes the `self` parameter (handled separately via self_binding).
+    fn build_method_params_from_vir(
+        &self,
+        method_id: MethodId,
+        interner: &Interner,
+    ) -> CodegenResult<Vec<(Symbol, TypeId, types::Type)>> {
+        let method_def = self.analyzed.get_method(method_id);
+        let (param_type_ids, _, _) = self
+            .vir_query_unwrap_function(method_def.signature_id)
+            .ok_or_else(|| {
+                CodegenError::internal("method compilation: missing function signature")
+            })?;
+        let params = method_def
+            .param_names
+            .iter()
+            .zip(param_type_ids.iter())
+            .map(|(name_str, &type_id)| {
+                let sym = interner
+                    .lookup(name_str)
+                    .or_else(|| self.analyzed.interner().lookup(name_str))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "param name '{}' not interned for method {:?}",
+                            name_str, method_id
+                        )
+                    });
+                let cranelift_type = type_id_to_cranelift(type_id, self.arena(), self.pointer_type);
+                (sym, type_id, cranelift_type)
+            })
+            .collect();
+        Ok(params)
+    }
+
+    /// Get the appropriate interner for a module, falling back to the program interner.
+    fn interner_for_module(&self, module_id: Option<ModuleId>) -> Rc<Interner> {
+        if let Some(mod_id) = module_id {
+            // Try to find the module's interner from module programs
+            for (module_path, (_program, interner)) in self.analyzed.module_programs() {
+                if self.analyzed.module_id_if_known(module_path) == Some(mod_id) {
+                    return interner.clone();
+                }
+            }
+        }
+        self.analyzed.interner_rc()
+    }
+
+    /// Collect interface default methods that are NOT explicitly implemented.
+    ///
+    /// Returns `(impl_method_id, method_name_id, interface_tdef_id)` triples.
+    fn collect_iface_default_methods(
+        &self,
+        type_def_id: TypeDefId,
+        direct_method_name_ids: &std::collections::HashSet<NameId>,
+    ) -> Vec<(MethodId, NameId, TypeDefId)> {
+        let query = self.analyzed;
+        let mut results = Vec::new();
+        for interface_tdef_id in query.implemented_interfaces(type_def_id) {
+            for iface_method_id in query.type_methods(interface_tdef_id) {
+                let method_def = query.get_method(iface_method_id);
+                if !method_def.has_default {
+                    continue;
+                }
+                // Skip external default methods - they are provided by the runtime,
+                // not compiled from Vole source.
+                if method_def.external_binding.is_some() {
+                    continue;
+                }
+                // Skip explicitly implemented methods
+                if direct_method_name_ids.contains(&method_def.name_id) {
+                    continue;
+                }
+                // Find the method as registered on the implementing type
+                if let Some(impl_method_id) = query.find_method(type_def_id, method_def.name_id) {
+                    results.push((impl_method_id, method_def.name_id, interface_tdef_id));
+                }
+            }
+        }
+        results
+    }
+
+    /// Compile interface default method bodies for an implement block.
+    ///
+    /// These are default methods from interfaces that are NOT explicitly implemented.
+    /// They were registered in pass 1; this function compiles their bodies.
+    fn compile_iface_default_methods(
+        &mut self,
+        entry: &VirImplementBlockEntry,
+        _override_module_id: Option<ModuleId>,
+    ) -> CodegenResult<()> {
+        let type_def_id = entry.type_def_id;
+        let self_type_id = entry.self_type_id;
+        let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
+
+        // Collect direct method NameIds to skip explicitly implemented ones
+        let direct_method_name_ids: std::collections::HashSet<NameId> = entry
+            .instance_methods
+            .iter()
+            .map(|&mid| self.analyzed.get_method(mid).name_id)
+            .collect();
+
+        // Collect (interface_name_str, default_method_id, method_name_id, interface_tdef_id)
+        let iface_default_method_ids: Vec<(String, MethodId, NameId, TypeDefId)> = {
+            let query = self.analyzed;
+            let mut results = Vec::new();
+            for interface_tdef_id in query.implemented_interfaces(type_def_id) {
+                let iface_name_str = query
+                    .last_segment(query.entity_type_name_id(interface_tdef_id))
+                    .unwrap_or_default();
+                for iface_method_id in query.type_methods(interface_tdef_id) {
+                    let method_def = query.get_method(iface_method_id);
+                    if !method_def.has_default {
+                        continue;
+                    }
+                    if method_def.external_binding.is_some() {
+                        continue;
+                    }
+                    if direct_method_name_ids.contains(&method_def.name_id) {
+                        continue;
+                    }
+                    if let Some(impl_method_id) = query.find_method(type_def_id, method_def.name_id)
+                    {
+                        results.push((
+                            iface_name_str.clone(),
+                            impl_method_id,
+                            method_def.name_id,
+                            interface_tdef_id,
+                        ));
+                    }
+                }
+            }
+            results
+        };
+
+        for (iface_name_str, semantic_method_id, method_name_id, interface_tdef_id) in
+            iface_default_method_ids
+        {
+            // Look up function key (registered in pass 1)
+            let func_key = match self
+                .state
+                .method_func_keys
+                .get(&(type_name_id, method_name_id))
+            {
+                Some(&k) => k,
+                None => continue,
+            };
+            let func_id = match self.func_registry.func_id(func_key) {
+                Some(id) => id,
+                None => continue,
+            };
+
+            // Skip if the function was imported from cache (Import linkage).
+            if !self.jit.is_local_func_id(func_id) {
+                continue;
+            }
+
+            // Get method_name_str for searching the interface decl
+            let method_name_str = self
+                .analyzed
+                .name_table()
+                .last_segment_str(method_name_id)
+                .unwrap_or_default();
+
+            // Find the interface's interner and module_id
+            let iface_info = self.find_interface_method_interner(&iface_name_str, &method_name_str);
+            let Some((iface_interner, iface_module_id)) = iface_info else {
+                continue;
+            };
+
+            // Build type-parameter substitution map for this interface implementation.
+            let type_param_subs = self
+                .analyzed
+                .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
+
+            // Skip compilation if any substitution value is still a TypeParam (abstract/generic).
+            if !type_param_subs.is_empty() {
+                let has_abstract = type_param_subs
+                    .values()
+                    .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
+                if has_abstract {
+                    continue;
+                }
+            }
+
+            // Get signature data from sema, substituting:
+            //   1. Placeholder(SelfType) -> self_type_id
+            //   2. TypeParam(T) -> concrete element type (via type_param_subs)
+            let (param_type_ids, return_type_id) = {
+                let method_def = self.analyzed.get_method(semantic_method_id);
+                match self.vir_query_unwrap_function(method_def.signature_id) {
+                    Some((params, ret, _)) => {
+                        let subst_params: Vec<TypeId> = params
+                            .iter()
+                            .map(|&p| {
+                                if self.vir_query_is_self_type(p) {
+                                    self_type_id
+                                } else {
+                                    self.vir_query_lookup_substitute(p, &type_param_subs)
+                                        .unwrap_or(p)
+                                }
+                            })
+                            .collect();
+                        let subst_ret = if self.vir_query_is_self_type(ret) {
+                            self_type_id
+                        } else {
+                            self.vir_query_lookup_substitute(ret, &type_param_subs)
+                                .unwrap_or(ret)
+                        };
+                        (subst_params, subst_ret)
+                    }
+                    None => continue,
+                }
+            };
+
+            let sig = self.build_signature_from_type_ids(
+                &param_type_ids,
+                Some(return_type_id),
+                SelfParam::TypedId(self_type_id),
+            );
+            self.jit.ctx.func.signature = sig;
+
+            // Build params from VirMethodDef.param_names using the interface's interner
+            let method_def = self.analyzed.get_method(semantic_method_id);
+            let param_types = self.type_ids_to_cranelift(&param_type_ids);
+            let params: Vec<_> = method_def
+                .param_names
+                .iter()
+                .zip(param_type_ids.iter())
+                .zip(param_types.iter())
+                .map(|((name_str, &type_id), &cranelift_type)| {
+                    let sym = iface_interner
+                        .lookup(name_str)
+                        .or_else(|| self.analyzed.interner().lookup(name_str))
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "param name '{}' not interned for default method {:?}",
+                                name_str, semantic_method_id
+                            )
+                        });
+                    (sym, type_id, cranelift_type)
+                })
+                .collect();
+
+            let self_sym = iface_interner
+                .lookup("self")
+                .unwrap_or_else(|| self.self_symbol());
+
+            let source_file_ptr = self.source_file_ptr();
+            let self_cranelift_type =
+                type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
+            let self_binding = (self_sym, self_type_id, self_cranelift_type);
+
+            let mut builder_ctx = FunctionBuilderContext::new();
+            {
+                let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+                let env = compile_env!(self, &iface_interner, source_file_ptr);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
+                let mut config =
+                    FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
+                if self
+                    .analyzed
+                    .name_table()
+                    .well_known
+                    .is_iterable_type_def(interface_tdef_id)
+                {
+                    config = config.with_iterable_default_body();
+                }
+                let subs = if type_param_subs.is_empty() {
+                    None
+                } else {
+                    Some(&type_param_subs)
+                };
+                let vir_func = self
+                    .analyzed
+                    .get_vir_method(semantic_method_id)
+                    .expect("implement block default method should have VIR");
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir_func.body,
+                    iface_module_id,
+                    subs,
+                )?;
+            }
+            self.finalize_function(func_id)?;
+        }
+
+        Ok(())
     }
 
     /// Declare and compile array Iterable default methods for each concrete element type.
@@ -1772,7 +987,7 @@ impl Compiler<'_> {
             }
         };
 
-        // Get the interface name string for collect_interface_method_body
+        // Get the interface name string for find_interface_method_interner
         let iface_name_str: String = {
             let iface_name_id = self.analyzed.entity_type_name_id(iterable_tdef_id);
             self.analyzed
@@ -1893,23 +1108,36 @@ impl Compiler<'_> {
                     .array_iterable_func_keys
                     .insert((*method_name_id, self_type_id), func_key);
 
-                // Find the interface AST method body and compile it
+                // Find the interface's interner and module_id
                 let iface_info =
-                    self.collect_interface_method_body(&iface_name_str, method_name_str);
-                let Some((_body, method_params, iface_interner, iface_module_id)) = iface_info
-                else {
+                    self.find_interface_method_interner(&iface_name_str, method_name_str);
+                let Some((iface_interner, iface_module_id)) = iface_info else {
                     continue;
                 };
 
                 // Set the function signature for compilation
                 self.jit.ctx.func.signature = sig;
 
+                // Build params from VirMethodDef.param_names using the interface's interner
+                let method_def = self.analyzed.get_method(*semantic_method_id);
                 let param_types = self.type_ids_to_cranelift(&param_type_ids);
-                let params: Vec<_> = method_params
+                let params: Vec<_> = method_def
+                    .param_names
                     .iter()
                     .zip(param_type_ids.iter())
                     .zip(param_types.iter())
-                    .map(|((p, &type_id), &cranelift_type)| (*p, type_id, cranelift_type))
+                    .map(|((name_str, &type_id), &cranelift_type)| {
+                        let sym = iface_interner
+                            .lookup(name_str)
+                            .or_else(|| self.analyzed.interner().lookup(name_str))
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "param name '{}' not interned for iterable default method",
+                                    name_str
+                                )
+                            });
+                        (sym, type_id, cranelift_type)
+                    })
                     .collect();
 
                 let self_sym = iface_interner

@@ -329,17 +329,6 @@ impl AnalyzedProgram {
         self.vir_program.name_id(module_id, segments)
     }
 
-    /// Resolve NameId by module and symbol segments with an explicit interner.
-    pub(crate) fn try_name_id_with_interner(
-        &self,
-        module_id: ModuleId,
-        segments: &[Symbol],
-        interner: &Interner,
-    ) -> Option<NameId> {
-        self.vir_program
-            .try_name_id_with_interner(module_id, segments, interner)
-    }
-
     /// Resolve method NameId by short string, panicking when missing.
     pub(crate) fn method_name_id_by_str(&self, name_str: &str) -> NameId {
         self.vir_program.method_name_id_by_str(name_str)
@@ -443,16 +432,6 @@ impl AnalyzedProgram {
             .into_iter()
             .zip(type_args.iter().copied())
             .collect()
-    }
-
-    /// Find a static method on a type by method NameId.
-    pub(crate) fn find_static_method(
-        &self,
-        type_def_id: TypeDefId,
-        method_name_id: NameId,
-    ) -> Option<MethodId> {
-        self.entity_metadata()
-            .find_static_method_on_type(type_def_id, method_name_id)
     }
 
     /// Get the full NameId for a semantic method.

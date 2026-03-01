@@ -4,7 +4,9 @@ use std::rc::Rc;
 use rustc_hash::FxHashMap;
 
 use super::annotation_inits::lower_annotation_inits;
-use super::entity_metadata::build_entity_metadata;
+use super::entity_metadata::{
+    PopulateImplementBlockEntriesArgs, build_entity_metadata, populate_implement_block_entries,
+};
 use super::field_default_inits::{
     LowerFieldDefaultInitsArgs, LowerModuleFieldDefaultInitsArgs, lower_field_default_inits,
     lower_module_field_default_inits,
@@ -353,7 +355,19 @@ where
 
     let monomorph_info = populate_monomorph_info(entities, type_arena, &mut type_table);
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
-    let entity_metadata = build_entity_metadata(entities, type_arena, &type_table, interner, names);
+    let mut entity_metadata =
+        build_entity_metadata(entities, type_arena, &type_table, interner, names);
+    populate_implement_block_entries(PopulateImplementBlockEntriesArgs {
+        program,
+        interner,
+        names,
+        entities,
+        type_arena,
+        module_id,
+        module_programs: &module_programs,
+        modules_with_errors,
+        meta: &mut entity_metadata,
+    });
     let implement_dispatch = build_implement_dispatch(implements);
     let mut vir_program = VirProgram {
         type_table,

@@ -294,6 +294,32 @@ pub struct VirMethodBinding {
 }
 
 // ---------------------------------------------------------------------------
+// Implement block entry (codegen iteration)
+// ---------------------------------------------------------------------------
+
+/// VIR-native metadata for a single implement block.
+///
+/// Captures everything codegen needs to register and compile an implement
+/// block without walking AST `ImplementBlock` nodes.  Populated during VIR
+/// lowering from sema's `ImplementRegistry` + `EntityRegistry`.
+#[derive(Debug, Clone)]
+pub struct VirImplementBlockEntry {
+    /// The target type definition (e.g. `Point` in `extend Point with Show`).
+    pub type_def_id: TypeDefId,
+    /// The sema `TypeId` for `self` in this implement block's methods.
+    ///
+    /// For named types this is the type's base TypeId; for primitives it's
+    /// `TypeId::I64` etc.; for arrays it's the canonical array TypeId.
+    pub self_type_id: TypeId,
+    /// Instance method IDs declared in this implement block (ordered by declaration).
+    pub instance_methods: Vec<MethodId>,
+    /// Static method IDs declared in this implement block (ordered by declaration).
+    pub static_methods: Vec<MethodId>,
+    /// The module this implement block belongs to.
+    pub module_id: ModuleId,
+}
+
+// ---------------------------------------------------------------------------
 // Global variable definition metadata
 // ---------------------------------------------------------------------------
 
@@ -439,6 +465,16 @@ pub struct VirEntityMetadata {
     /// by `AnalyzedProgram::impl_type_name_id_from_type_id` as a fast-path
     /// before falling back to TypeArena inspection.
     impl_type_names: FxHashMap<TypeId, NameId>,
+    /// Implement block entries for the main program.
+    ///
+    /// Ordered by declaration order.  Codegen iterates these instead of
+    /// walking AST `Decl::Implement` nodes.
+    implement_blocks: Vec<VirImplementBlockEntry>,
+    /// Implement block entries for imported modules.
+    ///
+    /// Keyed by module path string.  Each module's entries are ordered by
+    /// declaration order within that module.
+    module_implement_blocks: FxHashMap<String, Vec<VirImplementBlockEntry>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -520,6 +556,23 @@ impl VirEntityMetadata {
     /// `impl_type_name_id_from_type_id` uses as a fast-path.
     pub fn insert_impl_type_name(&mut self, type_id: TypeId, name_id: NameId) {
         self.impl_type_names.insert(type_id, name_id);
+    }
+
+    /// Register an implement block entry for the main program.
+    pub fn insert_implement_block(&mut self, entry: VirImplementBlockEntry) {
+        self.implement_blocks.push(entry);
+    }
+
+    /// Register an implement block entry for an imported module.
+    pub fn insert_module_implement_block(
+        &mut self,
+        module_path: String,
+        entry: VirImplementBlockEntry,
+    ) {
+        self.module_implement_blocks
+            .entry(module_path)
+            .or_default()
+            .push(entry);
     }
 }
 
@@ -856,6 +909,34 @@ impl VirEntityMetadata {
     /// Return the number of registered function definitions.
     pub fn function_def_count(&self) -> usize {
         self.function_defs.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Implement block queries
+// ---------------------------------------------------------------------------
+
+impl VirEntityMetadata {
+    /// Return implement block entries for the main program.
+    pub fn implement_blocks(&self) -> &[VirImplementBlockEntry] {
+        &self.implement_blocks
+    }
+
+    /// Return implement block entries for a specific module.
+    pub fn module_implement_blocks(&self, module_path: &str) -> &[VirImplementBlockEntry] {
+        self.module_implement_blocks
+            .get(module_path)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Iterate all module implement block entries with their module paths.
+    pub fn all_module_implement_blocks(
+        &self,
+    ) -> impl Iterator<Item = (&str, &[VirImplementBlockEntry])> {
+        self.module_implement_blocks
+            .iter()
+            .map(|(path, entries)| (path.as_str(), entries.as_slice()))
     }
 }
 

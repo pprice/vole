@@ -5,7 +5,7 @@
 //! - Individual method compilation (`compile_method`, `compile_default_method`)
 //! - Static method compilation (`compile_static_methods`)
 //! - Module type method compilation (`compile_module_type_methods` and helpers)
-//! - Shared helpers (`register_method_func`, `get_type_name_from_expr`)
+//! - Shared helpers (`register_method_func`)
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::ModuleCompileInfo;
@@ -15,10 +15,8 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, TypeMetadata, type_id_to_cranelift};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::InterfaceMethod;
-use vole_frontend::{Interner, Symbol, TypeExpr, TypeExprKind};
+use vole_frontend::{Interner, Symbol};
 use vole_identity::{MethodId, ModuleId, TypeId};
-
-use super::impls::primitive_type_name;
 
 impl Compiler<'_> {
     /// Register a method in the JIT function registry if not already registered.
@@ -43,40 +41,6 @@ impl Compiler<'_> {
             self.func_registry.set_func_id(func_key, jit_func_id);
         }
         func_key
-    }
-
-    /// Get the type name string from a TypeExpr (works for primitives, named types,
-    /// and generic specializations like `Tagged<i64>`)
-    pub(super) fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
-        match &ty.kind {
-            TypeExprKind::Primitive(p) => Some(primitive_type_name(*p).to_string()),
-            TypeExprKind::Handle => Some("handle".to_string()),
-            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                Some(self.analyzed.resolve_symbol(*sym).to_string())
-            }
-            // `extend [T] with Iterable<T>` has an Array target type.
-            TypeExprKind::Array(_) => Some("array".to_string()),
-            _ => None,
-        }
-    }
-
-    /// Get the type name string from a TypeExpr using a specific interner
-    /// (for module-specific symbols)
-    pub(super) fn get_type_name_from_expr_with_interner(
-        &self,
-        ty: &TypeExpr,
-        interner: &Interner,
-    ) -> Option<String> {
-        match &ty.kind {
-            TypeExprKind::Primitive(p) => Some(primitive_type_name(*p).to_string()),
-            TypeExprKind::Handle => Some("handle".to_string()),
-            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                Some(interner.resolve(*sym).to_string())
-            }
-            // `extend [T] with Iterable<T>` has an Array target type.
-            TypeExprKind::Array(_) => Some("array".to_string()),
-            _ => None,
-        }
     }
 
     /// Compile methods for a class by name.

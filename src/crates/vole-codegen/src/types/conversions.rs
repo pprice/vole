@@ -10,7 +10,7 @@ use crate::AnalyzedProgram;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::helpers::StructEntityLookup;
 use crate::union_layout;
-use vole_frontend::{Interner, PrimitiveType as AstPrimitiveType, Symbol};
+use vole_frontend::{Interner, Symbol};
 use vole_identity::{
     FieldId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId, TypeId, VirTypeId,
 };
@@ -271,26 +271,6 @@ pub(crate) fn function_name_id_with_interner(
     let name_table = analyzed.name_table();
     let namer = NamerLookup::new(name_table, interner);
     namer.function(module, name)
-}
-
-/// Convert an AST primitive type into the corresponding canonical TypeId.
-pub(crate) fn ast_primitive_type_id(prim: AstPrimitiveType) -> TypeId {
-    match prim {
-        AstPrimitiveType::I8 => TypeId::I8,
-        AstPrimitiveType::I16 => TypeId::I16,
-        AstPrimitiveType::I32 => TypeId::I32,
-        AstPrimitiveType::I64 => TypeId::I64,
-        AstPrimitiveType::I128 => TypeId::I128,
-        AstPrimitiveType::U8 => TypeId::U8,
-        AstPrimitiveType::U16 => TypeId::U16,
-        AstPrimitiveType::U32 => TypeId::U32,
-        AstPrimitiveType::U64 => TypeId::U64,
-        AstPrimitiveType::F32 => TypeId::F32,
-        AstPrimitiveType::F64 => TypeId::F64,
-        AstPrimitiveType::F128 => TypeId::F128,
-        AstPrimitiveType::Bool => TypeId::BOOL,
-        AstPrimitiveType::String => TypeId::STRING,
-    }
 }
 
 /// Convert a TypeId to a Cranelift type.

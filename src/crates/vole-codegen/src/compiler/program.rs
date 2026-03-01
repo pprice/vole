@@ -189,8 +189,8 @@ impl Compiler<'_> {
                 Decl::Interface(_) => {
                     // Interface declarations don't generate code directly
                 }
-                Decl::Implement(impl_block) => {
-                    self.register_implement_block(impl_block)?;
+                Decl::Implement(_) => {
+                    // Implement blocks are registered via VirImplementBlockEntry below.
                 }
                 Decl::Struct(s) => {
                     self.finalize_struct(s.name)?;
@@ -205,6 +205,17 @@ impl Compiler<'_> {
                     // External blocks don't generate code in pass 1
                 }
             }
+        }
+
+        // Register implement block methods from VIR metadata (pass 1).
+        // This replaces the old AST-based Decl::Implement loop above.
+        for entry in self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .implement_blocks()
+        {
+            self.register_implement_block(entry)?;
         }
 
         // Declare all test functions from VirProgram's flat test list.
@@ -296,8 +307,8 @@ impl Compiler<'_> {
                 Decl::Interface(_) => {
                     // Interface methods are compiled when used via implement blocks
                 }
-                Decl::Implement(impl_block) => {
-                    self.compile_implement_block(impl_block)?;
+                Decl::Implement(_) => {
+                    // Implement blocks are compiled via VirImplementBlockEntry below.
                 }
                 Decl::Struct(struct_decl) => {
                     if !struct_decl.methods.is_empty() || struct_decl.statics.is_some() {
@@ -318,6 +329,17 @@ impl Compiler<'_> {
                     // External blocks don't generate code in pass 2
                 }
             }
+        }
+
+        // Compile implement block methods from VIR metadata (pass 2).
+        for entry in self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .implement_blocks()
+            .to_vec()
+        {
+            self.compile_implement_block(&entry)?;
         }
 
         // Compile all test bodies from VirProgram's flat test list.
@@ -458,16 +480,17 @@ impl Compiler<'_> {
                 }
             }
 
-            // Register implement block methods (both instance and static declarations)
+            // Register implement block methods from VIR metadata
             // MUST happen after class finalization so type_metadata is populated
-            for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl {
-                    self.register_implement_block_with_interner(
-                        impl_block,
-                        module_interner,
-                        module_id,
-                    )?;
-                }
+            let interner_rc = module_interner.clone();
+            let entries = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_implement_blocks(module_path)
+                .to_vec();
+            for entry in &entries {
+                self.register_implement_block_with_module_interner(entry, &interner_rc)?;
             }
         }
 
@@ -571,12 +594,16 @@ impl Compiler<'_> {
             }
         }
 
-        // Compile implement block methods (both instance and static)
+        // Compile implement block methods from VIR metadata (both instance and static)
         let module_id = self.analyzed.module_id_or_main(module_path);
-        for decl in &program.declarations {
-            if let Decl::Implement(impl_block) = decl {
-                self.compile_module_implement_block(impl_block, module_interner, module_id)?;
-            }
+        let impl_entries = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_implement_blocks(module_path)
+            .to_vec();
+        for entry in &impl_entries {
+            self.compile_module_implement_block(entry, module_interner, module_id)?;
         }
 
         // Compile module class methods (both instance and static)
@@ -664,12 +691,16 @@ impl Compiler<'_> {
                 }
             }
 
-            // Import implement block methods (both instance and static, using Linkage::Import)
+            // Import implement block methods from VIR metadata (using Linkage::Import)
             // MUST happen after class finalization so type_metadata is populated
-            for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl {
-                    self.import_module_implement_block(impl_block, module_interner, module_id)?;
-                }
+            let impl_entries = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_implement_blocks(module_path)
+                .to_vec();
+            for entry in &impl_entries {
+                self.import_module_implement_block(entry)?;
             }
         }
 
@@ -1045,13 +1076,9 @@ impl Compiler<'_> {
                         self.finalize_module_class(class.name, interner, vm_id)?;
                     }
                 }
-                Decl::Implement(impl_block) => {
-                    // Scoped implement blocks target types under the virtual module
-                    if let Some(vm_id) = virtual_module_id {
-                        self.register_implement_block_in_module(impl_block, vm_id)?;
-                    } else {
-                        self.register_implement_block(impl_block)?;
-                    }
+                Decl::Implement(_) => {
+                    // Scoped implement blocks are registered via VirImplementBlockEntry
+                    // in the main implement_blocks() iteration.
                 }
                 Decl::Tests(nested_tests) => {
                     // Recursively declare nested tests block scoped types
@@ -1103,8 +1130,8 @@ impl Compiler<'_> {
                 Decl::Class(class) => {
                     self.compile_class_methods_in_module(class.name, program, virtual_module_id)?;
                 }
-                Decl::Implement(impl_block) => {
-                    self.compile_implement_block_in_module(impl_block, virtual_module_id)?;
+                Decl::Implement(_) => {
+                    // Compiled via VirImplementBlockEntry in the main compile pass.
                 }
                 Decl::Tests(nested_tests) => {
                     // Recursively compile nested tests block scoped bodies
