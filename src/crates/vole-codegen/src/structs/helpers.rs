@@ -8,10 +8,19 @@ use crate::ops::uextend_const;
 use crate::types::CompiledValue;
 use vole_identity::{NameId, TypeDefId, TypeId, TypeIdVec};
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena};
+use vole_vir::type_table::VirTypeTable;
 
 pub(crate) trait StructEntityLookup {
     fn generic_field_types(&self, type_def_id: TypeDefId) -> Option<Vec<TypeId>>;
     fn type_params(&self, type_def_id: TypeDefId) -> Vec<NameId>;
+
+    /// Optional access to VirTypeTable for arena-free substitution.
+    ///
+    /// Production implementations (`AnalyzedProgram`) return `Some`,
+    /// test-only implementations return `None` (falls back to arena).
+    fn vir_type_table(&self) -> Option<&VirTypeTable> {
+        None
+    }
 }
 
 impl StructEntityLookup for crate::analyzed::AnalyzedProgram {
@@ -21,6 +30,10 @@ impl StructEntityLookup for crate::analyzed::AnalyzedProgram {
 
     fn type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
         self.entity_type_params(type_def_id)
+    }
+
+    fn vir_type_table(&self) -> Option<&VirTypeTable> {
+        Some(&self.vir_program().type_table)
     }
 }
 
@@ -45,6 +58,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     cg: &crate::context::Cg,
 ) -> CodegenResult<(usize, TypeId)> {
     let arena = cg.arena();
+    let vir_table = cg.vir_type_table();
 
     // Apply function-level substitutions first (for monomorphized generics)
     // This handles the case where type_id is a TypeParam that needs to be
@@ -56,7 +70,11 @@ pub(crate) fn get_field_slot_and_type_id_cg(
             ?func_subs,
             "field access: applying substitutions"
         );
-        arena.expect_substitute(type_id, func_subs, "field access type substitution")
+        vir_table
+            .lookup_substitute(type_id, func_subs)
+            .unwrap_or_else(|| {
+                arena.expect_substitute(type_id, func_subs, "field access type substitution")
+            })
     } else {
         tracing::debug!(
             ?type_id,
@@ -121,7 +139,15 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         if name.as_deref() == Some(field_name) {
             let base_type_id = sema_field_types[idx];
             let field_type_id = if !combined_subs.is_empty() {
-                arena.expect_substitute(base_type_id, &combined_subs, "field access substitution")
+                vir_table
+                    .lookup_substitute(base_type_id, &combined_subs)
+                    .unwrap_or_else(|| {
+                        arena.expect_substitute(
+                            base_type_id,
+                            &combined_subs,
+                            "field access substitution",
+                        )
+                    })
             } else {
                 base_type_id
             };
@@ -132,7 +158,11 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         // Advance physical slot counter
         let ft = sema_field_types[idx];
         let resolved_ft = if !combined_subs.is_empty() {
-            arena.expect_substitute(ft, &combined_subs, "field slot width substitution")
+            vir_table
+                .lookup_substitute(ft, &combined_subs)
+                .unwrap_or_else(|| {
+                    arena.expect_substitute(ft, &combined_subs, "field slot width substitution")
+                })
         } else {
             ft
         };
@@ -369,9 +399,10 @@ pub(crate) fn struct_flat_slot_count(
     // Build substitution map for generic structs (type param NameId -> concrete TypeId)
     let subs = build_type_arg_subs(type_def_id, type_args, entities);
 
+    let vt = entities.vir_type_table();
     let mut total = 0usize;
     for field_type in &field_types {
-        let concrete_type = substitute_field_type(*field_type, &subs, arena);
+        let concrete_type = substitute_field_type(*field_type, &subs, arena, vt);
         total += field_flat_slots(concrete_type, arena, entities);
     }
     Some(total)
@@ -458,11 +489,12 @@ pub(crate) fn struct_flat_field_cranelift_types(
     let field_types = entities.generic_field_types(type_def_id)?;
 
     let subs = build_type_arg_subs(type_def_id, type_args, entities);
+    let vt = entities.vir_type_table();
 
     let mut result = Vec::new();
     let mut offset = 0i32;
     for field_type in &field_types {
-        let concrete = substitute_field_type(*field_type, &subs, arena);
+        let concrete = substitute_field_type(*field_type, &subs, arena, vt);
         collect_leaf_slots(concrete, arena, entities, &mut offset, &mut result);
     }
     Some(result)
@@ -482,8 +514,9 @@ fn collect_leaf_slots(
         && let Some(nested_field_types) = entities.generic_field_types(nested_def)
     {
         let nested_subs = build_type_arg_subs(nested_def, nested_args, entities);
+        let vt = entities.vir_type_table();
         for field_type in &nested_field_types {
-            let concrete = substitute_field_type(*field_type, &nested_subs, arena);
+            let concrete = substitute_field_type(*field_type, &nested_subs, arena, vt);
             collect_leaf_slots(concrete, arena, entities, offset, out);
         }
         return;
@@ -522,10 +555,11 @@ pub(crate) fn struct_field_byte_offset(
 
     // Build substitution map for generic structs
     let subs = build_type_arg_subs(type_def_id, type_args, entities);
+    let vt = entities.vir_type_table();
 
     let mut offset = 0i32;
     for field_type in field_types.iter().take(slot) {
-        let concrete_type = substitute_field_type(*field_type, &subs, arena);
+        let concrete_type = substitute_field_type(*field_type, &subs, arena, vt);
         let slots = field_flat_slots(concrete_type, arena, entities);
         offset += (slots as i32) * 8;
     }
@@ -561,15 +595,22 @@ fn build_type_arg_subs(
 
 /// Resolve a field type through type argument substitutions.
 /// For non-generic structs (empty subs), returns the original type.
+///
+/// Uses VirTypeTable when available (production), falls back to arena (tests).
 fn substitute_field_type(
     field_type: TypeId,
     subs: &FxHashMap<NameId, TypeId>,
     arena: &TypeArena,
+    vir_table: Option<&VirTypeTable>,
 ) -> TypeId {
     if subs.is_empty() {
         return field_type;
     }
-    arena
-        .lookup_substitute(field_type, subs)
-        .unwrap_or(field_type)
+    if let Some(vt) = vir_table {
+        vt.lookup_substitute(field_type, subs).unwrap_or(field_type)
+    } else {
+        arena
+            .lookup_substitute(field_type, subs)
+            .unwrap_or(field_type)
+    }
 }

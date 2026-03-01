@@ -16,7 +16,7 @@ use crate::errors::CodegenResult;
 use crate::union_layout;
 
 use super::context::Cg;
-use super::rc_state::{RcState, compute_rc_state};
+use super::rc_state::{RcState, compute_rc_state_with_vir};
 use super::types::{CompiledValue, RcLifecycle};
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
@@ -508,7 +508,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - `RcState::Union`: Union with some RC variants
     ///
     pub fn rc_state(&self, type_id: TypeId) -> RcState {
-        compute_rc_state(self.arena(), self.analyzed(), type_id)
+        compute_rc_state_with_vir(
+            self.arena(),
+            self.analyzed(),
+            type_id,
+            self.vir_type_table(),
+        )
     }
 
     /// Get the field type tag for a type, determining how instance fields of this

@@ -808,7 +808,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Look up the result of substituting type parameters in a type (read-only).
     ///
-    /// Arena-only operation (walks sema types with substitution map).
+    /// Tries VirTypeTable first; falls back to arena for compound types that
+    /// were not lowered into the VIR type table.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_substitute(
@@ -816,7 +817,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ty: TypeId,
         subs: &FxHashMap<NameId, TypeId>,
     ) -> Option<TypeId> {
-        self.arena().lookup_substitute(ty, subs)
+        self.vir_type_table()
+            .lookup_substitute(ty, subs)
+            .or_else(|| self.arena().lookup_substitute(ty, subs))
     }
 
     /// Look up an existing runtime iterator type by element `TypeId` in the arena.
@@ -830,7 +833,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Substitute type parameters in a type, panicking on failure.
     ///
-    /// Arena-only operation (walks sema types with substitution map).
+    /// Tries VirTypeTable first; falls back to arena for compound types that
+    /// were not lowered into the VIR type table.
     #[allow(dead_code)]
     #[track_caller]
     #[inline]
@@ -840,7 +844,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         subs: &FxHashMap<NameId, TypeId>,
         context: &str,
     ) -> TypeId {
-        self.arena().expect_substitute(ty, subs, context)
+        self.vir_type_table()
+            .lookup_substitute(ty, subs)
+            .unwrap_or_else(|| self.arena().expect_substitute(ty, subs, context))
     }
 
     /// Return all concrete element types for which a RuntimeIterator exists

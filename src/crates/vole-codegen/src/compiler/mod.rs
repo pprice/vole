@@ -359,13 +359,18 @@ impl<'a> Compiler<'a> {
     }
 
     /// Look up the result of substituting type parameters in a type (read-only).
+    ///
+    /// Tries VirTypeTable first; falls back to arena for compound types that
+    /// were not lowered into the VIR type table.
     #[inline]
     fn vir_query_lookup_substitute(
         &self,
         ty: TypeId,
         subs: &FxHashMap<NameId, TypeId>,
     ) -> Option<TypeId> {
-        self.arena().lookup_substitute(ty, subs)
+        self.vir_type_table()
+            .lookup_substitute(ty, subs)
+            .or_else(|| self.arena().lookup_substitute(ty, subs))
     }
 
     /// Access the arena's pre-interned primitive types.

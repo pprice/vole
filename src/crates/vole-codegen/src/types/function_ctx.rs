@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 
 use vole_identity::{ModuleId, NameId, TypeId};
-use vole_sema::type_arena::TypeArena;
+use vole_vir::type_table::VirTypeTable;
 
 /// Per-function compilation context.
 /// Contains state that varies for each function being compiled.
@@ -69,19 +69,16 @@ impl<'a> FunctionCtx<'a> {
 
     /// Substitute type parameters with concrete types using TypeId directly.
     ///
-    /// Uses expect_substitute for read-only lookup since sema pre-computes all
-    /// substituted types when creating MonomorphInstance.
-    /// Uses a cache to avoid repeated HashMap conversion.
-    pub fn substitute_type_id(&self, ty: TypeId, arena: &TypeArena) -> TypeId {
+    /// Uses VirTypeTable for structural type walking instead of the arena.
+    /// Uses a cache to avoid repeated lookups.
+    pub fn substitute_type_id(&self, ty: TypeId, vir_table: &VirTypeTable) -> TypeId {
         if let Some(substitutions) = self.substitutions {
             // Check cache first
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            // Convert std HashMap to FxHashMap for arena compatibility
-            let subs: FxHashMap<NameId, TypeId> =
-                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            let result = arena.expect_substitute(ty, &subs, "FunctionCtx::substitute_type_id");
+            let result =
+                vir_table.expect_substitute(ty, substitutions, "FunctionCtx::substitute_type_id");
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
             result

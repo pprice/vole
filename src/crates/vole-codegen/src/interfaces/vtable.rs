@@ -2193,14 +2193,21 @@ fn resolve_vtable_target<C: VtableCtx>(
     // registry paths which provide their own concrete types.
     let substituted_types: Option<(Vec<TypeId>, TypeId)> = {
         let arena = ctx.analyzed().type_arena();
+        let vir_table = &ctx.analyzed().vir_program().type_table;
         let (params, ret, _) = arena
             .unwrap_function(interface_method.signature_id)
             .expect("INTERNAL: vtable method: signature is not a function type");
         let param_ids: Option<Vec<TypeId>> = params
             .iter()
-            .map(|&p| arena.lookup_substitute(p, substitutions))
+            .map(|&p| {
+                vir_table
+                    .lookup_substitute(p, substitutions)
+                    .or_else(|| arena.lookup_substitute(p, substitutions))
+            })
             .collect();
-        let ret_id = arena.lookup_substitute(ret, substitutions);
+        let ret_id = vir_table
+            .lookup_substitute(ret, substitutions)
+            .or_else(|| arena.lookup_substitute(ret, substitutions));
         param_ids.zip(ret_id)
     };
 

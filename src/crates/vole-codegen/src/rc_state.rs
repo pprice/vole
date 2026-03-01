@@ -17,6 +17,7 @@
 use rustc_hash::FxHashMap;
 use vole_identity::TypeId;
 use vole_sema::type_arena::{SemaType, TypeArena};
+use vole_vir::type_table::VirTypeTable;
 
 use crate::structs::helpers::StructEntityLookup;
 
@@ -153,10 +154,29 @@ impl RcState {
 /// * `arena` - The type arena for type lookups
 /// * `entities` - Type metadata lookup for struct definitions and substitutions
 /// * `type_id` - The type to analyze
+#[cfg(test)]
 pub(crate) fn compute_rc_state(
     arena: &TypeArena,
     entities: &impl StructEntityLookup,
     type_id: TypeId,
+) -> RcState {
+    compute_rc_state_inner(arena, entities, type_id, None)
+}
+
+pub(crate) fn compute_rc_state_with_vir(
+    arena: &TypeArena,
+    entities: &impl StructEntityLookup,
+    type_id: TypeId,
+    vir_table: &VirTypeTable,
+) -> RcState {
+    compute_rc_state_inner(arena, entities, type_id, Some(vir_table))
+}
+
+fn compute_rc_state_inner(
+    arena: &TypeArena,
+    entities: &impl StructEntityLookup,
+    type_id: TypeId,
+    vir_table: Option<&VirTypeTable>,
 ) -> RcState {
     // Check for simple RC types first (most common case for RC values)
     if is_simple_rc_type(arena, type_id) {
@@ -175,7 +195,7 @@ pub(crate) fn compute_rc_state(
 
     // Check for composite types (struct, tuple, fixed array) with RC fields
     if let Some((shallow_offsets, deep_offsets, union_fields)) =
-        compute_composite_rc_offsets(arena, entities, type_id)
+        compute_composite_rc_offsets(arena, entities, type_id, vir_table)
     {
         return RcState::Composite {
             shallow_offsets,
@@ -254,6 +274,7 @@ fn compute_composite_rc_offsets(
     arena: &TypeArena,
     entities: &impl StructEntityLookup,
     type_id: TypeId,
+    vir_table: Option<&VirTypeTable>,
 ) -> Option<CompositeRcOffsets> {
     // Struct: iterate fields, collect offsets of RC-typed fields
     if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id)
@@ -272,7 +293,11 @@ fn compute_composite_rc_offsets(
                 field_types
                     .iter()
                     .map(|&field_ty| {
-                        arena.expect_substitute(field_ty, &subs, "rc_state struct fields")
+                        if let Some(vt) = vir_table {
+                            vt.expect_substitute(field_ty, &subs, "rc_state struct fields")
+                        } else {
+                            arena.expect_substitute(field_ty, &subs, "rc_state struct fields")
+                        }
                     })
                     .collect()
             }
@@ -301,7 +326,7 @@ fn compute_composite_rc_offsets(
             } else {
                 // Deep: recursively collect from nested structs
                 if let Some((_, nested_deep, nested_unions)) =
-                    compute_composite_rc_offsets(arena, entities, *field_type)
+                    compute_composite_rc_offsets(arena, entities, *field_type, vir_table)
                 {
                     for off in nested_deep {
                         deep_offsets.push(byte_offset + off);

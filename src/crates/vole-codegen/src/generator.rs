@@ -21,7 +21,7 @@ use vole_vir::VirBody;
 use crate::compiler::common::{DefaultReturn, compile_vir_body_with_cg};
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::rc_state::compute_rc_state;
+use crate::rc_state::compute_rc_state_with_vir;
 use crate::types::{CodegenCtx, CompileEnv, array_element_tag_id, type_id_size};
 use crate::{FunctionKey, RuntimeKey};
 
@@ -307,7 +307,9 @@ fn emit_capture_closure(
         block_params.iter().zip(param_type_ids.iter()).enumerate()
     {
         let is_interface = arena.is_interface(param_type_id);
-        let is_rc = compute_rc_state(arena, env.analyzed, param_type_id).needs_cleanup();
+        let vir_table = &env.analyzed.vir_program().type_table;
+        let is_rc = compute_rc_state_with_vir(arena, env.analyzed, param_type_id, vir_table)
+            .needs_cleanup();
 
         // RC captures need rc_inc so the closure owns its own reference.
         // For interfaces, rc_inc the data_ptr (offset 0 of fat pointer),

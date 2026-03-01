@@ -6,7 +6,7 @@
 // only (`VirTypeId`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::{TypeDefId, TypeId, VirTypeId};
+use vole_identity::{NameId, TypeDefId, TypeId, VirTypeId};
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -31,6 +31,14 @@ pub struct VirTypeTable {
     /// TypeArena.  Pre-populated with the 23 reserved primitive/special
     /// constants that are identity-mapped between the two ID spaces.
     type_id_to_vir: FxHashMap<TypeId, VirTypeId>,
+    /// Reverse mapping from `VirTypeId` to sema `TypeId`.
+    ///
+    /// Populated alongside `type_id_to_vir` in `record_type_id()` and
+    /// `populate_reserved_type_id_map()`.  When multiple sema `TypeId`s map to
+    /// the same `VirTypeId` (structurally identical internings) the first
+    /// recorded TypeId wins — any of them is correct since they represent the
+    /// same type.
+    vir_to_type_id: FxHashMap<VirTypeId, TypeId>,
     /// VirTypeIds that represent sentinel types (zero-field structs like nil, Done,
     /// and user-defined sentinels).  Populated during reserved slot init and
     /// type translation.
@@ -49,6 +57,7 @@ impl VirTypeTable {
             layouts: Vec::new(),
             intern_map: FxHashMap::default(),
             type_id_to_vir: FxHashMap::default(),
+            vir_to_type_id: FxHashMap::default(),
             sentinel_ids: FxHashSet::default(),
         };
         table.populate_reserved();
@@ -678,8 +687,10 @@ impl VirTypeTable {
     /// `TypeId` and `VirTypeId`.
     fn populate_reserved_type_id_map(&mut self) {
         for raw in 0..VirTypeId::FIRST_DYNAMIC {
-            self.type_id_to_vir
-                .insert(TypeId::from_raw(raw), VirTypeId::from_raw(raw));
+            let type_id = TypeId::from_raw(raw);
+            let vir_id = VirTypeId::from_raw(raw);
+            self.type_id_to_vir.insert(type_id, vir_id);
+            self.vir_to_type_id.insert(vir_id, type_id);
         }
     }
 }
@@ -695,11 +706,21 @@ impl VirTypeTable {
     /// later resolve any sema TypeId without falling back to the TypeArena.
     pub fn record_type_id(&mut self, type_id: TypeId, vir_type_id: VirTypeId) {
         self.type_id_to_vir.insert(type_id, vir_type_id);
+        // First-wins: don't overwrite an existing reverse entry so that the
+        // earliest (most canonical) sema TypeId is preserved.
+        self.vir_to_type_id.entry(vir_type_id).or_insert(type_id);
     }
 
     /// Look up the `VirTypeId` for a sema `TypeId`, if one was recorded.
     pub fn lookup_type_id(&self, type_id: TypeId) -> Option<VirTypeId> {
         self.type_id_to_vir.get(&type_id).copied()
+    }
+
+    /// Look up the sema `TypeId` for a `VirTypeId`, if one was recorded.
+    ///
+    /// Returns the first TypeId that was recorded for this VirTypeId.
+    pub fn lookup_vir_type_id(&self, vir_type_id: VirTypeId) -> Option<TypeId> {
+        self.vir_to_type_id.get(&vir_type_id).copied()
     }
 }
 
@@ -740,6 +761,198 @@ impl VirTypeTable {
         };
         self.intern_map.insert(new_type.clone(), id);
         self.types[idx] = new_type;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Type substitution (replaces arena-based substitution for codegen)
+// ---------------------------------------------------------------------------
+
+impl VirTypeTable {
+    /// Substitute type parameters in a type, returning the concrete `TypeId`.
+    ///
+    /// Walks the VIR type structure rooted at `ty`, replacing
+    /// `VirType::Param { name }` entries with their concrete counterparts from
+    /// `subs`.  The resulting compound `VirType` is looked up in the intern map
+    /// — if the concrete type was already interned, the corresponding sema
+    /// `TypeId` is returned via the reverse map.
+    ///
+    /// Returns `None` when:
+    /// - `ty` has no `VirTypeId` mapping (unmapped sema type), or
+    /// - a substituted compound type was never interned, or
+    /// - the resulting `VirTypeId` has no reverse `TypeId` mapping.
+    pub fn lookup_substitute(
+        &self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<TypeId> {
+        if subs.is_empty() {
+            return Some(ty);
+        }
+        let vir_id = self.lookup_type_id(ty)?;
+        let result_vir = self.substitute_vir(vir_id, subs)?;
+        self.lookup_vir_type_id(result_vir)
+    }
+
+    /// Substitute type parameters in a type, panicking on failure.
+    ///
+    /// Like [`lookup_substitute`] but panics with a diagnostic message when the
+    /// substituted type cannot be resolved.
+    #[track_caller]
+    pub fn expect_substitute(
+        &self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+        context: &str,
+    ) -> TypeId {
+        self.lookup_substitute(ty, subs).unwrap_or_else(|| {
+            panic!(
+                "VirTypeTable::expect_substitute: type not found after substitution\n\
+                 Context: {context}\n\
+                 TypeId: {ty:?}\n\
+                 Location: {}",
+                std::panic::Location::caller(),
+            )
+        })
+    }
+
+    /// Recursive VIR-level substitution.
+    ///
+    /// Returns `Some(concrete_vir_id)` on success, `None` if any intermediate
+    /// or final type is not interned.
+    fn substitute_vir(
+        &self,
+        vir_id: VirTypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<VirTypeId> {
+        let vir_type = self.get(vir_id);
+        match vir_type {
+            VirType::Param { name } => {
+                let concrete_type_id = subs.get(name)?;
+                self.lookup_type_id(*concrete_type_id)
+            }
+
+            // Compound types: recursively substitute children.
+            VirType::Array { elem } => {
+                let new_elem = self.substitute_vir(*elem, subs)?;
+                if new_elem == *elem {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Array { elem: new_elem })
+            }
+            VirType::FixedArray { elem, len } => {
+                let new_elem = self.substitute_vir(*elem, subs)?;
+                if new_elem == *elem {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::FixedArray {
+                    elem: new_elem,
+                    len: *len,
+                })
+            }
+            VirType::Optional { inner } => {
+                let new_inner = self.substitute_vir(*inner, subs)?;
+                if new_inner == *inner {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Optional { inner: new_inner })
+            }
+            VirType::RuntimeIterator { elem } => {
+                let new_elem = self.substitute_vir(*elem, subs)?;
+                if new_elem == *elem {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::RuntimeIterator { elem: new_elem })
+            }
+            VirType::Tuple { elems } => {
+                let new_elems = self.substitute_vir_vec(elems, subs)?;
+                if new_elems == *elems {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Tuple { elems: new_elems })
+            }
+            VirType::Union { variants } => {
+                let new_variants = self.substitute_vir_vec(variants, subs)?;
+                if new_variants == *variants {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Union {
+                    variants: new_variants,
+                })
+            }
+            VirType::Fallible { success, errors } => {
+                let new_success = self.substitute_vir(*success, subs)?;
+                let new_errors = self.substitute_vir_vec(errors, subs)?;
+                if new_success == *success && new_errors == *errors {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Fallible {
+                    success: new_success,
+                    errors: new_errors,
+                })
+            }
+            VirType::Function { params, ret } => {
+                let new_params = self.substitute_vir_vec(params, subs)?;
+                let new_ret = self.substitute_vir(*ret, subs)?;
+                if new_params == *params && new_ret == *ret {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Function {
+                    params: new_params,
+                    ret: new_ret,
+                })
+            }
+            VirType::Class { def, type_args } => {
+                let new_args = self.substitute_vir_vec(type_args, subs)?;
+                if new_args == *type_args {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Class {
+                    def: *def,
+                    type_args: new_args,
+                })
+            }
+            VirType::Struct { def, type_args } => {
+                let new_args = self.substitute_vir_vec(type_args, subs)?;
+                if new_args == *type_args {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Struct {
+                    def: *def,
+                    type_args: new_args,
+                })
+            }
+            VirType::Interface { def, type_args } => {
+                let new_args = self.substitute_vir_vec(type_args, subs)?;
+                if new_args == *type_args {
+                    return Some(vir_id);
+                }
+                self.lookup(&VirType::Interface {
+                    def: *def,
+                    type_args: new_args,
+                })
+            }
+
+            // Leaf types: no type parameters inside.
+            VirType::Primitive(_)
+            | VirType::Error { .. }
+            | VirType::Void
+            | VirType::Never
+            | VirType::Range
+            | VirType::MetaType
+            | VirType::Unknown => Some(vir_id),
+        }
+    }
+
+    /// Substitute a vector of VirTypeIds, returning None if any fails.
+    fn substitute_vir_vec(
+        &self,
+        ids: &[VirTypeId],
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<Vec<VirTypeId>> {
+        ids.iter()
+            .map(|&id| self.substitute_vir(id, subs))
+            .collect()
     }
 }
 
@@ -1252,5 +1465,238 @@ mod tests {
         assert!(!table.is_heap(id));
         assert_eq!(table.slot_count(id), 0);
         assert_eq!(table.storage_class(id), None);
+    }
+
+    // ===== lookup_substitute tests =====
+
+    /// Helper to create a NameId for testing.
+    fn test_name(n: u32) -> NameId {
+        NameId::new_for_test(n)
+    }
+
+    #[test]
+    fn substitute_empty_subs_returns_original() {
+        let table = VirTypeTable::new();
+        let subs = FxHashMap::default();
+        // Reserved i64 TypeId should round-trip.
+        let ty = TypeId::from_raw(VirTypeId::I64.raw());
+        assert_eq!(table.lookup_substitute(ty, &subs), Some(ty));
+    }
+
+    #[test]
+    fn substitute_primitive_unchanged() {
+        let table = VirTypeTable::new();
+        let mut subs = FxHashMap::default();
+        let t_name = test_name(100);
+        // Substitute T -> i64, but query with i64 (no Param involved).
+        subs.insert(t_name, TypeId::from_raw(VirTypeId::I64.raw()));
+        let i64_ty = TypeId::from_raw(VirTypeId::I64.raw());
+        assert_eq!(table.lookup_substitute(i64_ty, &subs), Some(i64_ty));
+    }
+
+    #[test]
+    fn substitute_param_found() {
+        let mut table = VirTypeTable::new();
+        let t_name = test_name(100);
+        let param_vir = table.intern(VirType::Param { name: t_name }, None);
+        // Record a sema TypeId that maps to this Param VirTypeId.
+        let param_sema = TypeId::from_raw(200);
+        table.record_type_id(param_sema, param_vir);
+
+        let concrete_sema = TypeId::from_raw(VirTypeId::I64.raw());
+        let mut subs = FxHashMap::default();
+        subs.insert(t_name, concrete_sema);
+
+        assert_eq!(
+            table.lookup_substitute(param_sema, &subs),
+            Some(concrete_sema)
+        );
+    }
+
+    #[test]
+    fn substitute_param_not_in_subs_returns_original_with_empty_subs() {
+        let mut table = VirTypeTable::new();
+        let t_name = test_name(100);
+        let param_vir = table.intern(VirType::Param { name: t_name }, None);
+        let param_sema = TypeId::from_raw(200);
+        table.record_type_id(param_sema, param_vir);
+
+        // Empty subs -> early return with the original type.
+        let subs = FxHashMap::default();
+        assert_eq!(table.lookup_substitute(param_sema, &subs), Some(param_sema));
+    }
+
+    #[test]
+    fn substitute_param_not_in_nonempty_subs_returns_none() {
+        let mut table = VirTypeTable::new();
+        let t_name = test_name(100);
+        let u_name = test_name(200);
+        let param_vir = table.intern(VirType::Param { name: t_name }, None);
+        let param_sema = TypeId::from_raw(300);
+        table.record_type_id(param_sema, param_vir);
+
+        // Non-empty subs, but T not in the map (only U is).
+        let mut subs = FxHashMap::default();
+        subs.insert(u_name, TypeId::from_raw(VirTypeId::I64.raw()));
+        // Param T not in substitution map -> None (can't resolve).
+        assert_eq!(table.lookup_substitute(param_sema, &subs), None);
+    }
+
+    #[test]
+    fn substitute_array_of_param() {
+        let mut table = VirTypeTable::new();
+        let t_name = test_name(100);
+        let param_vir = table.intern(VirType::Param { name: t_name }, None);
+        let array_of_param = table.intern(VirType::Array { elem: param_vir }, None);
+        // Intern the concrete result type too.
+        let array_of_i64 = table.intern(
+            VirType::Array {
+                elem: VirTypeId::I64,
+            },
+            None,
+        );
+
+        let param_sema = TypeId::from_raw(200);
+        let array_param_sema = TypeId::from_raw(201);
+        let array_i64_sema = TypeId::from_raw(202);
+        table.record_type_id(param_sema, param_vir);
+        table.record_type_id(array_param_sema, array_of_param);
+        table.record_type_id(array_i64_sema, array_of_i64);
+
+        let mut subs = FxHashMap::default();
+        let i64_sema = TypeId::from_raw(VirTypeId::I64.raw());
+        subs.insert(t_name, i64_sema);
+
+        assert_eq!(
+            table.lookup_substitute(array_param_sema, &subs),
+            Some(array_i64_sema)
+        );
+    }
+
+    #[test]
+    fn substitute_class_type_args() {
+        let mut table = VirTypeTable::new();
+        let t_name = test_name(100);
+        let param_vir = table.intern(VirType::Param { name: t_name }, None);
+        let def = TypeDefId::new(42);
+        let class_of_param = table.intern(
+            VirType::Class {
+                def,
+                type_args: vec![param_vir],
+            },
+            None,
+        );
+        let class_of_i64 = table.intern(
+            VirType::Class {
+                def,
+                type_args: vec![VirTypeId::I64],
+            },
+            None,
+        );
+
+        let param_sema = TypeId::from_raw(300);
+        let class_param_sema = TypeId::from_raw(301);
+        let class_i64_sema = TypeId::from_raw(302);
+        table.record_type_id(param_sema, param_vir);
+        table.record_type_id(class_param_sema, class_of_param);
+        table.record_type_id(class_i64_sema, class_of_i64);
+
+        let mut subs = FxHashMap::default();
+        subs.insert(t_name, TypeId::from_raw(VirTypeId::I64.raw()));
+
+        assert_eq!(
+            table.lookup_substitute(class_param_sema, &subs),
+            Some(class_i64_sema)
+        );
+    }
+
+    #[test]
+    fn substitute_returns_none_when_result_not_interned() {
+        let mut table = VirTypeTable::new();
+        let t_name = test_name(100);
+        let param_vir = table.intern(VirType::Param { name: t_name }, None);
+        // Intern Array<T> but NOT Array<i64>.
+        let array_of_param = table.intern(VirType::Array { elem: param_vir }, None);
+
+        let param_sema = TypeId::from_raw(200);
+        let array_param_sema = TypeId::from_raw(201);
+        table.record_type_id(param_sema, param_vir);
+        table.record_type_id(array_param_sema, array_of_param);
+
+        let mut subs = FxHashMap::default();
+        subs.insert(t_name, TypeId::from_raw(VirTypeId::I64.raw()));
+
+        // Array<i64> not interned -> None.
+        assert_eq!(table.lookup_substitute(array_param_sema, &subs), None);
+    }
+
+    #[test]
+    fn substitute_function_type() {
+        let mut table = VirTypeTable::new();
+        let t_name = test_name(100);
+        let param_vir = table.intern(VirType::Param { name: t_name }, None);
+        let func_of_param = table.intern(
+            VirType::Function {
+                params: vec![param_vir],
+                ret: param_vir,
+            },
+            None,
+        );
+        let func_of_i64 = table.intern(
+            VirType::Function {
+                params: vec![VirTypeId::I64],
+                ret: VirTypeId::I64,
+            },
+            None,
+        );
+
+        let param_sema = TypeId::from_raw(400);
+        let func_param_sema = TypeId::from_raw(401);
+        let func_i64_sema = TypeId::from_raw(402);
+        table.record_type_id(param_sema, param_vir);
+        table.record_type_id(func_param_sema, func_of_param);
+        table.record_type_id(func_i64_sema, func_of_i64);
+
+        let mut subs = FxHashMap::default();
+        subs.insert(t_name, TypeId::from_raw(VirTypeId::I64.raw()));
+
+        assert_eq!(
+            table.lookup_substitute(func_param_sema, &subs),
+            Some(func_i64_sema)
+        );
+    }
+
+    #[test]
+    fn substitute_nested_optional_array() {
+        let mut table = VirTypeTable::new();
+        let t_name = test_name(100);
+        let param_vir = table.intern(VirType::Param { name: t_name }, None);
+        let opt_param = table.intern(VirType::Optional { inner: param_vir }, None);
+        let arr_opt_param = table.intern(VirType::Array { elem: opt_param }, None);
+
+        let opt_i64 = table.intern(
+            VirType::Optional {
+                inner: VirTypeId::I64,
+            },
+            None,
+        );
+        let arr_opt_i64 = table.intern(VirType::Array { elem: opt_i64 }, None);
+
+        let param_sema = TypeId::from_raw(500);
+        let arr_opt_param_sema = TypeId::from_raw(501);
+        let arr_opt_i64_sema = TypeId::from_raw(502);
+        table.record_type_id(param_sema, param_vir);
+        table.record_type_id(TypeId::from_raw(503), opt_param);
+        table.record_type_id(arr_opt_param_sema, arr_opt_param);
+        table.record_type_id(TypeId::from_raw(504), opt_i64);
+        table.record_type_id(arr_opt_i64_sema, arr_opt_i64);
+
+        let mut subs = FxHashMap::default();
+        subs.insert(t_name, TypeId::from_raw(VirTypeId::I64.raw()));
+
+        assert_eq!(
+            table.lookup_substitute(arr_opt_param_sema, &subs),
+            Some(arr_opt_i64_sema)
+        );
     }
 }
