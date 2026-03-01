@@ -537,7 +537,6 @@ impl InterfaceVtableRegistry {
                         CompiledValue::new(
                             result,
                             type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
-                            method.return_type_id,
                             vir_type_id,
                         )
                     };
@@ -2102,7 +2101,12 @@ fn box_interface_value_core<'a, 'ctx>(
     })?;
 
     // Check if value is already an interface
-    if env.analyzed.type_arena().is_interface(value.type_id) {
+    let value_sema_type_id = super::super::types::vir_conversions::vir_to_sema_type_id(
+        value.type_id,
+        &env.analyzed.vir_program().type_table,
+        env.analyzed.type_arena(),
+    );
+    if env.analyzed.type_arena().is_interface(value_sema_type_id) {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
@@ -2113,7 +2117,6 @@ fn box_interface_value_core<'a, 'ctx>(
         return Ok(CompiledValue::new(
             value.value,
             codegen_ctx.ptr_type(),
-            interface_type_id,
             env.analyzed
                 .vir_program()
                 .type_table
@@ -2133,13 +2136,13 @@ fn box_interface_value_core<'a, 'ctx>(
         interface_name,
         type_def_id,
         type_args_ids,
-        value.type_id,
+        value_sema_type_id,
     )?;
     // Phase 2+3: Compile wrappers and define vtable data
     env.state.interface_vtables.borrow_mut().ensure_compiled(
         &mut ctx_view,
         interface_name,
-        value.type_id,
+        value_sema_type_id,
     )?;
     let vtable_gv = ctx_view
         .jit_module()
@@ -2161,7 +2164,6 @@ fn box_interface_value_core<'a, 'ctx>(
     Ok(CompiledValue::new(
         iface_ptr,
         ctx_view.ptr_type(),
-        interface_type_id,
         env.analyzed
             .vir_program()
             .type_table

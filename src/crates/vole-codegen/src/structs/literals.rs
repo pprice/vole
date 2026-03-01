@@ -24,8 +24,8 @@ impl Cg<'_, '_, '_> {
         let field_is_union = self.vir_query_is_union(field_type_id);
         let field_is_interface = self.vir_query_is_interface(field_type_id);
         let field_is_unknown = self.vir_query_is_unknown(field_type_id);
-        let value_is_union = self.vir_query_is_union(value.type_id);
-        let value_is_unknown = self.vir_query_is_unknown(value.type_id);
+        let value_is_union = self.vir_query_is_union(self.cv_type_id(&value));
+        let value_is_unknown = self.vir_query_is_unknown(self.cv_type_id(&value));
 
         if field_is_unknown && !value_is_unknown {
             // Box the value into a heap-allocated TaggedValue.
@@ -44,7 +44,7 @@ impl Cg<'_, '_, '_> {
             // The value may be stack-allocated (from construct_union_id),
             // so copy the 16-byte buffer to the heap.
             self.copy_union_to_heap(value)
-        } else if field_is_interface && self.vir_query_is_interface(value.type_id) {
+        } else if field_is_interface && self.vir_query_is_interface(self.cv_type_id(&value)) {
             // Value is already an interface fat pointer. Copy it into a new
             // heap allocation so instance_drop can free it independently.
             self.copy_interface_fat_ptr(value)
@@ -68,7 +68,7 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // If the value is already the same union type, just return it
-        if value.type_id == union_type_id {
+        if self.cv_type_id(&value) == union_type_id {
             return Ok(value);
         }
 
@@ -115,7 +115,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             heap_ptr,
             self.ptr_type(),
-            union_type_id,
             self.vir_lookup(union_type_id),
         ))
     }
@@ -131,7 +130,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
         let ptr_type = self.ptr_type();
-        let union_size = self.type_size(value.type_id);
+        let union_size = self.type_size(self.cv_type_id(&value));
         let size_val = self.iconst_cached(ptr_type, union_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
@@ -192,8 +191,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             heap_ptr,
             ptr_type,
-            value.type_id,
-            self.vir_lookup(value.type_id),
+            self.vir_lookup(self.cv_type_id(&value)),
         ))
     }
 
@@ -241,8 +239,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             heap_ptr,
             ptr_type,
-            value.type_id,
-            self.vir_lookup(value.type_id),
+            self.vir_lookup(self.cv_type_id(&value)),
         ))
     }
 
@@ -287,12 +284,7 @@ impl Cg<'_, '_, '_> {
             union_layout::PAYLOAD_OFFSET,
         );
 
-        Ok(CompiledValue::new(
-            heap_ptr,
-            ptr_type,
-            TypeId::UNKNOWN,
-            VirTypeId::UNKNOWN,
-        ))
+        Ok(CompiledValue::new(heap_ptr, ptr_type, VirTypeId::UNKNOWN))
     }
 
     /// Store a value into a struct field's stack slot, handling nested structs,
@@ -303,7 +295,7 @@ impl Cg<'_, '_, '_> {
         slot: StackSlot,
         offset: i32,
     ) -> CodegenResult<()> {
-        let field_flat_slots = self.struct_flat_slot_count(value.type_id);
+        let field_flat_slots = self.struct_flat_slot_count(self.cv_type_id(&value));
         if let Some(nested_flat) = field_flat_slots {
             for i in 0..nested_flat {
                 let src_off = (i as i32) * 8;
@@ -314,7 +306,7 @@ impl Cg<'_, '_, '_> {
                         .load(types::I64, MemFlags::new(), value.value, src_off);
                 self.builder.ins().stack_store(val, slot, dst_off);
             }
-        } else if self.vir_query_is_payload_union(value.type_id) {
+        } else if self.vir_query_is_payload_union(self.cv_type_id(&value)) {
             // Union values are pointers to 16-byte buffers (tag + payload).
             // Copy both words inline into the struct's slot.
             let word0 = self

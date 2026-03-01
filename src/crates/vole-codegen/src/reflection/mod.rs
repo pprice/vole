@@ -81,12 +81,7 @@ pub(crate) fn compile_static_meta_with_type(
     cg.builder.seal_block(merge_block);
     let result_ptr = cg.builder.block_params(merge_block)[0];
 
-    let cv = CompiledValue::new(
-        result_ptr,
-        ptr_type,
-        result_type_id,
-        cg.vir_lookup(result_type_id),
-    );
+    let cv = CompiledValue::new(result_ptr, ptr_type, cg.vir_lookup(result_type_id));
     Ok(cg.mark_rc_owned(cv))
 }
 
@@ -191,12 +186,7 @@ pub(crate) fn compile_dynamic_meta_from_value(
     let call = cg.builder.ins().call_indirect(sig_ref, meta_fn_ptr, &[]);
     let type_meta_ptr = cg.builder.inst_results(call)[0];
 
-    let cv = CompiledValue::new(
-        type_meta_ptr,
-        ptr_type,
-        result_type_id,
-        cg.vir_lookup(result_type_id),
-    );
+    let cv = CompiledValue::new(type_meta_ptr, ptr_type, cg.vir_lookup(result_type_id));
     Ok(cg.mark_rc_owned(cv))
 }
 

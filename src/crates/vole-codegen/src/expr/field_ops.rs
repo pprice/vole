@@ -41,7 +41,8 @@ impl Cg<'_, '_, '_> {
         // Resolved storage: use pre-resolved slot, only look up field type.
         if let FieldStorage::Direct { slot } | FieldStorage::Heap { slot } = storage {
             let field_name = self.interner().resolve(field);
-            let (_, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+            let (_, field_type_id) =
+                get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
             return self.extract_field(obj, slot as usize, field_type_id);
         }
 
@@ -50,7 +51,8 @@ impl Cg<'_, '_, '_> {
             return Ok(cv);
         }
         let field_name = self.interner().resolve(field);
-        let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+        let (slot, field_type_id) =
+            get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
         self.extract_field(obj, slot, field_type_id)
     }
 
@@ -73,20 +75,20 @@ impl Cg<'_, '_, '_> {
             FieldStorage::Direct { slot } => {
                 let field_name = self.interner().resolve(field);
                 let (_, field_type_id) =
-                    get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+                    get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
                 self.vir_struct_field_store(obj, slot as usize, field_type_id, value)
             }
             FieldStorage::Heap { slot } => {
                 let field_name = self.interner().resolve(field);
                 let (_, field_type_id) =
-                    get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+                    get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
                 self.vir_class_field_store(obj, slot as usize, field_type_id, value)
             }
             FieldStorage::ByName => {
                 let field_name = self.interner().resolve(field);
                 let (slot, field_type_id) =
-                    get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
-                let is_struct = self.vir_query_is_struct(obj.type_id);
+                    get_field_slot_and_type_id_cg(self.cv_type_id(&obj), field_name, self)?;
+                let is_struct = self.vir_query_is_struct(self.cv_type_id(&obj));
                 if is_struct {
                     self.vir_struct_field_store(obj, slot, field_type_id, value)
                 } else {
@@ -106,7 +108,7 @@ impl Cg<'_, '_, '_> {
         obj: CompiledValue,
         field: Symbol,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let Some((module_id, exports)) = self.vir_query_unwrap_module(obj.type_id) else {
+        let Some((module_id, exports)) = self.vir_query_unwrap_module(self.cv_type_id(&obj)) else {
             return Ok(None);
         };
 
@@ -136,7 +138,6 @@ impl Cg<'_, '_, '_> {
                 return Ok(Some(CompiledValue::new(
                     value,
                     types::I8,
-                    export_type_id,
                     self.vir_lookup(export_type_id),
                 )));
             }
@@ -154,34 +155,18 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a `ConstantValue` to a `CompiledValue`.
     fn compile_constant_value(&mut self, const_val: ConstantValue) -> CodegenResult<CompiledValue> {
-        let prims = self.vir_query_primitives();
         match const_val {
             ConstantValue::F64(v) => {
                 let val = self.builder.ins().f64const(v);
-                Ok(CompiledValue::new(
-                    val,
-                    types::F64,
-                    prims.f64,
-                    VirTypeId::F64,
-                ))
+                Ok(CompiledValue::new(val, types::F64, VirTypeId::F64))
             }
             ConstantValue::I64(v) => {
                 let val = self.iconst_cached(types::I64, v);
-                Ok(CompiledValue::new(
-                    val,
-                    types::I64,
-                    prims.i64,
-                    VirTypeId::I64,
-                ))
+                Ok(CompiledValue::new(val, types::I64, VirTypeId::I64))
             }
             ConstantValue::Bool(v) => {
                 let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
-                Ok(CompiledValue::new(
-                    val,
-                    types::I8,
-                    prims.bool,
-                    VirTypeId::BOOL,
-                ))
+                Ok(CompiledValue::new(val, types::I8, VirTypeId::BOOL))
             }
             ConstantValue::String(s) => self.string_literal(&s),
         }
@@ -198,10 +183,10 @@ impl Cg<'_, '_, '_> {
         field_type_id: TypeId,
         value: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
-        let offset = self.struct_field_byte_offset(obj.type_id, slot);
+        let offset = self.struct_field_byte_offset(self.cv_type_id(&obj), slot);
 
         // Nested struct: copy all flat slots inline.
-        if let Some(nested_flat) = self.struct_flat_slot_count(value.type_id) {
+        if let Some(nested_flat) = self.struct_flat_slot_count(self.cv_type_id(&value)) {
             for i in 0..nested_flat {
                 let src_off = (i as i32) * 8;
                 let dst_off = offset + src_off;

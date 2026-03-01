@@ -52,7 +52,6 @@ impl Cg<'_, '_, '_> {
         let cv = CompiledValue::new(
             result,
             result_cranelift_type,
-            nullable_type_id,
             self.vir_lookup(nullable_type_id),
         );
         Ok(self.mark_rc_owned(cv))
@@ -94,7 +93,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             result,
             result_cranelift_type,
-            tested_type_id,
             self.vir_lookup(tested_type_id),
         ))
     }
@@ -106,11 +104,11 @@ impl Cg<'_, '_, '_> {
         target_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let payload_ty = self.cranelift_type(target_type_id);
-        let payload = self.load_union_payload(union_value.value, union_value.type_id, payload_ty);
+        let payload =
+            self.load_union_payload(union_value.value, self.cv_type_id(&union_value), payload_ty);
         Ok(CompiledValue::new(
             payload,
             payload_ty,
-            target_type_id,
             self.vir_lookup(target_type_id),
         ))
     }

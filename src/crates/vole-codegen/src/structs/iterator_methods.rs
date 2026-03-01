@@ -196,7 +196,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::owned(
             wrapped,
             types::I64,
-            runtime_iter_type_id,
             self.vir_lookup(runtime_iter_type_id),
         ))
     }
@@ -280,7 +279,7 @@ impl Cg<'_, '_, '_> {
             let compiled = self.compile_arg_from_source(arg_source, i)?;
             if stores_closure
                 && compiled.is_borrowed()
-                && self.rc_state(compiled.type_id).needs_cleanup()
+                && self.rc_state(self.cv_type_id(&compiled)).needs_cleanup()
             {
                 if self.in_iterable_default_body {
                     // Iterable default body: `f` is owned (caller transferred ownership).
@@ -297,7 +296,7 @@ impl Cg<'_, '_, '_> {
                 }
             } else if codegen_frees_closure
                 && compiled.is_borrowed()
-                && self.rc_state(compiled.type_id).needs_cleanup()
+                && self.rc_state(self.cv_type_id(&compiled)).needs_cleanup()
                 && self.in_iterable_default_body
                 && !arg_var_has_scope_exit_cleanup
             {
@@ -337,12 +336,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 result_val
             };
-            CompiledValue::new(
-                converted,
-                expected_cty,
-                return_type_id,
-                self.vir_lookup(return_type_id),
-            )
+            CompiledValue::new(converted, expected_cty, self.vir_lookup(return_type_id))
         } else if method_name == "sum" {
             // sum() -> T: the runtime always returns i64 (raw word). When the
             // element type is a float, the runtime does float addition and returns
@@ -368,7 +362,6 @@ impl Cg<'_, '_, '_> {
             CompiledValue::new(
                 converted,
                 expected_cty,
-                effective_return_type,
                 self.vir_lookup(effective_return_type),
             )
         } else {
@@ -391,7 +384,7 @@ impl Cg<'_, '_, '_> {
                 self.consume_rc_value(&mut tmp)?;
             }
             for borrow in &borrowed_closure_args {
-                self.emit_rc_dec_for_type(borrow.value, borrow.type_id)?;
+                self.emit_rc_dec_for_type(borrow.value, self.cv_type_id(borrow))?;
             }
         }
 

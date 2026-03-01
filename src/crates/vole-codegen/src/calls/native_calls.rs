@@ -243,7 +243,6 @@ impl Cg<'_, '_, '_> {
             return Ok(CompiledValue::new(
                 results[0],
                 self.ptr_type(),
-                type_id,
                 self.vir_lookup(type_id),
             ));
         }
@@ -260,7 +259,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             value,
             expected_ty,
-            type_id,
             self.vir_lookup(type_id),
         ))
     }
@@ -500,7 +498,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         arg_source: &ArgSource<'_>,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let Some(iface_type_def_id) = self.interface_type_def_id(obj.type_id) else {
+        let Some(iface_type_def_id) = self.interface_type_def_id(self.cv_type_id(obj)) else {
             return Ok(None);
         };
 

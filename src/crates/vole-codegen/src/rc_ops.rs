@@ -251,10 +251,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         #[cfg(debug_assertions)]
         compiled.debug_assert_not_consumed("rc_inc_borrowed_for_container");
         if self.rc_scopes.has_active_scope()
-            && self.rc_state(compiled.type_id).needs_cleanup()
+            && self.rc_state(self.cv_type_id(compiled)).needs_cleanup()
             && compiled.is_borrowed()
         {
-            self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
+            self.emit_rc_inc_for_type(compiled.value, self.cv_type_id(compiled))?;
         }
         Ok(())
     }
@@ -426,9 +426,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// For interface types, extracts the data word before decrementing.
     pub fn consume_rc_value(&mut self, cv: &mut CompiledValue) -> CodegenResult<()> {
         if cv.is_owned() {
-            if self.rc_state(cv.type_id).needs_cleanup() {
-                self.emit_rc_dec_for_type(cv.value, cv.type_id)?;
-            } else if let Some(rc_tags) = self.rc_state(cv.type_id).union_variants() {
+            if self.rc_state(self.cv_type_id(cv)).needs_cleanup() {
+                self.emit_rc_dec_for_type(cv.value, self.cv_type_id(cv))?;
+            } else if let Some(rc_tags) = self.rc_state(self.cv_type_id(cv)).union_variants() {
                 self.emit_union_rc_dec(cv.value, rc_tags)?;
             }
             cv.mark_consumed();
@@ -539,7 +539,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Use this for fresh allocations (function returns, operator results) — NOT for
     /// borrowed values (variable reads, field access, index operations).
     pub fn mark_rc_owned(&self, mut cv: CompiledValue) -> CompiledValue {
-        if self.rc_state(cv.type_id).needs_cleanup() {
+        if self.rc_state(self.cv_type_id(&cv)).needs_cleanup() {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
         cv
@@ -550,7 +550,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// with RC fields.
     /// This sets lifecycle metadata without emitting any rc_inc/rc_dec.
     pub fn mark_borrowed_if_rc(&self, cv: &mut CompiledValue) {
-        let state = self.rc_state(cv.type_id);
+        let state = self.rc_state(self.cv_type_id(cv));
         if state.needs_cleanup()
             || state.union_variants().is_some()
             || state.shallow_offsets().is_some()

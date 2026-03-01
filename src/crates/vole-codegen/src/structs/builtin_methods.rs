@@ -39,7 +39,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::owned(
             result,
             self.ptr_type(),
-            iter_type_id,
             self.vir_lookup(iter_type_id),
         ))
     }
@@ -53,7 +52,7 @@ impl Cg<'_, '_, '_> {
         iter_type_hint: Option<TypeId>,
     ) -> CodegenResult<Option<CompiledValue>> {
         // Array methods
-        if let Some(elem_type_id) = self.vir_query_unwrap_array(obj.type_id) {
+        if let Some(elem_type_id) = self.vir_query_unwrap_array(self.cv_type_id(obj)) {
             return match method_name {
                 "length" => {
                     let result = self.call_compiler_intrinsic_key_with_line(
@@ -84,7 +83,6 @@ impl Cg<'_, '_, '_> {
                     Ok(Some(CompiledValue::owned(
                         result,
                         self.ptr_type(),
-                        iter_type_id,
                         self.vir_lookup(iter_type_id),
                     )))
                 }
@@ -93,7 +91,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // String methods
-        if self.vir_query_is_string(obj.type_id) {
+        if self.vir_query_is_string(self.cv_type_id(obj)) {
             return match method_name {
                 "length" => {
                     let result = self.call_compiler_intrinsic_key_with_line(
@@ -125,7 +123,6 @@ impl Cg<'_, '_, '_> {
                     Ok(Some(CompiledValue::owned(
                         result,
                         self.ptr_type(),
-                        iter_type_id,
                         self.vir_lookup(iter_type_id),
                     )))
                 }
@@ -134,7 +131,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Range methods
-        if obj.type_id == TypeId::RANGE {
+        if self.cv_type_id(obj) == TypeId::RANGE {
             if method_name == "iter" {
                 // Load start and end from the range struct (pointer to [start, end])
                 let start = self
@@ -156,7 +153,6 @@ impl Cg<'_, '_, '_> {
                 return Ok(Some(CompiledValue::owned(
                     result,
                     self.ptr_type(),
-                    iter_type_id,
                     self.vir_lookup(iter_type_id),
                 )));
             }
@@ -181,7 +177,7 @@ impl Cg<'_, '_, '_> {
         // Compile the argument
         let value = self.compile_arg_from_source(arg_source, 0)?;
 
-        let elem_type = self.vir_query_unwrap_array(arr_obj.type_id);
+        let elem_type = self.vir_query_unwrap_array(self.cv_type_id(arr_obj));
         let (tag_val, value_bits, _value) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(value, elem_id)?
         } else {
@@ -199,7 +195,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             self.iconst_cached(types::I64, 0),
             types::I64,
-            void_type_id,
             self.vir_lookup(void_type_id),
         ))
     }

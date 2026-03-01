@@ -47,7 +47,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             ptr,
             ptr_type,
-            range_type_id,
             self.vir_lookup(range_type_id),
         ))
     }
@@ -77,7 +76,7 @@ impl Cg<'_, '_, '_> {
 
         if elem_type.is_none() && !elements.is_empty() {
             let first = self.compile_vir_expr(&elements[0])?;
-            let inferred_elem = self.try_substitute_type(first.type_id);
+            let inferred_elem = self.try_substitute_type(self.cv_type_id(&first));
             if inferred_elem != TypeId::UNKNOWN
                 && let Some(inferred_array_type) = self.vir_query_lookup_array(inferred_elem)
             {
@@ -122,7 +121,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             arr_ptr,
             self.ptr_type(),
-            result_array_type,
             self.vir_lookup(result_array_type),
         ))
     }
@@ -146,7 +144,7 @@ impl Cg<'_, '_, '_> {
                 // arrive with degraded compat type IDs (e.g. f128 paths mapping through
                 // vir F64) even though element VIR is concrete. Keep codegen robust by
                 // deriving element layout from the compiled element value.
-                let fallback_elem_type_id = self.try_substitute_type(elem_value.type_id);
+                let fallback_elem_type_id = self.try_substitute_type(self.cv_type_id(&elem_value));
                 let fallback_result_type_id = self
                     .vir_query_lookup_fixed_array(fallback_elem_type_id, count)
                     .unwrap_or(type_id);
@@ -158,14 +156,14 @@ impl Cg<'_, '_, '_> {
 
         let slot = self.alloc_stack(total_size);
 
-        let needs_rc =
-            self.rc_scopes.has_active_scope() && self.rc_state(elem_value.type_id).needs_cleanup();
+        let needs_rc = self.rc_scopes.has_active_scope()
+            && self.rc_state(self.cv_type_id(&elem_value)).needs_cleanup();
         let is_borrowed = elem_value.is_borrowed();
         let wide_bits = crate::types::wide_ops::WideType::from_cranelift_type(elem_value.ty)
             .map(|wide| wide.to_i128_bits(self.builder, elem_value.value));
         for i in 0..count {
             if needs_rc && (i > 0 || is_borrowed) {
-                self.emit_rc_inc_for_type(elem_value.value, elem_value.type_id)?;
+                self.emit_rc_inc_for_type(elem_value.value, self.cv_type_id(&elem_value))?;
             }
             let offset = (i as i32) * (elem_size as i32);
             if let Some(wide_bits) = wide_bits {
@@ -187,7 +185,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             ptr,
             ptr_type,
-            result_type_id,
             self.vir_lookup(result_type_id),
         ))
     }
@@ -221,7 +218,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             ptr,
             ptr_type,
-            tuple_type_id,
             self.vir_lookup(tuple_type_id),
         ))
     }

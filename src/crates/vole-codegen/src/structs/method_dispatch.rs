@@ -179,12 +179,7 @@ impl Cg<'_, '_, '_> {
         // For sret, result[0] is the sret pointer we passed in
         let result = if is_sret {
             let results = self.builder.inst_results(call_inst);
-            CompiledValue::new(
-                results[0],
-                self.ptr_type(),
-                return_type_id,
-                self.vir_lookup(return_type_id),
-            )
+            CompiledValue::new(results[0], self.ptr_type(), self.vir_lookup(return_type_id))
         } else {
             self.call_result(call_inst, return_type_id)?
         };
@@ -319,7 +314,7 @@ impl Cg<'_, '_, '_> {
         let word_type = self.ptr_type();
         let word_bytes = word_type.bytes() as i32;
         let dispatch_func_type_id = self
-            .vir_query_unwrap_interface(obj.type_id)
+            .vir_query_unwrap_interface(self.cv_type_id(obj))
             .and_then(|(interface_type_def_id, _)| {
                 self.analyzed()
                     .interface_method_ids_ordered(interface_type_def_id)

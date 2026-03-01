@@ -43,43 +43,44 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Value, TypeId, bool)> {
         let mut is_stack_union = false;
 
-        let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
-            declared_type_id_opt
-        {
-            match storage {
-                LetStorageHint::Unknown if !init.type_id.is_unknown() => {
-                    // Box value to unknown type (TaggedValue)
-                    let boxed = self.box_to_unknown(*init)?;
-                    (boxed.value, boxed.type_id)
+        let (mut final_value, mut final_type_id) =
+            if let Some(declared_type_id) = declared_type_id_opt {
+                match storage {
+                    LetStorageHint::Unknown if !init.type_id.is_unknown() => {
+                        // Box value to unknown type (TaggedValue)
+                        let boxed = self.box_to_unknown(*init)?;
+                        (boxed.value, self.cv_type_id(&boxed))
+                    }
+                    LetStorageHint::Union { tag_hint }
+                        if !self.vir_query_is_union(self.cv_type_id(init)) =>
+                    {
+                        let wrapped = if let Some(hint) = tag_hint {
+                            self.construct_union_from_hint(*init, declared_type_id, &hint)?
+                        } else {
+                            self.construct_union_id_with_hint(
+                                *init,
+                                declared_type_id,
+                                sentinel_hint_type_id,
+                            )?
+                        };
+                        is_stack_union = true;
+                        (wrapped.value, self.cv_type_id(&wrapped))
+                    }
+                    LetStorageHint::Numeric if self.cv_type_id(init).is_numeric() => {
+                        let coerced = self.coerce_to_type(*init, declared_type_id)?;
+                        (coerced.value, self.cv_type_id(&coerced))
+                    }
+                    LetStorageHint::Interface => {
+                        // For functional interfaces, keep the actual function type
+                        // from the lambda. This preserves the is_closure flag for
+                        // proper calling convention.
+                        (init.value, self.cv_type_id(init))
+                    }
+                    _ => (init.value, declared_type_id),
                 }
-                LetStorageHint::Union { tag_hint } if !self.vir_query_is_union(init.type_id) => {
-                    let wrapped = if let Some(hint) = tag_hint {
-                        self.construct_union_from_hint(*init, declared_type_id, &hint)?
-                    } else {
-                        self.construct_union_id_with_hint(
-                            *init,
-                            declared_type_id,
-                            sentinel_hint_type_id,
-                        )?
-                    };
-                    is_stack_union = true;
-                    (wrapped.value, wrapped.type_id)
-                }
-                LetStorageHint::Numeric if init.type_id.is_numeric() => {
-                    let coerced = self.coerce_to_type(*init, declared_type_id)?;
-                    (coerced.value, coerced.type_id)
-                }
-                LetStorageHint::Interface => {
-                    // For functional interfaces, keep the actual function type
-                    // from the lambda. This preserves the is_closure flag for
-                    // proper calling convention.
-                    (init.value, init.type_id)
-                }
-                _ => (init.value, declared_type_id),
-            }
-        } else {
-            (init.value, init.type_id)
-        };
+            } else {
+                (init.value, self.cv_type_id(init))
+            };
 
         // Box value if assigning to interface type
         if let Some(declared_type_id) = declared_type_id_opt
@@ -93,16 +94,11 @@ impl Cg<'_, '_, '_> {
             if !is_final_interface && !is_runtime_iterator {
                 let cranelift_ty = self.cranelift_type(final_type_id);
                 let boxed = self.box_interface_value(
-                    CompiledValue::new(
-                        final_value,
-                        cranelift_ty,
-                        final_type_id,
-                        self.vir_lookup(final_type_id),
-                    ),
+                    CompiledValue::new(final_value, cranelift_ty, self.vir_lookup(final_type_id)),
                     declared_type_id,
                 )?;
                 final_value = boxed.value;
-                final_type_id = boxed.type_id;
+                final_type_id = self.cv_type_id(&boxed);
             }
         }
 
@@ -127,7 +123,7 @@ impl Cg<'_, '_, '_> {
         variants: &[TypeId],
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<(usize, Value, TypeId)> {
-        let resolved_value_type_id = self.try_substitute_type(value.type_id);
+        let resolved_value_type_id = self.try_substitute_type(self.cv_type_id(value));
 
         // Direct type match
         if let Some(pos) = variants.iter().position(|&v| v == resolved_value_type_id) {
@@ -216,7 +212,9 @@ impl Cg<'_, '_, '_> {
                     .map(|&variant| self.vir_query_display_basic(variant))
                     .collect::<Vec<_>>()
                     .join(" | ");
-                let found = if let Some(name_id) = self.vir_query_unwrap_type_param(value.type_id) {
+                let found = if let Some(name_id) =
+                    self.vir_query_unwrap_type_param(self.cv_type_id(value))
+                {
                     format!("{} ({:?})", self.name_table().display(name_id), name_id)
                 } else {
                     self.vir_query_display_basic(resolved_value_type_id)
@@ -270,7 +268,7 @@ impl Cg<'_, '_, '_> {
         hint: &vole_vir::stmt::UnionTagHint,
     ) -> CodegenResult<CompiledValue> {
         // If the value is a struct, box it first (auto-boxing for union storage)
-        let value = if self.vir_query_is_struct(value.type_id) {
+        let value = if self.vir_query_is_struct(self.cv_type_id(&value)) {
             self.copy_struct_to_heap(value)?
         } else {
             value
@@ -321,7 +319,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             ptr,
             ptr_type,
-            union_type_id,
             self.vir_lookup(union_type_id),
         ))
     }
@@ -340,13 +337,13 @@ impl Cg<'_, '_, '_> {
         // Also check the substituted type, since generic code may produce values
         // whose raw type_id is e.g. `T | nil` but after substitution matches the
         // concrete union type `i64 | nil`.
-        let resolved_type_id = self.try_substitute_type(value.type_id);
-        if value.type_id == union_type_id || resolved_type_id == union_type_id {
+        let resolved_type_id = self.try_substitute_type(self.cv_type_id(&value));
+        if self.cv_type_id(&value) == union_type_id || resolved_type_id == union_type_id {
             return Ok(value);
         }
 
         // If the value is a struct, box it first (auto-boxing for union storage)
-        let value = if self.vir_query_is_struct(value.type_id) {
+        let value = if self.vir_query_is_struct(self.cv_type_id(&value)) {
             self.copy_struct_to_heap(value)?
         } else {
             value
@@ -394,7 +391,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             ptr,
             ptr_type,
-            union_type_id,
             self.vir_lookup(union_type_id),
         ))
     }
@@ -492,7 +488,7 @@ impl Cg<'_, '_, '_> {
         match vir_stmt {
             VirStmt::Expr { value } => {
                 let mut compiled = self.compile_vir_expr(value)?;
-                if compiled.type_id == TypeId::NEVER {
+                if self.cv_type_id(&compiled) == TypeId::NEVER {
                     // The expression diverges (e.g. exhaustive if/else with
                     // returns in all branches, `unreachable`, `panic`).
                     // The current block is already terminated by the expression
@@ -519,12 +515,20 @@ impl Cg<'_, '_, '_> {
             // -- RC operations ---------------------------------------------------
             VirStmt::RcInc { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_inc_with_cleanup(compiled.value, compiled.type_id, *cleanup)?;
+                self.emit_rc_inc_with_cleanup(
+                    compiled.value,
+                    self.cv_type_id(&compiled),
+                    *cleanup,
+                )?;
                 Ok(false)
             }
             VirStmt::RcDec { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_dec_with_cleanup(compiled.value, compiled.type_id, *cleanup)?;
+                self.emit_rc_dec_with_cleanup(
+                    compiled.value,
+                    self.cv_type_id(&compiled),
+                    *cleanup,
+                )?;
                 Ok(false)
             }
 
@@ -584,10 +588,11 @@ impl Cg<'_, '_, '_> {
             } else {
                 self.compile_vir_expr(value_expr)?
             };
-            compiled.type_id = self.try_substitute_type(compiled.type_id);
+            compiled.type_id =
+                self.vir_lookup(self.try_substitute_type(self.cv_type_id(&compiled)));
             if is_union_return
                 && let Some(ret_type_id) = return_type_id
-                && self.vir_query_is_function(compiled.type_id)
+                && self.vir_query_is_function(self.cv_type_id(&compiled))
                 && let vole_vir::VirExpr::Match {
                     scrutinee, arms, ..
                 } = value_expr
@@ -596,15 +601,18 @@ impl Cg<'_, '_, '_> {
                 // bodies. Recompile with the declared return union as the
                 // expected result type.
                 compiled = self.compile_vir_match(scrutinee, arms, ret_type_id)?;
-                compiled.type_id = self.try_substitute_type(compiled.type_id);
+                compiled.type_id =
+                    self.vir_lookup(self.try_substitute_type(self.cv_type_id(&compiled)));
             }
 
             // RC bookkeeping: detect RC skip-var from VIR LocalLoad.
             let skip_var = self.extract_vir_return_skip_var(value_expr);
             if skip_var.is_none() && compiled.is_borrowed() {
-                if self.rc_state(compiled.type_id).needs_cleanup() {
-                    self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
-                } else if let Some(rc_tags) = self.rc_state(compiled.type_id).union_variants() {
+                if self.rc_state(self.cv_type_id(&compiled)).needs_cleanup() {
+                    self.emit_rc_inc_for_type(compiled.value, self.cv_type_id(&compiled))?;
+                } else if let Some(rc_tags) =
+                    self.rc_state(self.cv_type_id(&compiled)).union_variants()
+                {
                     self.emit_union_rc_inc(compiled.value, rc_tags)?;
                 }
             }
@@ -714,8 +722,8 @@ impl Cg<'_, '_, '_> {
                 // NOTE: box_interface_value requires sema TypeId for vtable generation.
                 let ret_type_id =
                     return_type_id.expect("InterfaceBox convention requires return type");
-                if !self.vir_query_is_interface(compiled.type_id)
-                    && !self.vir_query_is_runtime_iterator(compiled.type_id)
+                if !self.vir_query_is_interface(self.cv_type_id(&compiled))
+                    && !self.vir_query_is_runtime_iterator(self.cv_type_id(&compiled))
                 {
                     let boxed = self.box_interface_value(compiled, ret_type_id)?;
                     self.builder.ins().return_(&[boxed.value]);
@@ -725,7 +733,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             ReturnConvention::UnknownBox => {
-                if !self.vir_query_is_unknown(compiled.type_id) {
+                if !self.vir_query_is_unknown(self.cv_type_id(&compiled)) {
                     let boxed = self.box_to_unknown_no_inc(compiled)?;
                     self.builder.ins().return_(&[boxed.value]);
                 } else {
@@ -935,8 +943,10 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
 
             let mut field_value = self.compile_vir_expr(&field_init.1)?;
-            if self.rc_state(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
-                self.emit_rc_inc_for_type(field_value.value, field_value.type_id)?;
+            if self.rc_state(self.cv_type_id(&field_value)).needs_cleanup()
+                && field_value.is_borrowed()
+            {
+                self.emit_rc_inc_for_type(field_value.value, self.cv_type_id(&field_value))?;
             }
             field_value.mark_consumed();
             field_value.debug_assert_rc_handled("VirStmt::Raise (single field)");
@@ -962,8 +972,10 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
 
             let mut field_value = self.compile_vir_expr(&field_init.1)?;
-            if self.rc_state(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
-                self.emit_rc_inc_for_type(field_value.value, field_value.type_id)?;
+            if self.rc_state(self.cv_type_id(&field_value)).needs_cleanup()
+                && field_value.is_borrowed()
+            {
+                self.emit_rc_inc_for_type(field_value.value, self.cv_type_id(&field_value))?;
             }
             field_value.mark_consumed();
             field_value.debug_assert_rc_handled("VirStmt::Raise (multi field)");
@@ -1006,7 +1018,7 @@ impl Cg<'_, '_, '_> {
 
         // Struct copy: when binding a struct value, copy to a new stack slot
         // to maintain value semantics (structs are stack-allocated value types).
-        let mut init = if self.vir_query_is_struct(init.type_id) {
+        let mut init = if self.vir_query_is_struct(self.cv_type_id(&init)) {
             self.copy_struct_value(init)?
         } else {
             init
@@ -1083,13 +1095,13 @@ impl Cg<'_, '_, '_> {
         // Register composite RC cleanup for owned temporaries.
         if self.rc_scopes.has_active_scope()
             && !is_borrow
-            && let Some(offsets) = self.rc_state(init.type_id).shallow_offsets()
+            && let Some(offsets) = self.rc_state(self.cv_type_id(&init)).shallow_offsets()
         {
-            let cr_type = self.cranelift_type(init.type_id);
+            let cr_type = self.cranelift_type(self.cv_type_id(&init));
             let temp_var = self.builder.declare_var(cr_type);
             self.builder.def_var(temp_var, init.value);
             let union_fields = self
-                .rc_state(init.type_id)
+                .rc_state(self.cv_type_id(&init))
                 .composite_union_fields()
                 .to_vec();
             let drop_flag =
@@ -1354,15 +1366,15 @@ impl Cg<'_, '_, '_> {
         is_stack_union: bool,
     ) -> CodegenResult<()> {
         // Detect whether coerce_let_init called box_to_unknown (new TaggedValue).
-        let created_tagged_value =
-            self.vir_query_is_unknown(final_type_id) && !self.vir_query_is_unknown(init.type_id);
+        let created_tagged_value = self.vir_query_is_unknown(final_type_id)
+            && !self.vir_query_is_unknown(self.cv_type_id(init));
 
         if self.rc_scopes.has_active_scope() && created_tagged_value {
             let drop_flag = self.register_rc_local(var, final_type_id);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         } else if self.rc_scopes.has_active_scope()
             && final_type_id == TypeId::UNKNOWN
-            && init.type_id == TypeId::UNKNOWN
+            && self.cv_type_id(init) == TypeId::UNKNOWN
             && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
         {
             // TEMP(N279-C): mixed VIR/sema metadata can degrade array-literal

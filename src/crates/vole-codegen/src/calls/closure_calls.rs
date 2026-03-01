@@ -191,7 +191,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            Ok(CompiledValue::new(ptr, ptr_type, ret, self.vir_lookup(ret)))
+            Ok(CompiledValue::new(ptr, ptr_type, self.vir_lookup(ret)))
         } else {
             // If the return type is a union, the returned value is a pointer to callee's stack.
             // We need to copy the union data to our own stack to prevent it from being

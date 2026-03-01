@@ -35,7 +35,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let field_name = self.interner().resolve(field);
         let (slot, field_type_id) = super::super::structs::helpers::get_field_slot_and_type_id_cg(
-            inner.type_id,
+            self.cv_type_id(&inner),
             field_name,
             self,
         )?;
@@ -51,7 +51,6 @@ impl Cg<'_, '_, '_> {
         let nil_val = CompiledValue::new(
             self.iconst_cached(types::I8, 0),
             types::I8,
-            nil_type_id,
             self.vir_lookup(nil_type_id),
         );
         self.coerce_to_type(nil_val, result_type_id)
@@ -76,12 +75,7 @@ impl Cg<'_, '_, '_> {
         // struct pointer.
         if self.vir_query_is_struct(binding.vole_type) {
             let ptr_type = self.ptr_type();
-            let cv = CompiledValue::new(
-                heap_ptr,
-                ptr_type,
-                binding.vole_type,
-                self.vir_lookup(binding.vole_type),
-            );
+            let cv = CompiledValue::new(heap_ptr, ptr_type, self.vir_lookup(binding.vole_type));
             return Ok(cv);
         }
 
@@ -94,12 +88,7 @@ impl Cg<'_, '_, '_> {
         // Capture loads are borrows — the closure owns the reference via its
         // capture slot.  Marking as Borrowed ensures the return path inc's the
         // value when it leaves the closure body, giving the caller a +1 ref.
-        let mut cv = CompiledValue::new(
-            value,
-            cranelift_ty,
-            binding.vole_type,
-            self.vir_lookup(binding.vole_type),
-        );
+        let mut cv = CompiledValue::new(value, cranelift_ty, self.vir_lookup(binding.vole_type));
         self.mark_borrowed_if_rc(&mut cv);
         Ok(cv)
     }
@@ -137,7 +126,6 @@ impl Cg<'_, '_, '_> {
             return Ok(CompiledValue::new(
                 heap_ptr,
                 ptr_type,
-                binding.vole_type,
                 self.vir_lookup(binding.vole_type),
             ));
         }
@@ -153,7 +141,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             value.value,
             cranelift_ty,
-            binding.vole_type,
             self.vir_lookup(binding.vole_type),
         ))
     }
@@ -174,7 +161,7 @@ impl Cg<'_, '_, '_> {
         inner_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let value = self.compile_vir_expr(value_expr)?;
-        let nil_tag = self.find_nil_variant(value.type_id).ok_or_else(|| {
+        let nil_tag = self.find_nil_variant_vir(value.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
         })?;
 
@@ -220,7 +207,7 @@ impl Cg<'_, '_, '_> {
 
         // Not-nil branch: extract payload
         self.switch_and_seal(not_nil_block);
-        let union_size = self.type_size(value.type_id);
+        let union_size = self.type_size(self.cv_type_id(&value));
         let payload = if union_size > union_layout::TAG_ONLY_SIZE {
             let loaded = self.builder.ins().load(
                 cranelift_type,
@@ -240,12 +227,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        let cv = CompiledValue::new(
-            result,
-            cranelift_type,
-            inner_type_id,
-            self.vir_lookup(inner_type_id),
-        );
+        let cv = CompiledValue::new(result, cranelift_type, self.vir_lookup(inner_type_id));
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -270,7 +252,7 @@ impl Cg<'_, '_, '_> {
         // Nil branch: evaluate default, box into union if needed
         self.switch_and_seal(nil_block);
         let default_val = self.compile_vir_expr(default_expr)?;
-        let default_ptr = if self.vir_query_is_union(default_val.type_id) {
+        let default_ptr = if self.vir_query_is_union(self.cv_type_id(&default_val)) {
             default_val.value
         } else {
             let boxed = self.construct_union_id(default_val, inner_type_id)?;
@@ -286,12 +268,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result_ptr = self.builder.block_params(merge_block)[0];
-        let cv = CompiledValue::new(
-            result_ptr,
-            ptr_type,
-            inner_type_id,
-            self.vir_lookup(inner_type_id),
-        );
+        let cv = CompiledValue::new(result_ptr, ptr_type, self.vir_lookup(inner_type_id));
         Ok(cv)
     }
 
@@ -307,9 +284,15 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let scrutinee = self.compile_vir_expr(object_expr)?;
-        let nil_tag = self.find_nil_variant(scrutinee.type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("optional chain operator", "optional type", "non-optional")
-        })?;
+        let nil_tag = self
+            .find_nil_variant_vir(scrutinee.type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
+                    "optional chain operator",
+                    "optional type",
+                    "non-optional",
+                )
+            })?;
 
         let result_type_id = self.try_substitute_type(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
@@ -373,9 +356,15 @@ impl Cg<'_, '_, '_> {
         } = args;
 
         let scrutinee = self.compile_vir_expr(object_expr)?;
-        let nil_tag = self.find_nil_variant(scrutinee.type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("optional chain operator", "optional type", "non-optional")
-        })?;
+        let nil_tag = self
+            .find_nil_variant_vir(scrutinee.type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
+                    "optional chain operator",
+                    "optional type",
+                    "non-optional",
+                )
+            })?;
 
         let result_type_id = self.try_substitute_type(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
@@ -442,10 +431,12 @@ impl Cg<'_, '_, '_> {
 
         // Insert into vars under the $oc symbol
         let oc_sym = self.interner().lookup("$oc").expect("$oc must be interned");
-        let saved_entry = self.vars.insert(oc_sym, (inner_var, inner.type_id));
+        let saved_entry = self
+            .vars
+            .insert(oc_sym, (inner_var, self.cv_type_id(&inner)));
 
         // Build a VIR-native MethodCallSource with $oc as the receiver.
-        let inner_vir_ty = self.vir_lookup(inner.type_id);
+        let inner_vir_ty = self.vir_lookup(self.cv_type_id(&inner));
         let receiver_vir = VirExpr::LocalLoad {
             name: oc_sym,
             ty: inner_vir_ty,
@@ -514,7 +505,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             result,
             payload_ty,
-            success_type_id,
             self.vir_lookup(success_type_id),
         ))
     }
@@ -530,7 +520,7 @@ impl Cg<'_, '_, '_> {
     ) -> CompiledValue {
         let inner_type_id = self.try_substitute_type(inner_type_id);
         let inner_cranelift_type = self.cranelift_type(inner_type_id);
-        let union_size = self.type_size(scrutinee.type_id);
+        let union_size = self.type_size(self.cv_type_id(&scrutinee));
         if union_size > union_layout::TAG_ONLY_SIZE {
             let loaded = self.builder.ins().load(
                 inner_cranelift_type,
@@ -538,20 +528,10 @@ impl Cg<'_, '_, '_> {
                 scrutinee.value,
                 union_layout::PAYLOAD_OFFSET,
             );
-            CompiledValue::new(
-                loaded,
-                inner_cranelift_type,
-                inner_type_id,
-                self.vir_lookup(inner_type_id),
-            )
+            CompiledValue::new(loaded, inner_cranelift_type, self.vir_lookup(inner_type_id))
         } else {
             let zero = self.iconst_cached(inner_cranelift_type, 0);
-            CompiledValue::new(
-                zero,
-                inner_cranelift_type,
-                inner_type_id,
-                self.vir_lookup(inner_type_id),
-            )
+            CompiledValue::new(zero, inner_cranelift_type, self.vir_lookup(inner_type_id))
         }
     }
 

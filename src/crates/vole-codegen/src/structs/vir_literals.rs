@@ -37,7 +37,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(CompiledValue::new(
                 value,
                 types::I8,
-                result_type_id,
                 self.vir_lookup(result_type_id),
             ));
         }
@@ -114,7 +113,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(CompiledValue::new(
             ptr,
             ptr_type,
-            layout_type_id,
             self.vir_lookup(layout_type_id),
         ))
     }
@@ -135,7 +133,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(CompiledValue::new(
                 value,
                 types::I8,
-                result_type_id,
                 self.vir_lookup(result_type_id),
             ));
         }
@@ -182,7 +179,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(CompiledValue::new(
             instance_ptr,
             self.ptr_type(),
-            result_type_id,
             self.vir_lookup(result_type_id),
         ))
     }
@@ -216,22 +212,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CodegenResult<()> {
         // RC: inc borrowed field values so the struct gets its own reference.
         if self.rc_scopes.has_active_scope()
-            && self.rc_state(value.type_id).needs_cleanup()
+            && self.rc_state(self.cv_type_id(value)).needs_cleanup()
             && value.is_borrowed()
         {
-            self.emit_rc_inc_for_type(value.value, value.type_id)?;
+            self.emit_rc_inc_for_type(value.value, self.cv_type_id(value))?;
         }
         // Coerce to unknown when the field type is unknown.
         if let Some(&field_type_id) = field_types.get(field_name)
             && self.vir_query_is_unknown(field_type_id)
-            && !self.vir_query_is_unknown(value.type_id)
+            && !self.vir_query_is_unknown(self.cv_type_id(value))
         {
             *value = self.box_to_unknown_no_inc(*value)?;
         }
         // Coerce non-union to union for payload-carrying union fields.
         if let Some(&field_type_id) = field_types.get(field_name)
             && self.vir_query_is_payload_union(field_type_id)
-            && !self.vir_query_is_union(value.type_id)
+            && !self.vir_query_is_union(self.cv_type_id(value))
         {
             *value = self.construct_union_id(*value, field_type_id)?;
         }
@@ -276,14 +272,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // Coerce concrete defaults to unknown.
             if let Some(&field_type_id) = field_types.get(&field_name)
                 && self.vir_query_is_unknown(field_type_id)
-                && !self.vir_query_is_unknown(value.type_id)
+                && !self.vir_query_is_unknown(self.cv_type_id(&value))
             {
                 value = self.box_to_unknown(value)?;
             }
             // Coerce non-union defaults to union.
             if let Some(&field_type_id) = field_types.get(&field_name)
                 && self.vir_query_is_payload_union(field_type_id)
-                && !self.vir_query_is_union(value.type_id)
+                && !self.vir_query_is_union(self.cv_type_id(&value))
             {
                 value = self.construct_union_id(value, field_type_id)?;
             }
@@ -359,11 +355,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // RC: inc borrowed field values (skip unions -- handled by coercion).
         if self.rc_scopes.has_active_scope()
-            && self.rc_state(value.type_id).needs_cleanup()
+            && self.rc_state(self.cv_type_id(&value)).needs_cleanup()
             && value.is_borrowed()
-            && !self.vir_query_is_union(value.type_id)
+            && !self.vir_query_is_union(self.cv_type_id(&value))
         {
-            self.emit_rc_inc_for_type(value.value, value.type_id)?;
+            self.emit_rc_inc_for_type(value.value, self.cv_type_id(&value))?;
         }
         value.mark_consumed();
 

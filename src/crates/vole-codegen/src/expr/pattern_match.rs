@@ -174,7 +174,7 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let scrutinee = self.compile_vir_expr(scrutinee_expr)?;
-        let scrutinee_type_id = scrutinee.type_id;
+        let scrutinee_type_id = self.cv_type_id(&scrutinee);
 
         let mut effective_result_type = self.try_substitute_type(result_type_id);
 
@@ -380,7 +380,7 @@ impl Cg<'_, '_, '_> {
             vole_vir::VirPattern::Binding { name, ty: _, .. } => {
                 let var = self.builder.declare_var(scrutinee.ty);
                 self.builder.def_var(var, scrutinee.value);
-                arm_variables.insert(*name, (var, scrutinee.type_id));
+                arm_variables.insert(*name, (var, self.cv_type_id(scrutinee)));
                 Ok(None)
             }
 
@@ -395,7 +395,7 @@ impl Cg<'_, '_, '_> {
                 let effective_result = if self.substitutions.is_some() {
                     let sub_tested =
                         self.try_substitute_type(self.sema_type_from_vir(*tested_type));
-                    let sub_scrutinee = self.try_substitute_type(scrutinee.type_id);
+                    let sub_scrutinee = self.try_substitute_type(self.cv_type_id(scrutinee));
                     self.compute_is_check_result(sub_scrutinee, sub_tested)
                 } else {
                     convert_vir_is_check(result)
@@ -439,7 +439,7 @@ impl Cg<'_, '_, '_> {
                         (self.builder.use_var(var), var_type_id)
                     } else if let Some(binding) = self.get_capture(name).copied() {
                         let captured = self.load_capture(&binding)?;
-                        (captured.value, captured.type_id)
+                        (captured.value, self.cv_type_id(&captured))
                     } else {
                         return Err(CodegenError::internal("undefined variable in val pattern"));
                     };
@@ -598,7 +598,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> CodegenResult<Option<Value>> {
-        let elem_type_ids = self.vir_query_unwrap_tuple(scrutinee.type_id);
+        let elem_type_ids = self.vir_query_unwrap_tuple(self.cv_type_id(scrutinee));
         if let Some(elem_type_ids) = elem_type_ids {
             let (_, offsets) = self.tuple_layout(&elem_type_ids);
             let elem_cr_types = self.cranelift_types(&elem_type_ids);
@@ -654,7 +654,7 @@ impl Cg<'_, '_, '_> {
             let effective_result = if self.substitutions.is_some() {
                 if let Some(tested) = tested_type {
                     let sub_tested = self.try_substitute_type(self.sema_type_from_vir(*tested));
-                    let sub_scrutinee = self.try_substitute_type(scrutinee.type_id);
+                    let sub_scrutinee = self.try_substitute_type(self.cv_type_id(scrutinee));
                     self.compute_is_check_result(sub_scrutinee, sub_tested)
                 } else {
                     convert_vir_is_check(vir_result)
@@ -789,7 +789,7 @@ impl Cg<'_, '_, '_> {
             let (_, body_val) = self.compile_vir_body(body)?;
             body_val.unwrap_or_else(|| self.void_value())
         };
-        if body_result.type_id == TypeId::NEVER {
+        if self.cv_type_id(&body_result) == TypeId::NEVER {
             return Ok(body_result);
         }
         self.coerce_to_type(body_result, result_type_id)
@@ -804,7 +804,7 @@ impl Cg<'_, '_, '_> {
         is_void: bool,
         merge_block: Block,
     ) -> CodegenResult<()> {
-        if body_result.type_id == TypeId::NEVER {
+        if self.cv_type_id(&body_result) == TypeId::NEVER {
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         } else if !is_void {
             let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();

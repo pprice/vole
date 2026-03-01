@@ -114,9 +114,9 @@ impl WideType {
         self,
         builder: &mut FunctionBuilder,
         i128_bits: Value,
-        type_id: TypeId,
+        _type_id: TypeId,
     ) -> CompiledValue {
         let value = self.reinterpret_i128(builder, i128_bits);
-        CompiledValue::new(value, self.cranelift_type(), type_id, self.vir_type_id())
+        CompiledValue::new(value, self.cranelift_type(), self.vir_type_id())
     }
 }

@@ -1124,13 +1124,13 @@ pub(crate) fn vir_convert_to_type(
     // Integer widening — use uextend for unsigned types, sextend for signed.
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
         // Check VirTypeTable for unsigned status instead of arena.
-        let vir_ty = val.vir_type_id;
+        let vir_ty = val.type_id;
         let is_unsigned = if vir_ty != VirTypeId::UNKNOWN {
             vir_is_unsigned(vir_ty, table)
         } else {
             // Fallback: check well-known unsigned type IDs.
             matches!(
-                val.type_id,
+                val.sema_type_id(),
                 TypeId::U8 | TypeId::U16 | TypeId::U32 | TypeId::U64
             )
         };
@@ -1172,7 +1172,7 @@ pub(crate) fn vir_value_to_word(
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
 
-    let vir_ty = value.vir_type_id;
+    let vir_ty = value.type_id;
     let value_size = vir_type_id_size(vir_ty, pointer_type, entities, table);
     let needs_box = value_size > word_bytes;
 

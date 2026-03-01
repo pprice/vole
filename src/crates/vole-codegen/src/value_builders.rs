@@ -31,12 +31,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// construction, avoiding thousands of dead iconst instructions that were
     /// previously emitted and never referenced.
     pub fn void_value(&self) -> CompiledValue {
-        CompiledValue::new(
-            self.cached_void_val,
-            types::I64,
-            TypeId::VOID,
-            VirTypeId::VOID,
-        )
+        CompiledValue::new(self.cached_void_val, types::I64, VirTypeId::VOID)
     }
 
     /// Create a zero/default value of the given Cranelift type.
@@ -69,7 +64,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as a Bool CompiledValue
     pub fn bool_value(&self, value: Value) -> CompiledValue {
-        CompiledValue::new(value, types::I8, TypeId::BOOL, VirTypeId::BOOL)
+        CompiledValue::new(value, types::I8, VirTypeId::BOOL)
     }
 
     /// Create a boolean constant (true or false)
@@ -80,7 +75,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as an I64 CompiledValue
     pub fn i64_value(&self, value: Value) -> CompiledValue {
-        CompiledValue::new(value, types::I64, TypeId::I64, VirTypeId::I64)
+        CompiledValue::new(value, types::I64, VirTypeId::I64)
     }
 
     /// Create an integer constant with a specific Vole type
@@ -116,7 +111,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             self.iconst_cached(ty, n)
         };
-        CompiledValue::new(value, ty, type_id, self.vir_lookup(type_id))
+        CompiledValue::new(value, ty, self.vir_lookup(type_id))
     }
 
     /// Create an integer constant using a VIR type ID.
@@ -149,8 +144,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             self.iconst_cached(cranelift_ty, n)
         };
-        let type_id = self.sema_type_from_vir(vir_ty);
-        CompiledValue::new(value, cranelift_ty, type_id, vir_ty)
+        CompiledValue::new(value, cranelift_ty, vir_ty)
     }
 
     /// Create a wide (i128/f128) literal using a VIR type ID.
@@ -163,15 +157,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let low_val = self.iconst_cached(types::I64, low as i64);
         let high_val = self.iconst_cached(types::I64, high as i64);
         let i128_val = crate::structs::reconstruct_i128(self.builder, low_val, high_val);
-        let type_id = self.sema_type_from_vir(vir_ty);
         if vir_ty == VirTypeId::F128 {
             let value = self
                 .builder
                 .ins()
                 .bitcast(types::F128, MemFlags::new(), i128_val);
-            CompiledValue::new(value, types::F128, type_id, vir_ty)
+            CompiledValue::new(value, types::F128, vir_ty)
         } else {
-            CompiledValue::new(i128_val, types::I128, type_id, vir_ty)
+            CompiledValue::new(i128_val, types::I128, vir_ty)
         }
     }
 
@@ -179,7 +172,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
         if self.vir_query_is_union(type_id) {
             let v = self.builder.ins().f64const(n);
-            return CompiledValue::new(v, types::F64, TypeId::F64, VirTypeId::F64);
+            return CompiledValue::new(v, types::F64, VirTypeId::F64);
         }
         let (ty, value) = match type_id {
             TypeId::F32 => {
@@ -208,7 +201,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 type_id
             ),
         };
-        CompiledValue::new(value, ty, type_id, self.vir_lookup(type_id))
+        CompiledValue::new(value, ty, self.vir_lookup(type_id))
     }
 
     /// Create a float constant using a VIR type ID.
@@ -216,7 +209,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let table = self.vir_type_table();
         if table.is_union(vir_ty) {
             let v = self.builder.ins().f64const(n);
-            return CompiledValue::new(v, types::F64, TypeId::F64, VirTypeId::F64);
+            return CompiledValue::new(v, types::F64, VirTypeId::F64);
         }
         let (ty, value) = match vir_ty {
             VirTypeId::F32 => {
@@ -241,8 +234,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 vir_ty
             ),
         };
-        let type_id = self.sema_type_from_vir(vir_ty);
-        CompiledValue::new(value, ty, type_id, vir_ty)
+        CompiledValue::new(value, ty, vir_ty)
     }
 
     // ========== Tag helpers ==========
@@ -267,7 +259,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as a String CompiledValue marked as an RC temp
     pub fn string_temp(&self, value: Value) -> CompiledValue {
-        CompiledValue::owned(value, self.ptr_type(), TypeId::STRING, VirTypeId::STRING)
+        CompiledValue::owned(value, self.ptr_type(), VirTypeId::STRING)
     }
 
     /// Create a CompiledValue from a value and TypeId, automatically computing the cranelift type
@@ -275,7 +267,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(
             value,
             self.cranelift_type(type_id),
-            type_id,
             self.vir_lookup(type_id),
         )
     }
@@ -287,7 +278,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.env.analyzed.type_arena();
         let (value, ty) =
             super::structs::convert_field_value_id(self.builder, raw_value, type_id, arena);
-        CompiledValue::new(value, ty, type_id, self.vir_lookup(type_id))
+        CompiledValue::new(value, ty, self.vir_lookup(type_id))
     }
 
     /// Extract a value from a TaggedValue (unknown type) after type narrowing.
@@ -417,8 +408,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        let mut cv =
-            CompiledValue::new(ptr, ptr_type, union_type_id, self.vir_lookup(union_type_id));
+        let mut cv = CompiledValue::new(ptr, ptr_type, self.vir_lookup(union_type_id));
         cv.mark_borrowed();
         cv
     }
@@ -536,20 +526,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue::new(
-            ptr,
-            ptr_type,
-            type_id,
-            self.vir_lookup(type_id),
-        ))
+        Ok(CompiledValue::new(ptr, ptr_type, self.vir_lookup(type_id)))
     }
 
     /// Copy a struct value to a new stack slot (value semantics).
     /// Copies all flat slots (8 bytes each), accounting for nested structs.
     pub fn copy_struct_value(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
-        let flat_count = self.struct_flat_slot_count(src.type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("copy_struct_value", "struct type", "non-struct")
-        })?;
+        let flat_count = self
+            .struct_flat_slot_count(self.cv_type_id(&src))
+            .ok_or_else(|| {
+                CodegenError::type_mismatch("copy_struct_value", "struct type", "non-struct")
+            })?;
 
         let total_size = (flat_count as u32) * 8;
         let dst_slot = self.alloc_stack(total_size);
@@ -567,20 +554,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let dst_ptr = self.builder.ins().stack_addr(ptr_type, dst_slot, 0);
 
-        Ok(CompiledValue::new(
-            dst_ptr,
-            ptr_type,
-            src.type_id,
-            src.vir_type_id,
-        ))
+        Ok(CompiledValue::new(dst_ptr, ptr_type, src.type_id))
     }
 
     /// Copy a struct value to a heap allocation.
     /// Used when storing structs into arrays so the data survives the current stack frame.
     pub fn copy_struct_to_heap(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
-        let flat_count = self.struct_flat_slot_count(src.type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("copy_struct_to_heap", "struct type", "non-struct")
-        })?;
+        let flat_count = self
+            .struct_flat_slot_count(self.cv_type_id(&src))
+            .ok_or_else(|| {
+                CodegenError::type_mismatch("copy_struct_to_heap", "struct type", "non-struct")
+            })?;
 
         let total_size = (flat_count as u32) * 8;
         let ptr_type = self.ptr_type();
@@ -603,12 +587,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .store(MemFlags::new(), val, heap_ptr, offset);
         }
 
-        Ok(CompiledValue::new(
-            heap_ptr,
-            ptr_type,
-            src.type_id,
-            src.vir_type_id,
-        ))
+        Ok(CompiledValue::new(heap_ptr, ptr_type, src.type_id))
     }
 
     // ========== Call result & union helpers ==========
@@ -656,7 +635,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(CompiledValue::new(
                 ptr,
                 ptr_type,
-                return_type_id,
                 self.vir_lookup(return_type_id),
             ));
         }
@@ -684,7 +662,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(CompiledValue::new(
                 ptr,
                 ptr_type,
-                return_type_id,
                 self.vir_lookup(return_type_id),
             ));
         }

@@ -76,6 +76,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Temporary bridge from `VirTypeId` to sema `TypeId` for legacy code paths.
+    ///
+    /// **Includes** `try_substitute_type()` — use `cv_type_id()` when you need
+    /// the raw sema TypeId without substitution.
     #[inline]
     pub fn sema_type_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
         let sema_ty = super::types::vir_conversions::vir_to_sema_type_id(
@@ -84,6 +87,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.arena(),
         );
         self.try_substitute_type(sema_ty)
+    }
+
+    /// Recover the raw sema `TypeId` from a `CompiledValue`'s `VirTypeId`.
+    ///
+    /// Unlike `sema_type_from_vir()`, this does **not** call `try_substitute_type()`,
+    /// matching the old `CompiledValue::type_id: TypeId` semantics.
+    #[inline]
+    pub fn cv_type_id(&self, cv: &CompiledValue) -> TypeId {
+        self.cv_type_id_from_vir(cv.type_id)
+    }
+
+    /// Convert a `VirTypeId` to sema `TypeId` without substitution.
+    #[inline]
+    pub fn cv_type_id_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
+        super::types::vir_conversions::vir_to_sema_type_id(
+            vir_ty,
+            self.vir_type_table(),
+            self.arena(),
+        )
     }
 
     /// Convert a slice of TypeIds to Cranelift types
@@ -145,7 +167,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Type resolution ==========
 
-    /// Find the nil variant index in a union (for optional handling)
+    /// Find the nil variant index in a union (for optional handling).
+    ///
+    /// Uses the VirTypeId path when available for correct variant ordering.
+    /// The round-tripped sema TypeId from `cv_type_id()` can have reversed
+    /// variant order because `arena.lookup_optional()` non-deterministically
+    /// picks among interned unions.
+    pub fn find_nil_variant_vir(&self, vir_ty: VirTypeId) -> Option<usize> {
+        use vole_vir::types::VirType;
+
+        let table = self.vir_type_table();
+        if !vir_ty.is_compat()
+            && vir_ty != VirTypeId::UNKNOWN
+            && (vir_ty.raw() as usize) < table.len()
+        {
+            match table.get(vir_ty) {
+                // Optional<T> always has nil at tag 1 by VIR convention
+                VirType::Optional { .. } => return Some(1),
+                VirType::Union { variants } => {
+                    return variants
+                        .iter()
+                        .position(|&id| matches!(table.get(id), VirType::Nil));
+                }
+                _ => {}
+            }
+        }
+
+        // Fallback to arena-based lookup via sema TypeId
+        self.find_nil_variant(self.cv_type_id_from_vir(vir_ty))
+    }
+
+    /// Find the nil variant index using a sema TypeId directly.
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
         if let Some(variants) = self.vir_query_unwrap_union(ty) {
             variants.iter().position(|&id| id.is_nil())

@@ -265,7 +265,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(CompiledValue::new(
             ptr,
             ptr_type,
-            return_type_id,
             self.vir_lookup(return_type_id),
         ))
     }

@@ -25,7 +25,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             self.iconst_cached(types::I64, 0),
             types::I64,
-            TypeId::NEVER,
             self.vir_lookup(TypeId::NEVER),
         ))
     }
@@ -104,7 +103,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.void_value());
         }
         let result = self.builder.block_params(merge_block)[0];
-        let mut cv = CompiledValue::new(result, cranelift_type, type_id, self.vir_lookup(type_id));
+        let mut cv = CompiledValue::new(result, cranelift_type, self.vir_lookup(type_id));
         if self.rc_state(type_id).needs_cleanup() {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
@@ -159,7 +158,7 @@ impl Cg<'_, '_, '_> {
         let then_terminated = then_flag && then_val.is_none();
         if !then_terminated {
             let then_result = then_val.unwrap_or_else(|| self.void_value());
-            if then_result.type_id == TypeId::NEVER {
+            if self.cv_type_id(&then_result) == TypeId::NEVER {
                 self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
             } else if !is_void {
                 self.jump_with_owned_result(
@@ -181,7 +180,7 @@ impl Cg<'_, '_, '_> {
             let terminated = flag && val.is_none();
             if !terminated {
                 let else_result = val.unwrap_or_else(|| self.void_value());
-                if else_result.type_id == TypeId::NEVER {
+                if self.cv_type_id(&else_result) == TypeId::NEVER {
                     self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
                 } else if !is_void {
                     self.jump_with_owned_result(
@@ -214,7 +213,6 @@ impl Cg<'_, '_, '_> {
             return Ok(CompiledValue::new(
                 dummy,
                 types::I64,
-                TypeId::NEVER,
                 self.vir_lookup(TypeId::NEVER),
             ));
         }

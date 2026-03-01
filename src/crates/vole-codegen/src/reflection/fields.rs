@@ -76,7 +76,6 @@ pub(super) fn build_field_meta_array(
     Ok(CompiledValue::new(
         arr_ptr,
         cg.ptr_type(),
-        array_type_id,
         cg.vir_lookup(array_type_id),
     ))
 }
@@ -199,7 +198,6 @@ fn build_annotations_array(
         return Ok(CompiledValue::new(
             arr_ptr,
             cg.ptr_type(),
-            cg.vir_query_unknown(),
             cg.vir_lookup(cg.vir_query_unknown()),
         ));
     }
@@ -215,7 +213,6 @@ fn build_annotations_array(
     Ok(CompiledValue::new(
         arr_ptr,
         cg.ptr_type(),
-        cg.vir_query_unknown(),
         cg.vir_lookup(cg.vir_query_unknown()),
     ))
 }
@@ -301,12 +298,7 @@ fn compile_vir_constant(cg: &mut Cg, constant: &VirConstant) -> CodegenResult<Co
         VirConstant::String(s) => cg.string_literal(s),
         VirConstant::Nil => {
             let value = cg.iconst_cached(types::I8, 0);
-            Ok(CompiledValue::new(
-                value,
-                types::I8,
-                TypeId::NIL,
-                VirTypeId::NIL,
-            ))
+            Ok(CompiledValue::new(value, types::I8, VirTypeId::NIL))
         }
     }
 }

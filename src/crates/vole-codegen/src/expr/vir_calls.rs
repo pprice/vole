@@ -243,7 +243,6 @@ impl Cg<'_, '_, '_> {
             Ok(CompiledValue::new(
                 ptr,
                 ptr_type,
-                return_ty,
                 self.vir_lookup(return_ty),
             ))
         } else if self.vir_query_is_union(return_ty) {

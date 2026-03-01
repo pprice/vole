@@ -227,7 +227,7 @@ fn emit_implicit_return(
 
             if is_wide {
                 // Wide fallible (i128 success): load low/high from offset 8/16
-                let union_size = cg.type_size(value.type_id);
+                let union_size = cg.type_size(cg.cv_type_id(&value));
                 let (low, high) = if union_size > union_layout::TAG_ONLY_SIZE {
                     let low = cg.builder.ins().load(
                         types::I64,
@@ -246,7 +246,7 @@ fn emit_implicit_return(
                 };
                 cg.builder.ins().return_(&[tag, low, high]);
             } else {
-                let payload = cg.load_union_payload(value.value, value.type_id, types::I64);
+                let payload = cg.load_union_payload(value.value, cg.cv_type_id(&value), types::I64);
                 cg.builder.ins().return_(&[tag, payload]);
             }
         } else if let Some(ret_type_id) = cg.return_type
@@ -368,9 +368,9 @@ fn compile_trailing_vir_expr(
     let skip_var = extract_vir_rc_skip_var(cg, vir_expr);
 
     if skip_var.is_none() && value.is_borrowed() {
-        if cg.rc_state(value.type_id).needs_cleanup() {
-            cg.emit_rc_inc_for_type(value.value, value.type_id)?;
-        } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
+        if cg.rc_state(cg.cv_type_id(&value)).needs_cleanup() {
+            cg.emit_rc_inc_for_type(value.value, cg.cv_type_id(&value))?;
+        } else if let Some(rc_tags) = cg.rc_state(cg.cv_type_id(&value)).union_variants() {
             cg.emit_union_rc_inc(value.value, rc_tags)?;
         }
     }
@@ -418,9 +418,9 @@ fn compile_vir_block_body(
         };
         let mut value = value;
         if skip_var.is_none() && value.is_borrowed() {
-            if cg.rc_state(value.type_id).needs_cleanup() {
-                cg.emit_rc_inc_for_type(value.value, value.type_id)?;
-            } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
+            if cg.rc_state(cg.cv_type_id(&value)).needs_cleanup() {
+                cg.emit_rc_inc_for_type(value.value, cg.cv_type_id(&value))?;
+            } else if let Some(rc_tags) = cg.rc_state(cg.cv_type_id(&value)).union_variants() {
                 cg.emit_union_rc_inc(value.value, rc_tags)?;
             }
         }

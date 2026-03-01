@@ -60,13 +60,13 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let obj = self.compile_vir_expr(object)?;
 
-        if let Some(elem_type_ids) = self.vir_query_unwrap_tuple(obj.type_id) {
+        if let Some(elem_type_ids) = self.vir_query_unwrap_tuple(self.cv_type_id(&obj)) {
             return self.vir_index_tuple(obj, index, &elem_type_ids);
         }
-        if let Some((element_id, size)) = self.vir_query_unwrap_fixed_array(obj.type_id) {
+        if let Some((element_id, size)) = self.vir_query_unwrap_fixed_array(self.cv_type_id(&obj)) {
             return self.vir_index_fixed_array(obj, index, element_id, size);
         }
-        if let Some(element_id) = self.vir_query_unwrap_array(obj.type_id) {
+        if let Some(element_id) = self.vir_query_unwrap_array(self.cv_type_id(&obj)) {
             return self.vir_index_dynamic_array(obj, index, element_id, ty, union_storage);
         }
         if let Some((tuple_elems, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
@@ -82,7 +82,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Codegen should not reach this — sema validates indexable types.
-        let type_name = self.vir_query_display_basic(obj.type_id);
+        let type_name = self.vir_query_display_basic(self.cv_type_id(&obj));
         Err(CodegenError::type_mismatch(
             "index expression",
             "array or tuple",
@@ -101,8 +101,8 @@ impl Cg<'_, '_, '_> {
         let arr = self.compile_vir_expr(object)?;
         let val = self.compile_vir_expr(value_expr)?;
 
-        let fixed_array_info = self.vir_query_unwrap_fixed_array(arr.type_id);
-        let is_dynamic_array = self.vir_query_is_array(arr.type_id);
+        let fixed_array_info = self.vir_query_unwrap_fixed_array(self.cv_type_id(&arr));
+        let is_dynamic_array = self.vir_query_is_array(self.cv_type_id(&arr));
 
         if let Some((elem_type_id, size)) = fixed_array_info {
             self.vir_index_assign_fixed_array(arr.value, index, val, elem_type_id, size)
@@ -116,7 +116,7 @@ impl Cg<'_, '_, '_> {
                 let idx = self.compile_vir_expr(index)?;
                 self.index_assign_dynamic_array_inner(arr, idx, val)
             } else {
-                let type_name = self.vir_query_display_basic(arr.type_id);
+                let type_name = self.vir_query_display_basic(self.cv_type_id(&arr));
                 Err(CodegenError::type_mismatch(
                     "index assignment",
                     "array",
@@ -124,7 +124,7 @@ impl Cg<'_, '_, '_> {
                 ))
             }
         } else {
-            let type_name = self.vir_query_display_basic(arr.type_id);
+            let type_name = self.vir_query_display_basic(self.cv_type_id(&arr));
             Err(CodegenError::type_mismatch(
                 "index assignment",
                 "array",
@@ -152,12 +152,7 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .load(elem_cr_type, MemFlags::new(), obj.value, offset);
 
-            let mut cv = CompiledValue::new(
-                value,
-                elem_cr_type,
-                elem_type_id,
-                self.vir_lookup(elem_type_id),
-            );
+            let mut cv = CompiledValue::new(value, elem_cr_type, self.vir_lookup(elem_type_id));
             self.mark_borrowed_if_rc(&mut cv);
             Ok(cv)
         } else {
@@ -219,8 +214,7 @@ impl Cg<'_, '_, '_> {
                 .load(elem_cr_type, MemFlags::new(), elem_ptr, 0)
         };
 
-        let mut cv =
-            CompiledValue::new(value, elem_cr_type, element_id, self.vir_lookup(element_id));
+        let mut cv = CompiledValue::new(value, elem_cr_type, self.vir_lookup(element_id));
         self.mark_borrowed_if_rc(&mut cv);
         Ok(cv)
     }
@@ -345,7 +339,7 @@ impl Cg<'_, '_, '_> {
         idx: CompiledValue,
         val: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
-        let elem_type = self.vir_query_unwrap_array(arr.type_id);
+        let elem_type = self.vir_query_unwrap_array(self.cv_type_id(&arr));
         let (tag_val, value_bits, val) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(val, elem_id)?
         } else {

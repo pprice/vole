@@ -71,11 +71,8 @@ pub enum RcLifecycle {
 pub struct CompiledValue {
     pub value: Value,
     pub ty: Type,
-    /// The Vole type of this value (interned TypeId handle - use arena to query).
-    /// Migration: being replaced by `vir_type_id` (vol-zlly).
-    pub type_id: TypeId,
     /// The VIR type of this value (proper VirTypeId from VirTypeTable).
-    pub vir_type_id: VirTypeId,
+    pub type_id: VirTypeId,
     /// Lifecycle state for reference-counted values.
     pub rc_lifecycle: RcLifecycle,
     /// Debug-only flag: set by `mark_consumed()` to catch accidental RC ops
@@ -86,12 +83,11 @@ pub struct CompiledValue {
 
 impl CompiledValue {
     /// Create a compiled value (not an RC temporary).
-    pub fn new(value: Value, ty: Type, type_id: TypeId, vir_type_id: VirTypeId) -> Self {
+    pub fn new(value: Value, ty: Type, type_id: VirTypeId) -> Self {
         Self {
             value,
             ty,
             type_id,
-            vir_type_id,
             rc_lifecycle: RcLifecycle::Untracked,
             #[cfg(debug_assertions)]
             consumed: false,
@@ -99,12 +95,11 @@ impl CompiledValue {
     }
 
     /// Create a compiled value marked as an RC temporary that needs cleanup.
-    pub fn owned(value: Value, ty: Type, type_id: TypeId, vir_type_id: VirTypeId) -> Self {
+    pub fn owned(value: Value, ty: Type, type_id: VirTypeId) -> Self {
         Self {
             value,
             ty,
             type_id,
-            vir_type_id,
             rc_lifecycle: RcLifecycle::Owned,
             #[cfg(debug_assertions)]
             consumed: false,
@@ -117,17 +112,18 @@ impl CompiledValue {
             value,
             ty: self.ty,
             type_id: self.type_id,
-            vir_type_id: self.vir_type_id,
             rc_lifecycle: RcLifecycle::Untracked,
             #[cfg(debug_assertions)]
             consumed: false,
         }
     }
 
-    /// Return a copy with the given VIR type ID set.
-    pub fn with_vir_type(mut self, vir_type_id: VirTypeId) -> Self {
-        self.vir_type_id = vir_type_id;
-        self
+    /// Recover the sema TypeId from this value's VirTypeId via lossy conversion.
+    ///
+    /// Use this ONLY for legacy sema-typed APIs (arena substitution, display).
+    /// Prefer querying `self.type_id` via VirTypeTable for type predicates.
+    pub fn sema_type_id(&self) -> TypeId {
+        crate::types::vir_conversions::vir_to_sema_type_id_lossy(self.type_id)
     }
 
     /// Whether this value has Owned lifecycle.
@@ -660,7 +656,7 @@ pub(crate) fn convert_to_type(
 
     // Integer widening - use uextend for unsigned types, sextend for signed
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-        if arena.is_unsigned(val.type_id) {
+        if arena.is_unsigned(val.sema_type_id()) {
             return uextend_const(builder, target, val.value);
         } else {
             return sextend_const(builder, target, val.value);
@@ -695,7 +691,7 @@ pub(crate) fn value_to_word(
 ) -> CodegenResult<Value> {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let value_size = type_id_size(value.type_id, pointer_type, entities, arena);
+    let value_size = type_id_size(value.sema_type_id(), pointer_type, entities, arena);
     let needs_box = value_size > word_bytes;
 
     if needs_box {
@@ -719,7 +715,7 @@ pub(crate) fn value_to_word(
         return Ok(alloc_ptr);
     }
 
-    let word = match value.type_id {
+    let word = match value.sema_type_id() {
         TypeId::F64 => builder
             .ins()
             .bitcast(types::I64, MemFlags::new(), value.value),

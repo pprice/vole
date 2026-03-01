@@ -92,7 +92,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let obj = CompiledValue::new(
                 value,
                 self.cranelift_type(*type_id),
-                *type_id,
                 self.vir_lookup(*type_id),
             );
             if let Some(result) = self.try_call_functional_interface(&obj, arg_source)? {
@@ -311,17 +310,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 )?;
                 // Dec the boxed interface instance (which transitively frees
                 // the closure via instance_drop).
-                self.emit_rc_dec_for_type(boxed.value, boxed.type_id)?;
+                self.emit_rc_dec_for_type(boxed.value, self.cv_type_id(&boxed))?;
                 return Ok(Some(result));
             }
         }
 
         // If it's a function type, call as closure
         // Note: Global lambdas don't support default params lookup (call_expr_id is a placeholder)
-        if self.vir_query_is_function(lambda_val.type_id) {
+        if self.vir_query_is_function(self.cv_type_id(&lambda_val)) {
             let result = self.call_closure_value(
                 lambda_val.value,
-                lambda_val.type_id,
+                self.cv_type_id(&lambda_val),
                 arg_source,
                 call_expr_id,
             )?;
@@ -335,7 +334,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // If it's an interface type (functional interface), call via vtable
         if let Some(result) = self.try_call_functional_interface(&lambda_val, arg_source)? {
             // Dec the interface instance created by the global init.
-            self.emit_rc_dec_for_type(lambda_val.value, lambda_val.type_id)?;
+            self.emit_rc_dec_for_type(lambda_val.value, self.cv_type_id(&lambda_val))?;
             return Ok(Some(result));
         }
 
@@ -545,12 +544,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);
-            let mut result = CompiledValue::new(
-                results[0],
-                ptr_type,
-                callee_return_type_id,
-                self.vir_lookup(callee_return_type_id),
-            );
+            let mut result =
+                CompiledValue::new(results[0], ptr_type, self.vir_lookup(callee_return_type_id));
             if return_type_id != callee_return_type_id {
                 result = self.coerce_to_type(result, return_type_id)?;
             }

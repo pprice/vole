@@ -121,7 +121,7 @@ impl Cg<'_, '_, '_> {
         mut right: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
         // Get the right operand as a string
-        let right_converted = if right.type_id == TypeId::STRING {
+        let right_converted = if self.cv_type_id(&right) == TypeId::STRING {
             // Right is already a string, use it directly
             None
         } else {
@@ -155,7 +155,7 @@ impl Cg<'_, '_, '_> {
 
         let (type_name_id, method_impl) = self
             .analyzed()
-            .implement_method_for_type(val.type_id, method_id)
+            .implement_method_for_type(self.cv_type_id(val), method_id)
             .ok_or_else(|| {
                 CodegenError::not_found("to_string method", format!("{:?}", val.type_id))
             })?;
@@ -201,48 +201,53 @@ impl Cg<'_, '_, '_> {
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
             // Check if left is optional and right is nil
-            if self.vir_query_is_optional(left.type_id) && right.type_id.is_nil() {
+            let left_sema = self.cv_type_id(&left);
+            let left_is_opt = self.vir_query_is_optional(left_sema);
+            let right_is_nil = right.type_id.is_nil();
+            if left_is_opt && right_is_nil {
                 return self.optional_nil_compare(left, op);
             }
             // Check if right is optional and left is nil
-            if self.vir_query_is_optional(right.type_id) && left.type_id.is_nil() {
+            if self.vir_query_is_optional(self.cv_type_id(&right)) && left.type_id.is_nil() {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type (using TypeId)
-            if let Some(inner_type_id) = self.vir_query_unwrap_optional(left.type_id)
-                && (inner_type_id == right.type_id
+            if let Some(inner_type_id) = self.vir_query_unwrap_optional(self.cv_type_id(&left))
+                && (inner_type_id == self.cv_type_id(&right)
                     || (self.vir_query_is_integer(inner_type_id)
-                        && self.vir_query_is_integer(right.type_id)))
+                        && self.vir_query_is_integer(self.cv_type_id(&right))))
             {
                 return self.optional_value_compare(left, right, op);
             }
             // Check if right is optional and left is a compatible value type (using TypeId)
-            if let Some(inner_type_id) = self.vir_query_unwrap_optional(right.type_id)
-                && (inner_type_id == left.type_id
+            if let Some(inner_type_id) = self.vir_query_unwrap_optional(self.cv_type_id(&right))
+                && (inner_type_id == self.cv_type_id(&left)
                     || (self.vir_query_is_integer(inner_type_id)
-                        && self.vir_query_is_integer(left.type_id)))
+                        && self.vir_query_is_integer(self.cv_type_id(&left))))
             {
                 return self.optional_value_compare(right, left, op);
             }
             // Check if both operands are structs
-            if self.vir_query_is_struct(left.type_id) && self.vir_query_is_struct(right.type_id) {
+            if self.vir_query_is_struct(self.cv_type_id(&left))
+                && self.vir_query_is_struct(self.cv_type_id(&right))
+            {
                 return self.struct_equality(left, right, op);
             }
         }
 
-        let left_type_id = left.type_id;
+        let left_type_id = self.cv_type_id(&left);
         let left_is_string = left_type_id == TypeId::STRING;
 
         // Determine result type using type promotion rules.
         // For numeric types, delegate to the canonical sema numeric_model function.
         // For non-numeric types (like strings), use left's type directly.
-        let (result_type_id, result_ty) = if left_type_id.is_numeric() && right.type_id.is_numeric()
-        {
-            let promoted = numeric_result_type(left_type_id, right.type_id);
-            (promoted, type_id_to_cranelift_type(promoted))
-        } else {
-            (left_type_id, left.ty)
-        };
+        let (result_type_id, result_ty) =
+            if left_type_id.is_numeric() && self.cv_type_id(&right).is_numeric() {
+                let promoted = numeric_result_type(left_type_id, self.cv_type_id(&right));
+                (promoted, type_id_to_cranelift_type(promoted))
+            } else {
+                (left_type_id, left.ty)
+            };
 
         let (left_val, right_val) = if result_ty == types::F128 {
             (
@@ -470,7 +475,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             result,
             final_ty,
-            final_type_id,
             self.vir_lookup(final_type_id),
         ))
     }
@@ -576,7 +580,7 @@ impl Cg<'_, '_, '_> {
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
         let field_slots = self
-            .struct_flat_field_cranelift_types(left.type_id)
+            .struct_flat_field_cranelift_types(self.cv_type_id(&left))
             .ok_or_else(|| {
                 CodegenError::type_mismatch("struct_equality", "struct type", "non-struct")
             })?;
@@ -701,7 +705,9 @@ impl Cg<'_, '_, '_> {
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
         // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag = self.find_nil_variant(optional.type_id).ok_or_else(|| {
+        // Use VIR path for correct variant ordering (round-tripped sema TypeId
+        // can have reversed variants due to arena.lookup_optional non-determinism).
+        let nil_tag = self.find_nil_variant_vir(optional.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("optional_nil_compare", "optional type", "non-optional")
         })?;
 
@@ -724,7 +730,7 @@ impl Cg<'_, '_, '_> {
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
         // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag = self.find_nil_variant(optional.type_id).ok_or_else(|| {
+        let nil_tag = self.find_nil_variant_vir(optional.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("optional_value_compare", "optional type", "non-optional")
         })?;
 
@@ -733,7 +739,7 @@ impl Cg<'_, '_, '_> {
 
         // Resolve the inner (non-nil) TypeId for dispatch
         let inner_type_id = self
-            .vir_query_unwrap_optional(optional.type_id)
+            .vir_query_unwrap_optional(self.cv_type_id(&optional))
             .unwrap_or(TypeId::I64);
         let payload_cranelift_type = self.cranelift_type(inner_type_id);
 
@@ -743,8 +749,11 @@ impl Cg<'_, '_, '_> {
             return self.optional_struct_compare(optional, value, op, is_not_nil, inner_type_id);
         }
 
-        let payload =
-            self.load_union_payload(optional.value, optional.type_id, payload_cranelift_type);
+        let payload = self.load_union_payload(
+            optional.value,
+            self.cv_type_id(&optional),
+            payload_cranelift_type,
+        );
 
         // Compare payload with value, dispatching on vole TypeId rather than Cranelift type.
         // This correctly handles string (content equality), float, and integer/pointer types.
@@ -808,12 +817,14 @@ impl Cg<'_, '_, '_> {
 
         // Non-nil branch: load payload and compare struct fields
         self.switch_and_seal(not_nil_block);
-        let payload =
-            self.load_union_payload(optional.value, optional.type_id, payload_cranelift_type);
+        let payload = self.load_union_payload(
+            optional.value,
+            self.cv_type_id(&optional),
+            payload_cranelift_type,
+        );
         let payload_compiled = CompiledValue::new(
             payload,
             payload_cranelift_type,
-            inner_type_id,
             self.vir_lookup(inner_type_id),
         );
         let eq_result = self.struct_equality(payload_compiled, value, op)?;

@@ -33,38 +33,61 @@ use super::types::{CompiledValue, RcLifecycle};
 impl Cg<'_, '_, '_> {
     /// Best-effort VIR type extraction for an expression node.
     ///
-    /// Used by VIR `is` checks when sema `TypeId` mapping is lossy.
+    /// Most VIR expression nodes carry two type IDs:
+    /// - `vir_ty`: native VirTypeId from VirTypeTable (may be UNKNOWN for types
+    ///   not yet in the table, e.g. module types, some generics).
+    /// - `ty`: compat-encoded VirTypeId that embeds the sema TypeId (always
+    ///   preserves the original sema TypeId via `vir_to_sema_type_id_lossy`).
+    ///
+    /// This function prefers `vir_ty` when it's a concrete type; falls back to
+    /// the compat-encoded `ty` when `vir_ty` is UNKNOWN. This ensures downstream
+    /// `cv_type_id()` conversions can always recover a correct sema TypeId.
     fn vir_expr_type_id(expr: &VirExpr) -> Option<VirTypeId> {
+        /// Prefer the native VirTypeId; fall back to the compat-encoded one.
+        #[inline]
+        fn prefer(vir_ty: VirTypeId, compat_ty: VirTypeId) -> VirTypeId {
+            if vir_ty != VirTypeId::UNKNOWN {
+                vir_ty
+            } else {
+                compat_ty
+            }
+        }
         match expr {
-            VirExpr::IntLiteral { vir_ty, .. }
-            | VirExpr::WideLiteral { vir_ty, .. }
-            | VirExpr::FloatLiteral { vir_ty, .. }
-            | VirExpr::Import { vir_ty, .. }
-            | VirExpr::ArrayLiteral { vir_ty, .. }
-            | VirExpr::RepeatLiteral { vir_ty, .. }
-            | VirExpr::StructLiteral { vir_ty, .. }
-            | VirExpr::ClassInstance { vir_ty, .. }
-            | VirExpr::BinaryOp { vir_ty, .. }
-            | VirExpr::UnaryOp { vir_ty, .. }
-            | VirExpr::Call { vir_ty, .. }
-            | VirExpr::MethodCall { vir_ty, .. }
-            | VirExpr::FieldLoad { vir_ty, .. }
-            | VirExpr::Index { vir_ty, .. }
-            | VirExpr::If { vir_ty, .. }
-            | VirExpr::Block { vir_ty, .. }
-            | VirExpr::Match { vir_ty, .. }
-            | VirExpr::IsCheck { vir_ty, .. }
-            | VirExpr::MetaAccess { vir_ty, .. }
-            | VirExpr::LocalLoad { vir_ty, .. }
-            | VirExpr::NullCoalesce { vir_ty, .. }
-            | VirExpr::OptionalChain { vir_ty, .. }
-            | VirExpr::OptionalMethodCall { vir_ty, .. }
-            | VirExpr::Lambda { vir_ty, .. } => Some(*vir_ty),
-            VirExpr::AsCast { vir_target_ty, .. } => Some(*vir_target_ty),
+            VirExpr::IntLiteral { vir_ty, ty, .. }
+            | VirExpr::WideLiteral { vir_ty, ty, .. }
+            | VirExpr::FloatLiteral { vir_ty, ty, .. }
+            | VirExpr::Import { vir_ty, ty }
+            | VirExpr::ArrayLiteral { vir_ty, ty, .. }
+            | VirExpr::RepeatLiteral { vir_ty, ty, .. }
+            | VirExpr::StructLiteral { vir_ty, ty, .. }
+            | VirExpr::ClassInstance { vir_ty, ty, .. }
+            | VirExpr::BinaryOp { vir_ty, ty, .. }
+            | VirExpr::UnaryOp { vir_ty, ty, .. }
+            | VirExpr::Call { vir_ty, ty, .. }
+            | VirExpr::MethodCall { vir_ty, ty, .. }
+            | VirExpr::FieldLoad { vir_ty, ty, .. }
+            | VirExpr::Index { vir_ty, ty, .. }
+            | VirExpr::If { vir_ty, ty, .. }
+            | VirExpr::Block { vir_ty, ty, .. }
+            | VirExpr::Match { vir_ty, ty, .. }
+            | VirExpr::IsCheck { vir_ty, ty, .. }
+            | VirExpr::MetaAccess { vir_ty, ty, .. }
+            | VirExpr::LocalLoad { vir_ty, ty, .. }
+            | VirExpr::NullCoalesce { vir_ty, ty, .. }
+            | VirExpr::OptionalChain { vir_ty, ty, .. }
+            | VirExpr::OptionalMethodCall { vir_ty, ty, .. }
+            | VirExpr::Lambda { vir_ty, ty, .. } => Some(prefer(*vir_ty, *ty)),
+            VirExpr::AsCast {
+                vir_target_ty,
+                target_ty,
+                ..
+            } => Some(prefer(*vir_target_ty, *target_ty)),
             VirExpr::Try {
-                vir_success_type, ..
-            } => Some(*vir_success_type),
-            VirExpr::Coerce { vir_to, .. } => Some(*vir_to),
+                vir_success_type,
+                success_type,
+                ..
+            } => Some(prefer(*vir_success_type, *success_type)),
+            VirExpr::Coerce { vir_to, to, .. } => Some(prefer(*vir_to, *to)),
             VirExpr::BoolLiteral(_) => Some(VirTypeId::BOOL),
             VirExpr::StringLiteral(_) => Some(VirTypeId::STRING),
             VirExpr::NilLiteral => Some(VirTypeId::NIL),
@@ -101,34 +124,18 @@ impl Cg<'_, '_, '_> {
         let const_val = name_id.and_then(|nid| self.vir_query_module_constant(module_id, nid));
 
         if let Some(const_val) = const_val {
-            let prims = self.vir_query_primitives();
             match const_val {
                 ConstantValue::F64(v) => {
                     let val = self.builder.ins().f64const(v);
-                    Ok(CompiledValue::new(
-                        val,
-                        types::F64,
-                        prims.f64,
-                        VirTypeId::F64,
-                    ))
+                    Ok(CompiledValue::new(val, types::F64, VirTypeId::F64))
                 }
                 ConstantValue::I64(v) => {
                     let val = self.iconst_cached(types::I64, v);
-                    Ok(CompiledValue::new(
-                        val,
-                        types::I64,
-                        prims.i64,
-                        VirTypeId::I64,
-                    ))
+                    Ok(CompiledValue::new(val, types::I64, VirTypeId::I64))
                 }
                 ConstantValue::Bool(v) => {
                     let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
-                    Ok(CompiledValue::new(
-                        val,
-                        types::I8,
-                        prims.bool,
-                        VirTypeId::BOOL,
-                    ))
+                    Ok(CompiledValue::new(val, types::I8, VirTypeId::BOOL))
                 }
                 ConstantValue::String(s) => self.string_literal(&s),
             }
@@ -144,7 +151,6 @@ impl Cg<'_, '_, '_> {
             Ok(CompiledValue::new(
                 value,
                 types::I8,
-                export_type_id,
                 self.vir_lookup(export_type_id),
             ))
         } else {
@@ -296,12 +302,7 @@ impl Cg<'_, '_, '_> {
         // Use closure type from sema (already has is_closure: true).
         // Mark as Owned: the closure allocation is a fresh +1 reference that
         // must be rc_dec'd when it goes out of scope or is consumed as an arg.
-        let cv = CompiledValue::new(
-            closure_ptr,
-            self.ptr_type(),
-            func_type_id,
-            self.vir_lookup(func_type_id),
-        );
+        let cv = CompiledValue::new(closure_ptr, self.ptr_type(), self.vir_lookup(func_type_id));
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -328,7 +329,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             self.iconst_cached(types::I64, 0),
             types::I64,
-            TypeId::I64,
             VirTypeId::I64,
         ))
     }
@@ -391,31 +391,16 @@ impl Cg<'_, '_, '_> {
             }
             VirExpr::NilLiteral => {
                 let value = self.iconst_cached(types::I8, 0);
-                Ok(CompiledValue::new(
-                    value,
-                    types::I8,
-                    TypeId::NIL,
-                    VirTypeId::NIL,
-                ))
+                Ok(CompiledValue::new(value, types::I8, VirTypeId::NIL))
             }
 
             // -- Simple expressions -----------------------------------------
             VirExpr::Unreachable { line } => self.unreachable_expr(*line),
-            VirExpr::Import { ty, vir_ty } => {
-                // Module types don't round-trip through vir_to_sema losslessly,
-                // so read the sema-encoded `ty` for backward compat.
-                let type_id = if *ty == VirTypeId::UNKNOWN {
-                    TypeId::I64
-                } else {
-                    self.sema_type_from_vir(*ty)
-                };
-                Ok(CompiledValue::new(
-                    self.iconst_cached(types::I64, 0),
-                    types::I64,
-                    type_id,
-                    *vir_ty,
-                ))
-            }
+            VirExpr::Import { vir_ty, .. } => Ok(CompiledValue::new(
+                self.iconst_cached(types::I64, 0),
+                types::I64,
+                *vir_ty,
+            )),
             VirExpr::TypeLiteral => Err(CodegenError::unsupported(
                 "type expressions as runtime values",
             )),
@@ -578,12 +563,20 @@ impl Cg<'_, '_, '_> {
             // -- RC operations ------------------------------------------------
             VirExpr::RcInc { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_inc_with_cleanup(compiled.value, compiled.type_id, *cleanup)?;
+                self.emit_rc_inc_with_cleanup(
+                    compiled.value,
+                    self.cv_type_id(&compiled),
+                    *cleanup,
+                )?;
                 Ok(compiled)
             }
             VirExpr::RcDec { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_dec_with_cleanup(compiled.value, compiled.type_id, *cleanup)?;
+                self.emit_rc_dec_with_cleanup(
+                    compiled.value,
+                    self.cv_type_id(&compiled),
+                    *cleanup,
+                )?;
                 Ok(compiled)
             }
             VirExpr::RcMove { value } => {
@@ -682,9 +675,26 @@ impl Cg<'_, '_, '_> {
         };
         // Annotate the result with the proper VIR type ID from the expression
         // node so downstream consumers can use VirTypeTable instead of arena.
+        //
+        // Three guards:
+        // 1. Never overwrite a valid VirTypeId with UNKNOWN — the inner
+        //    compilation may have derived a concrete VirTypeId (via vir_lookup)
+        //    that the VIR node doesn't carry.
+        // 2. Never overwrite NEVER — the inner compilation uses NEVER to signal
+        //    that all code paths diverge (e.g. all branches return). Overwriting
+        //    it with the expression's declared result type hides the divergence
+        //    from downstream `terminated` checks.
+        // 3. Only overwrite when the inner compilation left type_id as UNKNOWN
+        //    (the inner couldn't resolve a VirTypeId, but the VIR node carries
+        //    a valid one) — this ensures numeric promotion and other inner
+        //    transformations are preserved.
         result.map(|mut cv| {
-            if let Some(vir_ty) = Self::vir_expr_type_id(vir_expr) {
-                cv.vir_type_id = vir_ty;
+            if let Some(vir_ty) = Self::vir_expr_type_id(vir_expr)
+                && vir_ty != VirTypeId::UNKNOWN
+                && cv.type_id != VirTypeId::NEVER
+                && cv.type_id == VirTypeId::UNKNOWN
+            {
+                cv.type_id = vir_ty;
             }
             cv
         })
@@ -704,7 +714,7 @@ impl Cg<'_, '_, '_> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
         let ast_op = vir_binop_to_ast(op);
-        if ast_op == BinaryOp::Add && left.type_id == TypeId::STRING {
+        if ast_op == BinaryOp::Add && self.cv_type_id(&left) == TypeId::STRING {
             return self.string_concat(left, right);
         }
         self.binary_op(left, right, ast_op, line)
@@ -872,21 +882,11 @@ impl Cg<'_, '_, '_> {
                 } else {
                     sextend_const(self.builder, target_ty, value.value)
                 };
-                Ok(CompiledValue::new(
-                    result,
-                    target_ty,
-                    to,
-                    self.vir_lookup(to),
-                ))
+                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
             }
             CoerceKind::IntTruncate => {
                 let result = self.builder.ins().ireduce(target_ty, value.value);
-                Ok(CompiledValue::new(
-                    result,
-                    target_ty,
-                    to,
-                    self.vir_lookup(to),
-                ))
+                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
             }
             CoerceKind::IntToFloat => {
                 let result = if vir_is_unsigned(vir_from, table) {
@@ -894,12 +894,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.builder.ins().fcvt_from_sint(target_ty, value.value)
                 };
-                Ok(CompiledValue::new(
-                    result,
-                    target_ty,
-                    to,
-                    self.vir_lookup(to),
-                ))
+                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
             }
             CoerceKind::FloatToInt => {
                 let result = if vir_is_unsigned(vir_to, table) {
@@ -907,30 +902,15 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.builder.ins().fcvt_to_sint(target_ty, value.value)
                 };
-                Ok(CompiledValue::new(
-                    result,
-                    target_ty,
-                    to,
-                    self.vir_lookup(to),
-                ))
+                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
             }
             CoerceKind::FloatExtend => {
                 let result = self.builder.ins().fpromote(target_ty, value.value);
-                Ok(CompiledValue::new(
-                    result,
-                    target_ty,
-                    to,
-                    self.vir_lookup(to),
-                ))
+                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
             }
             CoerceKind::FloatTruncate => {
                 let result = self.builder.ins().fdemote(target_ty, value.value);
-                Ok(CompiledValue::new(
-                    result,
-                    target_ty,
-                    to,
-                    self.vir_lookup(to),
-                ))
+                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
             }
             CoerceKind::InterfaceBox {
                 interface_type_def,
@@ -994,7 +974,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             concrete_val,
             concrete_ty,
-            concrete_type_id,
             self.vir_lookup(concrete_type_id),
         ))
     }
@@ -1028,7 +1007,6 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::owned(
             wrapped,
             types::I64,
-            runtime_iter_type_id,
             self.vir_lookup(runtime_iter_type_id),
         ))
     }
@@ -1046,12 +1024,7 @@ impl Cg<'_, '_, '_> {
         // 1. Sentinel types — always i8(0).
         if self.vir_query_is_sentinel(ty) {
             let value = self.iconst_cached(types::I8, 0);
-            return Ok(CompiledValue::new(
-                value,
-                types::I8,
-                ty,
-                self.vir_lookup(ty),
-            ));
+            return Ok(CompiledValue::new(value, types::I8, self.vir_lookup(ty)));
         }
 
         // 2. Captured variable — load from closure environment.
@@ -1093,12 +1066,7 @@ impl Cg<'_, '_, '_> {
         {
             let payload_ty = self.cranelift_type(narrowed_variant);
             let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
-            let mut cv = CompiledValue::new(
-                payload,
-                payload_ty,
-                narrowed_variant,
-                self.vir_lookup(narrowed_variant),
-            );
+            let mut cv = CompiledValue::new(payload, payload_ty, self.vir_lookup(narrowed_variant));
             self.mark_borrowed_if_rc(&mut cv);
             return Ok(cv);
         }
@@ -1117,7 +1085,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Simple local: no narrowing needed.
-        let mut cv = CompiledValue::new(val, cl_ty, var_type_id, self.vir_lookup(var_type_id));
+        let mut cv = CompiledValue::new(val, cl_ty, self.vir_lookup(var_type_id));
         self.mark_borrowed_if_rc(&mut cv);
         if cv.rc_lifecycle == RcLifecycle::Untracked
             && self.rc_state(var_type_id).union_variants().is_some()
@@ -1189,7 +1157,6 @@ impl Cg<'_, '_, '_> {
             return Ok(CompiledValue::new(
                 value,
                 types::I8,
-                sentinel_type_id,
                 self.vir_lookup(sentinel_type_id),
             ));
         }
@@ -1423,7 +1390,7 @@ impl Cg<'_, '_, '_> {
             }
             IsCheckResult::CheckTag(tag_index) => {
                 let compiled = self.compile_vir_expr(value)?;
-                if self.vir_query_is_unknown(compiled.type_id)
+                if self.vir_query_is_unknown(self.cv_type_id(&compiled))
                     && let Some(source_vir_ty) = Self::vir_expr_type_id(value)
                     && let Some(variants) = crate::types::vir_conversions::vir_unwrap_union(
                         source_vir_ty,
@@ -1444,7 +1411,7 @@ impl Cg<'_, '_, '_> {
                 // Generic union checks are lowered as CheckUnknown so we can
                 // re-derive the concrete union tag after substitutions.
                 if tested_type_id != TypeId::UNKNOWN {
-                    let concrete_value_ty = self.try_substitute_type(compiled.type_id);
+                    let concrete_value_ty = self.try_substitute_type(self.cv_type_id(&compiled));
                     let concrete_tested_ty = self.try_substitute_type(tested_type_id);
                     if let Some(variants) = self.vir_query_unwrap_union(concrete_value_ty)
                         && let Some(tag_index) =
@@ -1535,7 +1502,6 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue::new(
                     self.iconst_cached(types::I64, 0),
                     types::I64,
-                    TypeId::NEVER,
                     self.vir_lookup(TypeId::NEVER),
                 ))
             }
@@ -1555,7 +1521,7 @@ impl Cg<'_, '_, '_> {
         // Remove when CompiledValue carries VirTypeId (Phase D).
         let tested_type_id = self
             .arena()
-            .unwrap_union(value.type_id)
+            .unwrap_union(self.cv_type_id(&value))
             .and_then(|variants| variants.get(tag_index as usize).copied())
             .ok_or_else(|| {
                 CodegenError::internal("as cast CheckTag: cannot derive tested type from union")

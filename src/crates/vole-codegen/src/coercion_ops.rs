@@ -149,9 +149,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // This keeps union/interface coercions from comparing concrete targets against
         // unresolved TypeParam values.
         let resolved_target_type_id = self.try_substitute_type(target_type_id);
-        let resolved_value_type_id = self.try_substitute_type(value.type_id);
+        let resolved_value_type_id = self.try_substitute_type(self.cv_type_id(&value));
         let mut resolved_value = value;
-        resolved_value.type_id = resolved_value_type_id;
+        resolved_value.type_id = self.vir_lookup(resolved_value_type_id);
 
         let is_target_interface = self.vir_query_is_interface(resolved_target_type_id);
         let is_value_interface = self.vir_query_is_interface(resolved_value_type_id);
@@ -194,18 +194,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(CompiledValue::new(
                 value.value,
                 target_ty,
-                target_type_id,
                 self.vir_lookup(target_type_id),
             ));
         }
-        let coercion = numeric_coercion(value.type_id, target_type_id);
+        let coercion = numeric_coercion(self.cv_type_id(&value), target_type_id);
 
         let converted = match coercion {
             NumericCoercion::Identity => {
                 return Ok(CompiledValue::new(
                     value.value,
                     target_ty,
-                    target_type_id,
                     self.vir_lookup(target_type_id),
                 ));
             }
@@ -228,7 +226,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(CompiledValue::new(
             converted,
             target_ty,
-            target_type_id,
             self.vir_lookup(target_type_id),
         ))
     }
@@ -371,9 +368,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // is freed, so we need the extra reference to avoid use-after-free.
         if value.is_borrowed()
             && self.rc_scopes.has_active_scope()
-            && self.rc_state(value.type_id).needs_cleanup()
+            && self.rc_state(self.cv_type_id(&value)).needs_cleanup()
         {
-            self.emit_rc_inc_for_type(value.value, value.type_id)?;
+            self.emit_rc_inc_for_type(value.value, self.cv_type_id(&value))?;
         }
         self.box_to_unknown_raw(value)
     }
@@ -397,7 +394,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Get the runtime tag for this type
-        let tag = self.vir_query_unknown_type_tag(value.type_id);
+        let tag = self.vir_query_unknown_type_tag(self.cv_type_id(&value));
         let tag_val = self.iconst_cached(types::I64, tag as i64);
 
         // Convert value to i64 for storage
@@ -414,7 +411,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .bitcast(types::I32, MemFlags::new(), value.value);
             uextend_const(self.builder, types::I64, i32_val)
         } else if value.ty.is_int() && value.ty.bytes() < 8 {
-            if self.vir_query_is_unsigned(value.type_id) {
+            if self.vir_query_is_unsigned(self.cv_type_id(&value)) {
                 uextend_const(self.builder, types::I64, value.value)
             } else {
                 sextend_const(self.builder, types::I64, value.value)
@@ -426,12 +423,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Heap-allocate the TaggedValue via runtime call
         let ptr = self.call_runtime(RuntimeKey::TaggedValueNew, &[tag_val, value_as_i64])?;
 
-        Ok(CompiledValue::new(
-            ptr,
-            self.ptr_type(),
-            TypeId::UNKNOWN,
-            VirTypeId::UNKNOWN,
-        ))
+        Ok(CompiledValue::new(ptr, self.ptr_type(), VirTypeId::UNKNOWN))
     }
 
     /// Box a value as an interface type.
@@ -504,12 +496,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(
-                    new_value,
-                    expected_ty,
-                    param_type_id,
-                    self.vir_lookup(param_type_id),
-                )
+                CompiledValue::new(new_value, expected_ty, self.vir_lookup(param_type_id))
             } else {
                 compiled
             };
@@ -570,12 +557,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(
-                    new_value,
-                    expected_ty,
-                    param_type_id,
-                    self.vir_lookup(param_type_id),
-                )
+                CompiledValue::new(new_value, expected_ty, self.vir_lookup(param_type_id))
             } else {
                 compiled
             };
@@ -633,12 +615,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(
-                    new_value,
-                    expected_ty,
-                    param_type_id,
-                    self.vir_lookup(param_type_id),
-                )
+                CompiledValue::new(new_value, expected_ty, self.vir_lookup(param_type_id))
             } else {
                 compiled
             };
