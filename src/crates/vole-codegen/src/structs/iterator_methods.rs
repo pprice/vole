@@ -321,7 +321,7 @@ impl Cg<'_, '_, '_> {
         // tagged variants that accept explicit elem type tags so the runtime
         // can dispatch between integer and floating-point operations.
         let mut result = if method_name == "reduce" {
-            let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
+            let tag = self.vir_query_unknown_type_tag(elem_type_id);
             let tag_val = self.iconst_cached(types::I64, tag as i64);
             args.push(tag_val); // acc_tag
             args.push(tag_val); // elem_tag
@@ -397,7 +397,7 @@ impl Cg<'_, '_, '_> {
             arena.unwrap_runtime_iterator(return_type_id)
         };
         if let Some(result_elem_id) = result_elem_type {
-            let tag = crate::types::unknown_type_tag(result_elem_id, self.arena());
+            let tag = self.vir_query_unknown_type_tag(result_elem_id);
             if tag != 0 {
                 // Only set tag for non-default types (RC types, etc.)
                 let tag_val = self.iconst_cached(types::I64, tag as i64);

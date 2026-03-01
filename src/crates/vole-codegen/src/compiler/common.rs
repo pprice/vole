@@ -223,7 +223,7 @@ fn emit_implicit_return(
 
             let is_wide = cg
                 .return_type
-                .is_some_and(|ret| crate::types::is_wide_fallible(ret, cg.arena()));
+                .is_some_and(|ret| cg.vir_query_is_wide_fallible(ret));
 
             if is_wide {
                 // Wide fallible (i128 success): load low/high from offset 8/16

@@ -373,8 +373,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Raw unknown boxing: heap-allocates a TaggedValue without RC adjustment.
     fn box_to_unknown_raw(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
-        use crate::types::unknown_type_tag;
-
         if value.ty == types::I128 || value.ty == types::F128 {
             return Err(CodegenError::type_mismatch(
                 "unknown boxing",
@@ -384,7 +382,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Get the runtime tag for this type
-        let tag = unknown_type_tag(value.type_id, self.arena());
+        let tag = self.vir_query_unknown_type_tag(value.type_id);
         let tag_val = self.iconst_cached(types::I64, tag as i64);
 
         // Convert value to i64 for storage

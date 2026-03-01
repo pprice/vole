@@ -125,7 +125,7 @@ fn build_single_field_meta(
     annotations: &[VirAnnotation],
 ) -> CodegenResult<Value> {
     // Compute the RuntimeTypeId tag for this field's type (used by getter boxing).
-    let runtime_tag = crate::types::unknown_type_tag(field_type_id, cg.arena()) as i64;
+    let runtime_tag = cg.vir_query_unknown_type_tag(field_type_id) as i64;
 
     let instance_ptr = super::allocate_class_instance(cg, info.field_meta_def_id)?;
     let set_func_ref = cg.runtime_func_ref(RuntimeKey::InstanceSetField)?;

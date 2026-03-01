@@ -604,7 +604,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Check for wide fallible multi-value return (3 results: tag, low, high)
         // i128 success values are split across two i64 registers
-        if results.len() == 3 && crate::types::is_wide_fallible(return_type_id, self.arena()) {
+        if results.len() == 3 && self.vir_query_is_wide_fallible(return_type_id) {
             let tag = results[0];
             let low = results[1];
             let high = results[2];

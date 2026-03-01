@@ -12,7 +12,7 @@ use cranelift::prelude::*;
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::helpers::{
-    convert_to_i64_for_storage, get_field_slot_and_type_id_cg, is_payload_union, store_field_value,
+    convert_to_i64_for_storage, get_field_slot_and_type_id_cg, store_field_value,
 };
 use crate::types::{CompiledValue, module_name_id};
 
@@ -193,7 +193,7 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .store(MemFlags::new(), val, obj.value, dst_off);
             }
-        } else if is_payload_union(field_type_id, self.arena()) {
+        } else if self.vir_query_is_payload_union(field_type_id) {
             self.assign_struct_union_field(obj.value, offset, value, field_type_id)?;
         } else {
             self.vir_struct_scalar_store(obj.value, offset, field_type_id, &value)?;

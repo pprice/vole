@@ -103,7 +103,7 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().band(tag_match, id_match)
         } else {
             // Standard single-level tag check
-            let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
+            let expected_tag = self.vir_query_unknown_type_tag(tested_type_id);
             let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
             self.builder.ins().icmp(IntCC::Equal, tag, expected_val)
         }

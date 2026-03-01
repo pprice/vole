@@ -6,7 +6,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::CodegenResult;
-use crate::types::{CompiledValue, field_byte_size};
+use crate::types::CompiledValue;
 
 use vole_identity::TypeId;
 
@@ -147,7 +147,7 @@ impl Cg<'_, '_, '_> {
                 (fallback_elem_type_id, fallback_result_type_id)
             };
 
-        let elem_size = field_byte_size(elem_type_id, self.arena());
+        let elem_size = self.vir_query_field_byte_size(elem_type_id);
         let total_size = elem_size * (count as u32);
 
         let slot = self.alloc_stack(total_size);

@@ -485,9 +485,7 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
         elem_cr_type: Type,
     ) -> CodegenResult<Value> {
-        if let Some(wide) =
-            crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena())
-        {
+        if let Some(wide) = self.vir_query_wide_type(elem_type_id) {
             let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
             Ok(wide.reinterpret_i128(self.builder, wide_bits))
         } else if elem_cr_type == types::F64 {
@@ -575,7 +573,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let elem_cr_type = self.cranelift_type(elem_type_id);
-        let elem_wide = crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena());
+        let elem_wide = self.vir_query_wide_type(elem_type_id);
         if let Some(storage) = union_storage {
             use vole_identity::UnionStorageKind;
             match storage {

@@ -10,7 +10,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, field_byte_size};
+use crate::types::CompiledValue;
 
 use vole_identity::{TypeId, UnionStorageKind};
 use vole_vir::VirExpr;
@@ -168,7 +168,7 @@ impl Cg<'_, '_, '_> {
         element_id: TypeId,
         size: usize,
     ) -> CodegenResult<CompiledValue> {
-        let elem_size = field_byte_size(element_id, self.arena()) as i32;
+        let elem_size = self.vir_query_field_byte_size(element_id) as i32;
         let elem_cr_type = self.cranelift_type(element_id);
 
         let offset = if let VirExpr::IntLiteral { value, .. } = index {
@@ -252,9 +252,7 @@ impl Cg<'_, '_, '_> {
             };
             return Ok(cv);
         }
-        if let Some(wide) =
-            crate::types::wide_ops::WideType::from_type_id(resolved_element_id, self.arena())
-        {
+        if let Some(wide) = self.vir_query_wide_type(resolved_element_id) {
             let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_value])?;
             return Ok(wide.compiled_value_from_i128(self.builder, wide_bits, resolved_element_id));
         }
@@ -273,7 +271,7 @@ impl Cg<'_, '_, '_> {
         size: usize,
     ) -> CodegenResult<CompiledValue> {
         let val = self.coerce_to_type(val, elem_type_id)?;
-        let elem_size = field_byte_size(elem_type_id, self.arena()) as i32;
+        let elem_size = self.vir_query_field_byte_size(elem_type_id) as i32;
 
         let offset = if let VirExpr::IntLiteral { value, .. } = index {
             let i = *value as usize;

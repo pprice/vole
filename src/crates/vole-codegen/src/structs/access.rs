@@ -51,7 +51,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // i128 fields use 2 consecutive slots - load both and reconstruct
-        let wide = crate::types::wide_ops::WideType::from_type_id(field_type_id, self.arena());
+        let wide = self.vir_query_wide_type(field_type_id);
         let mut cv = if let Some(wide) = wide {
             let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
             let wide_i128 = super::helpers::load_wide_field(self, get_func_ref, obj.value, slot);
@@ -109,7 +109,7 @@ impl Cg<'_, '_, '_> {
         // Payload-carrying union fields are stored inline (16 bytes: tag + payload).
         // Return a pointer into the parent struct, like nested struct fields —
         // union operations expect a pointer to the 16-byte buffer.
-        if super::helpers::is_payload_union(field_type_id, self.arena()) {
+        if self.vir_query_is_payload_union(field_type_id) {
             let ptr_type = self.ptr_type();
             let field_ptr = if offset == 0 {
                 struct_ptr
@@ -120,9 +120,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // i128 fields occupy 2 x 8-byte slots: load low and high halves, reconstruct
-        if let Some(wide) =
-            crate::types::wide_ops::WideType::from_type_id(field_type_id, self.arena())
-        {
+        if let Some(wide) = self.vir_query_wide_type(field_type_id) {
             let low = self
                 .builder
                 .ins()

@@ -206,18 +206,17 @@ impl Cg<'_, '_, '_> {
         // For single wide (i128) field or multi-field errors, payload is a pointer to field data
         let has_any_wide = error_fields
             .iter()
-            .any(|f| crate::types::is_wide_type(f.sema_type_id, self.arena()));
+            .any(|f| self.vir_query_is_wide(f.sema_type_id));
         let inline_single_field = error_fields.len() == 1 && !has_any_wide;
 
         // Precompute field byte offsets (i128 fields use 16 bytes, others 8)
         let field_byte_offsets: Vec<i32> = {
-            let arena = self.arena();
             let mut offset = 0i32;
             error_fields
                 .iter()
                 .map(|f| {
                     let current = offset;
-                    offset += crate::types::field_byte_size(f.sema_type_id, arena) as i32;
+                    offset += self.vir_query_field_byte_size(f.sema_type_id) as i32;
                     current
                 })
                 .collect()
@@ -234,7 +233,7 @@ impl Cg<'_, '_, '_> {
             };
 
             let field_ty_id = field_def.sema_type_id;
-            let is_wide = crate::types::is_wide_type(field_ty_id, self.arena());
+            let is_wide = self.vir_query_is_wide(field_ty_id);
 
             // Load the field value
             if inline_single_field {
@@ -256,9 +255,7 @@ impl Cg<'_, '_, '_> {
                         .load(types::I64, MemFlags::new(), payload, field_offset + 8);
                 let wide_i128 = super::super::structs::reconstruct_i128(self.builder, low, high);
                 // `is_wide` guard above guarantees this is Some.
-                let wide =
-                    crate::types::wide_ops::WideType::from_type_id(field_ty_id, self.arena())
-                        .unwrap();
+                let wide = self.vir_query_wide_type(field_ty_id).unwrap();
                 let wide_val = wide.reinterpret_i128(self.builder, wide_i128);
                 let wide_ty = wide.cranelift_type();
                 let var = self.builder.declare_var(wide_ty);

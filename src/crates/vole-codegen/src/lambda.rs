@@ -16,7 +16,7 @@ use vole_vir::expr::VirCapture;
 use super::RuntimeKey;
 use super::compiler::common::FunctionCompileConfig;
 use super::context::Cg;
-use super::types::{CompiledValue, is_wide_fallible};
+use super::types::CompiledValue;
 use crate::errors::{CodegenError, CodegenResult};
 
 /// Information about a captured variable for lambda compilation
@@ -76,7 +76,7 @@ impl Cg<'_, '_, '_> {
         }
         // For fallible returns, use multi-value return (tag: i64, payload: i64)
         // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
-        if is_wide_fallible(return_type_id, self.arena()) {
+        if self.vir_query_is_wide_fallible(return_type_id) {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // low
             sig.returns.push(AbiParam::new(types::I64)); // high
