@@ -371,9 +371,18 @@ pub(crate) fn vir_struct_total_byte_size(
 
 /// Map a VIR leaf type to its Cranelift type for equality comparison.
 ///
-/// Wide types (i128) map to I128. Float types map to F32/F64 so callers
-/// can use `fcmp` instead of `icmp`. All other types are compared as I64.
+/// Wide types (i128, f128) map to I128/F128. Float types map to F32/F64
+/// so callers can use `fcmp` instead of `icmp`. All other types are
+/// compared as I64.
+///
+/// Note: F128 is stored as `VirType::Unknown` in the type table (no
+/// `VirPrimitiveKind::F128` yet), so it must be checked by constant
+/// before the table lookup.
 fn vir_leaf_cranelift_type(vir_ty: VirTypeId, table: &VirTypeTable) -> Type {
+    // F128 is registered as VirType::Unknown (wide_layout) - check by ID.
+    if vir_ty == VirTypeId::F128 {
+        return types::F128;
+    }
     match table.get(vir_ty) {
         VirType::Primitive(VirPrimitiveKind::F32) => types::F32,
         VirType::Primitive(VirPrimitiveKind::F64) => types::F64,
@@ -755,6 +764,10 @@ mod tests {
         let table = test_table();
         assert_eq!(vir_leaf_cranelift_type(VirTypeId::F32, &table), types::F32);
         assert_eq!(vir_leaf_cranelift_type(VirTypeId::F64, &table), types::F64);
+        assert_eq!(
+            vir_leaf_cranelift_type(VirTypeId::F128, &table),
+            types::F128
+        );
         assert_eq!(
             vir_leaf_cranelift_type(VirTypeId::I128, &table),
             types::I128

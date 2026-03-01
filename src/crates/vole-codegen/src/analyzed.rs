@@ -653,6 +653,7 @@ impl AnalyzedProgram {
     }
 
     /// Resolve and look up an implement-registry method from a sema TypeId.
+    #[allow(dead_code)] // Bridge method; will be removed by vol-bmeu.
     pub(crate) fn implement_method_for_type(
         &self,
         type_id: vole_sema::type_arena::TypeId,

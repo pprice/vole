@@ -447,6 +447,7 @@ pub(crate) fn is_payload_union(type_id: TypeId, arena: &TypeArena) -> bool {
 /// Float types map to F32/F64/F128 so callers can use fcmp instead of icmp.
 /// All other primitive/pointer types (integers, bool, string, handles, etc.)
 /// are compared as I64 after zero-extension to a uniform slot width.
+#[allow(dead_code)] // Bridge function; will be removed by vol-bmeu.
 fn leaf_cranelift_type(type_id: TypeId, arena: &TypeArena) -> Type {
     match type_id {
         TypeId::F32 => types::F32,
@@ -480,6 +481,7 @@ fn leaf_cranelift_type(type_id: TypeId, arena: &TypeArena) -> Type {
 /// Wide types (i128, f128) occupy 16 bytes but produce a single entry so
 /// callers can issue one wide load+compare rather than two i64 compares.
 /// Returns None if `type_id` is not a struct type.
+#[allow(dead_code)] // Bridge function; will be removed by vol-bmeu.
 pub(crate) fn struct_flat_field_cranelift_types(
     type_id: TypeId,
     arena: &TypeArena,
@@ -502,6 +504,7 @@ pub(crate) fn struct_flat_field_cranelift_types(
 
 /// Recursively collect leaf (offset, cranelift_type) entries for a field type.
 /// Nested structs are flattened; leaf types produce a single entry.
+#[allow(dead_code)] // Bridge function; will be removed by vol-bmeu.
 fn collect_leaf_slots(
     type_id: TypeId,
     arena: &TypeArena,

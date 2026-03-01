@@ -7,7 +7,7 @@ use crate::errors::CodegenResult;
 use crate::types::{CompiledValue, RcLifecycle};
 use crate::union_layout;
 use cranelift::prelude::*;
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 
 impl Cg<'_, '_, '_> {
     /// Convenience wrapper: compute struct field byte offset, panicking on invalid types.
@@ -24,11 +24,26 @@ impl Cg<'_, '_, '_> {
     /// Return (byte_offset, cranelift_type) pairs for all flat fields of a struct.
     ///
     /// Returns None if type_id is not a struct. Used for struct equality comparison.
+    #[allow(dead_code)] // Bridge method; will be removed by vol-bmeu.
     pub(crate) fn struct_flat_field_cranelift_types(
         &self,
         type_id: TypeId,
     ) -> Option<Vec<(i32, Type)>> {
         super::helpers::struct_flat_field_cranelift_types(type_id, self.arena(), self.analyzed())
+    }
+
+    /// VirTypeId-native variant of [`struct_flat_field_cranelift_types`].
+    ///
+    /// Returns None if `vir_ty` is not a struct. Used for struct equality comparison.
+    pub(crate) fn struct_flat_field_cranelift_types_v(
+        &self,
+        vir_ty: VirTypeId,
+    ) -> Option<Vec<(i32, Type)>> {
+        crate::types::vir_struct_helpers::vir_struct_flat_field_cranelift_types(
+            vir_ty,
+            self.vir_type_table(),
+            self.analyzed(),
+        )
     }
 
     /// Extract a field from a container object, handling struct/instance dispatch

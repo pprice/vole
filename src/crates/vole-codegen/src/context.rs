@@ -1271,6 +1271,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // =====================================================================
 
     /// Unwrap an optional type, returning the inner sema `TypeId`.
+    #[allow(dead_code)] // Bridge method; will be removed by vol-bmeu.
     #[inline]
     pub fn vir_query_unwrap_optional_sema(&self, type_id: TypeId) -> Option<TypeId> {
         self.arena().unwrap_optional(type_id)

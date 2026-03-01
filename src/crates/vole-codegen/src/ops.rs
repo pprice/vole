@@ -8,8 +8,8 @@ use cranelift_codegen::ir::{BlockArg, Function, InstructionData};
 use crate::RuntimeKey;
 use crate::context::ExternalMethodRef;
 use vole_frontend::BinaryOp;
-use vole_identity::{TypeId, VirTypeId};
-use vole_vir::numeric_model::numeric_result_type;
+use vole_identity::VirTypeId;
+use vole_vir::numeric_model::numeric_result_type_v;
 
 use super::context::Cg;
 use super::types::{CompiledValue, convert_to_type};
@@ -63,33 +63,13 @@ pub(crate) fn sextend_const(builder: &mut FunctionBuilder, target_ty: Type, val:
     builder.ins().sextend(target_ty, val)
 }
 
-/// Convert a numeric TypeId to its corresponding Cranelift type.
+/// Convert a numeric VirTypeId to its corresponding Cranelift type.
 ///
 /// # Panics
 ///
-/// Panics in debug builds if `type_id` is not a numeric type.  Non-numeric types
+/// Panics in debug builds if `vir_ty` is not a numeric type.  Non-numeric types
 /// must never reach the binary-operator path (sema should have rejected them
 /// before codegen).
-fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
-    match type_id {
-        TypeId::I8 | TypeId::U8 => types::I8,
-        TypeId::I16 | TypeId::U16 => types::I16,
-        TypeId::I32 | TypeId::U32 => types::I32,
-        TypeId::I64 | TypeId::U64 => types::I64,
-        TypeId::I128 => types::I128,
-        TypeId::F32 => types::F32,
-        TypeId::F64 => types::F64,
-        TypeId::F128 => types::F128,
-        _ => unreachable!(
-            "INTERNAL: type_id_to_cranelift_type called with non-numeric type {:?}; \
-             this is a sema bug — only numeric types should reach binary-op codegen",
-            type_id
-        ),
-    }
-}
-
-/// VirTypeId version of [`type_id_to_cranelift_type`].
-#[allow(dead_code)] // Convenience for downstream VIR migration tickets.
 fn vir_type_id_to_cranelift_type(vir_ty: VirTypeId) -> Type {
     match vir_ty {
         VirTypeId::I8 | VirTypeId::U8 => types::I8,
@@ -141,7 +121,7 @@ impl Cg<'_, '_, '_> {
         mut right: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
         // Get the right operand as a string
-        let right_converted = if self.cv_type_id(&right) == TypeId::STRING {
+        let right_converted = if right.type_id == VirTypeId::STRING {
             // Right is already a string, use it directly
             None
         } else {
@@ -175,7 +155,7 @@ impl Cg<'_, '_, '_> {
 
         let (type_name_id, method_impl) = self
             .analyzed()
-            .implement_method_for_type(self.cv_type_id(val), method_id)
+            .implement_method_for_type_v(val.type_id, method_id)
             .ok_or_else(|| {
                 CodegenError::not_found("to_string method", format!("{:?}", val.type_id))
             })?;
@@ -221,54 +201,50 @@ impl Cg<'_, '_, '_> {
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
             // Check if left is optional and right is nil
-            let left_sema = self.cv_type_id(&left);
-            let left_is_opt = self.vir_query_is_optional(left_sema);
+            let left_is_opt = self.vir_query_is_optional_v(left.type_id);
             let right_is_nil = right.type_id.is_nil();
             if left_is_opt && right_is_nil {
                 return self.optional_nil_compare(left, op);
             }
             // Check if right is optional and left is nil
-            if self.vir_query_is_optional(self.cv_type_id(&right)) && left.type_id.is_nil() {
+            if self.vir_query_is_optional_v(right.type_id) && left.type_id.is_nil() {
                 return self.optional_nil_compare(right, op);
             }
-            // Check if left is optional and right is a compatible value type (using TypeId)
-            if let Some(inner_type_id) = self.vir_query_unwrap_optional_sema(self.cv_type_id(&left))
-                && (inner_type_id == self.cv_type_id(&right)
-                    || (self.vir_query_is_integer(inner_type_id)
-                        && self.vir_query_is_integer(self.cv_type_id(&right))))
+            // Check if left is optional and right is a compatible value type (using VirTypeId)
+            if let Some(inner_vir) = self.vir_query_unwrap_optional_v(left.type_id)
+                && (inner_vir == right.type_id
+                    || (self.vir_query_is_integer_v(inner_vir)
+                        && self.vir_query_is_integer_v(right.type_id)))
             {
                 return self.optional_value_compare(left, right, op);
             }
-            // Check if right is optional and left is a compatible value type (using TypeId)
-            if let Some(inner_type_id) =
-                self.vir_query_unwrap_optional_sema(self.cv_type_id(&right))
-                && (inner_type_id == self.cv_type_id(&left)
-                    || (self.vir_query_is_integer(inner_type_id)
-                        && self.vir_query_is_integer(self.cv_type_id(&left))))
+            // Check if right is optional and left is a compatible value type (using VirTypeId)
+            if let Some(inner_vir) = self.vir_query_unwrap_optional_v(right.type_id)
+                && (inner_vir == left.type_id
+                    || (self.vir_query_is_integer_v(inner_vir)
+                        && self.vir_query_is_integer_v(left.type_id)))
             {
                 return self.optional_value_compare(right, left, op);
             }
             // Check if both operands are structs
-            if self.vir_query_is_struct(self.cv_type_id(&left))
-                && self.vir_query_is_struct(self.cv_type_id(&right))
+            if self.vir_query_is_struct_v(left.type_id) && self.vir_query_is_struct_v(right.type_id)
             {
                 return self.struct_equality(left, right, op);
             }
         }
 
-        let left_type_id = self.cv_type_id(&left);
-        let left_is_string = left_type_id == TypeId::STRING;
+        let left_vir_ty = left.type_id;
+        let left_is_string = left_vir_ty == VirTypeId::STRING;
 
         // Determine result type using type promotion rules.
-        // For numeric types, delegate to the canonical sema numeric_model function.
+        // For numeric types, delegate to the canonical VIR numeric_model function.
         // For non-numeric types (like strings), use left's type directly.
-        let (result_type_id, result_ty) =
-            if left_type_id.is_numeric() && self.cv_type_id(&right).is_numeric() {
-                let promoted = numeric_result_type(left_type_id, self.cv_type_id(&right));
-                (promoted, type_id_to_cranelift_type(promoted))
-            } else {
-                (left_type_id, left.ty)
-            };
+        let (result_vir_ty, result_ty) = if left_vir_ty.is_numeric() && right.type_id.is_numeric() {
+            let promoted = numeric_result_type_v(left_vir_ty, right.type_id);
+            (promoted, vir_type_id_to_cranelift_type(promoted))
+        } else {
+            (left_vir_ty, left.ty)
+        };
 
         let (left_val, right_val) = if result_ty == types::F128 {
             (
@@ -320,7 +296,7 @@ impl Cg<'_, '_, '_> {
                 } else if result_ty == types::I128 {
                     // Cranelift x64 doesn't support sdiv.i128; use runtime helper
                     self.call_runtime(RuntimeKey::I128Sdiv, &[left_val, right_val])?
-                } else if left_type_id.is_unsigned_int() {
+                } else if left_vir_ty.is_unsigned_int() {
                     // Unsigned division: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
                     self.builder.ins().udiv(left_val, right_val)
@@ -342,7 +318,7 @@ impl Cg<'_, '_, '_> {
                 } else if result_ty == types::I128 {
                     // Cranelift x64 doesn't support srem.i128; use runtime helper
                     self.call_runtime(RuntimeKey::I128Srem, &[left_val, right_val])?
-                } else if left_type_id.is_unsigned_int() {
+                } else if left_vir_ty.is_unsigned_int() {
                     // Unsigned remainder: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
                     self.builder.ins().urem(left_val, right_val)
@@ -399,7 +375,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.emit_cmp(
                         result_ty,
-                        left_type_id,
+                        left_vir_ty,
                         left_val,
                         right_val,
                         CmpCodes {
@@ -416,7 +392,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.emit_cmp(
                         result_ty,
-                        left_type_id,
+                        left_vir_ty,
                         left_val,
                         right_val,
                         CmpCodes {
@@ -433,7 +409,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.emit_cmp(
                         result_ty,
-                        left_type_id,
+                        left_vir_ty,
                         left_val,
                         right_val,
                         CmpCodes {
@@ -450,7 +426,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.emit_cmp(
                         result_ty,
-                        left_type_id,
+                        left_vir_ty,
                         left_val,
                         right_val,
                         CmpCodes {
@@ -467,7 +443,7 @@ impl Cg<'_, '_, '_> {
             BinaryOp::BitXor => self.builder.ins().bxor(left_val, right_val),
             BinaryOp::Shl => self.builder.ins().ishl(left_val, right_val),
             BinaryOp::Shr => {
-                if left_type_id.is_unsigned_int() {
+                if left_vir_ty.is_unsigned_int() {
                     self.builder.ins().ushr(left_val, right_val)
                 } else {
                     self.builder.ins().sshr(left_val, right_val)
@@ -482,22 +458,18 @@ impl Cg<'_, '_, '_> {
         }
 
         // For comparison ops, result is bool; otherwise use the promoted type
-        let (final_ty, final_type_id) = match op {
+        let (final_ty, final_vir_ty) = match op {
             BinaryOp::Eq
             | BinaryOp::Ne
             | BinaryOp::Lt
             | BinaryOp::Gt
             | BinaryOp::Le
-            | BinaryOp::Ge => (types::I8, TypeId::BOOL),
+            | BinaryOp::Ge => (types::I8, VirTypeId::BOOL),
             BinaryOp::And | BinaryOp::Or => unreachable!(),
-            _ => (result_ty, result_type_id),
+            _ => (result_ty, result_vir_ty),
         };
 
-        Ok(CompiledValue::new(
-            result,
-            final_ty,
-            self.vir_lookup(final_type_id),
-        ))
+        Ok(CompiledValue::new(result, final_ty, final_vir_ty))
     }
 
     fn coerce_value_to_f128(&mut self, value: CompiledValue) -> CodegenResult<Value> {
@@ -601,7 +573,7 @@ impl Cg<'_, '_, '_> {
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
         let field_slots = self
-            .struct_flat_field_cranelift_types(self.cv_type_id(&left))
+            .struct_flat_field_cranelift_types_v(left.type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch("struct_equality", "struct type", "non-struct")
             })?;
@@ -758,33 +730,26 @@ impl Cg<'_, '_, '_> {
         // Check if not nil (tag != nil_tag)
         let is_not_nil = self.tag_ne(optional.value, nil_tag as i64);
 
-        // Resolve the inner (non-nil) TypeId for dispatch
-        let inner_type_id = self
-            .vir_query_unwrap_optional_sema(self.cv_type_id(&optional))
-            .unwrap_or(TypeId::I64);
-        let payload_cranelift_type = self.cranelift_type(inner_type_id);
+        // Resolve the inner (non-nil) VirTypeId for dispatch
+        let inner_vir_ty = self
+            .vir_query_unwrap_optional_v(optional.type_id)
+            .unwrap_or(VirTypeId::I64);
+        let payload_cranelift_type = self.cranelift_type_v(inner_vir_ty);
 
         // Struct payloads are pointers to stack data; loading fields from a nil optional's
         // payload pointer causes a segfault. Use conditional branching to guard the load.
-        if self.vir_query_is_struct(inner_type_id) {
-            return self.optional_struct_compare(optional, value, op, is_not_nil, inner_type_id);
+        if self.vir_query_is_struct_v(inner_vir_ty) {
+            return self.optional_struct_compare(optional, value, op, is_not_nil, inner_vir_ty);
         }
 
-        let payload = self.load_union_payload(
-            optional.value,
-            self.cv_type_id(&optional),
-            payload_cranelift_type,
-        );
+        let payload =
+            self.load_union_payload_v(optional.value, optional.type_id, payload_cranelift_type);
 
-        // Compare payload with value, dispatching on vole TypeId rather than Cranelift type.
+        // Compare payload with value, dispatching on VirTypeId rather than Cranelift type.
         // This correctly handles string (content equality), float, and integer/pointer types.
         // Cranelift-type dispatch would incorrectly treat string pointers as plain integers.
-        let values_equal = self.compare_optional_payload_eq(
-            inner_type_id,
-            payload,
-            payload_cranelift_type,
-            value,
-        )?;
+        let values_equal =
+            self.compare_optional_payload_eq(inner_vir_ty, payload, payload_cranelift_type, value)?;
 
         // Result is: is_not_nil AND values_equal
         let result = match op {
@@ -814,9 +779,9 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         op: BinaryOp,
         is_not_nil: Value,
-        inner_type_id: TypeId,
+        inner_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let payload_cranelift_type = self.cranelift_type(inner_type_id);
+        let payload_cranelift_type = self.cranelift_type_v(inner_vir_ty);
         let not_nil_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I8);
@@ -838,16 +803,9 @@ impl Cg<'_, '_, '_> {
 
         // Non-nil branch: load payload and compare struct fields
         self.switch_and_seal(not_nil_block);
-        let payload = self.load_union_payload(
-            optional.value,
-            self.cv_type_id(&optional),
-            payload_cranelift_type,
-        );
-        let payload_compiled = CompiledValue::new(
-            payload,
-            payload_cranelift_type,
-            self.vir_lookup(inner_type_id),
-        );
+        let payload =
+            self.load_union_payload_v(optional.value, optional.type_id, payload_cranelift_type);
+        let payload_compiled = CompiledValue::new(payload, payload_cranelift_type, inner_vir_ty);
         let eq_result = self.struct_equality(payload_compiled, value, op)?;
         let eq_arg = BlockArg::from(eq_result.value);
         self.builder.ins().jump(merge_block, &[eq_arg]);
@@ -861,7 +819,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compare an optional payload against a value, returning an I8 bool (1 = equal, 0 = not equal).
     ///
-    /// Dispatches on `inner_type_id` (the vole TypeId of the unwrapped optional's inner type):
+    /// Dispatches on `inner_vir_ty` (the VirTypeId of the unwrapped optional's inner type):
     /// - f128                -> call_f128_cmp (Cranelift has no native fcmp for F128)
     /// - f32 / f64           -> fcmp
     /// - String              -> string_eq (content equality via RuntimeKey::StringEq)
@@ -871,21 +829,21 @@ impl Cg<'_, '_, '_> {
     /// because struct field loads must be guarded by a nil check to avoid segfaults.
     fn compare_optional_payload_eq(
         &mut self,
-        inner_type_id: TypeId,
+        inner_vir_ty: VirTypeId,
         payload: Value,
         payload_cranelift_type: Type,
         value: CompiledValue,
     ) -> CodegenResult<Value> {
-        if inner_type_id == TypeId::F128 {
+        if inner_vir_ty == VirTypeId::F128 {
             // F128 requires a runtime call; Cranelift has no native fcmp for 128-bit floats.
             self.call_f128_cmp(RuntimeKey::F128Eq, payload, value.value)
-        } else if self.vir_query_is_float(inner_type_id) {
+        } else if self.vir_query_is_float_v(inner_vir_ty) {
             // F32 / F64 use the native Cranelift fcmp instruction.
             Ok(self
                 .builder
                 .ins()
                 .fcmp(FloatCC::Equal, payload, value.value))
-        } else if self.vir_query_is_string(inner_type_id) {
+        } else if self.vir_query_is_string_v(inner_vir_ty) {
             self.string_eq(payload, value.value)
         } else {
             // Integer, bool, pointer, interface, handle, union: compare by value/identity
@@ -910,7 +868,7 @@ impl Cg<'_, '_, '_> {
     fn emit_cmp(
         &mut self,
         result_ty: Type,
-        left_type_id: TypeId,
+        left_vir_ty: VirTypeId,
         left_val: Value,
         right_val: Value,
         codes: CmpCodes,
@@ -921,13 +879,13 @@ impl Cg<'_, '_, '_> {
             try_constant_value(self.builder.func, left_val),
             try_constant_value(self.builder.func, right_val),
         ) {
-            let cc = if left_type_id.is_unsigned_int() {
+            let cc = if left_vir_ty.is_unsigned_int() {
                 codes.unsigned
             } else {
                 codes.signed
             };
             self.iconst_cached(types::I8, i64::from(eval_int_cc(cc, a, b)))
-        } else if left_type_id.is_unsigned_int() {
+        } else if left_vir_ty.is_unsigned_int() {
             self.builder.ins().icmp(codes.unsigned, left_val, right_val)
         } else {
             self.builder.ins().icmp(codes.signed, left_val, right_val)
