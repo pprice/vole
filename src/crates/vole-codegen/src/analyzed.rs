@@ -294,11 +294,6 @@ impl AnalyzedProgram {
         self.vir_program.display_name(name_id)
     }
 
-    /// Resolve a symbol in the main-program interner.
-    pub(crate) fn resolve_symbol(&self, sym: Symbol) -> &str {
-        self.vir_program.resolve_symbol(sym)
-    }
-
     /// Resolve a NameId to its last segment.
     pub(crate) fn last_segment(&self, name_id: NameId) -> Option<String> {
         self.vir_program.last_segment(name_id)
@@ -314,24 +309,9 @@ impl AnalyzedProgram {
         self.vir_program.try_method_name_id_by_str(name_str)
     }
 
-    /// Resolve NameId by module and symbol segments using the main interner.
-    pub(crate) fn try_name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> Option<NameId> {
-        self.vir_program.try_name_id(module_id, segments)
-    }
-
-    /// Query-compatible alias for resolving NameId by module and symbol segments.
-    pub(crate) fn name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> NameId {
-        self.vir_program.name_id(module_id, segments)
-    }
-
     /// Resolve method NameId by short string, panicking when missing.
     pub(crate) fn method_name_id_by_str(&self, name_str: &str) -> NameId {
         self.vir_program.method_name_id_by_str(name_str)
-    }
-
-    /// Resolve function NameId by module and Symbol.
-    pub(crate) fn try_function_name_id(&self, module_id: ModuleId, name: Symbol) -> Option<NameId> {
-        self.vir_program.try_function_name_id(module_id, name)
     }
 
     /// Resolve semantic FunctionId by NameId.
@@ -482,9 +462,9 @@ impl AnalyzedProgram {
         self.entity_metadata().is_functional(type_def_id)
     }
 
-    /// Resolve virtual module ID for a tests block span.
-    pub(crate) fn tests_virtual_module(&self, span: Span) -> Option<ModuleId> {
-        self.tests_virtual_modules.get(&span).copied()
+    /// Return all test-scoped virtual module IDs.
+    pub(crate) fn tests_virtual_module_ids(&self) -> Vec<ModuleId> {
+        self.tests_virtual_modules.values().copied().collect()
     }
 
     /// Resolve function NameId by module and Symbol, panicking when missing.

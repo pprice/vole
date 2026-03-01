@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
@@ -8,8 +8,7 @@ use super::{Compiler, DeclareMode};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, function_name_id_with_interner, type_id_to_cranelift};
-use vole_frontend::ast::TestsDecl;
-use vole_frontend::{Decl, FuncDecl, Interner, Program, Symbol};
+use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{ModuleId, NameId, TypeId};
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
@@ -18,26 +17,6 @@ use vole_vir::refs::VirRef;
 use vole_vir::stmt::VirStmt;
 
 impl Compiler<'_> {
-    fn main_function_key_and_name(&mut self, sym: Symbol) -> CodegenResult<(FunctionKey, String)> {
-        // Collect info using query (immutable borrow)
-        let (name_id, display_name) = {
-            let module_id = self.program_module();
-            (
-                self.analyzed.try_function_name_id(module_id, sym),
-                self.analyzed.resolve_symbol(sym).to_string(),
-            )
-        };
-        // Mutable operations on func_registry
-        let name_id = name_id.ok_or_else(|| {
-            CodegenError::internal_with_context(
-                "function not found in NameTable",
-                display_name.clone(),
-            )
-        })?;
-        let key = self.func_registry.intern_name_id(name_id);
-        Ok((key, display_name))
-    }
-
     pub(super) fn test_function_key(&mut self, test_index: usize) -> FunctionKey {
         if let Some(func_key) = self.test_func_keys.get(test_index).copied() {
             return func_key;
@@ -146,69 +125,98 @@ impl Compiler<'_> {
     }
 
     /// First pass: declare all functions and tests, collect globals, finalize type metadata.
-    fn declare_program_declarations(&mut self, program: &Program) -> CodegenResult<()> {
+    ///
+    /// Iterates VirEntityMetadata instead of walking AST `program.declarations`.
+    fn declare_program_declarations(&mut self) -> CodegenResult<()> {
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
         // Bulk-register top-level module import bindings from VirProgram.
         self.register_global_module_bindings();
 
-        for decl in &program.declarations {
-            match decl {
-                Decl::Function(func) => {
-                    // Skip generic functions - they're templates, not actual functions
-                    if !func.type_params.is_empty() {
-                        continue;
-                    }
-                    // Declare function using helper (skips if not registered)
-                    let func_key = self.declare_main_function(func.name);
-                    // If this is a generator, override the return type to
-                    // RuntimeIterator(T) so callers compiled before the
-                    // generator itself use the correct (non-interface) type.
-                    if let Some(func_key) = func_key {
-                        let module_id = self.program_module();
-                        if let Some(name_id) =
-                            self.analyzed.try_function_name_id(module_id, func.name)
-                        {
-                            self.override_generator_return_type(name_id, func_key);
-                        }
-                    }
-                }
-                Decl::Tests(_) if self.skip_tests => {}
-                Decl::Tests(tests_decl) => {
-                    // Declare scoped type/function declarations within the tests block
-                    self.declare_tests_scoped_types(tests_decl)?;
-                }
-                Decl::LetTuple(_) => {
-                    // Module bindings are bulk-registered from VirProgram at the
-                    // start of declare_program_declarations.
-                }
-                Decl::Let(_) => {
-                    // Global initializer presence is resolved via ProgramQuery lookups.
-                }
-                Decl::Class(class) => {
-                    self.finalize_class(class.name)?;
-                }
-                Decl::Interface(_) => {
-                    // Interface declarations don't generate code directly
-                }
-                Decl::Implement(_) => {
-                    // Implement blocks are registered via VirImplementBlockEntry below.
-                }
-                Decl::Struct(s) => {
-                    self.finalize_struct(s.name)?;
-                }
-                Decl::Error(_) => {
-                    // Error declarations don't generate code in pass 1
-                }
-                Decl::Sentinel(_) => {
-                    // Sentinel declarations don't generate code in pass 1
-                }
-                Decl::External(_) => {
-                    // External blocks don't generate code in pass 1
+        let program_module = self.program_module();
+
+        // Declare non-generic, non-external functions from VirEntityMetadata.
+        // This covers both top-level and test-scoped functions (both are
+        // registered under program_module by sema).
+        //
+        // Dedup by NameId: when the same source file is both imported as a
+        // module and compiled as the main program (common in test-runner batch
+        // mode), VirEntityMetadata may contain duplicate FunctionDefs with
+        // different FunctionIds but the same NameId.  Deduplicating matches
+        // the old AST-walk behavior where each Decl::Function appeared once.
+        let mut seen = HashSet::new();
+        let func_defs: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_function_defs(program_module)
+            .into_iter()
+            .filter(|fd| !fd.is_generic && !fd.is_external)
+            .filter_map(|fd| seen.insert(fd.name_id).then_some(fd.name_id))
+            .collect();
+        for name_id in func_defs {
+            // Use the bare (last-segment) name for main-program functions so
+            // the JIT key matches what `get_function_ptr("main")` looks up.
+            // Module functions use the fully-qualified display_name instead.
+            let bare_name = self
+                .analyzed
+                .last_segment(name_id)
+                .unwrap_or_else(|| self.analyzed.display_name(name_id));
+            let func_key =
+                self.declare_function_by_name_id(name_id, &bare_name, DeclareMode::Declare);
+            // If this is a generator, override the return type to
+            // RuntimeIterator(T) so callers compiled before the
+            // generator itself use the correct (non-interface) type.
+            if let Some(func_key) = func_key {
+                self.override_generator_return_type(name_id, func_key);
+            }
+        }
+
+        // Finalize classes in the main program module.
+        let class_ids: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_type_defs_by_kind(program_module, VirTypeDefKind::Class)
+            .into_iter()
+            .map(|td| td.id)
+            .collect();
+        for type_def_id in class_ids {
+            self.finalize_type_by_id(type_def_id)?;
+        }
+
+        // Finalize structs in the main program module.
+        let struct_ids: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_type_defs_by_kind(program_module, VirTypeDefKind::Struct)
+            .into_iter()
+            .map(|td| td.id)
+            .collect();
+        for type_def_id in struct_ids {
+            self.finalize_type_by_id(type_def_id)?;
+        }
+
+        // Finalize test-scoped classes (registered under virtual test modules).
+        if !self.skip_tests {
+            let virtual_module_ids = self.analyzed.tests_virtual_module_ids();
+            for vm_id in virtual_module_ids {
+                let class_ids: Vec<_> = self
+                    .analyzed
+                    .vir_program()
+                    .entity_metadata
+                    .module_type_defs_by_kind(vm_id, VirTypeDefKind::Class)
+                    .into_iter()
+                    .map(|td| td.id)
+                    .collect();
+                for type_def_id in class_ids {
+                    self.finalize_module_type_by_id(type_def_id)?;
                 }
             }
         }
 
         // Register implement block methods from VIR metadata (pass 1).
-        // This replaces the old AST-based Decl::Implement loop above.
         for entry in self
             .analyzed
             .vir_program()
@@ -265,67 +273,73 @@ impl Compiler<'_> {
     }
 
     /// Second pass: compile function bodies and tests.
-    /// Note: Decl::Let globals are handled by inlining their initializers
-    /// when referenced (see compile_expr for ExprKind::Identifier).
-    fn compile_program_declarations(&mut self, program: &Program) -> CodegenResult<()> {
-        for decl in &program.declarations {
-            match decl {
-                Decl::Function(func) => {
-                    // Skip generic functions - they're compiled via monomorphized instances
-                    // This includes both explicit generics (type_params in AST) and implicit
-                    // generics (structural type params that create generic_info in entity registry)
-                    if !func.type_params.is_empty() {
-                        continue;
-                    }
+    ///
+    /// Iterates VirEntityMetadata instead of walking AST `program.declarations`.
+    /// Decl::Let globals are handled by inlining their initializers when
+    /// referenced (see compile_expr for ExprKind::Identifier).
+    fn compile_program_declarations(&mut self, _program: &Program) -> CodegenResult<()> {
+        use vole_vir::entity_metadata::VirTypeDefKind;
 
-                    // Check for implicit generics (structural type params)
-                    let program_module = self.program_module();
-                    let name_id = self.analyzed.function_name_id(program_module, func.name);
-                    let has_implicit_generic_info = self
-                        .analyzed
-                        .function_id_by_name_id(name_id)
-                        .map(|func_id| self.analyzed.function_def(func_id).is_generic)
-                        .unwrap_or(false);
-                    if has_implicit_generic_info {
-                        continue;
-                    }
+        let program_module = self.program_module();
 
-                    self.compile_function(func)?;
-                }
-                Decl::Tests(_) if self.skip_tests => {}
-                Decl::Tests(tests_decl) => {
-                    // Compile scoped function/class/implement bodies (recursive into nested tests)
-                    self.compile_tests_scoped_bodies(tests_decl)?;
-                }
-                Decl::Let(_) | Decl::LetTuple(_) => {
-                    // Globals are handled during identifier lookup
-                    // LetTuple (destructuring imports) don't generate code
-                }
-                Decl::Class(class) => {
-                    self.compile_class_methods(class.name)?;
-                }
-                Decl::Interface(_) => {
-                    // Interface methods are compiled when used via implement blocks
-                }
-                Decl::Implement(_) => {
-                    // Implement blocks are compiled via VirImplementBlockEntry below.
-                }
-                Decl::Struct(struct_decl) => {
-                    if !struct_decl.methods.is_empty() || struct_decl.statics.is_some() {
-                        self.compile_struct_methods(
-                            struct_decl.name,
-                            !struct_decl.type_params.is_empty(),
-                        )?;
-                    }
-                }
-                Decl::Error(_) => {
-                    // Error declarations don't generate code in pass 2
-                }
-                Decl::Sentinel(_) => {
-                    // Sentinel declarations don't generate code in pass 2
-                }
-                Decl::External(_) => {
-                    // External blocks don't generate code in pass 2
+        // Compile non-generic, non-external function bodies from VirEntityMetadata.
+        // This covers both top-level and test-scoped functions (both are
+        // registered under program_module by sema).
+        // Dedup by NameId (see declare_program_declarations for rationale).
+        let mut seen = HashSet::new();
+        let func_name_ids: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_function_defs(program_module)
+            .into_iter()
+            .filter(|fd| !fd.is_generic && !fd.is_external)
+            .filter_map(|fd| seen.insert(fd.name_id).then_some(fd.name_id))
+            .collect();
+        for name_id in func_name_ids {
+            self.compile_main_function_by_name_id(name_id)?;
+        }
+
+        // Compile class methods in the main program module.
+        let class_ids: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_type_defs_by_kind(program_module, VirTypeDefKind::Class)
+            .into_iter()
+            .map(|td| td.id)
+            .collect();
+        for type_def_id in class_ids {
+            self.compile_type_methods_by_id(type_def_id, program_module)?;
+        }
+
+        // Compile struct methods in the main program module.
+        let struct_ids: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_type_defs_by_kind(program_module, VirTypeDefKind::Struct)
+            .into_iter()
+            .map(|td| td.id)
+            .collect();
+        for type_def_id in struct_ids {
+            self.compile_type_methods_by_id(type_def_id, program_module)?;
+        }
+
+        // Compile test-scoped class methods (registered under virtual test modules).
+        if !self.skip_tests {
+            let virtual_module_ids = self.analyzed.tests_virtual_module_ids();
+            for vm_id in virtual_module_ids {
+                let class_ids: Vec<_> = self
+                    .analyzed
+                    .vir_program()
+                    .entity_metadata
+                    .module_type_defs_by_kind(vm_id, VirTypeDefKind::Class)
+                    .into_iter()
+                    .map(|td| td.id)
+                    .collect();
+                for type_def_id in class_ids {
+                    self.compile_type_methods_by_id(type_def_id, vm_id)?;
                 }
             }
         }
@@ -356,29 +370,32 @@ impl Compiler<'_> {
 
     /// Compile the main program body (functions, tests, classes, etc.)
     fn compile_program_body(&mut self, program: &Program) -> CodegenResult<()> {
-        // Pre-pass: Register all class names first so they're available for field type resolution
-        // This allows classes to reference each other (e.g., Company.ceo: Person?)
-        for decl in &program.declarations {
-            match decl {
-                Decl::Class(class) => {
-                    self.pre_register_class(class.name)?;
-                }
-                Decl::Struct(s) => {
-                    self.pre_register_struct(s.name)?;
-                }
-                Decl::Sentinel(s) => {
-                    self.pre_register_sentinel(s.name)?;
-                }
-                Decl::Tests(_) if self.skip_tests => {}
-                Decl::Tests(_) => {
-                    // Scoped types use finalize_module_class in pass 1
-                }
-                _ => {}
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
+        // Pre-pass: Register all type names from VirEntityMetadata so they're
+        // available for field type resolution (classes can reference each other).
+        let program_module = self.program_module();
+        let type_kinds = [
+            VirTypeDefKind::Class,
+            VirTypeDefKind::Struct,
+            VirTypeDefKind::Sentinel,
+        ];
+        for kind in &type_kinds {
+            let type_ids: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_type_defs_by_kind(program_module, *kind)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in type_ids {
+                self.pre_register_type_by_id(type_def_id)?;
             }
         }
 
         // First pass: declare all functions and tests, collect globals, finalize type metadata
-        self.declare_program_declarations(program)?;
+        self.declare_program_declarations()?;
 
         // Declare monomorphized function instances before second pass
         self.declare_all_monomorphized_instances()?;
@@ -867,9 +884,13 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    pub(super) fn compile_function(&mut self, func: &FuncDecl) -> CodegenResult<()> {
-        let program_module = self.program_module();
-        let (func_key, display_name) = self.main_function_key_and_name(func.name)?;
+    /// Compile a main-program function by NameId (VIR-based, no AST FuncDecl needed).
+    ///
+    /// Used when iterating VirEntityMetadata function definitions instead of
+    /// walking AST declarations.
+    fn compile_main_function_by_name_id(&mut self, name_id: NameId) -> CodegenResult<()> {
+        let func_key = self.func_registry.intern_name_id(name_id);
+        let display_name = self.analyzed.display_name(name_id);
         let jit_func_id = self
             .func_registry
             .func_id(func_key)
@@ -878,8 +899,7 @@ impl Compiler<'_> {
         // Get FunctionId and extract pre-resolved signature data
         let semantic_func_id = self
             .analyzed
-            .try_function_name_id(program_module, func.name)
-            .and_then(|name_id| self.analyzed.function_id_by_name_id(name_id))
+            .function_id_by_name_id(name_id)
             .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
         let func_def = self.analyzed.function_def(semantic_func_id);
         let (param_type_ids, return_type_id) =
@@ -922,17 +942,22 @@ impl Compiler<'_> {
         let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
 
-        // Build params: Vec<(Symbol, TypeId, Type)>
-        // Combine AST param names with pre-resolved TypeIds from FunctionDef
+        // Build params using VIR function param Symbols
+        let vir = vir_func.unwrap_or_else(|| {
+            panic!(
+                "VIR must be available for non-generic, non-generator function '{}'",
+                display_name,
+            )
+        });
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.arena();
-            func.params
+            vir.params
                 .iter()
                 .zip(param_type_ids.iter())
-                .map(|(p, &type_id)| {
+                .map(|(&(sym, _, _), &type_id)| {
                     let cranelift_type =
                         type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
-                    (p.name, type_id, cranelift_type)
+                    (sym, type_id, cranelift_type)
                 })
                 .collect()
         };
@@ -954,12 +979,6 @@ impl Compiler<'_> {
             // Use pre-resolved return type (None for void)
             let return_type_opt = Some(return_type_id).filter(|id| !id.is_void());
             let config = FunctionCompileConfig::top_level(params, return_type_opt);
-            let vir = vir_func.unwrap_or_else(|| {
-                panic!(
-                    "VIR must be available for non-generic, non-generator function '{}'",
-                    display_name,
-                )
-            });
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
@@ -1054,105 +1073,6 @@ impl Compiler<'_> {
                 )?;
             }
             self.finalize_function(func_id)?;
-        }
-        Ok(())
-    }
-
-    // =====================================================================
-    // Test-scoped declaration helpers
-    //
-    // These walk AST `TestsDecl` blocks to declare and compile scoped
-    // functions, classes, and implement blocks.  Test *bodies* are compiled
-    // separately via `compile_all_tests` which iterates VirProgram.tests.
-    // =====================================================================
-
-    /// Declare scoped type/function declarations within a tests block (pass 1).
-    /// Handles scoped functions, classes, and implement blocks so they're available
-    /// during test compilation. Does NOT declare test functions (those are declared
-    /// from VirProgram.tests in declare_program_declarations).
-    fn declare_tests_scoped_types(&mut self, tests_decl: &TestsDecl) -> CodegenResult<()> {
-        let interner = self.analyzed.interner();
-
-        // Look up the virtual module ID for scoped type declarations
-        let virtual_module_id = self.analyzed.tests_virtual_module(tests_decl.span);
-
-        for inner_decl in &tests_decl.decls {
-            match inner_decl {
-                Decl::Function(func) => {
-                    // Skip generic functions
-                    if !func.type_params.is_empty() {
-                        continue;
-                    }
-                    // Scoped functions are registered under the program module by sema
-                    self.declare_main_function(func.name);
-                }
-                Decl::Class(class) => {
-                    // Scoped classes are registered under the virtual module
-                    if let Some(vm_id) = virtual_module_id {
-                        self.finalize_module_class(class.name, interner, vm_id)?;
-                    }
-                }
-                Decl::Implement(_) => {
-                    // Scoped implement blocks are registered via VirImplementBlockEntry
-                    // in the main implement_blocks() iteration.
-                }
-                Decl::Tests(nested_tests) => {
-                    // Recursively declare nested tests block scoped types
-                    self.declare_tests_scoped_types(nested_tests)?;
-                }
-                _ => {
-                    // Let declarations, interfaces, etc. don't need pass 1 handling
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Compile scoped function and method bodies within a tests block (pass 2).
-    /// Does NOT compile test bodies (those are compiled via compile_all_tests).
-    fn compile_tests_scoped_bodies(&mut self, tests_decl: &TestsDecl) -> CodegenResult<()> {
-        let program_module = self.program_module();
-        // Scoped types are registered under the virtual module in sema
-        let virtual_module_id = self
-            .analyzed
-            .tests_virtual_module(tests_decl.span)
-            .unwrap_or(program_module);
-
-        for inner_decl in &tests_decl.decls {
-            match inner_decl {
-                Decl::Function(func) => {
-                    // Skip generic functions
-                    if !func.type_params.is_empty() {
-                        continue;
-                    }
-                    // Check for implicit generics
-                    let name_id = self.analyzed.function_name_id(program_module, func.name);
-                    let has_implicit_generic_info = self
-                        .analyzed
-                        .function_id_by_name_id(name_id)
-                        .map(|func_id| self.analyzed.function_def(func_id).is_generic)
-                        .unwrap_or(false);
-                    if has_implicit_generic_info {
-                        continue;
-                    }
-                    // Compile as a regular function
-                    self.compile_function(func)?;
-                }
-                Decl::Class(class) => {
-                    self.compile_class_methods_in_module(class.name, virtual_module_id)?;
-                }
-                Decl::Implement(_) => {
-                    // Compiled via VirImplementBlockEntry in the main compile pass.
-                }
-                Decl::Tests(nested_tests) => {
-                    // Recursively compile nested tests block scoped bodies
-                    self.compile_tests_scoped_bodies(nested_tests)?;
-                }
-                _ => {
-                    // Let declarations are handled during test body compilation
-                }
-            }
         }
         Ok(())
     }

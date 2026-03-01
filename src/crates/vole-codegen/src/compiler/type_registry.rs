@@ -52,57 +52,6 @@ impl Compiler<'_> {
             .insert((type_name_id, method_name_id), func_key);
     }
 
-    /// Pre-register a class type (just the name and type_id)
-    /// This is called first so that field type resolution can find other classes/records
-    pub(super) fn pre_register_class(&mut self, name: Symbol) -> CodegenResult<()> {
-        let type_id = alloc_type_id();
-
-        let query = self.analyzed;
-        let module_id = self.program_module();
-        let name_id = query.name_id(module_id, &[name]);
-
-        // Look up the TypeDefId from EntityRegistry
-        let type_def_id = self.analyzed.try_type_def_id(name_id).ok_or_else(|| {
-            CodegenError::internal("pre_register_class: class not in entity registry")
-        })?;
-
-        // Use pre-computed base_type_id from sema (no mutable arena access needed)
-        let vole_type_id = self
-            .analyzed
-            .get_type(type_def_id)
-            .base_type_id
-            .ok_or_else(|| {
-                CodegenError::internal("pre_register_class: missing base_type_id from sema")
-            })?;
-
-        self.state.type_metadata.insert_with_name_id(
-            type_def_id,
-            name_id,
-            TypeMetadata {
-                type_id,
-                field_slots: FxHashMap::default(),
-                physical_slot_count: 0,
-                vole_type: vole_type_id,
-                method_infos: FxHashMap::default(),
-            },
-        );
-
-        Ok(())
-    }
-
-    /// Finalize a class type: fill in field types and declare methods
-    pub(super) fn finalize_class(&mut self, name: Symbol) -> CodegenResult<()> {
-        let module_id = self.program_module();
-        let type_def_id = self
-            .analyzed
-            .try_name_id(module_id, &[name])
-            .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-            .ok_or_else(|| {
-                CodegenError::internal("finalize_class: class not in entity registry")
-            })?;
-        self.finalize_type(type_def_id, true)
-    }
-
     /// Core implementation for finalizing a type (class or struct).
     /// - For classes: includes runtime type registration and interface handling
     /// - For structs: simpler path without runtime registration
@@ -360,33 +309,38 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Pre-register a struct type (just the name and type_id)
-    /// Structs are stack-allocated value types, so no runtime type registration is needed.
-    pub(super) fn pre_register_struct(&mut self, name: Symbol) -> CodegenResult<()> {
-        let query = self.analyzed;
-        let module_id = self.program_module();
-        let name_id = query.name_id(module_id, &[name]);
+    /// Pre-register a type (class, struct, or sentinel) by TypeDefId.
+    ///
+    /// Used when iterating VirEntityMetadata type definitions instead of
+    /// walking AST declarations.  Dispatches to the appropriate pre-register
+    /// logic based on the type kind (class gets a runtime type_id, struct and
+    /// sentinel get placeholder 0).
+    pub(super) fn pre_register_type_by_id(&mut self, type_def_id: TypeDefId) -> CodegenResult<()> {
+        use vole_vir::entity_metadata::VirTypeDefKind;
 
-        let type_def_id = self.analyzed.try_type_def_id(name_id).ok_or_else(|| {
-            CodegenError::internal("pre_register_struct: struct not in entity registry")
+        let type_def = self.analyzed.get_type(type_def_id);
+        let name_id = type_def.name_id;
+
+        let vole_type_id = type_def.base_type_id.ok_or_else(|| {
+            CodegenError::internal("pre_register_type_by_id: missing base_type_id from sema")
         })?;
 
-        let vole_type_id = self
-            .analyzed
-            .get_type(type_def_id)
-            .base_type_id
-            .ok_or_else(|| {
-                CodegenError::internal("pre_register_struct: missing base_type_id from sema")
-            })?;
+        let type_id = match type_def.kind {
+            VirTypeDefKind::Class => alloc_type_id(),
+            VirTypeDefKind::Struct | VirTypeDefKind::Sentinel => 0,
+            _ => return Ok(()),
+        };
 
-        // Structs don't need a runtime type_id since they're stack-allocated,
-        // but we still need type_metadata for field slot lookup during codegen.
-        // Use type_id 0 as a sentinel since it won't be used at runtime.
+        // Skip if already registered (e.g. from module finalization)
+        if self.state.type_metadata.contains_key(&type_def_id) {
+            return Ok(());
+        }
+
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,
             TypeMetadata {
-                type_id: 0,
+                type_id,
                 field_slots: FxHashMap::default(),
                 physical_slot_count: 0,
                 vole_type: vole_type_id,
@@ -397,39 +351,15 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Pre-register a sentinel type in codegen.
-    /// Sentinels are zero-field structs, so they need minimal metadata.
-    pub(super) fn pre_register_sentinel(&mut self, name: Symbol) -> CodegenResult<()> {
-        let query = self.analyzed;
-        let module_id = self.program_module();
-        let name_id = query.name_id(module_id, &[name]);
-
-        let type_def_id = self.analyzed.try_type_def_id(name_id).ok_or_else(|| {
-            CodegenError::internal("pre_register_sentinel: sentinel not in entity registry")
-        })?;
-
-        let vole_type_id = self
-            .analyzed
-            .get_type(type_def_id)
-            .base_type_id
-            .ok_or_else(|| {
-                CodegenError::internal("pre_register_sentinel: missing base_type_id from sema")
-            })?;
-
-        // Sentinels are zero-field structs, use type_id 0 as a placeholder.
-        self.state.type_metadata.insert_with_name_id(
+    /// Finalize a type (class or struct) by TypeDefId for the main program.
+    ///
+    /// Resolves the TypeDefId to the appropriate finalize logic. This is the
+    /// main-program equivalent of `finalize_module_type_by_id`.
+    pub(super) fn finalize_type_by_id(&mut self, type_def_id: TypeDefId) -> CodegenResult<()> {
+        self.finalize_type(
             type_def_id,
-            name_id,
-            TypeMetadata {
-                type_id: 0,
-                field_slots: FxHashMap::default(),
-                physical_slot_count: 0,
-                vole_type: vole_type_id,
-                method_infos: FxHashMap::default(),
-            },
-        );
-
-        Ok(())
+            self.analyzed.get_type(type_def_id).kind.is_class(),
+        )
     }
 
     /// Finalize a module type (class or struct) by TypeDefId.
@@ -570,20 +500,6 @@ impl Compiler<'_> {
         );
 
         Ok(())
-    }
-
-    /// Finalize a struct type: fill in field slots and register instance methods.
-    pub(super) fn finalize_struct(&mut self, name: Symbol) -> CodegenResult<()> {
-        let module_id = self.program_module();
-        let type_def_id = self
-            .analyzed
-            .try_name_id(module_id, &[name])
-            .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-            .ok_or_else(|| {
-                CodegenError::internal("finalize_struct: struct not in entity registry")
-            })?;
-        // Structs don't implement interfaces, so no default method registration
-        self.finalize_type(type_def_id, false)
     }
 
     /// Register static methods for a type from VIR metadata.

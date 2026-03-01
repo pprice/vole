@@ -9,7 +9,6 @@
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::ModuleCompileInfo;
-use super::impls::TypeMethodsData;
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, TypeMetadata, type_id_to_cranelift};
@@ -43,83 +42,45 @@ impl Compiler<'_> {
         func_key
     }
 
-    /// Compile methods for a class by name.
-    pub(super) fn compile_class_methods(&mut self, name: Symbol) -> CodegenResult<()> {
-        let module_id = self.program_module();
-        self.compile_class_methods_in_module(name, module_id)
-    }
-
-    /// Compile instance methods for a struct type by name.
-    pub(super) fn compile_struct_methods(
+    /// Compile methods for a type (class or struct) by TypeDefId.
+    ///
+    /// Used when iterating VirEntityMetadata type definitions instead of
+    /// walking AST declarations.  Skips generic types (compiled via monomorphized
+    /// instances).
+    pub(super) fn compile_type_methods_by_id(
         &mut self,
-        name: Symbol,
-        has_type_params: bool,
-    ) -> CodegenResult<()> {
-        // Skip generic structs - they're compiled via monomorphized instances
-        if has_type_params {
-            return Ok(());
-        }
-        let module_id = self.program_module();
-        let type_def_id = self
-            .analyzed
-            .try_name_id(module_id, &[name])
-            .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-            .ok_or_else(|| {
-                CodegenError::not_found("type", format!("struct {}", self.resolve_symbol(name)))
-            })?;
-        let type_def = self.analyzed.get_type(type_def_id);
-        let data = TypeMethodsData::from_vir(type_def, name);
-        self.compile_type_methods(data, module_id)
-    }
-
-    /// Compile methods for a class using a specific module for type lookups.
-    pub(super) fn compile_class_methods_in_module(
-        &mut self,
-        name: Symbol,
+        type_def_id: TypeDefId,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        // Look up VirTypeDef to check if generic
-        let type_def_id = self
-            .analyzed
-            .try_name_id(module_id, &[name])
-            .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
-            .ok_or_else(|| {
-                CodegenError::not_found("type", format!("class {}", self.resolve_symbol(name)))
-            })?;
         let type_def = self.analyzed.get_type(type_def_id);
-        // Skip generic classes - they're compiled via monomorphized instances
+        // Skip generic types - they're compiled via monomorphized instances
         if type_def.has_type_params() {
             return Ok(());
         }
-        let data = TypeMethodsData::from_vir(type_def, name);
-        self.compile_type_methods(data, module_id)
+        // Skip types with no methods
+        if type_def.methods.is_empty() && type_def.static_methods.is_empty() {
+            return Ok(());
+        }
+        self.compile_type_methods_inner(type_def_id, module_id)
     }
 
-    /// Core implementation for compiling methods of a class or struct.
+    /// Inner implementation for compiling methods of a class or struct by TypeDefId.
     ///
     /// Iterates method IDs from VirTypeDef.methods and compiles class-body
     /// and inherited default methods using VIR. Implement-block methods are
     /// excluded -- they are compiled separately by the implement block path.
-    fn compile_type_methods(
+    fn compile_type_methods_inner(
         &mut self,
-        data: TypeMethodsData<'_>,
+        type_def_id: TypeDefId,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        // Look up TypeDefId from name (needed as key for type_metadata)
-        let query = self.analyzed;
-        let type_def_id = query
-            .try_name_id(module_id, &[data.name])
-            .and_then(|name_id| query.try_type_def_id(name_id))
-            .ok_or_else(|| {
-                CodegenError::not_found(
-                    "type",
-                    format!(
-                        "{} {}",
-                        data.type_kind,
-                        self.analyzed.resolve_symbol(data.name)
-                    ),
-                )
-            })?;
+        let type_def = self.analyzed.get_type(type_def_id);
+        let type_name_id = type_def.name_id;
+        let method_ids = type_def.methods.clone();
+        let static_method_ids = type_def.static_methods.clone();
+        let type_kind = type_def.type_kind();
+
+        let type_display = self.analyzed.display_name(type_name_id);
 
         let metadata = self
             .state
@@ -127,14 +88,7 @@ impl Compiler<'_> {
             .get(&type_def_id)
             .cloned()
             .ok_or_else(|| {
-                CodegenError::not_found(
-                    "type_metadata",
-                    format!(
-                        "{} {}",
-                        data.type_kind,
-                        self.analyzed.resolve_symbol(data.name)
-                    ),
-                )
+                CodegenError::not_found("type_metadata", format!("{} {}", type_kind, type_display))
             })?;
 
         // Build sets of method IDs owned by implement blocks for this type.
@@ -154,7 +108,7 @@ impl Compiler<'_> {
         // - inherited default methods when implement blocks exist
         //   (compiled by compile_iface_default_methods for ALL interfaces)
         // - methods without VIR bodies
-        for &method_id in data.method_ids {
+        for &method_id in &method_ids {
             if impl_instance_ids.contains(&method_id) {
                 continue;
             }
@@ -170,19 +124,22 @@ impl Compiler<'_> {
             if self.analyzed.get_vir_method(method_id).is_none() {
                 continue;
             }
-            self.compile_method_by_id(method_id, data.name, &metadata)?;
+            self.compile_method_by_id_inner(method_id, &type_display, &metadata)?;
         }
 
         // Compile static methods from VIR metadata, excluding implement-block statics.
-        if !data.static_method_ids.is_empty() {
-            let non_impl_statics: Vec<MethodId> = data
-                .static_method_ids
+        if !static_method_ids.is_empty() {
+            let non_impl_statics: Vec<MethodId> = static_method_ids
                 .iter()
                 .copied()
                 .filter(|id| !impl_static_ids.contains(id))
                 .collect();
             if !non_impl_statics.is_empty() {
-                self.compile_static_methods_by_id(&non_impl_statics, data.name, module_id)?;
+                self.compile_static_methods_by_id_inner(
+                    &non_impl_statics,
+                    &type_display,
+                    module_id,
+                )?;
             }
         }
 
@@ -194,15 +151,14 @@ impl Compiler<'_> {
     /// Uses VIR function params for Symbol bindings, ensuring correctness for
     /// both direct methods and inherited default methods (including those from
     /// module interfaces where param Symbols may differ from the main interner).
-    fn compile_method_by_id(
+    fn compile_method_by_id_inner(
         &mut self,
         method_id: MethodId,
-        type_name: Symbol,
+        type_name_str: &str,
         metadata: &TypeMetadata,
     ) -> CodegenResult<()> {
         let method_def = self.analyzed.get_method(method_id);
         let method_name_id = method_def.name_id;
-        let type_name_str = self.analyzed.resolve_symbol(type_name).to_string();
         let method_name_str = self
             .analyzed
             .last_segment(method_name_id)
@@ -308,10 +264,10 @@ impl Compiler<'_> {
     }
 
     /// Compile static methods by MethodId from VIR metadata.
-    fn compile_static_methods_by_id(
+    fn compile_static_methods_by_id_inner(
         &mut self,
         static_method_ids: &[MethodId],
-        type_name: Symbol,
+        type_display: &str,
         _module_id: ModuleId,
     ) -> CodegenResult<()> {
         for &method_id in static_method_ids {
@@ -332,11 +288,7 @@ impl Compiler<'_> {
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found(
                     "static method",
-                    format!(
-                        "{}::{}",
-                        self.analyzed.resolve_symbol(type_name),
-                        method_name_str,
-                    ),
+                    format!("{}::{}", type_display, method_name_str,),
                 )
             })?;
 

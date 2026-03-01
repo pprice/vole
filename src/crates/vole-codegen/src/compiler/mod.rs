@@ -151,11 +151,6 @@ impl<'a> Compiler<'a> {
         self.analyzed.module_id()
     }
 
-    /// Resolve a Symbol to a string (owned, for use across mutable operations)
-    fn resolve_symbol(&self, sym: Symbol) -> String {
-        self.analyzed.interner().resolve(sym).to_string()
-    }
-
     /// Get the "self" keyword symbol (panics if not interned - should never happen)
     fn self_symbol(&self) -> Symbol {
         self.analyzed
@@ -281,25 +276,6 @@ impl<'a> Compiler<'a> {
         self.func_registry.set_return_type(func_key, return_type_id);
 
         Some(func_key)
-    }
-
-    /// Declare a main program function given its Symbol.
-    ///
-    /// This is a convenience wrapper for main program functions that:
-    /// 1. Looks up the NameId from the Symbol in the program module
-    /// 2. Delegates to `declare_function_by_name_id`
-    ///
-    /// Returns `None` if the function wasn't found.
-    fn declare_main_function(&mut self, name: Symbol) -> Option<FunctionKey> {
-        // Get name_id and display_name
-        let (name_id, display_name) = {
-            let module_id = self.program_module();
-            let name_id = self.analyzed.try_function_name_id(module_id, name)?;
-            let display_name = self.analyzed.resolve_symbol(name).to_string();
-            (name_id, display_name)
-        };
-
-        self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Declare)
     }
 
     // =====================================================================
