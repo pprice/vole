@@ -2043,15 +2043,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         value: CompiledValue,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
-        let value = if self.vir_query_is_struct(self.cv_type_id(&value)) {
+        let value = if self.vir_query_is_struct_v(value.type_id) {
             self.copy_struct_to_heap(value)?
         } else {
             value
         };
-        let tag = {
-            let arena = self.arena();
-            crate::types::array_element_tag_id(self.cv_type_id(&value), arena)
-        };
+        let tag = self.vir_query_array_element_tag_id_v(value.type_id);
         let tag_val = self.iconst_cached(types::I64, tag);
         if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
             let i128_bits = wide.to_i128_bits(self.builder, value.value);
@@ -2070,7 +2067,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         elem_type_id: TypeId,
         union_storage_hint: Option<vole_sema::UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
-        let mut value = if self.vir_query_is_struct(self.cv_type_id(&value)) {
+        let mut value = if self.vir_query_is_struct_v(value.type_id) {
             self.copy_struct_to_heap(value)?
         } else {
             value
@@ -2093,27 +2090,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             if was_already_unknown && value.type_id.is_unknown() {
                 let cloned = self.call_runtime(RuntimeKey::TaggedValueClone, &[value.value])?;
-                value = CompiledValue::new(
-                    cloned,
-                    self.ptr_type(),
-                    self.vir_lookup(self.cv_type_id(&value)),
-                );
+                value = CompiledValue::new(cloned, self.ptr_type(), value.type_id);
             }
 
             if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
                 let i128_bits = wide.to_i128_bits(self.builder, value.value);
                 let boxed = self.call_runtime(RuntimeKey::Wide128Box, &[i128_bits])?;
-                let tag = {
-                    let arena = self.arena();
-                    crate::types::array_element_tag_id(self.cv_type_id(&value), arena)
-                };
+                let tag = self.vir_query_array_element_tag_id_v(value.type_id);
                 let tag_val = self.iconst_cached(types::I64, tag);
                 return Ok((tag_val, boxed, value));
             }
-            let tag = {
-                let arena = self.arena();
-                crate::types::array_element_tag_id(self.cv_type_id(&value), arena)
-            };
+            let tag = self.vir_query_array_element_tag_id_v(value.type_id);
             let tag_val = self.iconst_cached(types::I64, tag);
             let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
             return Ok((tag_val, payload_bits, value));
@@ -2127,11 +2114,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
         if prefers_inline {
             value = self.coerce_to_type(value, resolved_elem_type)?;
-            if !self.vir_query_is_union(self.cv_type_id(&value)) {
+            if !self.vir_query_is_union_v(value.type_id) {
                 return Err(CodegenError::type_mismatch(
                     "array union inline coercion",
                     self.vir_query_display_basic(resolved_elem_type),
-                    self.vir_query_display_basic(self.cv_type_id(&value)),
+                    self.vir_query_display_basic_v(value.type_id),
                 ));
             }
             let variants = self
@@ -2157,25 +2144,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Boxed union storage for ambiguous runtime tags.
-        if self.vir_query_is_union(self.cv_type_id(&value)) {
+        if self.vir_query_is_union_v(value.type_id) {
             value = self.coerce_to_type(value, resolved_elem_type)?;
-            if !self.vir_query_is_union(self.cv_type_id(&value)) {
+            if !self.vir_query_is_union_v(value.type_id) {
                 return Err(CodegenError::type_mismatch(
                     "array union boxed coercion",
                     self.vir_query_display_basic(resolved_elem_type),
-                    self.vir_query_display_basic(self.cv_type_id(&value)),
+                    self.vir_query_display_basic_v(value.type_id),
                 ));
             }
             value = self.copy_union_to_heap(value)?;
         } else {
-            value.type_id = self.vir_lookup(self.try_substitute_type(self.cv_type_id(&value)));
+            if let Some(subs) = self.substitutions
+                && let Some(subst) = self
+                    .vir_type_table()
+                    .lookup_substitute_vir(value.type_id, subs)
+            {
+                value.type_id = subst;
+            }
             value = self.construct_union_heap_id(value, resolved_elem_type)?;
         }
 
-        let tag = {
-            let arena = self.arena();
-            crate::types::array_element_tag_id(self.cv_type_id(&value), arena)
-        };
+        let tag = self.vir_query_array_element_tag_id_v(value.type_id);
         let tag_val = self.iconst_cached(types::I64, tag);
         let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
         Ok((tag_val, payload_bits, value))

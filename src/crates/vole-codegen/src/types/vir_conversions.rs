@@ -1208,6 +1208,11 @@ pub(crate) fn vir_array_element_tag_id(vir_ty: VirTypeId, table: &VirTypeTable) 
     if table.is_sentinel(vir_ty) {
         return RuntimeTypeId::I64 as i64;
     }
+    // F128 is stored as VirType::Unknown placeholder (no VirPrimitiveKind::F128 yet),
+    // but it's a wide type that uses 2-slot storage like i128.
+    if vir_ty == VirTypeId::F128 {
+        return RuntimeTypeId::Wide128 as i64;
+    }
     match table.get(vir_ty) {
         VirType::Primitive(VirPrimitiveKind::String) => RuntimeTypeId::String as i64,
         VirType::Primitive(
