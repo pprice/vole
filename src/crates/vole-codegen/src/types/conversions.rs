@@ -11,9 +11,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::helpers::StructEntityLookup;
 use crate::union_layout;
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{
-    FieldId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId, TypeId, VirTypeId,
-};
+use vole_identity::{FieldId, ModuleId, NameId, NameTable, TypeDefId, TypeId, VirTypeId};
 use vole_runtime::native_registry::NativeType;
 use vole_sema::type_arena::TypeArena;
 
@@ -246,18 +244,6 @@ pub(crate) fn method_name_id_by_str(
 ) -> Option<NameId> {
     let name_table = analyzed.name_table();
     vole_identity::method_name_id_by_str(name_table, interner, name_str)
-}
-
-/// Look up a function NameId by Symbol with explicit interner (for cross-interner usage)
-pub(crate) fn function_name_id_with_interner(
-    analyzed: &AnalyzedProgram,
-    interner: &Interner,
-    module: ModuleId,
-    name: Symbol,
-) -> Option<NameId> {
-    let name_table = analyzed.name_table();
-    let namer = NamerLookup::new(name_table, interner);
-    namer.function(module, name)
 }
 
 /// Convert a TypeId to a Cranelift type.

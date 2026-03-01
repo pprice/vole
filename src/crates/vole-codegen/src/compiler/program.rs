@@ -7,9 +7,9 @@ use super::{Compiler, DeclareMode};
 
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CodegenCtx, function_name_id_with_interner, type_id_to_cranelift};
-use vole_frontend::{Decl, Interner, Program, Symbol};
-use vole_identity::{ModuleId, NameId, TypeId};
+use crate::types::{CodegenCtx, type_id_to_cranelift};
+use vole_frontend::{Interner, Program, Symbol};
+use vole_identity::{NameId, TypeId};
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use vole_vir::func::VirBody;
@@ -673,52 +673,60 @@ impl Compiler<'_> {
     /// This declares the functions so they can be called, but doesn't compile them.
     /// Used when modules are already compiled in a shared CompiledModules cache.
     fn import_module_functions(&mut self) -> CodegenResult<()> {
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
         let module_paths = self.analyzed.module_paths();
 
         for module_path in &module_paths {
-            let (program, module_interner) = &self.analyzed.module_programs()[module_path];
+            let module_id = self.analyzed.module_id_or_main(module_path);
 
-            // Import pure Vole functions (they're already compiled, just need declarations)
-            for decl in &program.declarations {
-                if let Decl::Function(func) = decl {
-                    let module_id = self.analyzed.module_id_or_main(module_path);
-                    let name_id = function_name_id_with_interner(
-                        self.analyzed,
-                        module_interner,
-                        module_id,
-                        func.name,
-                    )
-                    .ok_or_else(|| {
-                        CodegenError::internal("module function: name_id not registered")
-                    })?;
-
-                    let display_name = self.analyzed.display_name(name_id);
-                    let func_key = self.declare_function_by_name_id(
-                        name_id,
-                        &display_name,
-                        DeclareMode::Import,
-                    );
-                    // Override generator return types for imported module functions
-                    if let Some(func_key) = func_key {
-                        self.override_generator_return_type(name_id, func_key);
-                    }
+            // Import pure Vole functions from VirEntityMetadata (already compiled, just need declarations).
+            // Skip generic functions (declared via monomorphized instances) and
+            // external functions (declared via implement block / FFI path).
+            let func_defs: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_function_defs(module_id)
+                .into_iter()
+                .filter(|fd| !fd.is_generic && !fd.is_external)
+                .map(|fd| fd.name_id)
+                .collect();
+            for name_id in func_defs {
+                let display_name = self.analyzed.display_name(name_id);
+                let func_key =
+                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
+                // Override generator return types for imported module functions
+                if let Some(func_key) = func_key {
+                    self.override_generator_return_type(name_id, func_key);
                 }
             }
 
             // Finalize module classes (register type metadata, import methods)
             // MUST happen before implement block import, which needs type_metadata
-            let module_id = self.analyzed.module_id_or_main(module_path);
-            for decl in &program.declarations {
-                if let Decl::Class(class) = decl {
-                    self.import_module_class(class, module_interner, module_id)?;
-                }
+            let class_ids: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Class)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in class_ids {
+                self.finalize_module_type_by_id(type_def_id)?;
             }
 
             // Finalize module structs (register type metadata, import methods)
-            for decl in &program.declarations {
-                if let Decl::Struct(struct_decl) = decl {
-                    self.import_module_struct(struct_decl, module_interner, module_id)?;
-                }
+            let struct_ids: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Struct)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in struct_ids {
+                self.finalize_module_type_by_id(type_def_id)?;
             }
 
             // Import implement block methods from VIR metadata (using Linkage::Import)
@@ -741,34 +749,6 @@ impl Compiler<'_> {
         self.import_array_iterable_default_methods()?;
 
         Ok(())
-    }
-
-    /// Import a module class - register metadata and import methods.
-    /// Used when modules are already compiled in a shared cache.
-    fn import_module_class(
-        &mut self,
-        class: &vole_frontend::ast::ClassDecl,
-        module_interner: &Interner,
-        module_id: ModuleId,
-    ) -> CodegenResult<()> {
-        // First finalize to get type metadata registered
-        self.finalize_module_class(class.name, module_interner, module_id)?;
-
-        // The methods are already compiled - they'll be linked via external symbols
-        // No additional work needed here since method calls go through func_registry
-        // which will find the imported function IDs
-        Ok(())
-    }
-
-    /// Import a module struct - register metadata and import methods.
-    /// Used when modules are already compiled in a shared cache.
-    fn import_module_struct(
-        &mut self,
-        struct_decl: &vole_frontend::ast::StructDecl,
-        module_interner: &Interner,
-        module_id: ModuleId,
-    ) -> CodegenResult<()> {
-        self.finalize_module_struct(struct_decl.name, module_interner, module_id)
     }
 
     /// Compile a single module function using VIR metadata (no AST FuncDecl needed).
