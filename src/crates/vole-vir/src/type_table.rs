@@ -51,6 +51,14 @@ impl VirTypeTable {
         table
     }
 
+    /// Look up an existing `VirTypeId` for a `VirType` without interning.
+    ///
+    /// Returns `Some(id)` if the type was already interned, `None` otherwise.
+    /// Unlike `intern()`, this never grows the table.
+    pub fn lookup(&self, ty: &VirType) -> Option<VirTypeId> {
+        self.intern_map.get(ty).copied()
+    }
+
     /// Intern a type, returning an existing `VirTypeId` if the same `VirType`
     /// was already interned, or inserting a new entry.
     pub fn intern(&mut self, ty: VirType, layout: Option<VirTypeLayout>) -> VirTypeId {

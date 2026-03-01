@@ -495,6 +495,184 @@ fn primitive_layout(prim: PrimitiveType) -> VirTypeLayout {
 }
 
 // ---------------------------------------------------------------------------
+// Post-lowering sweep
+// ---------------------------------------------------------------------------
+
+/// Sweep all TypeIds in the arena and ensure each has a VirTypeId mapping.
+///
+/// During VIR lowering, `translate_type_id()` is called on-demand for types
+/// that appear in lowered nodes.  However, sema's `TypeArena::substitute()`
+/// creates ~1,900 monomorphized types during Pass 2 generic analysis that may
+/// never be directly referenced by a VIR node.  This sweep catches those
+/// unmapped types so that codegen can resolve any sema TypeId via
+/// `VirTypeTable::lookup_type_id()` without falling back to the TypeArena.
+///
+/// **Non-recursive**: Unlike `translate_type_id()`, this function does NOT
+/// recursively translate child types.  For compound types (Array, Tuple,
+/// Function, Class, etc.), it reuses existing VirTypeId mappings for children
+/// (falling back to `VirTypeId::UNKNOWN` for unmapped children).  This avoids
+/// creating side-effect mappings that would change codegen's UNKNOWN-fallback
+/// behavior for types that were intentionally left unmapped during lowering.
+pub fn sweep_unmapped_type_ids(table: &mut VirTypeTable, arena: &TypeArena) {
+    let count = arena.type_count();
+    // Collect unmapped TypeIds first to avoid borrow conflicts.
+    let unmapped: Vec<TypeId> = (0..count)
+        .map(TypeId::from_raw)
+        .filter(|&type_id| table.lookup_type_id(type_id).is_none())
+        .collect();
+
+    for type_id in unmapped {
+        // Skip types that still contain unresolved type parameters.
+        if arena.contains_type_param(type_id) {
+            continue;
+        }
+        sweep_translate_one(table, type_id, arena);
+    }
+}
+
+/// Translate a single TypeId without recursion.
+///
+/// Builds the `VirType` using existing VirTypeId mappings for child types
+/// (or `VirTypeId::UNKNOWN` if a child is unmapped).  Only records the
+/// mapping for `type_id` itself, never for its children.
+///
+/// **Table-size invariant**: Uses `table.lookup()` (not `intern()`) to
+/// avoid growing the table.  `compat_ty()` encodes raw sema TypeIds as
+/// VirTypeIds for types without VIR representation (e.g. Module).  If the
+/// sweep grew the table past those raw indices, `vir_to_sema_type_id()`
+/// would mistake them for real VIR entries and resolve to the wrong sema
+/// type.  By only recording mappings when the VirType already exists
+/// (dedup hit), the table size remains unchanged.
+fn sweep_translate_one(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeArena) {
+    // Sentinel check: nil/done have reserved slots, user-defined sentinels
+    // use lookup to avoid growing the table.
+    if arena.is_sentinel(type_id) {
+        if type_id == arena.nil() {
+            table.record_type_id(type_id, VirTypeId::NIL);
+        } else if type_id == arena.done() {
+            table.record_type_id(type_id, VirTypeId::DONE);
+        } else if let SemaType::Struct { type_def_id, .. } = arena.get(type_id) {
+            // User-defined sentinels: only record if the VirType already exists.
+            let vir_type = VirType::Struct {
+                def: *type_def_id,
+                type_args: vec![],
+            };
+            if let Some(vir_id) = table.lookup(&vir_type) {
+                table.record_type_id(type_id, vir_id);
+            }
+        }
+        // Other sentinel shapes: skip (no safe VirTypeId to record).
+        return;
+    }
+
+    // F128 special case (same as translate_type_id).
+    if type_id == TypeId::F128 {
+        table.record_type_id(type_id, VirTypeId::F128);
+        return;
+    }
+
+    // Look up an existing VirTypeId for a child, returning UNKNOWN if unmapped.
+    let child = |table: &VirTypeTable, child_id: TypeId| -> VirTypeId {
+        table.lookup_type_id(child_id).unwrap_or(VirTypeId::UNKNOWN)
+    };
+
+    let vir_type = match arena.get(type_id) {
+        SemaType::Primitive(prim) => VirType::Primitive(translate_primitive(*prim)),
+        SemaType::Handle => VirType::Primitive(VirPrimitiveKind::Handle),
+        SemaType::Void => VirType::Void,
+        SemaType::Range => VirType::Range,
+        SemaType::MetaType => VirType::MetaType,
+        SemaType::Never => VirType::Never,
+        SemaType::Unknown => VirType::Unknown,
+
+        SemaType::Array(elem) => VirType::Array {
+            elem: child(table, *elem),
+        },
+        SemaType::FixedArray { element, size } => VirType::FixedArray {
+            elem: child(table, *element),
+            len: *size as u32,
+        },
+        SemaType::RuntimeIterator(elem) => VirType::RuntimeIterator {
+            elem: child(table, *elem),
+        },
+        SemaType::Union(variants) => {
+            // Detect optional pattern (T | nil) same as translate_union.
+            let nil_id = arena.nil();
+            let has_nil = variants.contains(&nil_id);
+            let non_nil: Vec<TypeId> = variants.iter().copied().filter(|&v| v != nil_id).collect();
+            if has_nil && non_nil.len() == 1 {
+                VirType::Optional {
+                    inner: child(table, non_nil[0]),
+                }
+            } else {
+                VirType::Union {
+                    variants: variants.iter().map(|&v| child(table, v)).collect(),
+                }
+            }
+        }
+        SemaType::Tuple(elems) => VirType::Tuple {
+            elems: elems.iter().map(|&e| child(table, e)).collect(),
+        },
+        SemaType::Function {
+            params,
+            ret,
+            is_closure: _,
+        } => VirType::Function {
+            params: params.iter().map(|&p| child(table, p)).collect(),
+            ret: child(table, *ret),
+        },
+        SemaType::Class {
+            type_def_id,
+            type_args,
+        } => VirType::Class {
+            def: *type_def_id,
+            type_args: type_args.iter().map(|&a| child(table, a)).collect(),
+        },
+        SemaType::Struct {
+            type_def_id,
+            type_args,
+        } => VirType::Struct {
+            def: *type_def_id,
+            type_args: type_args.iter().map(|&a| child(table, a)).collect(),
+        },
+        SemaType::Interface {
+            type_def_id,
+            type_args,
+        } => VirType::Interface {
+            def: *type_def_id,
+            type_args: type_args.iter().map(|&a| child(table, a)).collect(),
+        },
+        SemaType::Error { type_def_id } => VirType::Error { def: *type_def_id },
+        SemaType::Fallible { success, error } => {
+            let errors_vir = match arena.get(*error) {
+                SemaType::Union(variants) => variants.iter().map(|&v| child(table, v)).collect(),
+                _ => vec![child(table, *error)],
+            };
+            VirType::Fallible {
+                success: child(table, *success),
+                errors: errors_vir,
+            }
+        }
+        SemaType::TypeParam(name_id) => VirType::Param { name: *name_id },
+        SemaType::TypeParamRef(_) => VirType::Unknown,
+        SemaType::Module(_)
+        | SemaType::Structural(_)
+        | SemaType::Placeholder(_)
+        | SemaType::Invalid { .. } => VirType::Unknown,
+    };
+
+    // Only record the mapping if the VirType already exists in the table
+    // (dedup hit).  We must NOT grow the table, because `compat_ty()` encodes
+    // raw sema TypeIds as VirTypeIds for types without VIR representation
+    // (e.g. Module).  If the table grew past those raw indices,
+    // `vir_to_sema_type_id()` would mistake them for real VIR entries and
+    // resolve to the wrong sema type.
+    if let Some(vir_id) = table.lookup(&vir_type) {
+        table.record_type_id(type_id, vir_id);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
 

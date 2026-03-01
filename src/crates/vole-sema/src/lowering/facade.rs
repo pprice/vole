@@ -42,6 +42,7 @@ use super::type_method_monomorph::{
 use super::type_methods::{lower_module_type_methods, lower_top_level_type_methods};
 use crate::LoweringEntityLookup;
 use crate::implement_registry::ImplementRegistry;
+use crate::vir_lower::type_translate::sweep_unmapped_type_ids;
 use crate::vir_lower::{lower_stmts, lower_test_body};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
@@ -403,6 +404,12 @@ where
         name_table: Rc::new(NameTable::new()),
     };
     run_vir_monomorphize(&mut vir_program);
+
+    // Sweep all TypeIds in the arena and populate VirTypeId mappings for any
+    // that were not encountered during on-demand lowering.  This catches the
+    // monomorphized types created by sema's TypeArena::substitute() during
+    // Pass 2 generic analysis (~1,900 types in typical programs).
+    sweep_unmapped_type_ids(&mut vir_program.type_table, type_arena);
 
     LowerVirProgramOutput { vir_program }
 }

@@ -493,6 +493,13 @@ impl TypeArena {
         self.module_metadata.get(&module_id)
     }
 
+    /// Return the number of interned types in the arena.
+    ///
+    /// Valid TypeIds range from `0..type_count()`.
+    pub fn type_count(&self) -> u32 {
+        self.types.len() as u32
+    }
+
     /// Create a fallible type: fallible(success, error)
     pub fn fallible(&mut self, success: TypeId, error: TypeId) -> TypeId {
         if self.is_invalid(success) || self.is_invalid(error) {
