@@ -59,7 +59,8 @@ pub use monomorph::{
     substitute_types,
 };
 pub use numeric_model::{
-    NumericCoercion, integer_result_type, numeric_coercion, numeric_result_type,
+    NumericCoercion, integer_result_type, integer_result_type_v, numeric_coercion,
+    numeric_coercion_v, numeric_result_type, numeric_result_type_v,
 };
 pub use program::VirProgram;
 pub use refs::VirRef;

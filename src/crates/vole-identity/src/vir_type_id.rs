@@ -146,6 +146,31 @@ impl VirTypeId {
     pub fn is_unsigned_int(self) -> bool {
         matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
     }
+
+    /// Check if this is a signed integer type.
+    #[inline]
+    pub fn is_signed_int(self) -> bool {
+        matches!(
+            self,
+            Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::I128
+        )
+    }
+
+    /// Return the bit width of an integer type.
+    ///
+    /// Returns `u16::MAX` for non-integer types (callers should never rely on
+    /// this value; the sentinel mirrors `TypeId::integer_bit_width`).
+    #[inline]
+    pub fn integer_bit_width(self) -> u16 {
+        match self {
+            Self::I8 | Self::U8 => 8,
+            Self::I16 | Self::U16 => 16,
+            Self::I32 | Self::U32 => 32,
+            Self::I64 | Self::U64 => 64,
+            Self::I128 => 128,
+            _ => u16::MAX,
+        }
+    }
 }
 
 impl fmt::Display for VirTypeId {
@@ -223,5 +248,36 @@ mod tests {
     fn non_invalid_is_not_invalid() {
         assert!(!VirTypeId::I64.is_invalid());
         assert!(!VirTypeId::from_raw(100).is_invalid());
+    }
+
+    #[test]
+    fn is_signed_int() {
+        assert!(VirTypeId::I8.is_signed_int());
+        assert!(VirTypeId::I16.is_signed_int());
+        assert!(VirTypeId::I32.is_signed_int());
+        assert!(VirTypeId::I64.is_signed_int());
+        assert!(VirTypeId::I128.is_signed_int());
+        assert!(!VirTypeId::U8.is_signed_int());
+        assert!(!VirTypeId::U16.is_signed_int());
+        assert!(!VirTypeId::U32.is_signed_int());
+        assert!(!VirTypeId::U64.is_signed_int());
+        assert!(!VirTypeId::F32.is_signed_int());
+        assert!(!VirTypeId::BOOL.is_signed_int());
+    }
+
+    #[test]
+    fn integer_bit_width() {
+        assert_eq!(VirTypeId::I8.integer_bit_width(), 8);
+        assert_eq!(VirTypeId::U8.integer_bit_width(), 8);
+        assert_eq!(VirTypeId::I16.integer_bit_width(), 16);
+        assert_eq!(VirTypeId::U16.integer_bit_width(), 16);
+        assert_eq!(VirTypeId::I32.integer_bit_width(), 32);
+        assert_eq!(VirTypeId::U32.integer_bit_width(), 32);
+        assert_eq!(VirTypeId::I64.integer_bit_width(), 64);
+        assert_eq!(VirTypeId::U64.integer_bit_width(), 64);
+        assert_eq!(VirTypeId::I128.integer_bit_width(), 128);
+        // Non-integer types return u16::MAX (sentinel).
+        assert_eq!(VirTypeId::F32.integer_bit_width(), u16::MAX);
+        assert_eq!(VirTypeId::BOOL.integer_bit_width(), u16::MAX);
     }
 }

@@ -8,7 +8,7 @@ use cranelift_codegen::ir::{BlockArg, Function, InstructionData};
 use crate::RuntimeKey;
 use crate::context::ExternalMethodRef;
 use vole_frontend::BinaryOp;
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_vir::numeric_model::numeric_result_type;
 
 use super::context::Cg;
@@ -84,6 +84,26 @@ fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
             "INTERNAL: type_id_to_cranelift_type called with non-numeric type {:?}; \
              this is a sema bug — only numeric types should reach binary-op codegen",
             type_id
+        ),
+    }
+}
+
+/// VirTypeId version of [`type_id_to_cranelift_type`].
+#[allow(dead_code)] // Convenience for downstream VIR migration tickets.
+fn vir_type_id_to_cranelift_type(vir_ty: VirTypeId) -> Type {
+    match vir_ty {
+        VirTypeId::I8 | VirTypeId::U8 => types::I8,
+        VirTypeId::I16 | VirTypeId::U16 => types::I16,
+        VirTypeId::I32 | VirTypeId::U32 => types::I32,
+        VirTypeId::I64 | VirTypeId::U64 => types::I64,
+        VirTypeId::I128 => types::I128,
+        VirTypeId::F32 => types::F32,
+        VirTypeId::F64 => types::F64,
+        VirTypeId::F128 => types::F128,
+        _ => unreachable!(
+            "INTERNAL: vir_type_id_to_cranelift_type called with non-numeric type {:?}; \
+             this is a sema bug — only numeric types should reach binary-op codegen",
+            vir_ty
         ),
     }
 }
