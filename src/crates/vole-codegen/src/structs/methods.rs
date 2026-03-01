@@ -14,7 +14,9 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::CompiledValue;
 use vole_frontend::Symbol;
-use vole_identity::{ClassMethodMonomorphKey, MethodId, NameId, NamerLookup, NodeId, TypeId};
+use vole_identity::{
+    ClassMethodMonomorphKey, MethodId, NameId, NamerLookup, NodeId, TypeId, VirTypeId,
+};
 use vole_vir::VirRef;
 use vole_vir::expr::{
     VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirResolvedMethod,
@@ -310,6 +312,21 @@ impl Cg<'_, '_, '_> {
             .map(|ty| self.vir_query_lookup_substitute(ty, &subs).unwrap_or(ty))
             .collect();
         resolved
+    }
+
+    /// VirTypeId-accepting overload of
+    /// [`concretize_method_param_type_ids_for_receiver`](Self::concretize_method_param_type_ids_for_receiver).
+    ///
+    /// Bridge method — converts the receiver `VirTypeId` to sema `TypeId`,
+    /// then delegates to the original.
+    #[allow(dead_code)]
+    fn concretize_method_param_type_ids_for_receiver_v(
+        &self,
+        receiver_vir_type_id: VirTypeId,
+        param_type_ids: &[TypeId],
+    ) -> Vec<TypeId> {
+        let receiver_type_id = self.cv_type_id_from_vir(receiver_vir_type_id);
+        self.concretize_method_param_type_ids_for_receiver(receiver_type_id, param_type_ids)
     }
 
     fn consume_method_receiver(

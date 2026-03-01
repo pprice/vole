@@ -8,7 +8,7 @@ use cranelift_codegen::ir::SigRef;
 use cranelift_module::Module;
 use smallvec::{SmallVec, smallvec};
 
-use vole_identity::{NodeId, TypeId};
+use vole_identity::{NodeId, TypeId, VirTypeId};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::methods::ArgSource;
@@ -47,6 +47,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Always use closure calling convention since all lambdas are now
         // wrapped in Closure structs for consistency with interface dispatch
         self.call_actual_closure(func_ptr_or_closure, func_type_id, arg_source, call_expr_id)
+    }
+
+    /// VirTypeId-accepting overload of [`call_closure_value`](Self::call_closure_value).
+    ///
+    /// Bridge method — converts VirTypeId to sema TypeId, then delegates.
+    #[allow(dead_code)]
+    pub(super) fn call_closure_value_v(
+        &mut self,
+        func_ptr_or_closure: Value,
+        func_vir_type_id: VirTypeId,
+        arg_source: &ArgSource<'_>,
+        call_expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        let func_type_id = self.cv_type_id_from_vir(func_vir_type_id);
+        self.call_closure_value(func_ptr_or_closure, func_type_id, arg_source, call_expr_id)
     }
 
     /// Build a Cranelift call signature for a closure call, returning the signature

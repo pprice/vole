@@ -6,9 +6,12 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use vole_frontend::{Interner, Program, Symbol};
-use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId};
+use vole_identity::{
+    FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId, VirTypeId,
+};
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 use vole_sema::{AnalysisOutput, SemaType, TypeArena};
+use vole_vir::types::VirType;
 use vole_vir::{VirEntityMetadata, VirFunction, VirProgram};
 
 /// Result of parsing and analyzing a source file.
@@ -641,6 +644,49 @@ impl AnalyzedProgram {
         method_name_id: NameId,
     ) -> Option<(NameId, &vole_vir::VirMethodImplInfo)> {
         let type_name_id = self.impl_type_name_id_from_type_id(type_id)?;
+        let method_impl = self.implement_method_by_name(type_name_id, method_name_id)?;
+        Some((type_name_id, method_impl))
+    }
+
+    /// Resolve the implement-registry type key NameId from a `VirTypeId`.
+    ///
+    /// VIR-native equivalent of [`impl_type_name_id_from_type_id`](Self::impl_type_name_id_from_type_id).
+    /// Inspects the `VirTypeTable` directly for Array / Class / Struct, and
+    /// falls back through `vir_to_sema_type_id_lossy` for primitives that are
+    /// in the pre-computed `impl_type_names` map.
+    #[allow(dead_code)]
+    pub(crate) fn impl_type_name_id_from_vir_type_id(
+        &self,
+        vir_ty: VirTypeId,
+    ) -> Option<NameId> {
+        let entity_metadata = self.vir_program.entity_metadata();
+        let table = &self.vir_program.type_table;
+        match table.get(vir_ty) {
+            VirType::Array { .. } => entity_metadata.array_name_id(),
+            VirType::Class { def, .. } | VirType::Struct { def, .. } => {
+                entity_metadata.type_name_id(*def)
+            }
+            _ => {
+                // Primitives, Range, Handle: try the pre-computed map keyed by sema TypeId.
+                let sema_id =
+                    crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
+                entity_metadata.impl_type_name(sema_id)
+            }
+        }
+    }
+
+    /// VirTypeId-accepting overload of [`implement_method_for_type`](Self::implement_method_for_type).
+    ///
+    /// Bridge method — converts VirTypeId to the implement-registry NameId via
+    /// `impl_type_name_id_from_vir_type_id`, then delegates to
+    /// `implement_method_by_name`.
+    #[allow(dead_code)]
+    pub(crate) fn implement_method_for_type_v(
+        &self,
+        vir_ty: VirTypeId,
+        method_name_id: NameId,
+    ) -> Option<(NameId, &vole_vir::VirMethodImplInfo)> {
+        let type_name_id = self.impl_type_name_id_from_vir_type_id(vir_ty)?;
         let method_impl = self.implement_method_by_name(type_name_id, method_name_id)?;
         Some((type_name_id, method_impl))
     }
