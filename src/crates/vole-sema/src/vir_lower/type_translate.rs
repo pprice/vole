@@ -28,6 +28,7 @@ pub fn translate_type_id(
     // `VirPrimitiveKind::F64` loses identity for composite/container lookups in
     // mixed sema/VIR bridge paths.
     if type_id == TypeId::F128 {
+        table.record_type_id(type_id, VirTypeId::F128);
         return VirTypeId::F128;
     }
 
@@ -36,12 +37,16 @@ pub fn translate_type_id(
     // Check before SemaType match since sentinels may be SemaType::Struct
     // internally after prelude rebinding.
     if arena.is_sentinel(type_id) {
-        return translate_sentinel(table, type_id, arena);
+        let vir_id = translate_sentinel(table, type_id, arena);
+        table.record_type_id(type_id, vir_id);
+        return vir_id;
     }
 
     let vir_type = translate_sema_type(table, type_id, arena);
     let layout = translate_layout(type_id, arena);
-    table.intern(vir_type, layout)
+    let vir_id = table.intern(vir_type, layout);
+    table.record_type_id(type_id, vir_id);
+    vir_id
 }
 
 /// Translate sentinel types to their reserved VirTypeId.

@@ -417,23 +417,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// this lookup path should be deleted.
     #[inline]
     pub fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
-        if type_id.raw() < VirTypeId::FIRST_DYNAMIC {
-            VirTypeId::from_raw(type_id.raw())
-        } else {
-            VirTypeId::UNKNOWN
-        }
+        self.vir_type_table()
+            .lookup_type_id(type_id)
+            .unwrap_or(VirTypeId::UNKNOWN)
     }
 
-    /// Check if a sema `TypeId` is a struct type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// Check if a sema `TypeId` is a struct type.
+    ///
+    /// Always uses the arena path because the arena's `is_struct()` excludes
+    /// sentinel types (zero-field structs like Nil, Done, user-defined empties),
+    /// while VIR represents sentinels as `VirType::Struct` internally.
     #[inline]
     pub fn vir_query_is_struct(&self, type_id: TypeId) -> bool {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_struct(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
-        }
+        self.arena().is_struct(type_id)
     }
 
     /// Check if a sema `TypeId` is a union type, using VirTypeTable with
@@ -736,173 +732,84 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Unwrap a fallible type to `(success, error)` sema `TypeId`s, using
-    /// VirTypeTable with arena fallback for monomorphized types.
+    /// Unwrap a fallible type to `(success, error)` sema `TypeId`s.
     ///
-    /// Note: the VIR path returns VirTypeIds that are lossily converted to
-    /// sema TypeIds.  For new code, prefer the VIR-native `vir_unwrap_fallible`.
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_fallible(&self, type_id: TypeId) -> Option<(TypeId, TypeId)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_fallible(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_fallible(vir_ty, self.vir_type_table()).map(
-                |(success, errors)| {
-                    let success_sema =
-                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(success);
-                    let error_sema = if let [single] = errors {
-                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(*single)
-                    } else {
-                        TypeId::UNKNOWN
-                    };
-                    (success_sema, error_sema)
-                },
-            )
-        }
+        self.arena().unwrap_fallible(type_id)
     }
 
-    /// Unwrap a union type to its variant sema `TypeId`s, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// Unwrap a union type to its variant sema `TypeId`s.
     ///
-    /// Note: the VIR path returns VirTypeIds that are lossily converted to
-    /// sema TypeIds.  For new code, prefer the VIR-native `vir_unwrap_union`.
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_union(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_union(type_id).map(|v| v.to_vec())
-        } else {
-            crate::types::vir_conversions::vir_unwrap_union(vir_ty, self.vir_type_table()).map(
-                |variants| {
-                    variants
-                        .iter()
-                        .map(|&v| crate::types::vir_conversions::vir_to_sema_type_id_lossy(v))
-                        .collect()
-                },
-            )
-        }
+        self.arena().unwrap_union(type_id).map(|v| v.to_vec())
     }
 
-    /// Unwrap a tuple type to its element sema `TypeId`s, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// Unwrap a tuple type to its element sema `TypeId`s.
     ///
-    /// Note: the VIR path returns VirTypeIds that are lossily converted to
-    /// sema TypeIds.  For new code, prefer the VIR-native `vir_unwrap_tuple`.
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_tuple(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_tuple(type_id).map(|v| v.to_vec())
-        } else {
-            crate::types::vir_conversions::vir_unwrap_tuple(vir_ty, self.vir_type_table()).map(
-                |elems| {
-                    elems
-                        .iter()
-                        .map(|&e| crate::types::vir_conversions::vir_to_sema_type_id_lossy(e))
-                        .collect()
-                },
-            )
-        }
+        self.arena().unwrap_tuple(type_id).map(|v| v.to_vec())
     }
 
-    /// Unwrap a fixed array type to `(element, size)`, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// Unwrap a fixed array type to `(element, size)`.
+    ///
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_fixed_array(&self, type_id: TypeId) -> Option<(TypeId, usize)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_fixed_array(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_fixed_array(vir_ty, self.vir_type_table())
-                .map(|(elem, len)| {
-                    (
-                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(elem),
-                        len as usize,
-                    )
-                })
-        }
+        self.arena().unwrap_fixed_array(type_id)
     }
 
-    /// Unwrap an array type to its element sema `TypeId`, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// Unwrap an array type to its element sema `TypeId`.
+    ///
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_array(&self, type_id: TypeId) -> Option<TypeId> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_array(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_array(vir_ty, self.vir_type_table())
-                .map(crate::types::vir_conversions::vir_to_sema_type_id_lossy)
-        }
+        self.arena().unwrap_array(type_id)
     }
 
-    /// Unwrap a struct type to `(TypeDefId, type_args)`, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// Unwrap a struct type to `(TypeDefId, type_args)`.
     ///
-    /// Note: the VIR path returns VirTypeIds for type_args that are lossily
-    /// converted.  For new code, prefer the VIR-native `vir_unwrap_struct`.
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_struct(
         &self,
         type_id: TypeId,
     ) -> Option<(vole_identity::TypeDefId, Vec<TypeId>)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena()
-                .unwrap_struct(type_id)
-                .map(|(def, args)| (def, args.to_vec()))
-        } else {
-            crate::types::vir_conversions::vir_unwrap_struct(vir_ty, self.vir_type_table()).map(
-                |(def, args)| {
-                    (
-                        def,
-                        args.iter()
-                            .map(|&a| crate::types::vir_conversions::vir_to_sema_type_id_lossy(a))
-                            .collect(),
-                    )
-                },
-            )
-        }
+        self.arena()
+            .unwrap_struct(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap a function type to `(params, return_type, is_closure)`, using
-    /// VirTypeTable with arena fallback for monomorphized types.
+    /// Unwrap a function type to `(params, return_type, is_closure)`.
     ///
-    /// Note: the VIR path returns VirTypeIds that are lossily converted.
-    /// The `is_closure` flag is always `false` for VIR types (VIR does not
-    /// distinguish closures at the type level).
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_function(
         &self,
         type_id: TypeId,
     ) -> Option<(Vec<TypeId>, TypeId, bool)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena()
-                .unwrap_function(type_id)
-                .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure))
-        } else {
-            crate::types::vir_conversions::vir_unwrap_function(vir_ty, self.vir_type_table()).map(
-                |(params, ret)| {
-                    (
-                        params
-                            .iter()
-                            .map(|&p| crate::types::vir_conversions::vir_to_sema_type_id_lossy(p))
-                            .collect(),
-                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret),
-                        false,
-                    )
-                },
-            )
-        }
+        self.arena()
+            .unwrap_function(type_id)
+            .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure))
     }
 
     /// Unwrap a type parameter to its `NameId`, using VirTypeTable with arena
@@ -918,48 +825,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Unwrap a runtime iterator type to its element sema `TypeId`, using
-    /// VirTypeTable with arena fallback for monomorphized types.
+    /// Unwrap a runtime iterator type to its element sema `TypeId`.
+    ///
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_runtime_iterator(&self, type_id: TypeId) -> Option<TypeId> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_runtime_iterator(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_runtime_iterator(
-                vir_ty,
-                self.vir_type_table(),
-            )
-            .map(crate::types::vir_conversions::vir_to_sema_type_id_lossy)
-        }
+        self.arena().unwrap_runtime_iterator(type_id)
     }
 
-    /// Unwrap an interface type to `(TypeDefId, type_args)`, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// Unwrap an interface type to `(TypeDefId, type_args)`.
+    ///
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_interface(
         &self,
         type_id: TypeId,
     ) -> Option<(vole_identity::TypeDefId, Vec<TypeId>)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena()
-                .unwrap_interface(type_id)
-                .map(|(def, args)| (def, args.to_vec()))
-        } else {
-            crate::types::vir_conversions::vir_unwrap_interface(vir_ty, self.vir_type_table()).map(
-                |(def, args)| {
-                    (
-                        def,
-                        args.iter()
-                            .map(|&a| crate::types::vir_conversions::vir_to_sema_type_id_lossy(a))
-                            .collect(),
-                    )
-                },
-            )
-        }
+        self.arena()
+            .unwrap_interface(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
     }
 
     /// Unwrap an error type to its `TypeDefId`, using VirTypeTable with arena
@@ -1142,48 +1030,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Unwrap a class type to `(TypeDefId, type_args)`, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// Unwrap a class type to `(TypeDefId, type_args)`.
+    ///
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_class(
         &self,
         type_id: TypeId,
     ) -> Option<(vole_identity::TypeDefId, Vec<TypeId>)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena()
-                .unwrap_class(type_id)
-                .map(|(def, args)| (def, args.to_vec()))
-        } else {
-            crate::types::vir_conversions::vir_unwrap_class(vir_ty, self.vir_type_table()).map(
-                |(def, args)| {
-                    (
-                        def,
-                        args.iter()
-                            .map(|&a| crate::types::vir_conversions::vir_to_sema_type_id_lossy(a))
-                            .collect(),
-                    )
-                },
-            )
-        }
+        self.arena()
+            .unwrap_class(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap an optional type to its inner sema `TypeId`, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// Unwrap an optional type to its inner sema `TypeId`.
     ///
-    /// Note: the VIR path returns a VirTypeId that is lossily converted to
-    /// a sema TypeId.  For new code, prefer the VIR-native path.
+    /// Always uses the arena path because VIR→TypeId conversion is lossy
+    /// (many sema TypeIds can map to the same VirTypeId via interning).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_optional(&self, type_id: TypeId) -> Option<TypeId> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_optional(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_optional(vir_ty, self.vir_type_table())
-                .map(crate::types::vir_conversions::vir_to_sema_type_id_lossy)
-        }
+        self.arena().unwrap_optional(type_id)
     }
 
     /// Check if a sema `TypeId` is the nil type.

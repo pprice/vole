@@ -331,15 +331,13 @@ impl<'a> Compiler<'a> {
     // =====================================================================
 
     /// Best-effort sema `TypeId` → `VirTypeId` translation.
-    /// Reserved / primitive IDs are aligned between the two ID spaces;
-    /// dynamic sema IDs fall back to `VirTypeId::UNKNOWN`.
+    /// Consults the `type_id_to_vir` mapping populated during VIR lowering;
+    /// falls back to `VirTypeId::UNKNOWN` for unmapped types.
     #[inline]
     fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
-        if type_id.raw() < VirTypeId::FIRST_DYNAMIC {
-            VirTypeId::from_raw(type_id.raw())
-        } else {
-            VirTypeId::UNKNOWN
-        }
+        self.vir_type_table()
+            .lookup_type_id(type_id)
+            .unwrap_or(VirTypeId::UNKNOWN)
     }
 
     /// Look up any existing array `TypeId` in the arena.
@@ -388,29 +386,16 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Unwrap a function type to `(params, return_type, is_closure)`, using
-    /// VirTypeTable with arena fallback.
+    /// Unwrap a function type to `(params, return_type, is_closure)`.
+    ///
+    /// Always uses the arena path because the VIR unwrap converts inner
+    /// VirTypeIds back to TypeIds via `vir_to_sema_type_id_lossy`, which
+    /// degrades dynamic VirTypeIds to `TypeId::UNKNOWN`.
     #[inline]
     fn vir_query_unwrap_function(&self, type_id: TypeId) -> Option<(Vec<TypeId>, TypeId, bool)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena()
-                .unwrap_function(type_id)
-                .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure))
-        } else {
-            crate::types::vir_conversions::vir_unwrap_function(vir_ty, self.vir_type_table()).map(
-                |(params, ret)| {
-                    (
-                        params
-                            .iter()
-                            .map(|&p| crate::types::vir_conversions::vir_to_sema_type_id_lossy(p))
-                            .collect(),
-                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret),
-                        false,
-                    )
-                },
-            )
-        }
+        self.arena()
+            .unwrap_function(type_id)
+            .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure))
     }
 
     /// Look up the result of substituting type parameters in a type (read-only).
@@ -439,27 +424,13 @@ impl<'a> Compiler<'a> {
         self.arena().lookup_runtime_iterator(elem)
     }
 
-    /// Unwrap a fallible type to `(success, error)` sema `TypeId`s, using
-    /// VirTypeTable with arena fallback.
+    /// Unwrap a fallible type to `(success, error)` sema `TypeId`s.
+    ///
+    /// Always uses the arena — the VIR unwrap path degrades dynamic
+    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
     #[inline]
     fn vir_query_unwrap_fallible(&self, type_id: TypeId) -> Option<(TypeId, TypeId)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_fallible(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_fallible(vir_ty, self.vir_type_table()).map(
-                |(success, errors)| {
-                    let success_sema =
-                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(success);
-                    let error_sema = if let [single] = errors {
-                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(*single)
-                    } else {
-                        TypeId::UNKNOWN
-                    };
-                    (success_sema, error_sema)
-                },
-            )
-        }
+        self.arena().unwrap_fallible(type_id)
     }
 
     /// Check if a type is a union, using VirTypeTable with arena fallback.
@@ -486,142 +457,73 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Unwrap a class type to `(TypeDefId, type_args)`, using VirTypeTable
-    /// with arena fallback.
+    /// Unwrap a class type to `(TypeDefId, type_args)`.
+    ///
+    /// Always uses the arena — the VIR unwrap path degrades dynamic
+    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
     #[inline]
     fn vir_query_unwrap_class(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena()
-                .unwrap_class(type_id)
-                .map(|(def, args)| (def, args.to_vec()))
-        } else {
-            crate::types::vir_conversions::vir_unwrap_class(vir_ty, self.vir_type_table()).map(
-                |(def, args)| {
-                    (
-                        def,
-                        args.iter()
-                            .map(|&a| crate::types::vir_conversions::vir_to_sema_type_id_lossy(a))
-                            .collect(),
-                    )
-                },
-            )
-        }
+        self.arena()
+            .unwrap_class(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap a struct type to `(TypeDefId, type_args)`, using VirTypeTable
-    /// with arena fallback.
+    /// Unwrap a struct type to `(TypeDefId, type_args)`.
+    ///
+    /// Always uses the arena — the VIR unwrap path degrades dynamic
+    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
     #[inline]
     fn vir_query_unwrap_struct(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena()
-                .unwrap_struct(type_id)
-                .map(|(def, args)| (def, args.to_vec()))
-        } else {
-            crate::types::vir_conversions::vir_unwrap_struct(vir_ty, self.vir_type_table()).map(
-                |(def, args)| {
-                    (
-                        def,
-                        args.iter()
-                            .map(|&a| crate::types::vir_conversions::vir_to_sema_type_id_lossy(a))
-                            .collect(),
-                    )
-                },
-            )
-        }
+        self.arena()
+            .unwrap_struct(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap an interface type to `(TypeDefId, type_args)`, using VirTypeTable
-    /// with arena fallback.
+    /// Unwrap an interface type to `(TypeDefId, type_args)`.
+    ///
+    /// Always uses the arena — the VIR unwrap path degrades dynamic
+    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
     #[inline]
     fn vir_query_unwrap_interface(&self, type_id: TypeId) -> Option<(TypeDefId, Vec<TypeId>)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena()
-                .unwrap_interface(type_id)
-                .map(|(def, args)| (def, args.to_vec()))
-        } else {
-            crate::types::vir_conversions::vir_unwrap_interface(vir_ty, self.vir_type_table()).map(
-                |(def, args)| {
-                    (
-                        def,
-                        args.iter()
-                            .map(|&a| crate::types::vir_conversions::vir_to_sema_type_id_lossy(a))
-                            .collect(),
-                    )
-                },
-            )
-        }
+        self.arena()
+            .unwrap_interface(type_id)
+            .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap an array type to its element `TypeId`, using VirTypeTable
-    /// with arena fallback.
+    /// Unwrap an array type to its element `TypeId`.
+    ///
+    /// Always uses the arena — the VIR unwrap path degrades dynamic
+    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
     #[inline]
     fn vir_query_unwrap_array(&self, type_id: TypeId) -> Option<TypeId> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_array(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_array(vir_ty, self.vir_type_table())
-                .map(crate::types::vir_conversions::vir_to_sema_type_id_lossy)
-        }
+        self.arena().unwrap_array(type_id)
     }
 
-    /// Unwrap a fixed array type to `(elem, len)`, using VirTypeTable
-    /// with arena fallback.
+    /// Unwrap a fixed array type to `(elem, len)`.
+    ///
+    /// Always uses the arena — the VIR unwrap path degrades dynamic
+    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
     #[inline]
     fn vir_query_unwrap_fixed_array(&self, type_id: TypeId) -> Option<(TypeId, usize)> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_fixed_array(type_id)
-        } else {
-            crate::types::vir_conversions::vir_unwrap_fixed_array(vir_ty, self.vir_type_table())
-                .map(|(elem, len)| {
-                    (
-                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(elem),
-                        len as usize,
-                    )
-                })
-        }
+        self.arena().unwrap_fixed_array(type_id)
     }
 
-    /// Unwrap a tuple type to its element `TypeId`s, using VirTypeTable
-    /// with arena fallback.
+    /// Unwrap a tuple type to its element `TypeId`s.
+    ///
+    /// Always uses the arena — the VIR unwrap path degrades dynamic
+    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
     #[inline]
     fn vir_query_unwrap_tuple(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_tuple(type_id).map(|v| v.to_vec())
-        } else {
-            crate::types::vir_conversions::vir_unwrap_tuple(vir_ty, self.vir_type_table()).map(
-                |elements| {
-                    elements
-                        .iter()
-                        .map(|&e| crate::types::vir_conversions::vir_to_sema_type_id_lossy(e))
-                        .collect()
-                },
-            )
-        }
+        self.arena().unwrap_tuple(type_id).map(|v| v.to_vec())
     }
 
-    /// Unwrap a union type to its variant `TypeId`s, using VirTypeTable
-    /// with arena fallback.
+    /// Unwrap a union type to its variant `TypeId`s.
+    ///
+    /// Always uses the arena — the VIR unwrap path degrades dynamic
+    /// VirTypeIds to `TypeId::UNKNOWN` when converting back.
     #[inline]
     fn vir_query_unwrap_union(&self, type_id: TypeId) -> Option<Vec<TypeId>> {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().unwrap_union(type_id).map(|v| v.to_vec())
-        } else {
-            crate::types::vir_conversions::vir_unwrap_union(vir_ty, self.vir_type_table()).map(
-                |variants| {
-                    variants
-                        .iter()
-                        .map(|&v| crate::types::vir_conversions::vir_to_sema_type_id_lossy(v))
-                        .collect()
-                },
-            )
-        }
+        self.arena().unwrap_union(type_id).map(|v| v.to_vec())
     }
 
     /// Check if a type contains any type parameter anywhere in its structure,

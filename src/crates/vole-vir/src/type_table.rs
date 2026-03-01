@@ -6,7 +6,7 @@
 // only (`VirTypeId`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::{TypeDefId, VirTypeId};
+use vole_identity::{TypeDefId, TypeId, VirTypeId};
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -24,6 +24,13 @@ pub struct VirTypeTable {
     layouts: Vec<Option<VirTypeLayout>>,
     /// Deduplication: VirType -> VirTypeId.
     intern_map: FxHashMap<VirType, VirTypeId>,
+    /// Reverse mapping from sema `TypeId` to `VirTypeId`.
+    ///
+    /// Populated by `translate_type_id()` during VIR lowering so that codegen
+    /// can resolve any sema TypeId to its VirTypeId without falling back to the
+    /// TypeArena.  Pre-populated with the 23 reserved primitive/special
+    /// constants that are identity-mapped between the two ID spaces.
+    type_id_to_vir: FxHashMap<TypeId, VirTypeId>,
 }
 
 impl VirTypeTable {
@@ -37,8 +44,10 @@ impl VirTypeTable {
             types: Vec::new(),
             layouts: Vec::new(),
             intern_map: FxHashMap::default(),
+            type_id_to_vir: FxHashMap::default(),
         };
         table.populate_reserved();
+        table.populate_reserved_type_id_map();
         table
     }
 
@@ -110,6 +119,13 @@ impl VirTypeTable {
         for i in VirTypeId::FIRST_DYNAMIC..other.types.len() as u32 {
             let old_id = VirTypeId::from_raw(i);
             merge_one(old_id, other, self, &mut mapping, &mut in_progress);
+        }
+
+        // Merge the TypeId→VirTypeId mapping, remapping VirTypeIds through the
+        // merge mapping so they reference `self`'s ID space.
+        for (&type_id, &old_vir_id) in &other.type_id_to_vir {
+            let new_vir_id = mapping.get(&old_vir_id).copied().unwrap_or(old_vir_id);
+            self.type_id_to_vir.insert(type_id, new_vir_id);
         }
 
         mapping
@@ -621,6 +637,35 @@ impl VirTypeTable {
             VirTypeId::FIRST_DYNAMIC,
             "VirTypeTable: reserved count mismatch"
         );
+    }
+
+    /// Pre-populate the `type_id_to_vir` mapping for the 23 reserved
+    /// primitive/special constants that are identity-mapped between
+    /// `TypeId` and `VirTypeId`.
+    fn populate_reserved_type_id_map(&mut self) {
+        for raw in 0..VirTypeId::FIRST_DYNAMIC {
+            self.type_id_to_vir
+                .insert(TypeId::from_raw(raw), VirTypeId::from_raw(raw));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// type_id_to_vir accessors
+// ---------------------------------------------------------------------------
+
+impl VirTypeTable {
+    /// Record a `TypeId → VirTypeId` mapping.
+    ///
+    /// Called by `translate_type_id()` during VIR lowering so that codegen can
+    /// later resolve any sema TypeId without falling back to the TypeArena.
+    pub fn record_type_id(&mut self, type_id: TypeId, vir_type_id: VirTypeId) {
+        self.type_id_to_vir.insert(type_id, vir_type_id);
+    }
+
+    /// Look up the `VirTypeId` for a sema `TypeId`, if one was recorded.
+    pub fn lookup_type_id(&self, type_id: TypeId) -> Option<VirTypeId> {
+        self.type_id_to_vir.get(&type_id).copied()
     }
 }
 
