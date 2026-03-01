@@ -11,8 +11,9 @@
 // instead of duplicating the i128/f128 branching logic.
 
 use cranelift::prelude::*;
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_sema::type_arena::TypeArena;
+use vole_vir::type_table::VirTypeTable;
 
 use crate::types::CompiledValue;
 
@@ -30,6 +31,22 @@ impl WideType {
         if type_id == TypeId::I128 {
             Some(WideType::I128)
         } else if type_id == TypeId::F128 {
+            Some(WideType::F128)
+        } else {
+            None
+        }
+    }
+
+    /// Try to classify a `VirTypeId` as a wide type.
+    ///
+    /// VIR equivalent of [`WideType::from_type_id`].  Uses reserved
+    /// `VirTypeId` constants rather than looking up the type table, since
+    /// F128 has no `VirPrimitiveKind` variant yet.
+    #[allow(dead_code)] // call-site migration is a separate ticket
+    pub fn from_vir_type_id(vir_ty: VirTypeId, _table: &VirTypeTable) -> Option<Self> {
+        if vir_ty == VirTypeId::I128 {
+            Some(WideType::I128)
+        } else if vir_ty == VirTypeId::F128 {
             Some(WideType::F128)
         } else {
             None

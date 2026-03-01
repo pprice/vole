@@ -523,6 +523,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Classify a sema `TypeId` as a `WideType` (i128/f128), using VirTypeTable
+    /// with arena fallback for unmapped monomorphized types.
+    ///
+    /// Returns `None` for non-wide types.
+    #[inline]
+    #[allow(dead_code)] // call-site migration is a separate ticket
+    pub fn vir_query_wide_type(&self, type_id: TypeId) -> Option<crate::types::wide_ops::WideType> {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            crate::types::wide_ops::WideType::from_type_id(type_id, self.arena())
+        } else {
+            crate::types::wide_ops::WideType::from_vir_type_id(vir_ty, self.vir_type_table())
+        }
+    }
+
     /// Check if a sema `TypeId` is an interface type, using VirTypeTable with
     /// arena fallback for unmapped monomorphized types.
     #[inline]

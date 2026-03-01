@@ -1539,6 +1539,44 @@ mod tests {
         assert!(!vir_is_wide(VirTypeId::I64, &table));
     }
 
+    // -----------------------------------------------------------------------
+    // WideType::from_vir_type_id
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn wide_type_from_vir_i128() {
+        use crate::types::wide_ops::WideType;
+        let table = test_table();
+        assert_eq!(
+            WideType::from_vir_type_id(VirTypeId::I128, &table),
+            Some(WideType::I128),
+        );
+    }
+
+    #[test]
+    fn wide_type_from_vir_f128() {
+        use crate::types::wide_ops::WideType;
+        let table = test_table();
+        assert_eq!(
+            WideType::from_vir_type_id(VirTypeId::F128, &table),
+            Some(WideType::F128),
+        );
+    }
+
+    #[test]
+    fn wide_type_from_vir_i64_none() {
+        use crate::types::wide_ops::WideType;
+        let table = test_table();
+        assert_eq!(WideType::from_vir_type_id(VirTypeId::I64, &table), None);
+    }
+
+    #[test]
+    fn wide_type_from_vir_string_none() {
+        use crate::types::wide_ops::WideType;
+        let table = test_table();
+        assert_eq!(WideType::from_vir_type_id(VirTypeId::STRING, &table), None);
+    }
+
     #[test]
     fn is_rc_string() {
         let table = test_table();
