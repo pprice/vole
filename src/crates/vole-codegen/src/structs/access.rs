@@ -59,10 +59,15 @@ impl Cg<'_, '_, '_> {
         // Struct types are stack-allocated: load field directly from pointer + offset.
         // Exception: annotation structs used in FieldMeta.annotations are heap-allocated
         // class instances (via InstanceNew), so they must use InstanceGetField.
-        let is_struct = self.vir_query_is_struct(self.cv_type_id(&obj))
-            && !self.is_heap_allocated_annotation(self.cv_type_id(&obj));
+        let is_struct = self.vir_query_is_struct_v(obj.type_id)
+            && !self.is_heap_allocated_annotation_v(obj.type_id);
         if is_struct {
-            return self.struct_field_load(obj.value, slot, field_type_id, self.cv_type_id(&obj));
+            return self.struct_field_load(
+                obj.value,
+                slot,
+                field_type_id,
+                self.cv_type_id_from_vir(obj.type_id),
+            );
         }
 
         // i128 fields use 2 consecutive slots - load both and reconstruct
@@ -81,13 +86,13 @@ impl Cg<'_, '_, '_> {
         // the field. If the field itself is RC, we must rc_inc it first so the
         // field value survives the container's rc_dec (which may free the container
         // and cascade to its fields).
-        if obj.is_owned() && self.rc_state(self.cv_type_id(&obj)).needs_cleanup() {
+        if obj.is_owned() && self.rc_state_v(obj.type_id).needs_cleanup() {
             if self.rc_state(field_type_id).needs_cleanup() {
                 self.emit_rc_inc_for_type(cv.value, field_type_id)?;
                 // The field is now an owned reference (we inc'd it out of the container)
                 cv.rc_lifecycle = RcLifecycle::Owned;
             }
-            self.emit_rc_dec_for_type(obj.value, self.cv_type_id(&obj))?;
+            self.emit_rc_dec_for_type_v(obj.value, obj.type_id)?;
         } else {
             self.mark_borrowed_if_rc(&mut cv);
         }
@@ -192,7 +197,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Coerce to union if needed
-        let union_val = if !self.vir_query_is_union(self.cv_type_id(&value)) {
+        let union_val = if !self.vir_query_is_union_v(value.type_id) {
             self.construct_union_id(value, field_type_id)?
         } else {
             value

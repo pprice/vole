@@ -1798,8 +1798,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Annotation struct types are normally stack-allocated, but when stored in
     /// FieldMeta.annotations they are heap-allocated via InstanceNew. Field access
     /// on these values must use InstanceGetField rather than struct offset loads.
+    #[allow(dead_code)] // Bridge method; will be removed by vol-bmeu.
     pub fn is_heap_allocated_annotation(&self, type_id: TypeId) -> bool {
         if let Some((type_def_id, _)) = self.vir_query_unwrap_struct(type_id) {
+            self.env
+                .state
+                .annotation_type_ids
+                .borrow()
+                .contains_key(&type_def_id)
+        } else {
+            false
+        }
+    }
+
+    /// VirTypeId-native variant of [`is_heap_allocated_annotation`].
+    pub fn is_heap_allocated_annotation_v(&self, vir_ty: VirTypeId) -> bool {
+        if let Some((type_def_id, _)) = self.vir_query_unwrap_struct_v(vir_ty) {
             self.env
                 .state
                 .annotation_type_ids

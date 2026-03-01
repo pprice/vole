@@ -143,7 +143,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get the size (in bytes) of a `VirTypeId` via the VIR type table.
-    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
     pub fn type_size_v(&self, vir_ty: VirTypeId) -> u32 {
         super::types::vir_conversions::vir_type_id_size(
             vir_ty,
