@@ -62,7 +62,7 @@ impl Compiler<'_> {
     ///
     /// Reads `module_bindings` from VirProgram (populated during VIR lowering)
     /// and registers them in `global_module_bindings` for use during compilation.
-    pub(super) fn register_global_module_bindings_from_vir(&mut self) {
+    pub(super) fn register_global_module_bindings(&mut self) {
         let vir = self.analyzed.vir_program();
         let type_table = &vir.type_table;
         let type_arena = self.analyzed.type_arena();
@@ -83,7 +83,7 @@ impl Compiler<'_> {
     /// (populated during VIR lowering). Returns a list of `(local_symbol, binding)`
     /// pairs that should be inserted into `global_module_bindings` before compiling
     /// the module's function bodies.
-    fn extract_module_destructured_bindings_from_vir(
+    fn extract_module_destructured_bindings(
         analyzed: &crate::AnalyzedProgram,
         module_path: &str,
     ) -> Vec<(Symbol, super::ModuleExportBinding)> {
@@ -148,7 +148,7 @@ impl Compiler<'_> {
     /// First pass: declare all functions and tests, collect globals, finalize type metadata.
     fn declare_program_declarations(&mut self, program: &Program) -> CodegenResult<()> {
         // Bulk-register top-level module import bindings from VirProgram.
-        self.register_global_module_bindings_from_vir();
+        self.register_global_module_bindings();
 
         for decl in &program.declarations {
             match decl {
@@ -535,7 +535,7 @@ impl Compiler<'_> {
         // When a module uses `let { add } = import "./other"`, the binding must
         // be available during compilation of the module's function bodies.
         let module_bindings =
-            Self::extract_module_destructured_bindings_from_vir(self.analyzed, module_path);
+            Self::extract_module_destructured_bindings(self.analyzed, module_path);
         let module_binding_keys: Vec<Symbol> = module_bindings.iter().map(|(k, _)| *k).collect();
         for (key, binding) in module_bindings {
             self.global_module_bindings.insert(key, binding);
