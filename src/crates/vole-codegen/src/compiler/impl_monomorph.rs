@@ -16,7 +16,7 @@ use rustc_hash::FxHashMap;
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CodegenCtx, MethodInfo, type_id_to_cranelift};
+use crate::types::{CodegenCtx, MethodInfo};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::{Interner, Symbol};
 use vole_identity::{MethodId, ModuleId, NameId, TypeDefId, TypeId};
@@ -349,8 +349,7 @@ impl Compiler<'_> {
         let sig = self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
         self.jit.ctx.func.signature = sig;
 
-        let self_cranelift_type =
-            type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
+        let self_cranelift_type = self.vir_query_type_to_cranelift(self_type_id);
 
         let source_file_ptr = self.source_file_ptr();
         // Use module interner to look up "self"
@@ -522,8 +521,7 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Get the Cranelift type for self (using TypeId)
-        let self_cranelift_type =
-            type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
+        let self_cranelift_type = self.vir_query_type_to_cranelift(self_type_id);
 
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
@@ -656,7 +654,7 @@ impl Compiler<'_> {
                             name_str, method_id
                         )
                     });
-                let cranelift_type = type_id_to_cranelift(type_id, self.arena(), self.pointer_type);
+                let cranelift_type = self.vir_query_type_to_cranelift(type_id);
                 (sym, type_id, cranelift_type)
             })
             .collect();
@@ -875,8 +873,7 @@ impl Compiler<'_> {
                 .unwrap_or_else(|| self.self_symbol());
 
             let source_file_ptr = self.source_file_ptr();
-            let self_cranelift_type =
-                type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
+            let self_cranelift_type = self.vir_query_type_to_cranelift(self_type_id);
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
 
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -1130,8 +1127,7 @@ impl Compiler<'_> {
                     .unwrap_or_else(|| self.self_symbol());
 
                 let source_file_ptr = self.source_file_ptr();
-                let self_cranelift_type =
-                    type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
+                let self_cranelift_type = self.vir_query_type_to_cranelift(self_type_id);
                 let self_binding = (self_sym, self_type_id, self_cranelift_type);
 
                 let mut builder_ctx = FunctionBuilderContext::new();

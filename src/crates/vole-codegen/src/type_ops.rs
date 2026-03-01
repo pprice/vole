@@ -62,7 +62,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
-        type_id_to_cranelift(ty, self.arena(), self.ptr_type())
+        self.vir_query_type_to_cranelift(ty)
     }
 
     /// Convert a `VirTypeId` to a Cranelift type via the VIR type table.

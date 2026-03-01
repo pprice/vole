@@ -48,7 +48,7 @@ impl Compiler<'_> {
 
     /// Convert a single TypeId to a Cranelift type.
     pub fn type_id_to_cranelift(&self, type_id: TypeId) -> CraneliftType {
-        type_id_to_cranelift(type_id, self.arena(), self.pointer_type)
+        self.vir_query_type_to_cranelift(type_id)
     }
 
     /// Convert a TypeId to Option<CraneliftType>, returning None for void types.

@@ -602,6 +602,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// arena fallback for monomorphized types.
     #[inline]
     pub fn vir_query_type_to_cranelift(&self, type_id: TypeId) -> Type {
+        // Sentinel types are always i8 (zero-field struct tag). VIR lacks a
+        // dedicated sentinel variant and maps them as Struct, which would
+        // incorrectly resolve to ptr_type. Guard with arena check first.
+        if self.arena().is_sentinel(type_id) {
+            return types::I8;
+        }
         let vir_ty = self.vir_lookup(type_id);
         let ptr = self.ptr_type();
         if vir_ty == VirTypeId::UNKNOWN {
