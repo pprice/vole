@@ -139,8 +139,17 @@ fn substitute_one(
                 def: *def,
                 type_args: new_args,
             };
-            let layout = compute_layout(&ty, target);
-            target.intern(ty, layout)
+            let is_sentinel = source.is_sentinel(old_id);
+            let layout = if is_sentinel {
+                Some(sentinel_layout())
+            } else {
+                compute_layout(&ty, target)
+            };
+            let new_id = target.intern(ty, layout);
+            if is_sentinel {
+                target.mark_sentinel(new_id);
+            }
+            new_id
         }
         VirType::Interface { def, type_args } => {
             let new_args = substitute_vec(type_args, source, target, subs, memo);
@@ -162,10 +171,8 @@ fn substitute_one(
         VirType::Primitive(_)
         | VirType::Error { .. }
         | VirType::Void
-        | VirType::Nil
         | VirType::Never
         | VirType::Range
-        | VirType::Done
         | VirType::MetaType
         | VirType::Unknown => {
             let layout = compute_layout(old_type, target);
@@ -280,15 +287,6 @@ fn compute_layout(ty: &VirType, _table: &VirTypeTable) -> Option<VirTypeLayout> 
             storage: StorageClass::Pointer,
         }),
 
-        // Sentinels with no storage.
-        VirType::Nil | VirType::Done => Some(VirTypeLayout {
-            is_rc: false,
-            is_heap: false,
-            is_wide: false,
-            slot_count: 0,
-            storage: StorageClass::Void,
-        }),
-
         // Zero-sized types.
         VirType::Void | VirType::Never => Some(VirTypeLayout {
             is_rc: false,
@@ -377,6 +375,17 @@ fn primitive_layout(kind: VirPrimitiveKind) -> VirTypeLayout {
             slot_count: 1,
             storage: StorageClass::Pointer,
         },
+    }
+}
+
+/// Zero-sized layout for sentinel types.
+fn sentinel_layout() -> VirTypeLayout {
+    VirTypeLayout {
+        is_rc: false,
+        is_heap: false,
+        is_wide: false,
+        slot_count: 0,
+        storage: StorageClass::Void,
     }
 }
 

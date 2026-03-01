@@ -507,6 +507,11 @@ fn derive_string_conversion_from_vir_type(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
 ) -> StringConversion {
+    // Check nil by reserved VirTypeId before pattern-matching the VirType.
+    if vir_ty == VirTypeId::NIL {
+        return StringConversion::NilToString;
+    }
+
     let vir_type = table.get(vir_ty);
     match vir_type {
         VirType::Primitive(prim) => match prim {
@@ -525,7 +530,6 @@ fn derive_string_conversion_from_vir_type(
             VirPrimitiveKind::Bool => StringConversion::BoolToString,
             VirPrimitiveKind::Handle => StringConversion::I64ToString,
         },
-        VirType::Nil => StringConversion::NilToString,
         VirType::Array { .. } | VirType::FixedArray { .. } => StringConversion::ArrayToString,
 
         // TODO(vol-b4d0): Optional, Union, Class, Struct, Interface need
@@ -686,7 +690,7 @@ fn is_integer(ty: VirTypeId, table: &VirTypeTable) -> bool {
 }
 
 fn is_sentinel(ty: VirTypeId, table: &VirTypeTable) -> bool {
-    matches!(table.get(ty), VirType::Nil | VirType::Done)
+    table.is_sentinel(ty)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -958,14 +962,12 @@ fn classify_rc_cleanup(vir_ty: VirTypeId, table: &VirTypeTable) -> crate::expr::
         // Handle is a well-known primitive but RC-managed.
         VirType::Primitive(VirPrimitiveKind::Handle) => VirRcCleanup::SimpleDecRef,
 
-        // Non-RC types.
+        // Non-RC types (sentinels are Struct with zero layout, also non-RC).
         VirType::Primitive(_)
         | VirType::Struct { .. }
         | VirType::Void
-        | VirType::Nil
         | VirType::Never
         | VirType::Range
-        | VirType::Done
         | VirType::MetaType
         | VirType::Error { .. } => VirRcCleanup::None,
 

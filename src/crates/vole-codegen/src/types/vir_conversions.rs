@@ -141,8 +141,6 @@ pub(crate) fn vir_to_sema_type_id(
             VirType::MetaType => Some(TypeId::METATYPE),
             VirType::Never => Some(TypeId::NEVER),
             VirType::Void => Some(TypeId::VOID),
-            VirType::Nil => Some(TypeId::NIL),
-            VirType::Done => Some(TypeId::DONE),
             VirType::Unknown => Some(TypeId::UNKNOWN),
             VirType::Param { name } => arena.lookup_type_param(*name).or(Some(TypeId::UNKNOWN)),
         };
@@ -232,8 +230,6 @@ fn raw_fallback_kind_matches(
         VirType::MetaType => candidate == TypeId::METATYPE,
         VirType::Never => candidate == TypeId::NEVER,
         VirType::Void => candidate == TypeId::VOID,
-        VirType::Nil => candidate == TypeId::NIL,
-        VirType::Done => candidate == TypeId::DONE,
         VirType::Unknown => candidate == TypeId::UNKNOWN,
         VirType::Param { .. } => {
             arena.unwrap_type_param(candidate).is_some()
@@ -253,6 +249,11 @@ pub(crate) fn vir_type_to_cranelift(
 ) -> Type {
     if vir_ty == VirTypeId::F128 {
         return types::F128;
+    }
+
+    // Sentinel types (nil, Done, user-defined) are zero-sized, I8 tag placeholder.
+    if table.is_sentinel(vir_ty) {
+        return types::I8;
     }
 
     match table.get(vir_ty) {
@@ -286,9 +287,6 @@ pub(crate) fn vir_type_to_cranelift(
 
         // Void: no meaningful value, I64 placeholder for uniform call ABI.
         VirType::Void => types::I64,
-
-        // Nil and Done: sentinel types, zero-sized (I8 tag placeholder).
-        VirType::Nil | VirType::Done => types::I8,
 
         // Never: bottom type. Pointer placeholder for unreachable branches.
         VirType::Never => pointer_type,
@@ -484,8 +482,8 @@ pub(crate) fn vir_unwrap_interface(
 }
 
 /// Check if a `VirTypeId` is the nil type.
-pub(crate) fn vir_is_nil(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    matches!(table.get(vir_ty), VirType::Nil)
+pub(crate) fn vir_is_nil(vir_ty: VirTypeId, _table: &VirTypeTable) -> bool {
+    vir_ty == VirTypeId::NIL
 }
 
 /// Check if a `VirTypeId` is a fallible return type.
@@ -612,7 +610,7 @@ pub(crate) fn vir_is_payload_union(vir_ty: VirTypeId, table: &VirTypeTable) -> b
         VirType::Optional { .. } => true,
         VirType::Union { variants } => variants
             .iter()
-            .any(|&v| !matches!(table.get(v), VirType::Nil | VirType::Done | VirType::Void)),
+            .any(|&v| !table.is_sentinel(v) && !matches!(table.get(v), VirType::Void)),
         _ => false,
     }
 }
@@ -655,6 +653,14 @@ pub(crate) fn vir_unknown_type_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> u
 /// Returns a simple human-readable name (e.g., "i64", "String",
 /// "Class(42)", "Interface(7)").
 pub(crate) fn vir_display_basic(vir_ty: VirTypeId, table: &VirTypeTable) -> String {
+    // Check well-known sentinels by VirTypeId before pattern matching.
+    if vir_ty == VirTypeId::NIL {
+        return "nil".into();
+    }
+    if vir_ty == VirTypeId::DONE {
+        return "Done".into();
+    }
+
     match table.get(vir_ty) {
         VirType::Primitive(kind) => match kind {
             VirPrimitiveKind::I8 => "i8".into(),
@@ -673,8 +679,6 @@ pub(crate) fn vir_display_basic(vir_ty: VirTypeId, table: &VirTypeTable) -> Stri
             VirPrimitiveKind::Handle => "handle".into(),
         },
         VirType::Void => "void".into(),
-        VirType::Nil => "nil".into(),
-        VirType::Done => "Done".into(),
         VirType::Never => "never".into(),
         VirType::Unknown => "unknown".into(),
         VirType::Range => "range".into(),
@@ -882,6 +886,11 @@ pub(crate) fn vir_type_id_size(
         return pointer_type.bytes();
     }
 
+    // Sentinel types are zero-sized.
+    if table.is_sentinel(vir_ty) {
+        return 0;
+    }
+
     match table.get(vir_ty) {
         VirType::Primitive(kind) => match kind {
             VirPrimitiveKind::I8 | VirPrimitiveKind::U8 | VirPrimitiveKind::Bool => 1,
@@ -891,9 +900,6 @@ pub(crate) fn vir_type_id_size(
             VirPrimitiveKind::I128 => 16,
             VirPrimitiveKind::String | VirPrimitiveKind::Handle => pointer_type.bytes(),
         },
-
-        // Sentinel types are zero-sized.
-        VirType::Nil | VirType::Done => 0,
 
         // Void: no meaningful value.
         VirType::Void => 0,
@@ -1638,9 +1644,6 @@ fn vir_compute_type_size_aligned(
             let elem_size = vir_compute_type_size_aligned(*elem, table, entities);
             elem_size * (*len as i32)
         }
-
-        // Sentinel types already handled above, but catch the patterns
-        VirType::Nil | VirType::Done => 0,
 
         // Erased types: pointer-sized
         VirType::Never | VirType::MetaType | VirType::Param { .. } => 8,

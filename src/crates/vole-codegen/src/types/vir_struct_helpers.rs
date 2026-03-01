@@ -84,13 +84,9 @@ pub(crate) fn vir_is_payload_union(
 fn vir_is_sentinel_or_void(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    entities: &impl VirStructEntityLookup,
+    _entities: &impl VirStructEntityLookup,
 ) -> bool {
-    match table.get(vir_ty) {
-        VirType::Nil | VirType::Done | VirType::Void => true,
-        VirType::Struct { def, .. } => entities.is_sentinel_type_def(*def),
-        _ => false,
-    }
+    table.is_sentinel(vir_ty) || matches!(table.get(vir_ty), VirType::Void)
 }
 
 pub(crate) fn sema_to_vir_hint(sema_ty: TypeId) -> VirTypeId {

@@ -50,38 +50,54 @@ pub fn translate_type_id(
 }
 
 /// Translate sentinel types to their reserved VirTypeId.
+///
+/// Built-in sentinels (nil, Done) are mapped to their reserved VirTypeId
+/// slots.  When the sema type has been rebound to a Struct (normal after
+/// prelude loading), the reserved slot is rebound to carry the correct
+/// TypeDefId.  User-defined sentinels are interned as normal VirType::Struct
+/// entries and marked in the sentinel_ids set.
 fn translate_sentinel(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeArena) -> VirTypeId {
+    // Built-in sentinels: always return the reserved VirTypeId.
+    // Rebind the VirType::Struct at the reserved slot if we know the TypeDefId.
     if type_id == arena.nil() {
-        VirTypeId::NIL
-    } else if type_id == arena.done() {
-        VirTypeId::DONE
-    } else if let SemaType::Struct { type_def_id, .. } = arena.get(type_id) {
-        // User-defined sentinels must remain distinct in VIR (e.g. Empty | Deleted),
-        // so preserve nominal identity via Struct(def, []) while keeping zero-size layout.
-        let layout = Some(VirTypeLayout {
-            is_rc: false,
-            is_heap: false,
-            is_wide: false,
-            slot_count: 0,
-            storage: StorageClass::Void,
-        });
-        table.intern(
+        if let SemaType::Struct { type_def_id, .. } = arena.get(type_id) {
+            table.rebind_sentinel(VirTypeId::NIL, *type_def_id);
+        }
+        return VirTypeId::NIL;
+    }
+    if type_id == arena.done() {
+        if let SemaType::Struct { type_def_id, .. } = arena.get(type_id) {
+            table.rebind_sentinel(VirTypeId::DONE, *type_def_id);
+        }
+        return VirTypeId::DONE;
+    }
+
+    // User-defined sentinels: intern as Struct and mark as sentinel.
+    if let SemaType::Struct { type_def_id, .. } = arena.get(type_id) {
+        let layout = Some(sentinel_layout());
+        let vir_id = table.intern(
             VirType::Struct {
                 def: *type_def_id,
                 type_args: vec![],
             },
             layout,
-        )
+        );
+        table.mark_sentinel(vir_id);
+        vir_id
     } else {
-        // Fallback: preserve previous Nil-like zero-sized behavior.
-        let layout = Some(VirTypeLayout {
-            is_rc: false,
-            is_heap: false,
-            is_wide: false,
-            slot_count: 0,
-            storage: StorageClass::Void,
-        });
-        table.intern(VirType::Nil, layout)
+        // Non-struct sentinel fallback (shouldn't happen in practice).
+        VirTypeId::NIL
+    }
+}
+
+/// Zero-sized layout for sentinel types.
+fn sentinel_layout() -> VirTypeLayout {
+    VirTypeLayout {
+        is_rc: false,
+        is_heap: false,
+        is_wide: false,
+        slot_count: 0,
+        storage: StorageClass::Void,
     }
 }
 
@@ -549,6 +565,7 @@ fn sweep_translate_one(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeAr
                 type_args: vec![],
             };
             let vir_id = table.intern(vir_type, None);
+            table.mark_sentinel(vir_id);
             table.record_type_id(type_id, vir_id);
         }
         // Other sentinel shapes: skip (no safe VirTypeId to record).

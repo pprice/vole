@@ -66,14 +66,10 @@ pub enum VirType {
     RuntimeIterator { elem: VirTypeId },
     /// The void type (no value).
     Void,
-    /// The nil literal type.
-    Nil,
     /// The bottom type (never returns).
     Never,
     /// Integer range.
     Range,
-    /// Iterator exhaustion sentinel.
-    Done,
     /// Compile-time type metadata (`T.@meta`).
     MetaType,
     /// Unknown / unresolved type (error recovery).

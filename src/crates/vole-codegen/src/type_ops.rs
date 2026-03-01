@@ -185,9 +185,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // Optional<T> always has nil at tag 1 by VIR convention
                 VirType::Optional { .. } => return Some(1),
                 VirType::Union { variants } => {
-                    return variants
-                        .iter()
-                        .position(|&id| matches!(table.get(id), VirType::Nil));
+                    return variants.iter().position(|&id| id == VirTypeId::NIL);
                 }
                 _ => {}
             }

@@ -31,6 +31,10 @@ pub struct VirTypeTable {
     /// TypeArena.  Pre-populated with the 23 reserved primitive/special
     /// constants that are identity-mapped between the two ID spaces.
     type_id_to_vir: FxHashMap<TypeId, VirTypeId>,
+    /// VirTypeIds that represent sentinel types (zero-field structs like nil, Done,
+    /// and user-defined sentinels).  Populated during reserved slot init and
+    /// type translation.
+    sentinel_ids: FxHashSet<VirTypeId>,
 }
 
 impl VirTypeTable {
@@ -45,6 +49,7 @@ impl VirTypeTable {
             layouts: Vec::new(),
             intern_map: FxHashMap::default(),
             type_id_to_vir: FxHashMap::default(),
+            sentinel_ids: FxHashSet::default(),
         };
         table.populate_reserved();
         table.populate_reserved_type_id_map();
@@ -134,6 +139,12 @@ impl VirTypeTable {
         for (&type_id, &old_vir_id) in &other.type_id_to_vir {
             let new_vir_id = mapping.get(&old_vir_id).copied().unwrap_or(old_vir_id);
             self.type_id_to_vir.insert(type_id, new_vir_id);
+        }
+
+        // Merge sentinel_ids, remapping through the merge mapping.
+        for &old_sentinel in &other.sentinel_ids {
+            let new_sentinel = mapping.get(&old_sentinel).copied().unwrap_or(old_sentinel);
+            self.sentinel_ids.insert(new_sentinel);
         }
 
         mapping
@@ -302,9 +313,9 @@ impl VirTypeTable {
         matches!(self.get(id), VirType::Unknown)
     }
 
-    /// Whether this is a sentinel type (`Nil` or `Done`).
+    /// Whether this is a sentinel type (nil, Done, or user-defined).
     pub fn is_sentinel(&self, id: VirTypeId) -> bool {
-        matches!(self.get(id), VirType::Nil | VirType::Done)
+        self.sentinel_ids.contains(&id)
     }
 
     /// Whether this is the `Range` type.
@@ -362,8 +373,6 @@ fn remap_type_ids_in_type(ty: &VirType, mapping: &FxHashMap<VirTypeId, VirTypeId
         // Leaf types: no inner VirTypeIds.
         VirType::Primitive(_)
         | VirType::Void
-        | VirType::Nil
-        | VirType::Done
         | VirType::Never
         | VirType::Range
         | VirType::MetaType
@@ -471,8 +480,6 @@ fn merge_one(
         }
         VirType::Primitive(_)
         | VirType::Void
-        | VirType::Nil
-        | VirType::Done
         | VirType::Never
         | VirType::Range
         | VirType::MetaType
@@ -618,9 +625,28 @@ impl VirTypeTable {
         // 16: Void
         self.push_reserved(VirType::Void, void_layout(), VirTypeId::VOID);
 
-        // 17-18: Nil, Done — sentinel structs, zero-sized
-        self.push_reserved(VirType::Nil, void_layout(), VirTypeId::NIL);
-        self.push_reserved(VirType::Done, void_layout(), VirTypeId::DONE);
+        // 17-18: Nil, Done — sentinel structs, zero-sized.
+        // Use placeholder TypeDefIds (u32::MAX - 1, u32::MAX) that will be
+        // rebound to the real TypeDefIds during VIR type translation when the
+        // prelude-defined sentinels are encountered.
+        self.push_reserved(
+            VirType::Struct {
+                def: TypeDefId::new(u32::MAX - 1),
+                type_args: vec![],
+            },
+            void_layout(),
+            VirTypeId::NIL,
+        );
+        self.push_reserved(
+            VirType::Struct {
+                def: TypeDefId::new(u32::MAX),
+                type_args: vec![],
+            },
+            void_layout(),
+            VirTypeId::DONE,
+        );
+        self.sentinel_ids.insert(VirTypeId::NIL);
+        self.sentinel_ids.insert(VirTypeId::DONE);
 
         // 19: Range — 16 bytes (start + end), treated as wide
         self.push_reserved(VirType::Range, wide_layout(), VirTypeId::RANGE);
@@ -678,6 +704,46 @@ impl VirTypeTable {
 }
 
 // ---------------------------------------------------------------------------
+// Sentinel management
+// ---------------------------------------------------------------------------
+
+impl VirTypeTable {
+    /// Mark a `VirTypeId` as a sentinel type.
+    ///
+    /// Called during VIR type translation for user-defined sentinels so that
+    /// `is_sentinel()` returns `true` for them.
+    pub fn mark_sentinel(&mut self, id: VirTypeId) {
+        self.sentinel_ids.insert(id);
+    }
+
+    /// Replace the `VirType` at a reserved sentinel slot with the real
+    /// `VirType::Struct` once the `TypeDefId` is known.
+    ///
+    /// During `populate_reserved()`, NIL and DONE are created with placeholder
+    /// `TypeDefId` values.  When VIR type translation encounters the actual
+    /// prelude-defined sentinel, this method updates the stored `VirType` and
+    /// the intern map to use the correct `TypeDefId`.
+    pub fn rebind_sentinel(&mut self, id: VirTypeId, def: TypeDefId) {
+        let idx = id.raw() as usize;
+        debug_assert!(idx < self.types.len(), "rebind_sentinel: id out of range");
+        debug_assert!(
+            self.sentinel_ids.contains(&id),
+            "rebind_sentinel: id is not a sentinel"
+        );
+
+        let old_type = self.types[idx].clone();
+        self.intern_map.remove(&old_type);
+
+        let new_type = VirType::Struct {
+            def,
+            type_args: vec![],
+        };
+        self.intern_map.insert(new_type.clone(), id);
+        self.types[idx] = new_type;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
 
@@ -711,8 +777,9 @@ mod tests {
         assert_eq!(*table.get(VirTypeId::NEVER), VirType::Never);
         assert_eq!(*table.get(VirTypeId::UNKNOWN), VirType::Unknown);
         assert_eq!(*table.get(VirTypeId::RANGE), VirType::Range);
-        assert_eq!(*table.get(VirTypeId::NIL), VirType::Nil);
-        assert_eq!(*table.get(VirTypeId::DONE), VirType::Done);
+        // NIL and DONE are now VirType::Struct with placeholder TypeDefIds
+        assert!(matches!(table.get(VirTypeId::NIL), VirType::Struct { .. }));
+        assert!(matches!(table.get(VirTypeId::DONE), VirType::Struct { .. }));
         assert_eq!(*table.get(VirTypeId::METATYPE), VirType::MetaType);
     }
 
