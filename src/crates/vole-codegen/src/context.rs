@@ -436,6 +436,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// arena's `is_struct()` semantics.
     #[inline]
     pub fn vir_query_is_struct_v(&self, vir_ty: VirTypeId) -> bool {
+        if vir_ty.is_compat() {
+            return self.vir_query_is_struct(self.cv_type_id_from_vir(vir_ty));
+        }
         crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
     }
 
@@ -451,6 +454,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check if a `VirTypeId` is a union type via VirTypeTable.
     #[inline]
     pub fn vir_query_is_union_v(&self, vir_ty: VirTypeId) -> bool {
+        if vir_ty.is_compat() {
+            return self.vir_query_is_union(self.cv_type_id_from_vir(vir_ty));
+        }
         crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
     }
 
@@ -561,6 +567,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check if a `VirTypeId` is an interface type via VirTypeTable.
     #[inline]
     pub fn vir_query_is_interface_v(&self, vir_ty: VirTypeId) -> bool {
+        if vir_ty.is_compat() {
+            return self.vir_query_is_interface(self.cv_type_id_from_vir(vir_ty));
+        }
         crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
     }
 
@@ -624,6 +633,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Map a `VirTypeId` to its Cranelift type via VirTypeTable.
     #[inline]
     pub fn vir_query_type_to_cranelift_v(&self, vir_ty: VirTypeId) -> Type {
+        if vir_ty.is_compat() {
+            return self.vir_query_type_to_cranelift(self.cv_type_id_from_vir(vir_ty));
+        }
         // Sentinel types are always i8 (zero-field struct tag). VIR maps them
         // as Struct, which would incorrectly resolve to ptr_type.
         if crate::types::vir_conversions::vir_is_sentinel(vir_ty, self.vir_type_table()) {
@@ -657,6 +669,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_function_v(&self, vir_ty: VirTypeId) -> bool {
+        if vir_ty.is_compat() {
+            return self.vir_query_is_function(self.cv_type_id_from_vir(vir_ty));
+        }
         crate::types::vir_conversions::vir_is_function(vir_ty, self.vir_type_table())
     }
 
@@ -766,6 +781,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_runtime_iterator_v(&self, vir_ty: VirTypeId) -> bool {
+        if vir_ty.is_compat() {
+            return self.vir_query_is_runtime_iterator(self.cv_type_id_from_vir(vir_ty));
+        }
         crate::types::vir_conversions::vir_is_runtime_iterator(vir_ty, self.vir_type_table())
     }
 
@@ -936,6 +954,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_type_param_v(&self, vir_ty: VirTypeId) -> Option<NameId> {
+        if vir_ty.is_compat() {
+            return self.vir_query_unwrap_type_param(self.cv_type_id_from_vir(vir_ty));
+        }
         crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
     }
 

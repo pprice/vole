@@ -58,6 +58,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// VIR-native substitution: try to substitute a `VirTypeId`, returning
+    /// the original if no substitution applies or the result is not interned.
+    ///
+    /// For compat-encoded VirTypeIds (raw TypeId encoding), falls back to the
+    /// TypeId-based substitution path and re-maps the result to VirTypeId.
+    pub fn try_substitute_type_v(&self, vir_ty: VirTypeId) -> VirTypeId {
+        if let Some(substitutions) = self.substitutions {
+            if vir_ty.is_compat() {
+                // Compat-encoded: round-trip through TypeId substitution.
+                let sema_ty = self.cv_type_id_from_vir(vir_ty);
+                let substituted = self.try_substitute_type(sema_ty);
+                self.vir_lookup(substituted)
+            } else {
+                self.vir_type_table()
+                    .lookup_substitute_vir(vir_ty, substitutions)
+                    .unwrap_or(vir_ty)
+            }
+        } else {
+            vir_ty
+        }
+    }
+
     // ========== Cranelift type mapping ==========
 
     /// Convert a TypeId to a Cranelift type
@@ -66,8 +88,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Convert a `VirTypeId` to a Cranelift type via the VIR type table.
-    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
     pub fn cranelift_type_v(&self, vir_ty: VirTypeId) -> Type {
+        if vir_ty.is_compat() {
+            return self.cranelift_type(self.cv_type_id_from_vir(vir_ty));
+        }
         self.vir_query_type_to_cranelift_v(vir_ty)
     }
 

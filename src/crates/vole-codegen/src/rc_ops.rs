@@ -443,6 +443,56 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// VirTypeId overload of [`emit_rc_inc_with_cleanup`].
+    pub fn emit_rc_inc_with_cleanup_v(
+        &mut self,
+        value: Value,
+        vir_ty: VirTypeId,
+        cleanup: vole_vir::expr::VirRcCleanup,
+    ) -> CodegenResult<()> {
+        use vole_vir::expr::VirRcCleanup;
+        match cleanup {
+            VirRcCleanup::None => Ok(()),
+            VirRcCleanup::SimpleDecRef => self.emit_rc_inc(value),
+            VirRcCleanup::InterfaceDecRef => {
+                let data_word = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value, 0);
+                self.call_runtime_void(RuntimeKey::RcInc, &[data_word])
+            }
+            VirRcCleanup::UnknownHeapCleanup => self.emit_rc_inc(value),
+            VirRcCleanup::Unresolved => self.emit_rc_inc_for_type_v(value, vir_ty),
+        }
+    }
+
+    /// VirTypeId overload of [`emit_rc_dec_with_cleanup`].
+    pub fn emit_rc_dec_with_cleanup_v(
+        &mut self,
+        value: Value,
+        vir_ty: VirTypeId,
+        cleanup: vole_vir::expr::VirRcCleanup,
+    ) -> CodegenResult<()> {
+        use vole_vir::expr::VirRcCleanup;
+        match cleanup {
+            VirRcCleanup::None => Ok(()),
+            VirRcCleanup::SimpleDecRef => self.emit_rc_dec(value),
+            VirRcCleanup::InterfaceDecRef => {
+                let data_word = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value, 0);
+                self.call_runtime_void(RuntimeKey::RcDec, &[data_word])
+            }
+            VirRcCleanup::UnknownHeapCleanup => {
+                let cleanup_ref = self.runtime_func_ref(RuntimeKey::UnknownHeapCleanup)?;
+                self.builder.ins().call(cleanup_ref, &[value]);
+                Ok(())
+            }
+            VirRcCleanup::Unresolved => self.emit_rc_dec_for_type_v(value, vir_ty),
+        }
+    }
+
     /// Emit rc_dec for an owned RC value and mark it as consumed.
     /// No-op if the value is not Owned (Borrowed, Consumed, or Untracked).
     /// For interface types, extracts the data word before decrementing.
@@ -542,6 +592,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Uses VirTypeTable directly — no TypeArena or sema TypeId involved.
     /// Callers migrating away from TypeId should use this instead of `rc_state()`.
     pub fn rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
+        if vir_ty.is_compat() {
+            return self.rc_state(self.cv_type_id_from_vir(vir_ty));
+        }
         vir_compute_rc_state(vir_ty, self.vir_type_table(), self.analyzed())
     }
 
