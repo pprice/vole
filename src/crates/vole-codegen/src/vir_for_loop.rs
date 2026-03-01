@@ -227,27 +227,25 @@ impl Cg<'_, '_, '_> {
 
         // TEMP(N279-C): if VIR iterator metadata degraded to `unknown`, recover
         // element typing/storage from the compiled iterable value.
-        if let Some(arr_elem_type_id) = self.vir_query_unwrap_array_sema(self.cv_type_id(&arr)) {
-            elem_type_id = arr_elem_type_id;
-            if union_storage.is_none() && self.vir_query_is_union(arr_elem_type_id) {
-                union_storage = Some(
-                    if self.union_array_prefers_inline_storage(arr_elem_type_id) {
-                        vole_sema::UnionStorageKind::Inline
-                    } else {
-                        vole_sema::UnionStorageKind::Heap
-                    },
-                );
+        if let Some(arr_elem_vir) = self.vir_query_unwrap_array_v(arr.type_id) {
+            let arr_elem_sema = self.cv_type_id_from_vir(arr_elem_vir);
+            elem_type_id = arr_elem_sema;
+            if union_storage.is_none() && self.vir_query_is_union_v(arr_elem_vir) {
+                union_storage = Some(if self.union_array_prefers_inline_storage_v(arr_elem_vir) {
+                    vole_sema::UnionStorageKind::Inline
+                } else {
+                    vole_sema::UnionStorageKind::Heap
+                });
             }
         }
 
         // Track owned iterable in a dedicated RC scope.
         self.push_rc_scope();
-        if arr.is_owned() && self.rc_state(self.cv_type_id(&arr)).needs_cleanup() {
-            let tracked_var = self
-                .builder
-                .declare_var(self.cranelift_type(self.cv_type_id(&arr)));
+        let arr_sema_ty = self.cv_type_id_from_vir(arr.type_id);
+        if arr.is_owned() && self.rc_state(arr_sema_ty).needs_cleanup() {
+            let tracked_var = self.builder.declare_var(self.cranelift_type(arr_sema_ty));
             self.builder.def_var(tracked_var, arr.value);
-            let drop_flag = self.register_rc_local(tracked_var, self.cv_type_id(&arr));
+            let drop_flag = self.register_rc_local(tracked_var, arr_sema_ty);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
 
@@ -378,14 +376,19 @@ impl Cg<'_, '_, '_> {
             VirIterKind::IteratorInterface { elem_type, .. } => {
                 let hint = self.sema_type_from_vir(*elem_type);
                 let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
-                let (elem_type_id, is_interface_iter) = if let Some(elem_id) =
-                    self.vir_query_unwrap_runtime_iterator_sema(self.cv_type_id(&iter))
+                let (elem_type_id, is_interface_iter) = if let Some(elem_vir) =
+                    self.vir_query_unwrap_runtime_iterator_v(iter.type_id)
                 {
-                    (elem_id, false)
-                } else if let Some((_, type_args)) =
-                    self.vir_query_unwrap_interface_sema(self.cv_type_id(&iter))
+                    (self.cv_type_id_from_vir(elem_vir), false)
+                } else if let Some((_, type_args)) = self.vir_query_unwrap_interface_v(iter.type_id)
                 {
-                    (type_args.first().copied().unwrap_or(hint), true)
+                    (
+                        type_args
+                            .first()
+                            .map(|&v| self.cv_type_id_from_vir(v))
+                            .unwrap_or(hint),
+                        true,
+                    )
                 } else {
                     (hint, false)
                 };
@@ -457,12 +460,13 @@ impl Cg<'_, '_, '_> {
 
     /// Track an owned iterator in the current RC scope for cleanup.
     pub(crate) fn track_iter_in_rc_scope(&mut self, iter: &super::types::CompiledValue) {
-        if iter.is_owned() && self.rc_state(self.cv_type_id(iter)).needs_cleanup() {
-            let tracked_var = self
-                .builder
-                .declare_var(self.cranelift_type(self.cv_type_id(iter)));
+        // For RC bookkeeping in iterator contexts, bridge via cv_type_id_from_vir
+        // rather than rc_state_v — rc_state_v can disagree for iterator types.
+        let iter_sema_ty = self.cv_type_id_from_vir(iter.type_id);
+        if iter.is_owned() && self.rc_state(iter_sema_ty).needs_cleanup() {
+            let tracked_var = self.builder.declare_var(self.cranelift_type(iter_sema_ty));
             self.builder.def_var(tracked_var, iter.value);
-            let drop_flag = self.register_rc_local(tracked_var, self.cv_type_id(iter));
+            let drop_flag = self.register_rc_local(tracked_var, iter_sema_ty);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
     }
@@ -528,7 +532,7 @@ impl Cg<'_, '_, '_> {
         _elem_type_id: TypeId,
     ) -> CodegenResult<super::types::CompiledValue> {
         let type_def_id = self
-            .vir_query_unwrap_nominal(self.cv_type_id(iterable))
+            .vir_query_unwrap_nominal_v(iterable.type_id)
             .ok_or_else(|| CodegenError::internal("for_iterable: expected class/struct type"))?;
         let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
 
