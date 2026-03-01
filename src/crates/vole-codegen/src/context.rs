@@ -1247,6 +1247,128 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     // =====================================================================
+    // Phase 3b: VIR-native type conversion wrappers
+    //
+    // These accept sema `TypeId` and try VirTypeTable first, falling back
+    // to the arena-based functions in conversions.rs when the VIR type is
+    // unknown (dynamic sema IDs that can't be translated).
+    // =====================================================================
+
+    /// Get the byte size of a type, using VirTypeTable with arena fallback.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_type_id_size(&self, type_id: TypeId) -> u32 {
+        let vir_ty = self.vir_lookup(type_id);
+        let ptr = self.ptr_type();
+        if vir_ty == VirTypeId::UNKNOWN {
+            crate::types::type_id_size(type_id, ptr, self.analyzed(), self.arena())
+        } else {
+            crate::types::vir_conversions::vir_type_id_size(
+                vir_ty,
+                ptr,
+                self.analyzed(),
+                self.vir_type_table(),
+            )
+        }
+    }
+
+    /// Calculate tuple layout, using VirTypeTable with arena fallback.
+    ///
+    /// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_tuple_layout(&self, elements: &[TypeId]) -> (u32, Vec<i32>) {
+        let ptr = self.ptr_type();
+        // Try VIR path: convert TypeIds to VirTypeIds.
+        let vir_elems: Vec<VirTypeId> = elements.iter().map(|&t| self.vir_lookup(t)).collect();
+        let any_unknown = vir_elems.contains(&VirTypeId::UNKNOWN);
+        if any_unknown {
+            crate::types::tuple_layout_id(elements, ptr, self.analyzed(), self.arena())
+        } else {
+            crate::types::vir_conversions::vir_tuple_layout(
+                &vir_elems,
+                ptr,
+                self.analyzed(),
+                self.vir_type_table(),
+            )
+        }
+    }
+
+    /// Get the runtime tag for an array element type, using VirTypeTable with
+    /// arena fallback.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_array_element_tag_id(&self, type_id: TypeId) -> i64 {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            crate::types::array_element_tag_id(type_id, self.arena())
+        } else {
+            crate::types::vir_conversions::vir_array_element_tag_id(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Convert a compiled value to a target Cranelift type, using VirTypeTable
+    /// with arena fallback.
+    #[allow(dead_code)]
+    pub fn vir_query_convert_to_type(
+        &self,
+        builder: &mut FunctionBuilder,
+        val: CompiledValue,
+        target: Type,
+    ) -> Value {
+        let vir_ty = val.vir_type_id;
+        if vir_ty == VirTypeId::UNKNOWN {
+            crate::types::convert_to_type(builder, val, target, self.arena())
+        } else {
+            crate::types::vir_conversions::vir_convert_to_type(
+                builder,
+                val,
+                target,
+                self.vir_type_table(),
+            )
+        }
+    }
+
+    /// Get the error tag for a fallible type, using VirTypeTable with arena
+    /// fallback.
+    #[allow(dead_code)]
+    pub fn vir_query_fallible_error_tag_by_id(
+        &self,
+        error_type_id: TypeId,
+        error_name: Symbol,
+    ) -> Option<i64> {
+        let vir_ty = self.vir_lookup(error_type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            crate::types::fallible_error_tag_by_id(
+                error_type_id,
+                error_name,
+                self.arena(),
+                self.env.interner,
+                self.env.analyzed.name_table(),
+                self.analyzed(),
+            )
+        } else {
+            // For VIR path, we need the error VirTypeIds from the fallible.
+            // The caller passes the error part of a fallible, which could be
+            // a single Error or a Union of Errors.
+            let table = self.vir_type_table();
+            let error_vir_types: Vec<VirTypeId> = match table.get(vir_ty) {
+                vole_vir::types::VirType::Error { .. } => vec![vir_ty],
+                vole_vir::types::VirType::Union { variants } => variants.clone(),
+                _ => return None,
+            };
+            crate::types::vir_conversions::vir_fallible_error_tag_by_id(
+                &error_vir_types,
+                error_name,
+                table,
+                self.env.interner,
+                self.env.analyzed.name_table(),
+                self.analyzed().vir_program().entity_metadata(),
+            )
+        }
+    }
+
+    // =====================================================================
     // VIR-native type queries (no arena fallback)
     //
     // These accept `VirTypeId` directly — use in migrated VIR codegen paths
@@ -1396,6 +1518,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_display_basic(&self, vir_ty: VirTypeId) -> String {
         crate::types::vir_conversions::vir_display_basic(vir_ty, self.vir_type_table())
+    }
+
+    /// Get the byte size of a VIR type.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_type_id_size(&self, vir_ty: VirTypeId) -> u32 {
+        crate::types::vir_conversions::vir_type_id_size(
+            vir_ty,
+            self.ptr_type(),
+            self.analyzed(),
+            self.vir_type_table(),
+        )
+    }
+
+    /// Calculate tuple layout for VIR types.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_tuple_layout(&self, elements: &[VirTypeId]) -> (u32, Vec<i32>) {
+        crate::types::vir_conversions::vir_tuple_layout(
+            elements,
+            self.ptr_type(),
+            self.analyzed(),
+            self.vir_type_table(),
+        )
+    }
+
+    /// Get the runtime tag for an array element VIR type.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_array_element_tag_id(&self, vir_ty: VirTypeId) -> i64 {
+        crate::types::vir_conversions::vir_array_element_tag_id(vir_ty, self.vir_type_table())
     }
 
     /// Get expression type from VIR-stashed `vir_call_return_type`.

@@ -11,11 +11,18 @@
 #![allow(dead_code)]
 
 use cranelift::prelude::*;
+use cranelift_codegen::ir::FuncRef;
 
-use vole_identity::{TypeDefId, TypeId, TypeIdVec, VirTypeId};
+use crate::errors::{CodegenError, CodegenResult};
+use crate::ops::{sextend_const, uextend_const};
+use vole_frontend::{Interner, Symbol};
+use vole_identity::{NameTable, TypeDefId, TypeId, TypeIdVec, VirTypeId};
 use vole_sema::type_arena::TypeArena;
+use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};
+
+use super::vir_struct_helpers::{VirStructEntityLookup, vir_struct_total_byte_size};
 
 /// Temporary bridge from `VirTypeId` to sema `TypeId`.
 ///
@@ -817,6 +824,509 @@ pub(crate) fn vir_contains_type_param(vir_ty: VirTypeId, table: &VirTypeTable) -
         }
         _ => false,
     }
+}
+
+// ============================================================================
+// VIR-native type conversion functions (Phase 3b)
+//
+// These replace the arena-based functions in conversions.rs for code paths
+// that operate on VirTypeId.  Each function matches on VirType variants
+// instead of SemaType variants.
+// ============================================================================
+
+/// Sum the byte sizes of all fields in a VIR error type definition.
+///
+/// VIR equivalent of `error_fields_size()` in conversions.rs.
+fn vir_error_fields_size(
+    type_def_id: TypeDefId,
+    pointer_type: Type,
+    entities: &impl VirStructEntityLookup,
+    table: &VirTypeTable,
+) -> u32 {
+    let field_ids = entities.field_ids_on_type(type_def_id);
+    field_ids
+        .into_iter()
+        .map(|field_id| {
+            let field_sema_ty = entities.field_type(field_id);
+            // Bridge sema TypeId to VirTypeId for recursive size computation.
+            let field_vir_ty = if field_sema_ty.raw() < VirTypeId::FIRST_DYNAMIC {
+                VirTypeId::from_raw(field_sema_ty.raw())
+            } else {
+                VirTypeId::UNKNOWN
+            };
+            if field_vir_ty != VirTypeId::UNKNOWN {
+                vir_type_id_size(field_vir_ty, pointer_type, entities, table)
+            } else {
+                // Fallback: treat as pointer-sized for dynamic sema IDs
+                pointer_type.bytes()
+            }
+        })
+        .sum()
+}
+
+/// Get the byte size for a VIR type.
+///
+/// VIR equivalent of `type_id_size()` in conversions.rs.
+pub(crate) fn vir_type_id_size(
+    vir_ty: VirTypeId,
+    pointer_type: Type,
+    entities: &impl VirStructEntityLookup,
+    table: &VirTypeTable,
+) -> u32 {
+    if vir_ty == VirTypeId::UNKNOWN {
+        return pointer_type.bytes();
+    }
+
+    match table.get(vir_ty) {
+        VirType::Primitive(kind) => match kind {
+            VirPrimitiveKind::I8 | VirPrimitiveKind::U8 | VirPrimitiveKind::Bool => 1,
+            VirPrimitiveKind::I16 | VirPrimitiveKind::U16 => 2,
+            VirPrimitiveKind::I32 | VirPrimitiveKind::U32 | VirPrimitiveKind::F32 => 4,
+            VirPrimitiveKind::I64 | VirPrimitiveKind::U64 | VirPrimitiveKind::F64 => 8,
+            VirPrimitiveKind::I128 => 16,
+            VirPrimitiveKind::String | VirPrimitiveKind::Handle => pointer_type.bytes(),
+        },
+
+        // Sentinel types are zero-sized.
+        VirType::Nil | VirType::Done => 0,
+
+        // Void: no meaningful value.
+        VirType::Void => 0,
+
+        // Range: 16 bytes (start i64 + end i64).
+        VirType::Range => 16,
+
+        // Unknown: TaggedValue representation: 8-byte tag + 8-byte value = 16 bytes.
+        VirType::Unknown => 16,
+
+        // Heap-allocated RC types: pointer-sized.
+        VirType::Array { .. }
+        | VirType::Class { .. }
+        | VirType::RuntimeIterator { .. }
+        | VirType::Function { .. }
+        | VirType::Interface { .. } => pointer_type.bytes(),
+
+        // Struct types: use flat slot count to account for nested struct fields.
+        VirType::Struct { .. } => vir_struct_total_byte_size(vir_ty, table, entities)
+            .expect("INTERNAL: valid struct must have computable size"),
+
+        // Union: tag + max variant payload (aligned to 8 bytes).
+        VirType::Union { variants } => {
+            let max_payload = variants
+                .iter()
+                .map(|&t| {
+                    // Struct variants are auto-boxed, so their payload is a pointer.
+                    if matches!(table.get(t), VirType::Struct { .. }) {
+                        pointer_type.bytes()
+                    } else {
+                        vir_type_id_size(t, pointer_type, entities, table)
+                    }
+                })
+                .max()
+                .unwrap_or(0);
+            crate::union_layout::TAG_ONLY_SIZE + max_payload.div_ceil(8) * 8
+        }
+
+        // Optional: treated like union with nil variant.
+        VirType::Optional { inner } => {
+            let inner_size = vir_type_id_size(*inner, pointer_type, entities, table);
+            crate::union_layout::TAG_ONLY_SIZE + inner_size.div_ceil(8) * 8
+        }
+
+        // Error: sum of field sizes, aligned.
+        VirType::Error { def } => {
+            vir_error_fields_size(*def, pointer_type, entities, table).div_ceil(8) * 8
+        }
+
+        // Fallible: tag + max(success, error) payload, aligned.
+        VirType::Fallible { success, errors } => {
+            let success_size = vir_type_id_size(*success, pointer_type, entities, table);
+            let error_size = if errors.len() == 1 {
+                // Single error type.
+                match table.get(errors[0]) {
+                    VirType::Error { def } => {
+                        vir_error_fields_size(*def, pointer_type, entities, table)
+                    }
+                    _ => 0,
+                }
+            } else {
+                // Union of error types: max of all error field sizes.
+                errors
+                    .iter()
+                    .filter_map(|&e| match table.get(e) {
+                        VirType::Error { def } => {
+                            Some(vir_error_fields_size(*def, pointer_type, entities, table))
+                        }
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0)
+            };
+            let max_payload = success_size.max(error_size);
+            crate::union_layout::TAG_ONLY_SIZE + max_payload.div_ceil(8) * 8
+        }
+
+        // Tuple: sum of element sizes (each aligned to 8 bytes).
+        VirType::Tuple { elems } => elems
+            .iter()
+            .map(|&t| vir_type_id_size(t, pointer_type, entities, table).div_ceil(8) * 8)
+            .sum(),
+
+        // Fixed array: element size * count.
+        VirType::FixedArray { elem, len } => {
+            let elem_size = vir_type_id_size(*elem, pointer_type, entities, table).div_ceil(8) * 8;
+            elem_size * *len
+        }
+
+        // Bottom/meta/param types: pointer-erased.
+        VirType::Never | VirType::MetaType | VirType::Param { .. } => pointer_type.bytes(),
+    }
+}
+
+/// Calculate layout for tuple elements using VirTypeId.
+///
+/// VIR equivalent of `tuple_layout_id()` in conversions.rs.
+/// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
+/// Each element is aligned to 8 bytes.
+pub(crate) fn vir_tuple_layout(
+    elements: &[VirTypeId],
+    pointer_type: Type,
+    entities: &impl VirStructEntityLookup,
+    table: &VirTypeTable,
+) -> (u32, Vec<i32>) {
+    let mut offsets = Vec::with_capacity(elements.len());
+    let mut offset = 0i32;
+
+    for &elem in elements {
+        offsets.push(offset);
+        let elem_size = vir_type_id_size(elem, pointer_type, entities, table).div_ceil(8) * 8;
+        offset += elem_size as i32;
+    }
+
+    (offset as u32, offsets)
+}
+
+/// Get the runtime tag value for an array element type.
+///
+/// VIR equivalent of `array_element_tag_id()` in conversions.rs.
+/// These tags must match the `RuntimeTypeId` variants in `vole_runtime::value`
+/// so that `tag_needs_rc` correctly identifies RC-managed elements for cleanup
+/// in `array_drop`.
+pub(crate) fn vir_array_element_tag_id(vir_ty: VirTypeId, table: &VirTypeTable) -> i64 {
+    use vole_runtime::value::RuntimeTypeId;
+    // Handle type check
+    if matches!(
+        table.get(vir_ty),
+        VirType::Primitive(VirPrimitiveKind::Handle)
+    ) {
+        return RuntimeTypeId::Rng as i64;
+    }
+    // Sentinel types (nil, Done) are non-RC stack values.
+    if table.is_sentinel(vir_ty) {
+        return RuntimeTypeId::I64 as i64;
+    }
+    match table.get(vir_ty) {
+        VirType::Primitive(VirPrimitiveKind::String) => RuntimeTypeId::String as i64,
+        VirType::Primitive(
+            VirPrimitiveKind::I64
+            | VirPrimitiveKind::I32
+            | VirPrimitiveKind::I16
+            | VirPrimitiveKind::I8,
+        ) => RuntimeTypeId::I64 as i64,
+        VirType::Primitive(VirPrimitiveKind::I128) => RuntimeTypeId::Wide128 as i64,
+        VirType::Primitive(VirPrimitiveKind::F64 | VirPrimitiveKind::F32) => {
+            RuntimeTypeId::F64 as i64
+        }
+        VirType::Primitive(VirPrimitiveKind::Bool) => RuntimeTypeId::Bool as i64,
+        VirType::Array { .. } => RuntimeTypeId::Array as i64,
+        VirType::Function { .. } => RuntimeTypeId::Closure as i64,
+        VirType::Class { .. } => RuntimeTypeId::Instance as i64,
+        VirType::Union { .. } => RuntimeTypeId::UnionHeap as i64,
+        VirType::Unknown => RuntimeTypeId::UnknownHeap as i64,
+        _ => RuntimeTypeId::I64 as i64,
+    }
+}
+
+/// Convert a compiled value to a target Cranelift type.
+///
+/// VIR equivalent of `convert_to_type()` in conversions.rs.
+/// Uses VirTypeTable instead of TypeArena for unsigned type detection.
+pub(crate) fn vir_convert_to_type(
+    builder: &mut FunctionBuilder,
+    val: super::CompiledValue,
+    target: Type,
+    table: &VirTypeTable,
+) -> Value {
+    fn pack_f64_to_f128(builder: &mut FunctionBuilder, f64_val: Value) -> Value {
+        let bits64 = builder.ins().bitcast(types::I64, MemFlags::new(), f64_val);
+        let bits128 = uextend_const(builder, types::I128, bits64);
+        builder.ins().bitcast(types::F128, MemFlags::new(), bits128)
+    }
+
+    fn unpack_f128_to_f64(builder: &mut FunctionBuilder, f128_val: Value) -> Value {
+        let bits128 = builder
+            .ins()
+            .bitcast(types::I128, MemFlags::new(), f128_val);
+        let bits64 = builder.ins().ireduce(types::I64, bits128);
+        builder.ins().bitcast(types::F64, MemFlags::new(), bits64)
+    }
+
+    if val.ty == target {
+        return val.value;
+    }
+
+    if target == types::F64 {
+        if val.ty == types::I64 || val.ty == types::I32 {
+            return builder.ins().fcvt_from_sint(types::F64, val.value);
+        }
+        if val.ty == types::F128 {
+            return unpack_f128_to_f64(builder, val.value);
+        }
+        if val.ty == types::F32 {
+            return builder.ins().fpromote(types::F64, val.value);
+        }
+    }
+
+    if target == types::F32 {
+        if val.ty == types::F128 {
+            let f64_val = unpack_f128_to_f64(builder, val.value);
+            return builder.ins().fdemote(types::F32, f64_val);
+        }
+        if val.ty == types::F64 {
+            return builder.ins().fdemote(types::F32, val.value);
+        }
+    }
+
+    if target == types::F128 {
+        if val.ty == types::F64 {
+            return pack_f64_to_f128(builder, val.value);
+        }
+        if val.ty == types::F32 {
+            let f64_val = builder.ins().fpromote(types::F64, val.value);
+            return pack_f64_to_f128(builder, f64_val);
+        }
+        if val.ty.is_int() {
+            let f64_val = if val.ty == types::I128 {
+                let low = builder.ins().ireduce(types::I64, val.value);
+                builder.ins().fcvt_from_sint(types::F64, low)
+            } else {
+                builder.ins().fcvt_from_sint(types::F64, val.value)
+            };
+            return pack_f64_to_f128(builder, f64_val);
+        }
+    }
+
+    // Integer widening — use uextend for unsigned types, sextend for signed.
+    if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
+        // Check VirTypeTable for unsigned status instead of arena.
+        let vir_ty = val.vir_type_id;
+        let is_unsigned = if vir_ty != VirTypeId::UNKNOWN {
+            vir_is_unsigned(vir_ty, table)
+        } else {
+            // Fallback: check well-known unsigned type IDs.
+            matches!(
+                val.type_id,
+                TypeId::U8 | TypeId::U16 | TypeId::U32 | TypeId::U64
+            )
+        };
+        if is_unsigned {
+            return uextend_const(builder, target, val.value);
+        } else {
+            return sextend_const(builder, target, val.value);
+        }
+    }
+
+    // Integer narrowing.
+    if target.is_int() && val.ty.is_int() && target.bits() < val.ty.bits() {
+        return builder.ins().ireduce(target, val.value);
+    }
+
+    if target.is_int() && val.ty == types::F128 {
+        let f64_val = unpack_f128_to_f64(builder, val.value);
+        if target == types::I128 {
+            let narrowed = builder.ins().fcvt_to_sint(types::I64, f64_val);
+            return sextend_const(builder, types::I128, narrowed);
+        }
+        return builder.ins().fcvt_to_sint(target, f64_val);
+    }
+
+    val.value
+}
+
+/// Convert a value to a uniform word representation for interface dispatch.
+///
+/// VIR equivalent of `value_to_word()` in conversions.rs.
+pub(crate) fn vir_value_to_word(
+    builder: &mut FunctionBuilder,
+    value: &super::CompiledValue,
+    pointer_type: Type,
+    heap_alloc_ref: Option<FuncRef>,
+    entities: &impl VirStructEntityLookup,
+    table: &VirTypeTable,
+) -> CodegenResult<Value> {
+    let word_type = pointer_type;
+    let word_bytes = word_type.bytes();
+
+    let vir_ty = value.vir_type_id;
+    let value_size = vir_type_id_size(vir_ty, pointer_type, entities, table);
+    let needs_box = value_size > word_bytes;
+
+    if needs_box {
+        // If the Cranelift type is already a pointer and the Vole type needs boxing,
+        // then the value is already a pointer to boxed data. Just return it directly.
+        if value.ty == pointer_type {
+            return Ok(value.value);
+        }
+        let Some(heap_alloc_ref) = heap_alloc_ref else {
+            return Err(CodegenError::missing_resource(
+                "heap allocator for interface boxing",
+            ));
+        };
+        let size_val = builder.ins().iconst(pointer_type, value_size as i64);
+        let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
+        let alloc_ptr = builder.inst_results(alloc_call)[0];
+        builder
+            .ins()
+            .store(MemFlags::new(), value.value, alloc_ptr, 0);
+        return Ok(alloc_ptr);
+    }
+
+    let word = match table.get(vir_ty) {
+        VirType::Primitive(VirPrimitiveKind::F64) => {
+            builder
+                .ins()
+                .bitcast(types::I64, MemFlags::new(), value.value)
+        }
+        VirType::Primitive(VirPrimitiveKind::F32) => {
+            let i32_val = builder
+                .ins()
+                .bitcast(types::I32, MemFlags::new(), value.value);
+            uextend_const(builder, word_type, i32_val)
+        }
+        VirType::Primitive(
+            VirPrimitiveKind::Bool
+            | VirPrimitiveKind::I8
+            | VirPrimitiveKind::U8
+            | VirPrimitiveKind::I16
+            | VirPrimitiveKind::U16
+            | VirPrimitiveKind::I32
+            | VirPrimitiveKind::U32,
+        ) => {
+            if value.ty == word_type {
+                value.value
+            } else {
+                uextend_const(builder, word_type, value.value)
+            }
+        }
+        VirType::Primitive(VirPrimitiveKind::I64 | VirPrimitiveKind::U64) => value.value,
+        VirType::Primitive(VirPrimitiveKind::I128) => {
+            let low = builder.ins().ireduce(types::I64, value.value);
+            if word_type == types::I64 {
+                low
+            } else {
+                uextend_const(builder, word_type, low)
+            }
+        }
+        _ => value.value,
+    };
+
+    Ok(word)
+}
+
+/// Convert a uniform word representation back into a typed value.
+///
+/// VIR equivalent of `word_to_value_type_id()` in conversions.rs.
+pub(crate) fn vir_word_to_value(
+    builder: &mut FunctionBuilder,
+    word: Value,
+    vir_ty: VirTypeId,
+    pointer_type: Type,
+    entities: &impl VirStructEntityLookup,
+    table: &VirTypeTable,
+) -> Value {
+    let word_type = pointer_type;
+    let word_bytes = word_type.bytes();
+    let needs_unbox = vir_type_id_size(vir_ty, pointer_type, entities, table) > word_bytes;
+
+    if needs_unbox {
+        let target_type = vir_type_to_cranelift(vir_ty, table, pointer_type);
+        if target_type == pointer_type {
+            return word;
+        }
+        return builder.ins().load(target_type, MemFlags::new(), word, 0);
+    }
+
+    match table.get(vir_ty) {
+        VirType::Primitive(VirPrimitiveKind::F64) => {
+            builder.ins().bitcast(types::F64, MemFlags::new(), word)
+        }
+        VirType::Primitive(VirPrimitiveKind::F32) => {
+            let i32_val = builder.ins().ireduce(types::I32, word);
+            builder.ins().bitcast(types::F32, MemFlags::new(), i32_val)
+        }
+        VirType::Primitive(
+            VirPrimitiveKind::Bool | VirPrimitiveKind::I8 | VirPrimitiveKind::U8,
+        ) => builder.ins().ireduce(types::I8, word),
+        VirType::Primitive(VirPrimitiveKind::I16 | VirPrimitiveKind::U16) => {
+            builder.ins().ireduce(types::I16, word)
+        }
+        VirType::Primitive(VirPrimitiveKind::I32 | VirPrimitiveKind::U32) => {
+            builder.ins().ireduce(types::I32, word)
+        }
+        VirType::Primitive(VirPrimitiveKind::I64 | VirPrimitiveKind::U64) => word,
+        VirType::Primitive(VirPrimitiveKind::I128) => {
+            let low = if word_type == types::I64 {
+                word
+            } else {
+                builder.ins().ireduce(types::I64, word)
+            };
+            uextend_const(builder, types::I128, low)
+        }
+        _ => word,
+    }
+}
+
+/// Returns the 1-based error tag for a given error name in a fallible type.
+///
+/// VIR equivalent of `fallible_error_tag_by_id()` in conversions.rs.
+/// Takes the error VirTypeIds from a Fallible type and finds the tag
+/// for the given error_name.
+pub(crate) fn vir_fallible_error_tag_by_id(
+    error_vir_types: &[VirTypeId],
+    error_name: Symbol,
+    table: &VirTypeTable,
+    interner: &Interner,
+    name_table: &NameTable,
+    entities: &VirEntityMetadata,
+) -> Option<i64> {
+    let error_name_str = interner.resolve(error_name);
+
+    if error_vir_types.len() == 1 {
+        // Single error type.
+        if let VirType::Error { def } = table.get(error_vir_types[0]) {
+            let info_name = entities
+                .type_name_id(*def)
+                .and_then(|name_id| name_table.last_segment_str(name_id));
+            if info_name.as_deref() == Some(error_name_str) {
+                return Some(1);
+            }
+        }
+        return None;
+    }
+
+    // Multiple error types: search by index.
+    for (idx, &error_vir_ty) in error_vir_types.iter().enumerate() {
+        if let VirType::Error { def } = table.get(error_vir_ty) {
+            let info_name = entities
+                .type_name_id(*def)
+                .and_then(|name_id| name_table.last_segment_str(name_id));
+            if info_name.as_deref() == Some(error_name_str) {
+                return Some((idx + 1) as i64);
+            }
+        }
+    }
+
+    None
 }
 
 // Struct/class field layout helpers and convert_field_value are in
