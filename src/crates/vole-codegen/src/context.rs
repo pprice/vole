@@ -417,9 +417,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// this lookup path should be deleted.
     #[inline]
     pub fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
-        self.vir_type_table()
-            .lookup_type_id(type_id)
-            .unwrap_or(VirTypeId::UNKNOWN)
+        let lookup = self.vir_type_table().lookup_type_id(type_id);
+        // Reserved/primitive TypeIds (< FIRST_DYNAMIC) must always have an
+        // explicit mapping (populated by `populate_reserved_type_id_map`).
+        // Dynamic TypeIds may be unmapped when their VirType was never interned
+        // during lowering — the sweep (vol-wdt4) only records dedup hits.
+        // Unmapped dynamic types fall back to UNKNOWN and are handled by the
+        // arena-fallback path in each vir_query_* helper.
+        debug_assert!(
+            lookup.is_some() || type_id.raw() >= TypeId::FIRST_DYNAMIC,
+            "reserved TypeId({}) has no VirTypeId mapping",
+            type_id.raw(),
+        );
+        lookup.unwrap_or(VirTypeId::UNKNOWN)
     }
 
     /// Check if a sema `TypeId` is a struct type.

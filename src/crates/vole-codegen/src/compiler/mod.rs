@@ -292,9 +292,17 @@ impl<'a> Compiler<'a> {
     /// falls back to `VirTypeId::UNKNOWN` for unmapped types.
     #[inline]
     fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
-        self.vir_type_table()
-            .lookup_type_id(type_id)
-            .unwrap_or(VirTypeId::UNKNOWN)
+        let lookup = self.vir_type_table().lookup_type_id(type_id);
+        // Reserved/primitive TypeIds (< FIRST_DYNAMIC) must always have an
+        // explicit mapping (populated by `populate_reserved_type_id_map`).
+        // Dynamic TypeIds may be unmapped when their VirType was never interned
+        // during lowering — the sweep (vol-wdt4) only records dedup hits.
+        debug_assert!(
+            lookup.is_some() || type_id.raw() >= TypeId::FIRST_DYNAMIC,
+            "reserved TypeId({}) has no VirTypeId mapping",
+            type_id.raw(),
+        );
+        lookup.unwrap_or(VirTypeId::UNKNOWN)
     }
 
     /// Look up an existing array type by element `TypeId` in the arena.
