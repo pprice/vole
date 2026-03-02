@@ -1,9 +1,10 @@
 use cranelift::prelude::{Signature, Type as CraneliftType, types};
+use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
 use crate::types::vir_conversions::{vir_is_wide, vir_type_to_cranelift};
-use vole_identity::{FunctionId, MethodId, TypeId, VirTypeId};
+use vole_identity::{FunctionId, MethodId, NameId, TypeId, VirTypeId};
 use vole_vir::types::VirType;
 
 /// SmallVec for function parameters - most functions have <= 8 params
@@ -41,6 +42,18 @@ impl Compiler<'_> {
         type_ids
             .iter()
             .map(|&id| self.vir_query_type_to_cranelift(id))
+            .collect()
+    }
+
+    /// Convert VirTypeIds to Cranelift types.
+    ///
+    /// VirTypeId-native equivalent of [`type_ids_to_cranelift`](Self::type_ids_to_cranelift).
+    pub fn vir_ids_to_cranelift(&self, vir_ids: &[VirTypeId]) -> Vec<CraneliftType> {
+        let table = self.vir_type_table();
+        let ptr = self.pointer_type;
+        vir_ids
+            .iter()
+            .map(|&id| vir_type_to_cranelift(id, table, ptr))
             .collect()
     }
 
@@ -166,6 +179,58 @@ impl Compiler<'_> {
             method_def.return_type,
             vir_self_param,
         )
+    }
+
+    /// Substitute VirTypeIds for Self placeholder and type parameters.
+    ///
+    /// Replaces `VirTypeId::UNKNOWN` (Self placeholder) with `self_vir_ty`,
+    /// then applies `subs` (NameId → VirTypeId) for type-parameter
+    /// substitution.  Each parameter that fails substitution keeps its
+    /// original VirTypeId (safe for pointer-sized types).
+    ///
+    /// Returns `None` only when the **return** type cannot be resolved
+    /// (e.g. a compound generic like `T?` is not interned for this element
+    /// type).  On success, returns `(substituted_params, substituted_ret)`.
+    pub fn substitute_method_vir_types(
+        &self,
+        param_vir_types: &[VirTypeId],
+        return_vir_type: VirTypeId,
+        self_vir_ty: VirTypeId,
+        subs: &FxHashMap<NameId, VirTypeId>,
+    ) -> Option<(SmallVec<[VirTypeId; 8]>, VirTypeId)> {
+        let table = self.vir_type_table();
+        let subst = |vir_ty: VirTypeId| -> Option<VirTypeId> {
+            if vir_ty == VirTypeId::UNKNOWN {
+                Some(self_vir_ty)
+            } else {
+                table.substitute_vir_ids(vir_ty, subs)
+            }
+        };
+
+        let subst_params: SmallVec<[VirTypeId; 8]> = param_vir_types
+            .iter()
+            .map(|&vir_ty| subst(vir_ty).unwrap_or(vir_ty))
+            .collect();
+        let subst_ret = subst(return_vir_type)?;
+        Some((subst_params, subst_ret))
+    }
+
+    /// Substitute method parameter/return VirTypeIds and build a signature.
+    ///
+    /// Convenience wrapper around [`substitute_method_vir_types`] +
+    /// [`build_signature_from_vir_types`].  Returns `None` if the return
+    /// type cannot be resolved.
+    pub fn build_substituted_method_sig(
+        &self,
+        param_vir_types: &[VirTypeId],
+        return_vir_type: VirTypeId,
+        self_vir_ty: VirTypeId,
+        subs: &FxHashMap<NameId, VirTypeId>,
+        self_param: VirSelfParam,
+    ) -> Option<Signature> {
+        let (subst_params, subst_ret) =
+            self.substitute_method_vir_types(param_vir_types, return_vir_type, self_vir_ty, subs)?;
+        Some(self.build_signature_from_vir_types(&subst_params, subst_ret, self_param))
     }
 
     // ========================================================================

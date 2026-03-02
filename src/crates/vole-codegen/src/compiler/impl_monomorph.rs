@@ -14,7 +14,7 @@ use std::rc::Rc;
 use rustc_hash::FxHashMap;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
-use super::{Compiler, DeclareMode, SelfParam};
+use super::{Compiler, DeclareMode, SelfParam, VirSelfParam};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::vir_conversions::vir_type_to_cranelift;
 use crate::types::{CodegenCtx, MethodInfo};
@@ -67,48 +67,36 @@ impl Compiler<'_> {
         let iface_default_methods =
             self.collect_iface_default_methods(type_def_id, &direct_method_name_ids);
 
+        let self_vir_ty = self.vir_lookup(self_type_id);
         for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
-            // Build TypeParam substitution map for this interface implementation.
-            let type_param_subs = self
+            // Build VirTypeId-native substitution map for this interface implementation.
+            let vir_subs = self
                 .analyzed
-                .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
+                .interface_impl_type_param_vir_subs(type_def_id, interface_tdef_id);
             // Skip abstract/generic default methods (not compiled in the module).
-            if !type_param_subs.is_empty() {
-                let has_abstract = type_param_subs
+            if !vir_subs.is_empty() {
+                let has_abstract = vir_subs
                     .values()
-                    .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
+                    .any(|&v| self.vir_query_unwrap_type_param_v(v).is_some());
                 if has_abstract {
                     continue;
                 }
             }
-            let sig = {
-                let method_def = self.analyzed.get_method(semantic_method_id);
-                let subst_params: Vec<TypeId> = method_def
-                    .param_types
-                    .iter()
-                    .map(|&vir_ty| {
-                        if vir_ty == VirTypeId::UNKNOWN {
-                            self_type_id
-                        } else {
-                            let tid = self.sema_type_id(vir_ty);
-                            self.vir_query_lookup_substitute(tid, &type_param_subs)
-                                .unwrap_or(tid)
-                        }
-                    })
-                    .collect();
-                let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
-                    self_type_id
-                } else {
-                    let tid = self.sema_type_id(method_def.return_type);
-                    self.vir_query_lookup_substitute(tid, &type_param_subs)
-                        .unwrap_or(tid)
-                };
-                self.build_signature_from_type_ids(
-                    &subst_params,
-                    Some(subst_ret),
-                    SelfParam::TypedId(self_type_id),
+            let method_def = self.analyzed.get_method(semantic_method_id);
+            let sig = self
+                .build_substituted_method_sig(
+                    &method_def.param_types,
+                    method_def.return_type,
+                    self_vir_ty,
+                    &vir_subs,
+                    VirSelfParam::Typed(self_vir_ty),
                 )
-            };
+                .unwrap_or_else(|| {
+                    self.build_signature_for_method(
+                        semantic_method_id,
+                        SelfParam::TypedId(self_type_id),
+                    )
+                });
             let func_key = self.register_method_func(semantic_method_id, &sig, DeclareMode::Import);
             self.state
                 .method_func_keys
@@ -165,54 +153,41 @@ impl Compiler<'_> {
             self.collect_iface_default_methods(type_def_id, &direct_method_name_ids);
 
         // Register each default method in the JIT function registry and method_func_keys.
-        // Build signatures with Placeholder(SelfType) substituted by self_type_id, and
-        // TypeParam(T) substituted with the concrete interface type arg (e.g., i64 for
-        // Iterable<i64>), so that the JIT function declaration signature matches what
-        // the compiler will emit.
+        // Build signatures with UNKNOWN (Self placeholder) substituted by self_vir_ty,
+        // and TypeParam(T) substituted with the concrete interface type arg (e.g., i64
+        // for Iterable<i64>), so that the JIT declaration signature matches the emitted code.
+        let self_vir_ty = self.vir_lookup(self_type_id);
         for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
-            // Build TypeParam substitution map for this interface's implementation.
-            let type_param_subs = self
+            // Build VirTypeId-native substitution map for this interface's implementation.
+            let vir_subs = self
                 .analyzed
-                .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
+                .interface_impl_type_param_vir_subs(type_def_id, interface_tdef_id);
             // Skip registration if any substitution value is still a TypeParam (abstract).
             // Generic interface implementations (e.g., `extend [T] with Iterable<T>`) are
             // handled via monomorphization at the call site, not registered here.
-            if !type_param_subs.is_empty() {
-                let has_abstract = type_param_subs
+            if !vir_subs.is_empty() {
+                let has_abstract = vir_subs
                     .values()
-                    .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
+                    .any(|&v| self.vir_query_unwrap_type_param_v(v).is_some());
                 if has_abstract {
                     continue;
                 }
             }
-            let sig = {
-                let method_def = self.analyzed.get_method(semantic_method_id);
-                let subst_params: Vec<TypeId> = method_def
-                    .param_types
-                    .iter()
-                    .map(|&vir_ty| {
-                        if vir_ty == VirTypeId::UNKNOWN {
-                            self_type_id
-                        } else {
-                            let tid = self.sema_type_id(vir_ty);
-                            self.vir_query_lookup_substitute(tid, &type_param_subs)
-                                .unwrap_or(tid)
-                        }
-                    })
-                    .collect();
-                let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
-                    self_type_id
-                } else {
-                    let tid = self.sema_type_id(method_def.return_type);
-                    self.vir_query_lookup_substitute(tid, &type_param_subs)
-                        .unwrap_or(tid)
-                };
-                self.build_signature_from_type_ids(
-                    &subst_params,
-                    Some(subst_ret),
-                    SelfParam::TypedId(self_type_id),
+            let method_def = self.analyzed.get_method(semantic_method_id);
+            let sig = self
+                .build_substituted_method_sig(
+                    &method_def.param_types,
+                    method_def.return_type,
+                    self_vir_ty,
+                    &vir_subs,
+                    VirSelfParam::Typed(self_vir_ty),
                 )
-            };
+                .unwrap_or_else(|| {
+                    self.build_signature_for_method(
+                        semantic_method_id,
+                        SelfParam::TypedId(self_type_id),
+                    )
+                });
             let func_key =
                 self.register_method_func(semantic_method_id, &sig, DeclareMode::Declare);
             self.state
@@ -784,65 +759,55 @@ impl Compiler<'_> {
                 continue;
             };
 
-            // Build type-parameter substitution map for this interface implementation.
-            let type_param_subs = self
+            // Build VirTypeId-native substitution map for this interface implementation.
+            let vir_subs = self
                 .analyzed
-                .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
+                .interface_impl_type_param_vir_subs(type_def_id, interface_tdef_id);
 
             // Skip compilation if any substitution value is still a TypeParam (abstract/generic).
-            if !type_param_subs.is_empty() {
-                let has_abstract = type_param_subs
+            if !vir_subs.is_empty() {
+                let has_abstract = vir_subs
                     .values()
-                    .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
+                    .any(|&v| self.vir_query_unwrap_type_param_v(v).is_some());
                 if has_abstract {
                     continue;
                 }
             }
 
-            // Get signature data from VIR method definition, substituting:
-            //   1. VirTypeId::UNKNOWN (Self placeholder) -> self_type_id
-            //   2. TypeParam(T) -> concrete element type (via type_param_subs)
+            // Substitute VirTypeIds: UNKNOWN → self, TypeParam(T) → concrete type.
+            let self_vir_ty = self.vir_lookup(self_type_id);
             let method_def = self.analyzed.get_method(semantic_method_id);
-            let (param_type_ids, return_type_id) = {
-                let subst_params: Vec<TypeId> = method_def
-                    .param_types
-                    .iter()
-                    .map(|&vir_ty| {
-                        if vir_ty == VirTypeId::UNKNOWN {
-                            self_type_id
-                        } else {
-                            let tid = self.sema_type_id(vir_ty);
-                            self.vir_query_lookup_substitute(tid, &type_param_subs)
-                                .unwrap_or(tid)
-                        }
-                    })
-                    .collect();
-                let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
-                    self_type_id
-                } else {
-                    let tid = self.sema_type_id(method_def.return_type);
-                    self.vir_query_lookup_substitute(tid, &type_param_subs)
-                        .unwrap_or(tid)
-                };
-                (subst_params, subst_ret)
-            };
+            let (subst_param_virs, return_vir_ty) = self
+                .substitute_method_vir_types(
+                    &method_def.param_types,
+                    method_def.return_type,
+                    self_vir_ty,
+                    &vir_subs,
+                )
+                .unwrap_or_else(|| {
+                    // Fallback: keep original types (safe for ptr-sized)
+                    (
+                        method_def.param_types.clone().into(),
+                        method_def.return_type,
+                    )
+                });
 
-            let sig = self.build_signature_from_type_ids(
-                &param_type_ids,
-                Some(return_type_id),
-                SelfParam::TypedId(self_type_id),
+            let sig = self.build_signature_from_vir_types(
+                &subst_param_virs,
+                return_vir_ty,
+                VirSelfParam::Typed(self_vir_ty),
             );
             self.jit.ctx.func.signature = sig;
 
             // Build params from VirMethodDef.param_names using the interface's interner
             let method_def = self.analyzed.get_method(semantic_method_id);
-            let param_types = self.type_ids_to_cranelift(&param_type_ids);
+            let param_cranelift_types = self.vir_ids_to_cranelift(&subst_param_virs);
             let params: Vec<_> = method_def
                 .param_names
                 .iter()
-                .zip(param_type_ids.iter())
-                .zip(param_types.iter())
-                .map(|((name_str, &type_id), &cranelift_type)| {
+                .zip(subst_param_virs.iter())
+                .zip(param_cranelift_types.iter())
+                .map(|((name_str, &vir_ty), &cranelift_type)| {
                     let sym = iface_interner
                         .lookup(name_str)
                         .or_else(|| self.analyzed.interner().lookup(name_str))
@@ -852,7 +817,7 @@ impl Compiler<'_> {
                                 name_str, semantic_method_id
                             )
                         });
-                    (sym, self.vir_lookup(type_id), cranelift_type)
+                    (sym, vir_ty, cranelift_type)
                 })
                 .collect();
 
@@ -861,10 +826,9 @@ impl Compiler<'_> {
                 .unwrap_or_else(|| self.self_symbol());
 
             let source_file_ptr = self.source_file_ptr();
-            let self_cranelift_type = self.vir_query_type_to_cranelift(self_type_id);
-            let self_vir_ty = self.vir_lookup(self_type_id);
+            let table = self.vir_type_table();
+            let self_cranelift_type = vir_type_to_cranelift(self_vir_ty, table, self.pointer_type);
             let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
-            let return_vir_ty = self.vir_lookup(return_type_id);
 
             let mut builder_ctx = FunctionBuilderContext::new();
             {
@@ -885,9 +849,6 @@ impl Compiler<'_> {
                 {
                     config = config.with_iterable_default_body();
                 }
-                let vir_subs = self
-                    .analyzed
-                    .interface_impl_type_param_vir_subs(type_def_id, interface_tdef_id);
                 let subs = if vir_subs.is_empty() {
                     None
                 } else {
@@ -1023,14 +984,12 @@ impl Compiler<'_> {
                 continue;
             }
 
-            // Build concrete substitution: T_name_id -> elem_type
-            let mut concrete_subs = FxHashMap::default();
-            concrete_subs.insert(t_name_id, elem_type);
-
-            // VirTypeId-native substitution for Cg context
+            // VirTypeId-native substitution: T_name_id -> vir_elem_type
             let vir_elem_type = self.vir_lookup(elem_type);
             let mut concrete_vir_subs: FxHashMap<NameId, VirTypeId> = FxHashMap::default();
             concrete_vir_subs.insert(t_name_id, vir_elem_type);
+
+            let self_vir_ty = self.vir_lookup(self_type_id);
 
             for (semantic_method_id, method_name_id, method_name_str) in &default_methods {
                 // Build a unique mangled name: "__array_iterable_{elem_type_idx}_{method_name}"
@@ -1038,42 +997,23 @@ impl Compiler<'_> {
                 let mangled_name =
                     format!("__array_iterable_{}_{}", elem_type.index(), method_name_str);
 
-                // Build the concrete signature (substituting Self -> self_type_id, T -> elem_type)
-                // If any return type substitution fails (e.g. T? not registered in arena for
-                // this elem_type), skip this method — it can't be compiled without a concrete
-                // return type. Params fall back to abstract type on failure (safe for ptr-size).
-                let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
-                    let method_def = self.analyzed.get_method(*semantic_method_id);
-                    let subst_params: Vec<TypeId> = method_def
-                        .param_types
-                        .iter()
-                        .map(|&vir_ty| {
-                            if vir_ty == VirTypeId::UNKNOWN {
-                                self_type_id
-                            } else {
-                                let tid = self.sema_type_id(vir_ty);
-                                self.vir_query_lookup_substitute(tid, &concrete_subs)
-                                    .unwrap_or(tid)
-                            }
-                        })
-                        .collect();
-                    let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
-                        Some(self_type_id)
-                    } else {
-                        let tid = self.sema_type_id(method_def.return_type);
-                        self.vir_query_lookup_substitute(tid, &concrete_subs)
-                    };
-                    subst_ret.map(|ret| (subst_params, ret))
-                };
-                let (param_type_ids, return_type_id) = match maybe_type_ids {
-                    Some(x) => x,
-                    None => continue, // return type unresolvable for this elem_type; skip
+                // Substitute VirTypeIds: UNKNOWN → self, TypeParam(T) → concrete elem type.
+                // If the return type cannot be resolved (e.g. T? not interned for this
+                // elem_type), skip this method.
+                let method_def = self.analyzed.get_method(*semantic_method_id);
+                let Some((subst_param_virs, return_vir_ty)) = self.substitute_method_vir_types(
+                    &method_def.param_types,
+                    method_def.return_type,
+                    self_vir_ty,
+                    &concrete_vir_subs,
+                ) else {
+                    continue; // return type unresolvable for this elem_type; skip
                 };
 
-                let sig = self.build_signature_from_type_ids(
-                    &param_type_ids,
-                    Some(return_type_id),
-                    SelfParam::TypedId(self_type_id),
+                let sig = self.build_signature_from_vir_types(
+                    &subst_param_virs,
+                    return_vir_ty,
+                    VirSelfParam::Typed(self_vir_ty),
                 );
 
                 // Declare JIT function with the mangled name and register in func_registry
@@ -1100,13 +1040,13 @@ impl Compiler<'_> {
 
                 // Build params from VirMethodDef.param_names using the interface's interner
                 let method_def = self.analyzed.get_method(*semantic_method_id);
-                let param_types = self.type_ids_to_cranelift(&param_type_ids);
+                let param_cranelift_types = self.vir_ids_to_cranelift(&subst_param_virs);
                 let params: Vec<_> = method_def
                     .param_names
                     .iter()
-                    .zip(param_type_ids.iter())
-                    .zip(param_types.iter())
-                    .map(|((name_str, &type_id), &cranelift_type)| {
+                    .zip(subst_param_virs.iter())
+                    .zip(param_cranelift_types.iter())
+                    .map(|((name_str, &vir_ty), &cranelift_type)| {
                         let sym = iface_interner
                             .lookup(name_str)
                             .or_else(|| self.analyzed.interner().lookup(name_str))
@@ -1116,7 +1056,7 @@ impl Compiler<'_> {
                                     name_str
                                 )
                             });
-                        (sym, self.vir_lookup(type_id), cranelift_type)
+                        (sym, vir_ty, cranelift_type)
                     })
                     .collect();
 
@@ -1125,10 +1065,10 @@ impl Compiler<'_> {
                     .unwrap_or_else(|| self.self_symbol());
 
                 let source_file_ptr = self.source_file_ptr();
-                let self_cranelift_type = self.vir_query_type_to_cranelift(self_type_id);
-                let self_vir_ty = self.vir_lookup(self_type_id);
+                let table = self.vir_type_table();
+                let self_cranelift_type =
+                    vir_type_to_cranelift(self_vir_ty, table, self.pointer_type);
                 let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
-                let return_vir_ty = self.vir_lookup(return_type_id);
 
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
@@ -1239,47 +1179,28 @@ impl Compiler<'_> {
                 None => continue,
             };
 
-            let mut concrete_subs = FxHashMap::default();
-            concrete_subs.insert(t_name_id, elem_type);
+            // VirTypeId-native substitution: T_name_id -> vir_elem_type
+            let vir_elem_type = self.vir_lookup(elem_type);
+            let mut concrete_vir_subs: FxHashMap<NameId, VirTypeId> = FxHashMap::default();
+            concrete_vir_subs.insert(t_name_id, vir_elem_type);
+            let self_vir_ty = self.vir_lookup(self_type_id);
 
             for (semantic_method_id, method_name_id, method_name_str) in &default_methods {
                 let mangled_name =
                     format!("__array_iterable_{}_{}", elem_type.index(), method_name_str);
 
-                // Build the concrete signature (same as compile path)
-                let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
-                    let method_def = self.analyzed.get_method(*semantic_method_id);
-                    let subst_params: Vec<TypeId> = method_def
-                        .param_types
-                        .iter()
-                        .map(|&vir_ty| {
-                            if vir_ty == VirTypeId::UNKNOWN {
-                                self_type_id
-                            } else {
-                                let tid = self.sema_type_id(vir_ty);
-                                self.vir_query_lookup_substitute(tid, &concrete_subs)
-                                    .unwrap_or(tid)
-                            }
-                        })
-                        .collect();
-                    let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
-                        Some(self_type_id)
-                    } else {
-                        let tid = self.sema_type_id(method_def.return_type);
-                        self.vir_query_lookup_substitute(tid, &concrete_subs)
-                    };
-                    subst_ret.map(|ret| (subst_params, ret))
+                // Substitute VirTypeIds and build signature (same as compile path).
+                // Returns None if return type unresolvable for this elem_type; skip.
+                let method_def = self.analyzed.get_method(*semantic_method_id);
+                let Some(sig) = self.build_substituted_method_sig(
+                    &method_def.param_types,
+                    method_def.return_type,
+                    self_vir_ty,
+                    &concrete_vir_subs,
+                    VirSelfParam::Typed(self_vir_ty),
+                ) else {
+                    continue;
                 };
-                let (param_type_ids, return_type_id) = match maybe_type_ids {
-                    Some(x) => x,
-                    None => continue,
-                };
-
-                let sig = self.build_signature_from_type_ids(
-                    &param_type_ids,
-                    Some(return_type_id),
-                    SelfParam::TypedId(self_type_id),
-                );
 
                 // Only import functions that exist in the pre-compiled module cache.
                 // Element types from non-module code (e.g. test files) won't have

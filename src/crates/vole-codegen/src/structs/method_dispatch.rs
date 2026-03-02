@@ -36,14 +36,14 @@ impl Cg<'_, '_, '_> {
             .module_path(module_id)
             .to_string();
         let name_id = module_name_id(self.analyzed(), module_id, method_name_str);
-        let (external_info, func_type_id) = match vir_resolution {
+        let (external_info, func_vir_type_id) = match vir_resolution {
             VirResolvedMethod::Implemented {
                 external_info,
                 func_type_id,
                 ..
             } => (
                 external_info.map(ExternalMethodRef::from),
-                self.sema_type_id(self.try_substitute_type_v(*func_type_id)),
+                self.try_substitute_type_v(*func_type_id),
             ),
             _ => {
                 return Err(CodegenError::not_found(
@@ -53,12 +53,12 @@ impl Cg<'_, '_, '_> {
             }
         };
 
-        // Get return type from function type
+        // Get return type from function type (unwrap VirTypeId, then convert for downstream)
         let return_type_id = {
-            let (_, ret) = self
-                .vir_query_unwrap_function(func_type_id)
+            let (_, ret_vir) = self
+                .vir_query_unwrap_function_v(func_vir_type_id)
                 .expect("INTERNAL: module method: missing function type");
-            self.sema_type_id(ret)
+            self.sema_type_id(ret_vir)
         };
 
         // Compile arguments, tracking owned RC temps for cleanup
@@ -195,20 +195,16 @@ impl Cg<'_, '_, '_> {
         is_closure: bool,
         arg_source: &ArgSource<'_>,
     ) -> CodegenResult<CompiledValue> {
-        // Extract function type components
-        let (param_ids, return_type_id) = {
-            let (vir_params, vir_ret) =
-                self.vir_query_unwrap_function(func_type_id)
-                    .ok_or_else(|| {
-                        CodegenError::type_mismatch(
-                            "functional interface call",
-                            "function type",
-                            "other",
-                        )
-                    })?;
-            let params: Vec<TypeId> = vir_params.iter().map(|&v| self.sema_type_id(v)).collect();
-            (params, self.sema_type_id(vir_ret))
-        };
+        // Extract function type components as VirTypeIds (no sema_type_id round-trip)
+        let (param_virs, return_vir) =
+            self.vir_query_unwrap_function(func_type_id)
+                .ok_or_else(|| {
+                    CodegenError::type_mismatch(
+                        "functional interface call",
+                        "function type",
+                        "other",
+                    )
+                })?;
 
         // Check if this is actually a closure or a pure function
         // The is_closure flag is determined by the caller based on the actual
@@ -221,15 +217,14 @@ impl Cg<'_, '_, '_> {
             // First param is the closure pointer, then the user params
             let mut sig = self.jit_module().make_signature();
             sig.params.push(AbiParam::new(self.ptr_type())); // Closure pointer
-            for &param_id in &param_ids {
+            for &param_vir in &param_virs {
                 sig.params
-                    .push(AbiParam::new(self.vir_query_type_to_cranelift(param_id)));
+                    .push(AbiParam::new(self.cranelift_type_v(param_vir)));
             }
-            let is_void_return = return_type_id.is_void();
+            let is_void_return = return_vir == VirTypeId::VOID;
             if !is_void_return {
-                sig.returns.push(AbiParam::new(
-                    self.vir_query_type_to_cranelift(return_type_id),
-                ));
+                sig.returns
+                    .push(AbiParam::new(self.cranelift_type_v(return_vir)));
             }
 
             // Compile arguments - closure pointer first, then user args
@@ -242,26 +237,27 @@ impl Cg<'_, '_, '_> {
 
             let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
 
-            // Perform the indirect call
+            // Perform the indirect call (call_result still needs sema TypeId)
+            let return_type_id = self.sema_type_id(return_vir);
             let call_inst = self.emit_call_indirect(sig_ref, func_ptr, &args);
             self.call_result(call_inst, return_type_id)
         } else {
             // It's a pure function - call directly
             let mut sig = self.jit_module().make_signature();
-            for &param_id in &param_ids {
+            for &param_vir in &param_virs {
                 sig.params
-                    .push(AbiParam::new(self.vir_query_type_to_cranelift(param_id)));
+                    .push(AbiParam::new(self.cranelift_type_v(param_vir)));
             }
-            let is_void_return = return_type_id.is_void();
+            let is_void_return = return_vir == VirTypeId::VOID;
             if !is_void_return {
-                sig.returns.push(AbiParam::new(
-                    self.vir_query_type_to_cranelift(return_type_id),
-                ));
+                sig.returns
+                    .push(AbiParam::new(self.cranelift_type_v(return_vir)));
             }
 
             let (values, _) = self.compile_args_tracking_rc(arg_source)?;
             let mut args = values;
             let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
+            let return_type_id = self.sema_type_id(return_vir);
             let call_inst = self.emit_call_indirect(sig_ref, func_ptr_or_closure, &args);
             self.call_result(call_inst, return_type_id)
         }
@@ -325,22 +321,13 @@ impl Cg<'_, '_, '_> {
             .map(|method_id| self.analyzed().method_signature_id(method_id))
             .unwrap_or(func_type_id);
 
-        // Unwrap function type to get params and return type
-        let (param_count, param_type_ids, return_type_id, is_void_return) = {
-            let (vir_params, vir_ret) = self
-                .vir_query_unwrap_function(dispatch_func_type_id)
-                .ok_or_else(|| {
-                    CodegenError::type_mismatch(
-                        "interface dispatch",
-                        "function type",
-                        "non-function",
-                    )
-                })?;
-            let params: Vec<TypeId> = vir_params.iter().map(|&v| self.sema_type_id(v)).collect();
-            let ret_id = self.sema_type_id(vir_ret);
-            let is_void = self.vir_query_is_void(ret_id);
-            (params.len(), params, ret_id, is_void)
-        };
+        // Unwrap function type to get params and return type as VirTypeIds
+        let (param_virs, return_vir) = self
+            .vir_query_unwrap_function(dispatch_func_type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch("interface dispatch", "function type", "non-function")
+            })?;
+        let is_void_return = return_vir == VirTypeId::VOID;
 
         // Load data pointer from boxed interface (first word)
         // Currently unused but kept for interface dispatch debugging
@@ -368,7 +355,7 @@ impl Cg<'_, '_, '_> {
 
         let mut sig = self.jit_module().make_signature();
         sig.params.push(AbiParam::new(word_type));
-        for _ in 0..param_count {
+        for _ in 0..param_virs.len() {
             sig.params.push(AbiParam::new(word_type));
         }
         if !is_void_return {
@@ -384,17 +371,13 @@ impl Cg<'_, '_, '_> {
         let iface_arg_count = arg_source.len();
         let mut call_args: ArgVec = smallvec![obj.value];
         for i in 0..iface_arg_count {
-            let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {
-                self.compile_arg_with_expected_type(arg_source, i, expected_type_id)?
-            } else {
-                self.compile_arg_from_source(arg_source, i)?
-            };
+            let compiled = self.compile_arg_from_source(arg_source, i)?;
             // Coerce arguments to their expected parameter types before converting
             // to word representation. Without this, union-typed parameters would be
             // passed as their concrete variant (e.g. i16) rather than as a tagged
             // union pointer, causing the callee's `is` checks to segfault.
-            let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {
-                self.coerce_to_type_id(compiled, expected_type_id)?
+            let compiled = if let Some(&expected_vir) = param_virs.get(i) {
+                self.coerce_to_type(compiled, expected_vir)?
             } else {
                 compiled
             };
@@ -409,6 +392,8 @@ impl Cg<'_, '_, '_> {
             return Ok(self.void_value());
         }
 
+        // Convert result from i64 storage to typed value (needs sema TypeId)
+        let return_type_id = self.sema_type_id(return_vir);
         let word = results
             .first()
             .copied()
