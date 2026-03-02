@@ -1167,7 +1167,7 @@ impl Cg<'_, '_, '_> {
                 self.compile_vir_destructure_record(
                     fields,
                     value,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*source_ty)),
+                    self.try_substitute_type_v(*source_ty),
                     *is_struct,
                 )?;
             }
@@ -1259,7 +1259,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         fields: &[vole_vir::VirDestructureField],
         value: Value,
-        source_ty: TypeId,
+        source_ty: VirTypeId,
         is_struct: bool,
     ) -> CodegenResult<()> {
         for field in fields {

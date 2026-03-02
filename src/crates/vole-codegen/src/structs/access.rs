@@ -62,12 +62,7 @@ impl Cg<'_, '_, '_> {
         let is_struct = self.vir_query_is_struct_v(obj.type_id)
             && !self.is_heap_allocated_annotation_v(obj.type_id);
         if is_struct {
-            return self.struct_field_load(
-                obj.value,
-                slot,
-                field_type_id,
-                self.cv_type_id_from_vir(obj.type_id),
-            );
+            return self.struct_field_load(obj.value, slot, field_type_id, obj.type_id);
         }
 
         // i128 fields use 2 consecutive slots - load both and reconstruct
@@ -108,10 +103,13 @@ impl Cg<'_, '_, '_> {
         struct_ptr: Value,
         slot: usize,
         field_type_id: TypeId,
-        parent_type_id: TypeId,
+        parent_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        // Compute byte offset accounting for nested struct sizes
-        let offset = self.struct_field_byte_offset(parent_type_id, slot);
+        // Compute byte offset accounting for nested struct sizes.
+        // Uses the sema TypeId path because vir_struct_field_byte_offset
+        // relies on sema_to_vir_hint which returns UNKNOWN for dynamic
+        // field types, producing wrong offsets for nested struct/union fields.
+        let offset = self.struct_field_byte_offset(self.cv_type_id_from_vir(parent_type_id), slot);
 
         // If the field is itself a struct, return a pointer into the parent data
         let is_nested_struct = self.vir_query_is_struct(field_type_id);

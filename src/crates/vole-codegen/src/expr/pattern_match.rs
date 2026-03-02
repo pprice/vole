@@ -15,7 +15,6 @@ use vole_identity::{IsCheckResult, TypeId, VirIsCheckResult, VirTypeId};
 
 use super::super::context::Cg;
 use super::super::control_flow::match_switch;
-use super::super::structs::get_field_slot_and_type_id_cg;
 
 impl Cg<'_, '_, '_> {
     // =========================================================================
@@ -733,7 +732,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Resolve source type with substitutions for monomorphized generics
-        let resolved_source_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(source_ty));
+        let resolved_source_ty = self.try_substitute_type_v(source_ty);
 
         // Conditional extraction: when scrutinee is a union, branch on the type
         // check before extracting fields in a new block.
@@ -781,17 +780,17 @@ impl Cg<'_, '_, '_> {
         &mut self,
         fields: &[vole_vir::VirRecordFieldBinding],
         field_source: Value,
-        field_source_type_id: TypeId,
+        field_source_type: VirTypeId,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> CodegenResult<()> {
-        let is_struct = self.vir_query_is_struct(field_source_type_id);
+        let is_struct = self.vir_query_is_struct_v(field_source_type);
         for field in fields {
             let field_name = self.interner().resolve(field.field_name);
             let (slot, field_type_id) =
-                get_field_slot_and_type_id_cg(field_source_type_id, field_name, self)?;
+                self.vir_field_slot_and_type(field_source_type, field_name)?;
 
             let converted = if is_struct {
-                self.struct_field_load(field_source, slot, field_type_id, field_source_type_id)?
+                self.struct_field_load(field_source, slot, field_type_id, field_source_type)?
             } else {
                 self.get_instance_field(field_source, slot, field_type_id)?
             };
