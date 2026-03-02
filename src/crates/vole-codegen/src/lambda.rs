@@ -302,8 +302,7 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().call(rc_inc_ref, &[current_value]);
             }
 
-            // Bridge to sema TypeId for size/copy — vir_struct_total_byte_size
-            // miscomputes nested struct sizes due to sema_to_vir_hint limitations.
+            // Bridge to sema TypeId for size/copy.
             let vole_type_id = self.cv_type_id_from_vir(vole_vir_ty);
             let size = self.type_size(vole_type_id);
             let size_val = self.iconst_cached(types::I64, size as i64);

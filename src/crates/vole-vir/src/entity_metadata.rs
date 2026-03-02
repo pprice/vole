@@ -86,6 +86,15 @@ pub struct VirTypeDef {
     pub kind: VirTypeDefKind,
     /// Field IDs declared on this type (ordered by declaration).
     pub fields: Vec<FieldId>,
+    /// Concrete VIR type for each field, parallel to `fields`.
+    ///
+    /// Populated during VIR lowering by translating each field's sema
+    /// `TypeId` to `VirTypeId`.  For non-generic types this contains the
+    /// final concrete types; for generic types these are the un-substituted
+    /// types (may contain `VirType::Param`).  Codegen uses this to compute
+    /// struct layout, field offsets, and RC state without reaching back
+    /// into sema.
+    pub field_types: Vec<VirTypeId>,
     /// Instance method IDs declared on this type.
     pub methods: Vec<MethodId>,
     /// Static method IDs declared on this type.
@@ -1237,6 +1246,7 @@ mod tests {
             name_id: make_name_id(100),
             kind: VirTypeDefKind::Class,
             fields: vec![field_id],
+            field_types: vec![VirTypeId::I64],
             methods: vec![method_id],
             static_methods: vec![],
             extends: vec![],
@@ -1413,6 +1423,7 @@ mod tests {
             name_id: make_name_id(420),
             kind: VirTypeDefKind::Struct,
             fields: vec![],
+            field_types: vec![],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -1441,6 +1452,7 @@ mod tests {
             name_id: make_name_id(200),
             kind: VirTypeDefKind::Interface,
             fields: vec![],
+            field_types: vec![],
             methods: vec![make_method_id(30)],
             static_methods: vec![],
             extends: vec![parent],
@@ -1468,6 +1480,7 @@ mod tests {
             name_id: make_name_id(100),
             kind: VirTypeDefKind::Class,
             fields: vec![make_field_id(1)],
+            field_types: vec![VirTypeId::I64],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -1488,6 +1501,7 @@ mod tests {
             name_id: make_name_id(101),
             kind: VirTypeDefKind::Struct,
             fields: vec![make_field_id(2), make_field_id(3)],
+            field_types: vec![VirTypeId::I64, VirTypeId::I64],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -1637,6 +1651,7 @@ mod tests {
             name_id: name,
             kind: VirTypeDefKind::Class,
             fields: vec![],
+            field_types: vec![],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -1667,6 +1682,7 @@ mod tests {
             name_id: name,
             kind: VirTypeDefKind::Class,
             fields: vec![],
+            field_types: vec![],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -1687,6 +1703,7 @@ mod tests {
             name_id: name,
             kind: VirTypeDefKind::Struct,
             fields: vec![],
+            field_types: vec![],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -1763,6 +1780,7 @@ mod tests {
             name_id: make_name_id(100),
             kind: VirTypeDefKind::Interface,
             fields: vec![],
+            field_types: vec![],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -1793,6 +1811,7 @@ mod tests {
             name_id: make_name_id(100),
             kind: VirTypeDefKind::Interface,
             fields: vec![],
+            field_types: vec![],
             methods: vec![m1, m2],
             static_methods: vec![],
             extends: vec![],
@@ -1862,6 +1881,7 @@ mod tests {
             name_id: make_name_id(100),
             kind: VirTypeDefKind::Interface,
             fields: vec![],
+            field_types: vec![],
             methods: vec![m1, m2],
             static_methods: vec![],
             extends: vec![],
@@ -1928,6 +1948,7 @@ mod tests {
             name_id: make_name_id(100),
             kind: VirTypeDefKind::Interface,
             fields: vec![],
+            field_types: vec![],
             methods: vec![m1],
             static_methods: vec![],
             extends: vec![],
@@ -1987,6 +2008,7 @@ mod tests {
             name_id: make_name_id(100),
             kind: VirTypeDefKind::Class,
             fields: vec![],
+            field_types: vec![],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -2031,6 +2053,7 @@ mod tests {
             name_id: nil_name,
             kind: VirTypeDefKind::Sentinel,
             fields: vec![],
+            field_types: vec![],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -2051,6 +2074,7 @@ mod tests {
             name_id: make_name_id(999),
             kind: VirTypeDefKind::Class,
             fields: vec![],
+            field_types: vec![],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],

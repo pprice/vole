@@ -23,7 +23,7 @@ use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};
 
 use super::vir_struct_helpers::{
-    VirStructEntityLookup, sema_to_vir_hint, vir_struct_flat_slot_count, vir_struct_total_byte_size,
+    VirStructEntityLookup, vir_struct_flat_slot_count, vir_struct_total_byte_size,
 };
 
 /// Temporary bridge from `VirTypeId` to sema `TypeId`.
@@ -1024,24 +1024,13 @@ fn vir_error_fields_size(
     entities: &impl VirStructEntityLookup,
     table: &VirTypeTable,
 ) -> u32 {
-    let field_ids = entities.field_ids_on_type(type_def_id);
-    field_ids
-        .into_iter()
-        .map(|field_id| {
-            let field_sema_ty = entities.field_type(field_id);
-            // Bridge sema TypeId to VirTypeId for recursive size computation.
-            let field_vir_ty = if field_sema_ty.raw() < VirTypeId::FIRST_DYNAMIC {
-                VirTypeId::from_raw(field_sema_ty.raw())
-            } else {
-                VirTypeId::UNKNOWN
-            };
-            if field_vir_ty != VirTypeId::UNKNOWN {
-                vir_type_id_size(field_vir_ty, pointer_type, entities, table)
-            } else {
-                // Fallback: treat as pointer-sized for dynamic sema IDs
-                pointer_type.bytes()
-            }
-        })
+    let field_vir_types = entities
+        .vir_type_def(type_def_id)
+        .map(|td| &td.field_types[..])
+        .unwrap_or(&[]);
+    field_vir_types
+        .iter()
+        .map(|&field_vir_ty| vir_type_id_size(field_vir_ty, pointer_type, entities, table))
         .sum()
 }
 
@@ -1624,14 +1613,17 @@ fn vir_compute_composite_rc_offsets(
 ) -> Option<VirCompositeRcOffsets> {
     // Struct: iterate fields, collect offsets of RC-typed fields
     if let Some((type_def_id, _type_args)) = vir_unwrap_struct(vir_ty, table) {
+        let field_vir_types = entities
+            .vir_type_def(type_def_id)
+            .map(|td| td.field_types.clone())
+            .unwrap_or_default();
         let mut shallow_offsets = Vec::new();
         let mut deep_offsets = Vec::new();
         let mut union_fields = Vec::new();
         let mut byte_offset = 0i32;
 
-        for field_id in entities.field_ids_on_type(type_def_id) {
-            let field_sema_ty = entities.field_type(field_id);
-            let field_vir = sema_to_vir_hint(field_sema_ty);
+        for field_vir in &field_vir_types {
+            let field_vir = *field_vir;
             let slots = vir_field_flat_slots(field_vir, table, entities);
 
             // Shallow: only direct RC fields

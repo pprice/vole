@@ -49,7 +49,13 @@ pub fn build_entity_metadata(
     // translate_type_id may intern new compound types it encounters.
     let mut tt = type_table.clone();
 
-    populate_type_defs(registry.all_type_defs(), type_arena, &mut tt, &mut meta);
+    populate_type_defs(
+        registry.all_type_defs(),
+        registry.all_field_defs(),
+        type_arena,
+        &mut tt,
+        &mut meta,
+    );
     populate_field_defs(
         registry.all_field_defs(),
         type_arena,
@@ -102,8 +108,11 @@ fn convert_type_def_kind(kind: TypeDefKind) -> VirTypeDefKind {
 ///
 /// Translates each implementation's sema `TypeId` type arguments to
 /// `VirTypeId`s so codegen can read them without the sema type arena.
+/// Also builds `field_types` for each type by looking up each field's
+/// sema type and translating it.
 fn populate_type_defs(
     type_defs: &[entity_defs::TypeDef],
+    field_defs: &[entity_defs::FieldDef],
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
     meta: &mut VirEntityMetadata,
@@ -150,11 +159,24 @@ fn populate_type_defs(
         let sema_generic_field_types = td.generic_info.as_ref().map(|gi| gi.field_types.clone());
         let generic_field_names = td.generic_info.as_ref().map(|gi| gi.field_names.clone());
 
+        // Build concrete field_types by translating each field's sema
+        // TypeId.  FieldId is index-based so field_defs[id.index()] is
+        // the corresponding FieldDef.
+        let field_types: Vec<VirTypeId> = td
+            .fields
+            .iter()
+            .map(|&fid| {
+                let fd = &field_defs[fid.index() as usize];
+                translate_type_id(type_table, fd.ty, type_arena)
+            })
+            .collect();
+
         meta.insert_type_def(VirTypeDef {
             id: td.id,
             name_id: td.name_id,
             kind: convert_type_def_kind(td.kind),
             fields: td.fields.clone(),
+            field_types,
             methods: td.methods.clone(),
             static_methods: td.static_methods.clone(),
             extends: td.extends.clone(),

@@ -30,9 +30,6 @@ impl Cg<'_, '_, '_> {
         };
 
         // Bridge to sema TypeId for RC state computation.
-        // `vir_compute_rc_state` cannot resolve nested struct field types
-        // (sema_to_vir_hint returns UNKNOWN for dynamic TypeIds), so we use
-        // the sema-based `rc_state()` which correctly walks TypeArena.
         let type_id = self.cv_type_id_from_vir(vir_ty);
 
         let rc_old = if self.rc_state(type_id).needs_cleanup() {

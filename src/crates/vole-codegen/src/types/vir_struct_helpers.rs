@@ -4,9 +4,9 @@
 // VirTypeTable-based struct/class field layout helpers for code generation.
 //
 // These functions replace the TypeArena-based equivalents in structs/helpers.rs
-// for code paths that operate on VirTypeId (post-VIR-lowering).  They still
-// require EntityRegistry access for field lists (TypeDefId -> field
-// names/types), but all type queries go through VirTypeTable.
+// for code paths that operate on VirTypeId (post-VIR-lowering).  Field types
+// come from `VirTypeDef::field_types` (populated during VIR lowering), so
+// no sema round-trip is needed for layout computation.
 //
 use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
@@ -87,6 +87,23 @@ impl VirStructEntityLookup for vole_sema::entity_registry::EntityRegistry {
 }
 
 // ============================================================================
+// Field type lookup from VirTypeDef
+// ============================================================================
+
+/// Look up the concrete `VirTypeId` for each field on a type definition.
+///
+/// Returns `Some(&[VirTypeId])` from `VirTypeDef::field_types`, or `None`
+/// if the entity has no VirTypeDef (e.g. test-only EntityRegistry impls).
+fn vir_field_types_for(
+    type_def_id: TypeDefId,
+    entities: &impl VirStructEntityLookup,
+) -> Option<&[VirTypeId]> {
+    entities
+        .vir_type_def(type_def_id)
+        .map(|td| td.field_types.as_slice())
+}
+
+// ============================================================================
 // Payload union detection
 // ============================================================================
 
@@ -117,18 +134,6 @@ fn vir_is_sentinel_or_void(
     _entities: &impl VirStructEntityLookup,
 ) -> bool {
     table.is_sentinel(vir_ty) || matches!(table.get(vir_ty), VirType::Void)
-}
-
-pub(crate) fn sema_to_vir_hint(sema_ty: TypeId) -> VirTypeId {
-    // Temporary bridge after removing VirTypeTable's sema TypeId cache.
-    // This helper intentionally maps only reserved IDs by index; dynamic
-    // IDs fall back to UNKNOWN until field metadata is VirTypeId-native
-    // in N279-C.
-    if sema_ty.raw() < VirTypeId::FIRST_DYNAMIC {
-        VirTypeId::from_raw(sema_ty.raw())
-    } else {
-        VirTypeId::UNKNOWN
-    }
 }
 
 // ============================================================================
@@ -317,9 +322,9 @@ pub(crate) fn vir_struct_flat_slot_count(
 ) -> Option<usize> {
     let (type_def_id, _type_args) = vir_unwrap_struct(vir_ty, table)?;
 
+    let field_vir_types = vir_field_types_for(type_def_id, entities)?;
     let mut total = 0usize;
-    for field_id in entities.field_ids_on_type(type_def_id) {
-        let field_vir = sema_to_vir_hint(entities.field_type(field_id));
+    for &field_vir in field_vir_types {
         total += vir_field_flat_slots_recursive(field_vir, table, entities);
     }
     Some(total)
@@ -337,14 +342,13 @@ pub(crate) fn vir_struct_field_byte_offset(
 ) -> Option<i32> {
     let (type_def_id, _type_args) = vir_unwrap_struct(vir_ty, table)?;
 
-    let fields = entities.field_ids_on_type(type_def_id);
-    if slot > fields.len() {
+    let field_vir_types = vir_field_types_for(type_def_id, entities)?;
+    if slot > field_vir_types.len() {
         return None;
     }
 
     let mut offset = 0i32;
-    for &field_id in fields.iter().take(slot) {
-        let field_vir = sema_to_vir_hint(entities.field_type(field_id));
+    for &field_vir in field_vir_types.iter().take(slot) {
         let slots = vir_field_flat_slots_recursive(field_vir, table, entities);
         offset += (slots as i32) * 8;
     }
@@ -400,10 +404,10 @@ pub(crate) fn vir_struct_flat_field_cranelift_types(
 ) -> Option<Vec<(i32, Type)>> {
     let (type_def_id, _type_args) = vir_unwrap_struct(vir_ty, table)?;
 
+    let field_vir_types = vir_field_types_for(type_def_id, entities)?;
     let mut result = Vec::new();
     let mut offset = 0i32;
-    for field_id in entities.field_ids_on_type(type_def_id) {
-        let field_vir = sema_to_vir_hint(entities.field_type(field_id));
+    for &field_vir in field_vir_types {
         vir_collect_leaf_slots(field_vir, table, entities, &mut offset, &mut result);
     }
     Some(result)
@@ -422,9 +426,10 @@ fn vir_collect_leaf_slots(
 ) {
     // Recursively flatten nested structs
     if let Some((nested_def, _nested_args)) = vir_unwrap_struct(vir_ty, table) {
-        for field_id in entities.field_ids_on_type(nested_def) {
-            let field_vir = sema_to_vir_hint(entities.field_type(field_id));
-            vir_collect_leaf_slots(field_vir, table, entities, offset, out);
+        if let Some(nested_field_types) = vir_field_types_for(nested_def, entities) {
+            for &field_vir in nested_field_types {
+                vir_collect_leaf_slots(field_vir, table, entities, offset, out);
+            }
         }
         return;
     }
@@ -549,13 +554,45 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Struct layout helpers (with EntityRegistry)
+    // Struct layout helpers
     // -----------------------------------------------------------------------
 
-    /// Create a test EntityRegistry with a struct type and fields.
-    fn make_struct_registry(field_type_ids: &[TypeId]) -> (EntityRegistry, TypeDefId) {
+    /// Test wrapper that combines an EntityRegistry with VirTypeDef metadata.
+    struct TestStructRegistry {
+        registry: EntityRegistry,
+        type_defs: FxHashMap<TypeDefId, VirTypeDef>,
+    }
+
+    impl VirStructEntityLookup for TestStructRegistry {
+        fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
+            self.registry.get_type(type_def_id).kind.is_sentinel()
+        }
+
+        fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+            self.registry.fields_on_type(type_def_id).collect()
+        }
+
+        fn field_type(&self, field_id: FieldId) -> TypeId {
+            self.registry.get_field(field_id).ty
+        }
+
+        fn last_segment(&self, _name_id: NameId) -> Option<String> {
+            None
+        }
+
+        fn vir_type_def(&self, type_def_id: TypeDefId) -> Option<&VirTypeDef> {
+            self.type_defs.get(&type_def_id)
+        }
+    }
+
+    /// Create a test struct type with fields and VirTypeDef metadata.
+    fn make_struct_registry(
+        field_sema_types: &[TypeId],
+        field_vir_types: &[VirTypeId],
+    ) -> (TestStructRegistry, TypeDefId) {
         use vole_identity::NameTable;
         use vole_sema::entity_defs::TypeDefKind;
+        use vole_vir::entity_metadata::VirTypeDefKind;
 
         let mut names = NameTable::new();
         let main_mod = names.main_module();
@@ -565,20 +602,52 @@ mod tests {
         let mut registry = EntityRegistry::new();
         let type_def_id = registry.register_type(type_name, TypeDefKind::Struct, main_mod);
 
-        for (i, &ty) in field_type_ids.iter().enumerate() {
+        let mut field_ids = Vec::new();
+        for (i, &ty) in field_sema_types.iter().enumerate() {
             let field_name_str = format!("f{i}");
             let field_name = names.intern_raw(builtin_mod, &[&field_name_str]);
             let full_name = names.intern_raw(main_mod, &["TestStruct", &field_name_str]);
-            registry.register_field(type_def_id, field_name, full_name, ty, i);
+            let fid = registry.register_field(type_def_id, field_name, full_name, ty, i);
+            field_ids.push(fid);
         }
 
-        (registry, type_def_id)
+        let vir_td = VirTypeDef {
+            id: type_def_id,
+            name_id: type_name,
+            kind: VirTypeDefKind::Struct,
+            fields: field_ids,
+            field_types: field_vir_types.to_vec(),
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: main_mod,
+            is_generic: false,
+            generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
+        };
+
+        let mut type_defs = FxHashMap::default();
+        type_defs.insert(type_def_id, vir_td);
+
+        (
+            TestStructRegistry {
+                registry,
+                type_defs,
+            },
+            type_def_id,
+        )
     }
 
     #[test]
     fn struct_flat_slot_count_two_i64_fields() {
         let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i64]);
+        let (entities, type_def_id) =
+            make_struct_registry(&[sema_i64, sema_i64], &[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -599,7 +668,8 @@ mod tests {
     fn struct_flat_slot_count_with_wide_field() {
         let sema_i64 = TypeId::I64;
         let sema_i128 = TypeId::I128;
-        let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i128]);
+        let (entities, type_def_id) =
+            make_struct_registry(&[sema_i64, sema_i128], &[VirTypeId::I64, VirTypeId::I128]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -627,7 +697,8 @@ mod tests {
     #[test]
     fn struct_field_byte_offset_two_i64() {
         let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i64]);
+        let (entities, type_def_id) =
+            make_struct_registry(&[sema_i64, sema_i64], &[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -652,7 +723,8 @@ mod tests {
     fn struct_field_byte_offset_with_wide() {
         let sema_i128 = TypeId::I128;
         let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) = make_struct_registry(&[sema_i128, sema_i64]);
+        let (entities, type_def_id) =
+            make_struct_registry(&[sema_i128, sema_i64], &[VirTypeId::I128, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -677,7 +749,8 @@ mod tests {
     #[test]
     fn struct_total_byte_size_two_i64() {
         let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i64]);
+        let (entities, type_def_id) =
+            make_struct_registry(&[sema_i64, sema_i64], &[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -697,7 +770,8 @@ mod tests {
     #[test]
     fn struct_flat_field_cranelift_types_two_i64() {
         let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i64]);
+        let (entities, type_def_id) =
+            make_struct_registry(&[sema_i64, sema_i64], &[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -716,7 +790,8 @@ mod tests {
     fn struct_flat_field_cranelift_types_with_f64() {
         let sema_i64 = TypeId::I64;
         let sema_f64 = TypeId::F64;
-        let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_f64]);
+        let (entities, type_def_id) =
+            make_struct_registry(&[sema_i64, sema_f64], &[VirTypeId::I64, VirTypeId::F64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -842,6 +917,7 @@ mod tests {
             name_id: type_name,
             kind: VirTypeDefKind::Struct,
             fields: vec![],
+            field_types: field_vir_types.to_vec(),
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -957,6 +1033,7 @@ mod tests {
             name_id: type_name,
             kind: VirTypeDefKind::Class,
             fields: vec![],
+            field_types: vec![VirTypeId::I128, VirTypeId::I64],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
@@ -1038,6 +1115,7 @@ mod tests {
             name_id: type_name,
             kind: VirTypeDefKind::Struct,
             fields: vec![],
+            field_types: vec![param_vir],
             methods: vec![],
             static_methods: vec![],
             extends: vec![],
