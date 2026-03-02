@@ -245,7 +245,7 @@ impl Cg<'_, '_, '_> {
         if arr.is_owned() && self.rc_state(arr_sema_ty).needs_cleanup() {
             let tracked_var = self.builder.declare_var(self.cranelift_type(arr_sema_ty));
             self.builder.def_var(tracked_var, arr.value);
-            let drop_flag = self.register_rc_local(tracked_var, arr_sema_ty);
+            let drop_flag = self.register_rc_local(tracked_var, arr.type_id);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
 
@@ -467,12 +467,14 @@ impl Cg<'_, '_, '_> {
     /// Track an owned iterator in the current RC scope for cleanup.
     pub(crate) fn track_iter_in_rc_scope(&mut self, iter: &super::types::CompiledValue) {
         // For RC bookkeeping in iterator contexts, bridge via cv_type_id_from_vir
-        // rather than rc_state_v — rc_state_v can disagree for iterator types.
+        // for the needs_cleanup check — rc_state_v can disagree for iterator types.
+        // register_rc_local takes VirTypeId (the stored type_id is dead_code;
+        // is_interface/is_unknown are computed from the VirTypeId at registration).
         let iter_sema_ty = self.cv_type_id_from_vir(iter.type_id);
         if iter.is_owned() && self.rc_state(iter_sema_ty).needs_cleanup() {
             let tracked_var = self.builder.declare_var(self.cranelift_type(iter_sema_ty));
             self.builder.def_var(tracked_var, iter.value);
-            let drop_flag = self.register_rc_local(tracked_var, iter_sema_ty);
+            let drop_flag = self.register_rc_local(tracked_var, iter.type_id);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
     }

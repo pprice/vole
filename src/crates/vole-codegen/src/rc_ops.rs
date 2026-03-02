@@ -531,12 +531,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Register an RC local in the current scope. Allocates a drop flag,
     /// initializes it to 0, and adds it to the current scope.
     /// Returns the drop flag Variable so the caller can set it to 1 after assignment.
-    pub fn register_rc_local(&mut self, variable: Variable, type_id: TypeId) -> Variable {
+    pub fn register_rc_local(&mut self, variable: Variable, vir_ty: VirTypeId) -> Variable {
         let drop_flag = super::rc_cleanup::alloc_drop_flag(self);
-        let is_interface = self.vir_query_is_interface(type_id);
-        let is_unknown = type_id.is_unknown();
+        let is_interface = self.vir_query_is_interface_v(vir_ty);
+        let is_unknown = self.vir_query_is_unknown_v(vir_ty);
         self.rc_scopes
-            .register_rc_local(variable, drop_flag, type_id, is_interface, is_unknown);
+            .register_rc_local(variable, drop_flag, vir_ty, is_interface, is_unknown);
         drop_flag
     }
 

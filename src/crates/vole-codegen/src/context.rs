@@ -488,9 +488,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a `VirTypeId` is the unknown type.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_unknown_v(&self, vir_ty: VirTypeId) -> bool {
+        if vir_ty.is_compat() {
+            return self.vir_query_is_unknown(self.cv_type_id_from_vir(vir_ty));
+        }
         crate::types::vir_conversions::vir_is_unknown(vir_ty, self.vir_type_table())
     }
 

@@ -8,7 +8,7 @@
 // conditional (e.g., variable set in one branch of an if but not the other).
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags, Variable, types};
-use vole_identity::TypeId;
+use vole_identity::VirTypeId;
 
 use crate::context::Cg;
 use crate::ops::try_constant_value;
@@ -26,7 +26,7 @@ pub(crate) struct RcLocal {
         dead_code,
         reason = "stored for debugging and future type-aware cleanup"
     )]
-    pub type_id: TypeId,
+    pub type_id: VirTypeId,
     /// True if this is an interface (fat pointer) local. For interfaces, the
     /// actual RC-managed data word is at offset 0 of the fat pointer, so cleanup
     /// must load it before calling rc_dec.
@@ -111,7 +111,7 @@ impl RcScopeStack {
         &mut self,
         variable: Variable,
         drop_flag: Variable,
-        type_id: TypeId,
+        type_id: VirTypeId,
         is_interface: bool,
         is_unknown: bool,
     ) {

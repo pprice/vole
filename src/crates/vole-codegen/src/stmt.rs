@@ -1218,7 +1218,7 @@ impl Cg<'_, '_, '_> {
         // RC_inc + register so scope-exit dec balances the borrow.
         if self.rc_scopes.has_active_scope() && self.rc_state(ty).needs_cleanup() {
             self.emit_rc_inc_for_type(value, ty)?;
-            let drop_flag = self.register_rc_local(var, ty);
+            let drop_flag = self.register_rc_local(var, self.vir_lookup_or_compat(ty));
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
         Ok(())
@@ -1407,23 +1407,29 @@ impl Cg<'_, '_, '_> {
         final_type_id: TypeId,
         is_stack_union: bool,
     ) -> CodegenResult<()> {
+        let final_vir_ty = self.vir_lookup_or_compat(final_type_id);
+
         // Detect whether coerce_let_init called box_to_unknown (new TaggedValue).
-        let created_tagged_value = self.vir_query_is_unknown(final_type_id)
-            && !self.vir_query_is_unknown(self.cv_type_id_from_vir(init.type_id));
+        // Use cv_type_id_from_vir for the init check — vir_query_is_unknown_v would
+        // miss array/function types that exist in VirTypeTable but can't be resolved
+        // back to sema TypeId (cv_type_id_from_vir returns TypeId::UNKNOWN for those).
+        let init_sema_ty = self.cv_type_id_from_vir(init.type_id);
+        let created_tagged_value =
+            self.vir_query_is_unknown(final_type_id) && !self.vir_query_is_unknown(init_sema_ty);
 
         if self.rc_scopes.has_active_scope() && created_tagged_value {
-            let drop_flag = self.register_rc_local(var, final_type_id);
+            let drop_flag = self.register_rc_local(var, final_vir_ty);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         } else if self.rc_scopes.has_active_scope()
             && final_type_id == TypeId::UNKNOWN
-            && self.cv_type_id_from_vir(init.type_id) == TypeId::UNKNOWN
+            && init_sema_ty == TypeId::UNKNOWN
             && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
         {
             // TEMP(N279-C): mixed VIR/sema metadata can degrade array-literal
             // let bindings to UNKNOWN while still carrying raw array pointers
             // (not boxed TaggedValue unknown). Register generic RC cleanup so
             // scope-exit emits rc_dec and array element closures are released.
-            let drop_flag = self.register_rc_local(var, TypeId::HANDLE);
+            let drop_flag = self.register_rc_local(var, VirTypeId::HANDLE);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         } else if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup()
         {
@@ -1434,7 +1440,7 @@ impl Cg<'_, '_, '_> {
                 if is_borrow {
                     self.emit_rc_inc_for_type(final_value, final_type_id)?;
                 }
-                let drop_flag = self.register_rc_local(var, final_type_id);
+                let drop_flag = self.register_rc_local(var, final_vir_ty);
                 crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
             }
         } else if self.rc_scopes.has_active_scope() {
