@@ -49,7 +49,7 @@ impl Cg<'_, '_, '_> {
             types::I8,
             self.vir_lookup(nil_type_id),
         );
-        self.coerce_to_type(nil_val, result_type_id)
+        self.coerce_to_type(nil_val, self.vir_lookup_or_compat(result_type_id))
     }
 
     /// Load a captured variable from closure
@@ -308,7 +308,7 @@ impl Cg<'_, '_, '_> {
 
         let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
         let result_type_id = self.try_substitute_type(result_type_id);
-        let result_vir_ty = self.vir_lookup(result_type_id);
+        let result_vir_ty = self.vir_lookup_or_compat(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
         let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
 
@@ -336,7 +336,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(not_nil_block);
         let inner = self.extract_optional_inner(scrutinee, inner_type_id);
         let body_val = self.optional_chain_field_access(inner, field)?;
-        let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
+        let body_coerced = self.coerce_to_type(body_val, result_vir_ty)?;
         self.jump_with_owned_result(
             body_coerced,
             result_vir_ty,
@@ -382,7 +382,7 @@ impl Cg<'_, '_, '_> {
             })?;
 
         let result_type_id = self.try_substitute_type(self.cv_type_id_from_vir(vir_result_type_id));
-        let result_vir_ty = self.vir_lookup(result_type_id);
+        let result_vir_ty = self.vir_lookup_or_compat(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
         let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
 
@@ -416,7 +416,7 @@ impl Cg<'_, '_, '_> {
             dispatch,
             call_node_id,
         )?;
-        let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
+        let body_coerced = self.coerce_to_type(body_val, result_vir_ty)?;
         self.jump_with_owned_result(
             body_coerced,
             result_vir_ty,

@@ -882,7 +882,7 @@ impl Cg<'_, '_, '_> {
         if body_result.type_id == VirTypeId::NEVER {
             return Ok(body_result);
         }
-        self.coerce_to_type(body_result, result_type_id)
+        self.coerce_to_type(body_result, self.vir_lookup_or_compat(result_type_id))
     }
 
     /// Emit the exit jump for a match arm body to the merge block.

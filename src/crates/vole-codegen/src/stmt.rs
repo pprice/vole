@@ -66,7 +66,8 @@ impl Cg<'_, '_, '_> {
                     (wrapped.value, self.cv_type_id_from_vir(wrapped.type_id))
                 }
                 LetStorageHint::Numeric if init.type_id.is_numeric() => {
-                    let coerced = self.coerce_to_type(*init, declared_type_id)?;
+                    let coerced =
+                        self.coerce_to_type(*init, self.vir_lookup_or_compat(declared_type_id))?;
                     (coerced.value, self.cv_type_id_from_vir(coerced.type_id))
                 }
                 LetStorageHint::Interface => {

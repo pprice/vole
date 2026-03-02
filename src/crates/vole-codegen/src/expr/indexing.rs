@@ -268,9 +268,7 @@ impl Cg<'_, '_, '_> {
         elem_vir_ty: VirTypeId,
         size: usize,
     ) -> CodegenResult<CompiledValue> {
-        // Bridge to sema TypeId for coerce_to_type (no _v variant yet).
-        let elem_sema_id = self.cv_type_id_from_vir(elem_vir_ty);
-        let val = self.coerce_to_type(val, elem_sema_id)?;
+        let val = self.coerce_to_type(val, elem_vir_ty)?;
         let elem_size = self.vir_query_field_byte_size_v(elem_vir_ty) as i32;
 
         let offset = if let VirExpr::IntLiteral { value, .. } = index {

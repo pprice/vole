@@ -176,7 +176,7 @@ impl Cg<'_, '_, '_> {
                     if compiled.is_owned() {
                         rc_temps.push(compiled);
                     }
-                    self.coerce_to_type(compiled, param_id)?
+                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_id))?
                 } else {
                     // slot uses its default value
                     let (default_vals, rc_owned) =
@@ -200,7 +200,8 @@ impl Cg<'_, '_, '_> {
                 if compiled.is_owned() {
                     rc_temps.push(compiled);
                 }
-                let compiled = self.coerce_to_type(compiled, *param_id)?;
+                let compiled =
+                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(*param_id))?;
                 args.push(compiled.value);
             }
 
@@ -398,7 +399,8 @@ impl Cg<'_, '_, '_> {
             if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
-            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            let compiled =
+                self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
             args.push(compiled.value);
         }
 

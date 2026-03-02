@@ -34,7 +34,8 @@ impl Cg<'_, '_, '_> {
         // Match block: extract value, wrap as nullable
         self.switch_and_seal(match_block);
         let extracted = extract(self)?;
-        let wrapped = self.coerce_to_type(extracted, nullable_type_id)?;
+        let wrapped =
+            self.coerce_to_type(extracted, self.vir_lookup_or_compat(nullable_type_id))?;
         if result_needs_rc && wrapped.is_borrowed() {
             self.emit_rc_inc_for_type(wrapped.value, nullable_type_id)?;
         }

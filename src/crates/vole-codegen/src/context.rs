@@ -430,6 +430,27 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         lookup.unwrap_or(VirTypeId::UNKNOWN)
     }
 
+    /// Look up the VirTypeId for a sema TypeId, falling back to a compat-encoded
+    /// VirTypeId that preserves the original TypeId for round-tripping.
+    ///
+    /// Unlike `vir_lookup`, this never returns `VirTypeId::UNKNOWN` for unmapped
+    /// types (unless `type_id` is genuinely `TypeId::UNKNOWN`).  Safe for callers
+    /// that need `VirTypeId` but may encounter unmapped cross-module types.
+    pub fn vir_lookup_or_compat(&self, type_id: TypeId) -> VirTypeId {
+        let lookup = self.vir_type_table().lookup_type_id(type_id);
+        match lookup {
+            Some(vir_ty) if vir_ty == VirTypeId::UNKNOWN && type_id != TypeId::UNKNOWN => {
+                // The VIR type table mapped this TypeId to VirTypeId::UNKNOWN
+                // (cross-module type not properly interned). Use compat encoding
+                // so callers can distinguish this from genuinely unknown types.
+                VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG)
+            }
+            Some(vir_ty) => vir_ty,
+            None if type_id == TypeId::UNKNOWN => VirTypeId::UNKNOWN,
+            None => VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG),
+        }
+    }
+
     /// Check if a `VirTypeId` is a struct type via VirTypeTable.
     ///
     /// Excludes sentinel types (Nil, Done, user-defined empties) — matching the
@@ -1134,6 +1155,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_numeric_v(&self, vir_ty: VirTypeId) -> bool {
+        if vir_ty.is_compat() {
+            return self.vir_query_is_numeric(self.cv_type_id_from_vir(vir_ty));
+        }
         crate::types::vir_conversions::vir_is_numeric(vir_ty, self.vir_type_table())
     }
 
@@ -2222,6 +2246,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
 
         let resolved_elem_type = self.try_substitute_type(elem_type_id);
+        let resolved_elem_vir = self.vir_lookup_or_compat(resolved_elem_type);
         // Fast path: sema told us whether this is a union element or not.
         // If no hint, fall back to arena check.
         let is_union_elem =
@@ -2234,7 +2259,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // scope cleanup frees the original).
             let was_already_unknown = value.type_id.is_unknown();
 
-            value = self.coerce_to_type(value, resolved_elem_type)?;
+            value = self.coerce_to_type(value, resolved_elem_vir)?;
 
             if was_already_unknown && value.type_id.is_unknown() {
                 let cloned = self.call_runtime(RuntimeKey::TaggedValueClone, &[value.value])?;
@@ -2261,7 +2286,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             None => self.union_array_prefers_inline_storage(resolved_elem_type),
         };
         if prefers_inline {
-            value = self.coerce_to_type(value, resolved_elem_type)?;
+            value = self.coerce_to_type(value, resolved_elem_vir)?;
             if !self.vir_query_is_union_v(value.type_id) {
                 return Err(CodegenError::type_mismatch(
                     "array union inline coercion",
@@ -2293,7 +2318,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Boxed union storage for ambiguous runtime tags.
         if self.vir_query_is_union_v(value.type_id) {
-            value = self.coerce_to_type(value, resolved_elem_type)?;
+            value = self.coerce_to_type(value, resolved_elem_vir)?;
             if !self.vir_query_is_union_v(value.type_id) {
                 return Err(CodegenError::type_mismatch(
                     "array union boxed coercion",

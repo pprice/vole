@@ -67,9 +67,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some(substitutions) = self.substitutions {
             if vir_ty.is_compat() {
                 // Compat-encoded: round-trip through TypeId substitution.
+                // Use vir_lookup_or_compat so unmapped cross-module types stay
+                // compat-encoded instead of collapsing to VirTypeId::UNKNOWN.
                 let sema_ty = self.cv_type_id_from_vir(vir_ty);
                 let substituted = self.try_substitute_type(sema_ty);
-                self.vir_lookup(substituted)
+                self.vir_lookup_or_compat(substituted)
             } else {
                 self.vir_type_table()
                     .lookup_substitute_vir(vir_ty, substitutions)

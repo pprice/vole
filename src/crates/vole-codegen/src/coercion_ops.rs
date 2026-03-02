@@ -143,13 +143,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn coerce_to_type(
         &mut self,
         value: CompiledValue,
-        target_type_id: TypeId,
+        target_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         // Resolve generic type params in monomorphized contexts before coercion checks.
         // This keeps union/interface coercions from comparing concrete targets against
         // unresolved TypeParam values.
-        let resolved_target_type_id = self.try_substitute_type(target_type_id);
-        let resolved_target_vir = self.vir_lookup(resolved_target_type_id);
+        let resolved_target_vir = self.try_substitute_type_v(target_vir_ty);
         let resolved_value_vir = self.try_substitute_type_v(value.type_id);
         let mut resolved_value = value;
         resolved_value.type_id = resolved_value_vir;
@@ -158,24 +157,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let is_value_interface = self.vir_query_is_interface_v(resolved_value_vir);
         let is_target_union = self.vir_query_is_union_v(resolved_target_vir);
         let is_value_union = self.vir_query_is_union_v(resolved_value_vir);
-        // Note: vir_lookup maps unmapped TypeIds to VirTypeId::UNKNOWN as a
-        // fallback, so vir_query_is_unknown_v on target would produce false
-        // positives. Use TypeId-based constant check instead.
-        let is_target_unknown = self.vir_query_is_unknown(resolved_target_type_id);
+        // Safe: callers use vir_lookup_or_compat, which produces compat-encoded
+        // VirTypeIds for unmapped types instead of VirTypeId::UNKNOWN. Only
+        // genuinely unknown targets will have VirTypeId::UNKNOWN here.
+        let is_target_unknown = self.vir_query_is_unknown_v(resolved_target_vir);
         let is_value_unknown = self.vir_query_is_unknown_v(resolved_value_vir);
+
         let is_value_runtime_iterator = self.vir_query_is_runtime_iterator_v(resolved_value_vir);
         let is_target_numeric = self.vir_query_is_numeric_v(resolved_target_vir);
         let is_value_numeric = self.vir_query_is_numeric_v(resolved_value_vir);
 
         if is_target_numeric && is_value_numeric && resolved_target_vir != resolved_value_vir {
-            return self.coerce_numeric_to_type(resolved_value, resolved_target_type_id);
+            return self.coerce_numeric_to_type(resolved_value, resolved_target_vir);
         }
         // RuntimeIterator is a concrete type that implements Iterator dispatch
         // directly via runtime_iterator_method; skip interface boxing.
         if is_target_interface && !is_value_interface && !is_value_runtime_iterator {
-            self.box_interface_value(resolved_value, resolved_target_type_id)
+            // Bridge to sema TypeId for box_interface_value (not yet migrated).
+            let target_type_id = self.cv_type_id_from_vir(resolved_target_vir);
+            self.box_interface_value(resolved_value, target_type_id)
         } else if is_target_union && !is_value_union {
-            self.construct_union_id(resolved_value, resolved_target_type_id)
+            // Bridge to sema TypeId for construct_union_id (not yet migrated).
+            let target_type_id = self.cv_type_id_from_vir(resolved_target_vir);
+            self.construct_union_id(resolved_value, target_type_id)
         } else if is_target_unknown && !is_value_unknown {
             self.box_to_unknown(resolved_value)
         } else {
@@ -186,27 +190,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     fn coerce_numeric_to_type(
         &mut self,
         value: CompiledValue,
-        target_type_id: TypeId,
+        target_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let target_ty = self.cranelift_type(target_type_id);
+        let target_ty = self.cranelift_type_v(target_vir_ty);
         // If the Cranelift representation is already the right type (e.g. u8 → i8,
         // u32 → i32), no IR instruction is needed — just re-tag the value.
         if value.ty == target_ty {
-            return Ok(CompiledValue::new(
-                value.value,
-                target_ty,
-                self.vir_lookup(target_type_id),
-            ));
+            return Ok(CompiledValue::new(value.value, target_ty, target_vir_ty));
         }
-        let coercion = numeric_coercion_v(value.type_id, self.vir_lookup(target_type_id));
+        let coercion = numeric_coercion_v(value.type_id, target_vir_ty);
 
         let converted = match coercion {
             NumericCoercion::Identity => {
-                return Ok(CompiledValue::new(
-                    value.value,
-                    target_ty,
-                    self.vir_lookup(target_type_id),
-                ));
+                return Ok(CompiledValue::new(value.value, target_ty, target_vir_ty));
             }
             NumericCoercion::IntWiden { signed: true } => {
                 sextend_const(self.builder, target_ty, value.value)
@@ -215,25 +211,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 uextend_const(self.builder, target_ty, value.value)
             }
             NumericCoercion::IntNarrow { .. } => self.builder.ins().ireduce(target_ty, value.value),
-            NumericCoercion::FloatWiden => self.float_widen(value, target_type_id)?,
-            NumericCoercion::FloatNarrow => self.float_narrow(value, target_type_id)?,
+            NumericCoercion::FloatWiden => self.float_widen(value, target_vir_ty)?,
+            NumericCoercion::FloatNarrow => self.float_narrow(value, target_vir_ty)?,
             NumericCoercion::IntToFloat { from_signed } => {
-                self.int_to_float(value, target_type_id, from_signed)?
+                self.int_to_float(value, target_vir_ty, from_signed)?
             }
             NumericCoercion::FloatToInt { to_signed } => {
-                self.float_to_int(value, target_type_id, to_signed)?
+                self.float_to_int(value, target_vir_ty, to_signed)?
             }
         };
-        Ok(CompiledValue::new(
-            converted,
-            target_ty,
-            self.vir_lookup(target_type_id),
-        ))
+        Ok(CompiledValue::new(converted, target_ty, target_vir_ty))
     }
 
     /// Float widening: F32→F64 (fpromote), or anything→F128 (runtime calls).
-    fn float_widen(&mut self, value: CompiledValue, to: TypeId) -> CodegenResult<Value> {
-        let target_ty = self.cranelift_type(to);
+    fn float_widen(&mut self, value: CompiledValue, to: VirTypeId) -> CodegenResult<Value> {
+        let target_ty = self.cranelift_type_v(to);
         if target_ty == types::F128 {
             // Anything→F128 goes through a runtime call, result is i128 bits → bitcast to f128.
             let bits = match value.ty {
@@ -256,8 +248,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Float narrowing: F128→F64/F32 (runtime calls), F64→F32 (fdemote).
-    fn float_narrow(&mut self, value: CompiledValue, to: TypeId) -> CodegenResult<Value> {
-        let target_ty = self.cranelift_type(to);
+    fn float_narrow(&mut self, value: CompiledValue, to: VirTypeId) -> CodegenResult<Value> {
+        let target_ty = self.cranelift_type_v(to);
         if value.ty == types::F128 {
             let f128_bits = self
                 .builder
@@ -279,10 +271,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     fn int_to_float(
         &mut self,
         value: CompiledValue,
-        to: TypeId,
+        to: VirTypeId,
         from_signed: bool,
     ) -> CodegenResult<Value> {
-        let target_ty = self.cranelift_type(to);
+        let target_ty = self.cranelift_type_v(to);
         if target_ty == types::F128 {
             // I128→F128 gets its own runtime call; all others route through i64.
             if value.ty == types::I128 {
@@ -321,10 +313,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     fn float_to_int(
         &mut self,
         value: CompiledValue,
-        to: TypeId,
+        to: VirTypeId,
         to_signed: bool,
     ) -> CodegenResult<Value> {
-        let target_ty = self.cranelift_type(to);
+        let target_ty = self.cranelift_type_v(to);
         if value.ty == types::F128 {
             let f128_bits = self
                 .builder
@@ -486,7 +478,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 rc_owned.push(compiled);
             }
 
-            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            let param_vir_ty = self.vir_lookup_or_compat(param_type_id);
+            let compiled = self.coerce_to_type(compiled, param_vir_ty)?;
             let expected_ty = self.cranelift_type(param_type_id);
             let compiled = if compiled.ty.is_int()
                 && expected_ty.is_int()
@@ -499,7 +492,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(new_value, expected_ty, self.vir_lookup(param_type_id))
+                CompiledValue::new(new_value, expected_ty, param_vir_ty)
             } else {
                 compiled
             };
@@ -547,7 +540,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 rc_owned.push(compiled);
             }
 
-            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            let param_vir_ty = self.vir_lookup_or_compat(param_type_id);
+            let compiled = self.coerce_to_type(compiled, param_vir_ty)?;
             let expected_ty = self.cranelift_type(param_type_id);
             let compiled = if compiled.ty.is_int()
                 && expected_ty.is_int()
@@ -560,7 +554,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(new_value, expected_ty, self.vir_lookup(param_type_id))
+                CompiledValue::new(new_value, expected_ty, param_vir_ty)
             } else {
                 compiled
             };
@@ -603,7 +597,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
 
             // Coerce to the expected param type (handles interface boxing, union construction).
-            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            let param_vir_ty = self.vir_lookup_or_compat(param_type_id);
+            let compiled = self.coerce_to_type(compiled, param_vir_ty)?;
 
             // Handle integer narrowing/widening if needed.
             let expected_ty = self.cranelift_type(param_type_id);
@@ -618,7 +613,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
-                CompiledValue::new(new_value, expected_ty, self.vir_lookup(param_type_id))
+                CompiledValue::new(new_value, expected_ty, param_vir_ty)
             } else {
                 compiled
             };

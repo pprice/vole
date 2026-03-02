@@ -399,7 +399,7 @@ impl Cg<'_, '_, '_> {
                 {
                     let compiled =
                         self.compile_arg_with_expected_type(arg_source, index, param_type_id)?;
-                    self.coerce_to_type(compiled, param_type_id)?
+                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?
                 } else {
                     self.compile_arg_from_source(arg_source, index)?
                 };

@@ -621,7 +621,8 @@ impl Cg<'_, '_, '_> {
                         if compiled.is_owned() {
                             rc_temps.push(compiled);
                         }
-                        let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                        let compiled = self
+                            .coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
                         args.push(compiled.value);
                     }
                 } else {
@@ -815,7 +816,8 @@ impl Cg<'_, '_, '_> {
                     if compiled.is_owned() {
                         rc_temps.push(compiled);
                     }
-                    let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                    let compiled =
+                        self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
                     args.push(compiled.value);
                 }
                 let return_type_id =
@@ -1062,7 +1064,8 @@ impl Cg<'_, '_, '_> {
                         if compiled.is_owned() {
                             rc_temps.push(compiled);
                         }
-                        let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                        let compiled = self
+                            .coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
 
                         if is_generic_class && compiled.ty != types::I64 {
                             self.emit_word(&compiled, None)?
@@ -1098,7 +1101,8 @@ impl Cg<'_, '_, '_> {
                 }
                 // Coerce argument to parameter type if needed
                 // (e.g., concrete type -> interface box, concrete type -> union)
-                let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                let compiled =
+                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
 
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {

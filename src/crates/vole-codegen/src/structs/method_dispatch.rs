@@ -392,7 +392,7 @@ impl Cg<'_, '_, '_> {
             // passed as their concrete variant (e.g. i16) rather than as a tagged
             // union pointer, causing the callee's `is` checks to segfault.
             let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {
-                self.coerce_to_type(compiled, expected_type_id)?
+                self.coerce_to_type(compiled, self.vir_lookup_or_compat(expected_type_id))?
             } else {
                 compiled
             };

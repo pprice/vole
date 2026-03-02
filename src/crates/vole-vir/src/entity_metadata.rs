@@ -339,8 +339,8 @@ pub struct VirGlobalDef {
     pub module_id: ModuleId,
     /// The original sema `TypeId` for this global.
     ///
-    /// Temporary — kept so codegen callers that call `coerce_to_type`
-    /// and `interface_type_def_id` can continue to work with sema TypeIds.
+    /// Temporary — kept so codegen callers that call `interface_type_def_id`
+    /// can continue to work with sema TypeIds.
     /// Will be removed once Phase 3 converts all codegen callers to VirTypeId.
     pub sema_type_id: TypeId,
 }

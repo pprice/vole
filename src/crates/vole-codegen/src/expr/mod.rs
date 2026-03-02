@@ -1207,7 +1207,7 @@ impl Cg<'_, '_, '_> {
         if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
             && let Some(global_type_id) = self.analyzed().global_type_id(name_id)
         {
-            *value = self.coerce_to_type(*value, global_type_id)?;
+            *value = self.coerce_to_type(*value, self.vir_lookup_or_compat(global_type_id))?;
         }
         Ok(())
     }
@@ -1239,7 +1239,7 @@ impl Cg<'_, '_, '_> {
         let var = *var;
         let var_type_id = *var_type_id;
 
-        value = self.coerce_to_type(value, var_type_id)?;
+        value = self.coerce_to_type(value, self.vir_lookup_or_compat(var_type_id))?;
 
         // RC bookkeeping: inc new if borrowed, store, dec old.
         if rc_old.is_some() && value.is_borrowed() {
@@ -1501,7 +1501,7 @@ impl Cg<'_, '_, '_> {
         match kind {
             AsCastKind::Checked => {
                 // target_ty is T | nil — wrap the value.
-                self.coerce_to_type(value, target_ty)
+                self.coerce_to_type(value, self.vir_lookup_or_compat(target_ty))
             }
             AsCastKind::Unchecked => {
                 // Value is already T — pass through.

@@ -434,6 +434,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .return_type(func_key)
             .expect("INTERNAL: function call: missing return type in registry");
         let return_type_id = return_type_id_override.unwrap_or(callee_return_type_id);
+        let return_vir_ty = self.vir_lookup_or_compat(return_type_id);
 
         let is_sret = self.is_sret_struct_return(callee_return_type_id);
 
@@ -537,7 +538,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some(result) = union_copy {
             let mut result = result;
             if return_type_id != callee_return_type_id {
-                result = self.coerce_to_type(result, return_type_id)?;
+                result = self.coerce_to_type(result, return_vir_ty)?;
             }
             return Ok(result);
         }
@@ -548,14 +549,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let mut result =
                 CompiledValue::new(results[0], ptr_type, self.vir_lookup(callee_return_type_id));
             if return_type_id != callee_return_type_id {
-                result = self.coerce_to_type(result, return_type_id)?;
+                result = self.coerce_to_type(result, return_vir_ty)?;
             }
             return Ok(result);
         }
 
         let mut result = self.call_result(call_inst, callee_return_type_id)?;
         if return_type_id != callee_return_type_id {
-            result = self.coerce_to_type(result, return_type_id)?;
+            result = self.coerce_to_type(result, return_vir_ty)?;
         }
         Ok(result)
     }
@@ -590,7 +591,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     rc_temp_args.push(compiled);
                 }
                 if let Some(&param_type_id) = param_type_ids.get(slot) {
-                    self.coerce_to_type(compiled, param_type_id)?
+                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?
                 } else {
                     compiled
                 }
@@ -650,7 +651,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             // Coerce argument to parameter type if needed (e.g., string -> string?)
             let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
-                self.coerce_to_type(compiled, param_type_id)?
+                self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?
             } else {
                 compiled
             };

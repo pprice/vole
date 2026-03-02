@@ -241,7 +241,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 if compiled.is_owned() {
                     rc_temp_args.push(compiled);
                 }
-                let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                let compiled =
+                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
                 compiled.value
             } else if let Some(lambda_node_id) = lambda_node_id {
                 let (default_vals, rc_owned) =
@@ -276,7 +277,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
-            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            let compiled =
+                self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
             args.push(compiled.value);
         }
 
