@@ -6,9 +6,10 @@ use rustc_hash::FxHashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::uextend_const;
 use crate::types::CompiledValue;
-use vole_identity::{NameId, TypeDefId, TypeId, TypeIdVec};
+use vole_identity::{NameId, TypeDefId, TypeId, TypeIdVec, VirTypeId};
 use vole_sema::type_arena::TypeArena;
 use vole_vir::type_table::VirTypeTable;
+use vole_vir::types::VirType;
 
 pub(crate) trait StructEntityLookup {
     fn generic_field_types(&self, type_def_id: TypeDefId) -> Option<Vec<TypeId>>;
@@ -57,7 +58,6 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     field_name: &str,
     cg: &crate::context::Cg,
 ) -> CodegenResult<(usize, TypeId)> {
-    let arena = cg.arena();
     let vir_table = cg.vir_type_table();
 
     // Apply function-level substitutions first (for monomorphized generics)
@@ -65,35 +65,46 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     // substituted with a concrete type (e.g., in duck typing with structural constraints)
     let sema_subs_ref = cg.sema_substitutions();
     let resolved_type_id = if let Some(ref func_subs) = sema_subs_ref {
-        tracing::debug!(
-            ?type_id,
-            type_display = %arena.display_basic(type_id),
-            ?func_subs,
-            "field access: applying substitutions"
-        );
+        tracing::debug!(?type_id, ?func_subs, "field access: applying substitutions");
         vir_table
             .lookup_substitute(type_id, func_subs)
-            .unwrap_or_else(|| {
-                arena.expect_substitute(type_id, func_subs, "field access type substitution")
+            .or_else(|| {
+                cg.analyzed()
+                    .type_arena()
+                    .lookup_substitute(type_id, func_subs)
             })
+            .unwrap_or(type_id)
     } else {
-        tracing::debug!(
-            ?type_id,
-            type_display = %arena.display_basic(type_id),
-            "field access: no substitutions available"
-        );
+        tracing::debug!(?type_id, "field access: no substitutions available");
         type_id
     };
 
-    tracing::debug!(
-        ?resolved_type_id,
-        resolved_display = %arena.display_basic(resolved_type_id),
-        "field access: resolved type"
-    );
+    tracing::debug!(?resolved_type_id, "field access: resolved type");
 
-    let (type_def_id, type_args, _) =
-        arena
-            .unwrap_class_or_struct(resolved_type_id)
+    // Unwrap class/struct via VIR type table
+    let vir_ty = vir_table
+        .lookup_type_id(resolved_type_id)
+        .unwrap_or(VirTypeId::UNKNOWN);
+    let (type_def_id, type_args) =
+        crate::types::vir_conversions::vir_unwrap_class(vir_ty, vir_table)
+            .or_else(|| crate::types::vir_conversions::vir_unwrap_struct(vir_ty, vir_table))
+            .map(|(def, args)| {
+                // Convert VirTypeId args back to TypeId for sema substitution
+                let sema_args: Vec<TypeId> = args
+                    .iter()
+                    .map(|&a| {
+                        vir_table
+                            .lookup_vir_type_id(a)
+                            .or_else(|| {
+                                let lossy =
+                                    crate::types::vir_conversions::vir_to_sema_type_id_lossy(a);
+                                (lossy != TypeId::UNKNOWN).then_some(lossy)
+                            })
+                            .unwrap_or(TypeId::UNKNOWN)
+                    })
+                    .collect();
+                (def, sema_args)
+            })
             .ok_or_else(|| {
                 CodegenError::type_mismatch("field access", "class or struct", "other type")
             })?;
@@ -122,9 +133,11 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     // partially-specialized generic instances.
     if let Some(ref func_subs) = sema_subs_ref {
         for (&k, &v) in func_subs.iter() {
-            let should_override = combined_subs
-                .get(&k)
-                .is_some_and(|&existing| arena.unwrap_type_param(existing).is_some());
+            let should_override = combined_subs.get(&k).is_some_and(|&existing| {
+                vir_table
+                    .lookup_type_id(existing)
+                    .is_some_and(|vir| matches!(vir_table.get(vir), VirType::Param { .. }))
+            });
             if should_override || !combined_subs.contains_key(&k) {
                 combined_subs.insert(k, v);
             }
@@ -135,7 +148,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
 
     // Compute physical slot: i128 fields use 2 u64 slots, all others use 1.
     // Physical slot is the sum of slot widths for all fields before this one.
-    let is_class = arena.unwrap_class(resolved_type_id).is_some();
+    let is_class = crate::types::vir_conversions::vir_unwrap_class(vir_ty, vir_table).is_some();
     let mut physical_slot = 0usize;
     for (idx, field_name_id) in field_names.iter().enumerate() {
         let name = cg.analyzed().last_segment(*field_name_id);
@@ -144,13 +157,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
             let field_type_id = if !combined_subs.is_empty() {
                 vir_table
                     .lookup_substitute(base_type_id, &combined_subs)
-                    .unwrap_or_else(|| {
-                        arena.expect_substitute(
-                            base_type_id,
-                            &combined_subs,
-                            "field access substitution",
-                        )
-                    })
+                    .unwrap_or(base_type_id)
             } else {
                 base_type_id
             };
@@ -163,13 +170,11 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         let resolved_ft = if !combined_subs.is_empty() {
             vir_table
                 .lookup_substitute(ft, &combined_subs)
-                .unwrap_or_else(|| {
-                    arena.expect_substitute(ft, &combined_subs, "field slot width substitution")
-                })
+                .unwrap_or(ft)
         } else {
             ft
         };
-        physical_slot += if is_class && crate::types::is_wide_type(resolved_ft, arena) {
+        physical_slot += if is_class && matches!(resolved_ft, TypeId::I128 | TypeId::F128) {
             2
         } else {
             1
@@ -448,6 +453,7 @@ pub(crate) fn is_payload_union(type_id: TypeId, arena: &TypeArena) -> bool {
 /// Compute the byte offset of field `slot` within a struct, accounting
 /// for nested struct fields that occupy more than one 8-byte slot.
 /// Returns None if the type is not a struct or `slot` is out of range.
+#[allow(dead_code)]
 pub(crate) fn struct_field_byte_offset(
     type_id: TypeId,
     slot: usize,

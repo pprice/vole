@@ -11,7 +11,6 @@ type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::CompiledValue;
 use vole_frontend::Symbol;
 use vole_identity::{
@@ -203,7 +202,8 @@ impl Cg<'_, '_, '_> {
     fn signature_has_self_placeholder_param(&self, signature_id: TypeId) -> bool {
         // Uses the arena directly to preserve Self placeholder TypeIds that
         // would be lost in the VIR roundtrip (VIR maps Placeholder -> Unknown).
-        self.arena()
+        self.analyzed()
+            .type_arena()
             .unwrap_function(signature_id)
             .is_some_and(|(params, _, _)| params.iter().any(|&p| self.vir_query_is_self_type(p)))
     }
@@ -216,11 +216,15 @@ impl Cg<'_, '_, '_> {
         &self,
         resolved: MethodResolutionRef<'_>,
     ) -> Option<Vec<TypeId>> {
-        // Uses the arena directly to preserve Self placeholder TypeIds that
-        // would be lost in the VIR roundtrip (VIR maps Placeholder -> Unknown).
+        // Use the arena to unwrap function signatures here because parameter
+        // types may include Self placeholders (TypeId values that VIR maps to
+        // Unknown).  The arena preserves these placeholder identities, which
+        // concretize_method_param_type_ids_for_receiver then substitutes with
+        // the concrete receiver type.
         if let Some(method_id) = resolved.method_id() {
             let signature_id = self.analyzed().method_signature_id(method_id);
-            if let Some((params, _, _)) = self.arena().unwrap_function(signature_id) {
+            if let Some((params, _, _)) = self.analyzed().type_arena().unwrap_function(signature_id)
+            {
                 return Some(params.to_vec());
             }
         }
@@ -228,12 +232,16 @@ impl Cg<'_, '_, '_> {
         let resolved_signature_id = self.resolved_func_type_id(resolved);
         if self.signature_has_self_placeholder_param(resolved_signature_id)
             && let Some(signature_id) = self.resolved_interface_signature_id(resolved)
-            && let Some((params, _, _)) = self.arena().unwrap_function(signature_id)
+            && let Some((params, _, _)) = self.analyzed().type_arena().unwrap_function(signature_id)
         {
             return Some(params.to_vec());
         }
 
-        if let Some((params, _, _)) = self.arena().unwrap_function(resolved_signature_id) {
+        if let Some((params, _, _)) = self
+            .analyzed()
+            .type_arena()
+            .unwrap_function(resolved_signature_id)
+        {
             return Some(params.to_vec());
         }
         if let VirType::Function { params, .. } =
@@ -774,13 +782,13 @@ impl Cg<'_, '_, '_> {
             // When inside a monomorphized method body, the object type may still be a type
             // parameter (e.g. T from class<T: Disposable>). Apply substitutions to get the
             // concrete type before looking up the TypeDefId.
-            let resolved_obj_type_id = self.sema_type_id(self.try_substitute_type_v(obj.type_id));
+            let resolved_obj_vir = self.try_substitute_type_v(obj.type_id);
 
             // In monomorphized context, resolution is None so the interface dispatch
             // paths above (lines 264-310) are skipped. Check here if the object is an
-            // interface type and dispatch via vtable.
+            // interface type and dispatch via vtable using VirTypeId directly.
             let interface_type_def_id = self
-                .vir_query_unwrap_interface(resolved_obj_type_id)
+                .vir_query_unwrap_interface_v(resolved_obj_vir)
                 .map(|(id, _)| id);
             if let Some(interface_type_def_id) = interface_type_def_id {
                 let func_type_id = self
@@ -805,15 +813,19 @@ impl Cg<'_, '_, '_> {
                 return Ok(result);
             }
 
-            let arena = self.arena();
-            let type_def_id =
-                get_type_def_id_from_type_id(resolved_obj_type_id, arena, self.analyzed())
-                    .ok_or_else(|| {
-                        CodegenError::not_found(
-                            "TypeDefId",
-                            format!("{method_name_str} (receiver_type={resolved_obj_type_id:?})"),
-                        )
-                    })?;
+            let resolved_obj_type_id = self.sema_type_id(resolved_obj_vir);
+            let vir_obj = self.vir_lookup(resolved_obj_type_id);
+            let type_def_id = crate::method_resolution::get_type_def_id_from_vir_type_id(
+                vir_obj,
+                self.vir_type_table(),
+                self.analyzed(),
+            )
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "TypeDefId",
+                    format!("{method_name_str} (receiver_type={resolved_obj_type_id:?})"),
+                )
+            })?;
 
             // Check for external method binding first (interface methods on primitives)
             if let Some(binding) = self.analyzed().method_binding(type_def_id, method_name_id)
@@ -878,7 +890,8 @@ impl Cg<'_, '_, '_> {
                         .map(|mid| {
                             let method = self.analyzed().method_def(mid);
                             let (params, ret) = self
-                                .arena()
+                                .analyzed()
+                                .type_arena()
                                 .unwrap_function(method.signature_id)
                                 .map(|(params, ret, _)| (Some(params.clone()), ret))
                                 .unwrap_or((None, TypeId::VOID));

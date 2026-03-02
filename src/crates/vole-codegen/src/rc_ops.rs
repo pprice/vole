@@ -16,7 +16,7 @@ use crate::errors::CodegenResult;
 use crate::union_layout;
 
 use super::context::Cg;
-use super::rc_state::{RcState, compute_rc_state_with_vir};
+use super::rc_state::RcState;
 use super::types::vir_conversions::{vir_compute_rc_state, vir_compute_union_rc_variants};
 use super::types::{CompiledValue, RcLifecycle};
 
@@ -537,12 +537,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - `RcState::Union`: Union with some RC variants
     ///
     pub fn rc_state(&self, type_id: TypeId) -> RcState {
-        compute_rc_state_with_vir(
-            self.arena(),
-            self.analyzed(),
-            type_id,
-            self.vir_type_table(),
-        )
+        let vir_ty = self.vir_lookup(type_id);
+        self.rc_state_v(vir_ty)
     }
 
     /// Get the RC state for a VIR type (VirTypeId-native).

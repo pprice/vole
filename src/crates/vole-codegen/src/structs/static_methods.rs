@@ -12,6 +12,7 @@ use vole_identity::{
 };
 use vole_vir::VirStaticMethodMonomorphInfo;
 use vole_vir::expr::{VirMethodDispatchMeta, VirStaticMethodMonomorphKey};
+use vole_vir::types::VirType;
 
 use super::methods::ArgSource;
 
@@ -132,13 +133,18 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
-        // Get param types and return type from arena
+        // Get param types and return type via VirTypeTable
         let (param_ids, return_type_id) = {
-            let arena = self.arena();
-            let (params, ret, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
-                CodegenError::type_mismatch("static method call", "function type", "non-function")
-            })?;
-            (params.clone(), ret)
+            let (params, ret) = self
+                .vir_query_unwrap_function_sema_v(self.vir_lookup(func_type_id))
+                .ok_or_else(|| {
+                    CodegenError::type_mismatch(
+                        "static method call",
+                        "function type",
+                        "non-function",
+                    )
+                })?;
+            (params, ret)
         };
 
         // Compile provided arguments (no receiver for static methods), tracking RC temps.
@@ -275,17 +281,24 @@ impl Cg<'_, '_, '_> {
             // with abstract TypeParam keys. Rewrite those keys through the current
             // substitution map before looking in the monomorph cache.
             let effective_key = if let Some(subs) = self.substitutions {
-                let arena = self.arena();
+                let table = self.vir_type_table();
+                let unwrap_param = |type_id: TypeId| -> Option<NameId> {
+                    let vir = table.lookup_type_id(type_id)?;
+                    match table.get(vir) {
+                        VirType::Param { name } => Some(*name),
+                        _ => None,
+                    }
+                };
                 let needs_substitution = mono_key
                     .class_type_keys
                     .iter()
                     .chain(mono_key.method_type_keys.iter())
-                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some());
+                    .any(|&type_id| unwrap_param(type_id).is_some());
                 if needs_substitution {
                     let map_keys = |keys: &[TypeId]| {
                         keys.iter()
                             .map(|&type_id| {
-                                if let Some(name_id) = arena.unwrap_type_param(type_id) {
+                                if let Some(name_id) = unwrap_param(type_id) {
                                     subs.get(&name_id)
                                         .map(|&v| self.sema_type_id(v))
                                         .unwrap_or(type_id)
@@ -325,7 +338,12 @@ impl Cg<'_, '_, '_> {
         // concrete instance that matches the current substitution map when available.
         let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
         let subs = self.substitutions;
-        let arena = self.arena();
+        let table = self.vir_type_table();
+        let is_type_param = |type_id: TypeId| -> bool {
+            table
+                .lookup_type_id(type_id)
+                .is_some_and(|vir| matches!(table.get(vir), VirType::Param { .. }))
+        };
         self.analyzed()
             .vir_program()
             .static_method_monomorphs
@@ -342,10 +360,7 @@ impl Cg<'_, '_, '_> {
                         if let Some(ctx_vir_ty) = subs.get(name_id).copied() {
                             if ctx_vir_ty == *inst_vir_ty {
                                 matches += 1;
-                            } else if arena
-                                .unwrap_type_param(instance.substitutions[name_id])
-                                .is_none()
-                            {
+                            } else if !is_type_param(instance.substitutions[name_id]) {
                                 // Concrete mismatch: this candidate does not match
                                 // the current monomorphized call context.
                                 incompatible = true;
@@ -363,11 +378,11 @@ impl Cg<'_, '_, '_> {
                 let concrete_key = key
                     .class_type_keys
                     .iter()
-                    .all(|&type_id| arena.unwrap_type_param(type_id).is_none())
+                    .all(|&type_id| !is_type_param(type_id))
                     && key
                         .method_type_keys
                         .iter()
-                        .all(|&type_id| arena.unwrap_type_param(type_id).is_none());
+                        .all(|&type_id| !is_type_param(type_id));
 
                 // Prefer substitution-compatible concrete instances first.
                 let score = (
@@ -529,26 +544,21 @@ impl Cg<'_, '_, '_> {
         // Get the return type [T] from sema to determine element type T.
         // VIR-return metadata may still be an unresolved placeholder; if so,
         // fall back to expression type metadata before failing.
-        let hint_array_elem = return_type_hint.and_then(|ret_ty| {
-            self.arena()
-                .unwrap_array(ret_ty)
-                .map(|elem_ty| (ret_ty, elem_ty))
-        });
+        let unwrap_array_sema = |ret_ty: TypeId| -> Option<(TypeId, TypeId)> {
+            let vir = self.vir_lookup(ret_ty);
+            let elem_vir = self.vir_query_unwrap_array_v(vir)?;
+            let elem_ty = self.sema_type_id(elem_vir);
+            Some((ret_ty, elem_ty))
+        };
+        let hint_array_elem = return_type_hint.and_then(&unwrap_array_sema);
         let expr_array_elem = expr_id
             .and_then(|id| self.get_expr_type_substituted(&id))
-            .and_then(|ret_ty| {
-                self.arena()
-                    .unwrap_array(ret_ty)
-                    .map(|elem_ty| (ret_ty, elem_ty))
-            });
+            .and_then(unwrap_array_sema);
         let (return_type_id, elem_type_id) =
             hint_array_elem.or(expr_array_elem).ok_or_else(|| {
                 CodegenError::type_mismatch("Array.filled", "array type", "non-array")
             })?;
-        let is_wide_elem = {
-            let arena = self.arena();
-            elem_type_id == arena.i128() || elem_type_id == arena.f128()
-        };
+        let is_wide_elem = matches!(elem_type_id, TypeId::I128 | TypeId::F128);
 
         // Compile count argument
         let count = self.compile_arg_from_source(arg_source, 0)?;

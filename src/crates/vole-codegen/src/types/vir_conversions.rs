@@ -12,11 +12,12 @@
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
+use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::{sextend_const, uextend_const};
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{NameTable, TypeDefId, TypeId, TypeIdVec, VirTypeId};
+use vole_identity::{NameId, NameTable, TypeDefId, TypeId, TypeIdVec, VirTypeId};
 use vole_sema::type_arena::TypeArena;
 use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::type_table::VirTypeTable;
@@ -941,10 +942,7 @@ pub(crate) fn vir_unwrap_function(
 /// Unwrap a type parameter, returning its `NameId`.
 ///
 /// Returns `None` if the type is not a `Param`.
-pub(crate) fn vir_unwrap_type_param(
-    vir_ty: VirTypeId,
-    table: &VirTypeTable,
-) -> Option<vole_identity::NameId> {
+pub(crate) fn vir_unwrap_type_param(vir_ty: VirTypeId, table: &VirTypeTable) -> Option<NameId> {
     match table.get(vir_ty) {
         VirType::Param { name } => Some(*name),
         _ => None,
@@ -1615,11 +1613,60 @@ fn vir_compute_composite_rc_offsets(
     entities: &impl VirStructEntityLookup,
 ) -> Option<VirCompositeRcOffsets> {
     // Struct: iterate fields, collect offsets of RC-typed fields
-    if let Some((type_def_id, _type_args)) = vir_unwrap_struct(vir_ty, table) {
-        let field_vir_types = entities
-            .vir_type_def(type_def_id)
-            .map(|td| td.field_types.clone())
-            .unwrap_or_default();
+    if let Some((type_def_id, type_args)) = vir_unwrap_struct(vir_ty, table) {
+        let td = entities.vir_type_def(type_def_id);
+
+        // For generic structs, substitute type params with concrete type_args.
+        //
+        // VirTypeDef.field_types and generic_field_types may contain VirTypeIds
+        // that were interned into a CLONED type table during entity metadata
+        // building.  Newly-interned compound types (e.g. Box<T> as a struct
+        // field) may have different VirTypeIds in the clone vs the main table.
+        //
+        // To avoid stale VirTypeId lookups, use sema_generic_field_types
+        // (sema TypeIds) and re-resolve them through the main VirTypeTable
+        // via lookup_substitute, which is guaranteed to use the main table's
+        // interned types.
+        let field_vir_types: Vec<VirTypeId> = if !type_args.is_empty() {
+            let type_params: Vec<NameId> = td.map(|td| td.type_params.clone()).unwrap_or_default();
+            if type_params.is_empty() {
+                td.map(|td| td.field_types.clone()).unwrap_or_default()
+            } else if let Some(sema_field_types) =
+                td.and_then(|td| td.sema_generic_field_types.clone())
+            {
+                // Build sema TypeId substitution map: type_param NameId -> concrete sema TypeId.
+                // The type_args are VirTypeIds; convert each to its sema TypeId counterpart.
+                let subs: FxHashMap<NameId, TypeId> = type_params
+                    .iter()
+                    .zip(type_args.iter())
+                    .filter_map(|(&param, &arg)| {
+                        table
+                            .lookup_vir_type_id(arg)
+                            .map(|sema_id| (param, sema_id))
+                    })
+                    .collect();
+                if subs.len() != type_params.len() {
+                    // Could not resolve all type args to sema TypeIds; fall back
+                    // to un-substituted field_types (conservative: may produce
+                    // false positives, but won't crash).
+                    td.map(|td| td.field_types.clone()).unwrap_or_default()
+                } else {
+                    sema_field_types
+                        .iter()
+                        .map(|&field_ty| {
+                            table
+                                .lookup_substitute(field_ty, &subs)
+                                .and_then(|sema_result| table.lookup_type_id(sema_result))
+                                .unwrap_or(VirTypeId::UNKNOWN)
+                        })
+                        .collect()
+                }
+            } else {
+                td.map(|td| td.field_types.clone()).unwrap_or_default()
+            }
+        } else {
+            td.map(|td| td.field_types.clone()).unwrap_or_default()
+        };
         let mut shallow_offsets = Vec::new();
         let mut deep_offsets = Vec::new();
         let mut union_fields = Vec::new();

@@ -31,6 +31,7 @@ macro_rules! define_primitive_types {
             }
         }
 
+
         // Generate accessor methods for TypeArena
         impl TypeArena {
             $(
@@ -53,6 +54,36 @@ define_primitive_types!(
     handle, // Special types
     void, nil, done, range, metatype, invalid
 );
+
+impl PrimitiveTypes {
+    /// Constant instance using well-known `TypeId` constants.
+    ///
+    /// Primitive `TypeId` slots are identity-mapped (e.g. `TypeId::I64` == `TypeId(4)`),
+    /// which matches the arena's interning order exactly.
+    pub const CONST: PrimitiveTypes = PrimitiveTypes {
+        i8: TypeId::I8,
+        i16: TypeId::I16,
+        i32: TypeId::I32,
+        i64: TypeId::I64,
+        i128: TypeId::I128,
+        u8: TypeId::U8,
+        u16: TypeId::U16,
+        u32: TypeId::U32,
+        u64: TypeId::U64,
+        f32: TypeId::F32,
+        f64: TypeId::F64,
+        f128: TypeId::F128,
+        bool: TypeId::BOOL,
+        string: TypeId::STRING,
+        handle: TypeId::HANDLE,
+        void: TypeId::VOID,
+        nil: TypeId::NIL,
+        done: TypeId::DONE,
+        range: TypeId::RANGE,
+        metatype: TypeId::METATYPE,
+        invalid: TypeId::INVALID,
+    };
+}
 
 /// Per-compilation type arena with automatic interning/deduplication.
 #[derive(Clone)]
@@ -533,6 +564,25 @@ impl TypeArena {
     /// Create a placeholder type (for inference)
     pub fn placeholder(&mut self, kind: PlaceholderKind) -> TypeId {
         self.intern(SemaType::Placeholder(kind))
+    }
+}
+
+impl TypeArena {
+    /// Iterate all module metadata entries.
+    pub fn all_module_metadata(&self) -> impl Iterator<Item = (&ModuleId, &ModuleMetadata)> {
+        self.module_metadata.iter()
+    }
+
+    /// Iterate all interned Module types, yielding `(TypeId, &InternedModule)`.
+    pub fn all_module_types(&self) -> Vec<(TypeId, &InternedModule)> {
+        self.types
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, ty)| match ty {
+                SemaType::Module(m) => Some((TypeId::from_raw(idx as u32), m.as_ref())),
+                _ => None,
+            })
+            .collect()
     }
 }
 

@@ -18,6 +18,7 @@ use vole_sema::type_arena::TypeArena;
 use super::codegen_state::TypeMetadataMap;
 use crate::ops::{sextend_const, uextend_const};
 
+#[allow(dead_code)]
 pub(crate) trait TypeEntityLookup: StructEntityLookup {
     fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId>;
     fn field_type(&self, field_id: FieldId) -> TypeId;
@@ -328,6 +329,7 @@ pub(crate) fn field_slot_count(ty: TypeId, arena: &TypeArena) -> usize {
 /// Returns true if the type is `fallible(i128, ...)`.
 /// When true, the fallible return convention uses 3 i64 registers instead of 2
 /// to carry (tag, payload_low, payload_high).
+#[allow(dead_code)]
 pub(crate) fn is_wide_fallible(ty: TypeId, arena: &TypeArena) -> bool {
     arena
         .unwrap_fallible(ty)
@@ -475,6 +477,7 @@ pub(crate) fn type_id_size(
 /// Calculate layout for tuple elements using TypeId.
 /// Returns (total_size, offsets) where offsets[i] is the byte offset for element i.
 /// Each element is aligned to 8 bytes for simplicity.
+#[allow(dead_code)]
 pub(crate) fn tuple_layout_id(
     elements: &[TypeId],
     pointer_type: Type,
@@ -532,6 +535,7 @@ pub(crate) fn load_fallible_payload(
 ///
 /// Takes the error part of a fallible type as a TypeId and uses arena queries
 /// to determine the tag for the given error_name.
+#[allow(dead_code)]
 pub(crate) fn fallible_error_tag_by_id(
     error_type_id: TypeId,
     error_name: Symbol,
@@ -572,7 +576,6 @@ pub(crate) fn convert_to_type(
     builder: &mut FunctionBuilder,
     val: CompiledValue,
     target: Type,
-    _arena: &TypeArena,
 ) -> Value {
     fn pack_f64_to_f128(builder: &mut FunctionBuilder, f64_val: Value) -> Value {
         // Runtime f128 currently uses a compact software representation:

@@ -374,6 +374,9 @@ where
         .iter()
         .map(|(path, (_program, interner))| (path.clone(), Rc::clone(interner)))
         .collect();
+    // Populate module metadata for codegen (replaces arena().module_metadata
+    // and arena().unwrap_module lookups).
+    let (module_constants, module_exports) = collect_module_metadata(type_arena);
     let mut vir_program = VirProgram {
         type_table,
         functions: vir_functions,
@@ -392,6 +395,8 @@ where
         annotation_inits: vir_annotation_inits,
         module_bindings: vir_module_bindings,
         module_module_bindings: vir_module_module_bindings,
+        module_constants,
+        module_exports,
         vir_monomorph_base: usize::MAX,
         entity_metadata,
         implement_dispatch,
@@ -412,6 +417,33 @@ where
     sweep_unmapped_type_ids(&mut vir_program.type_table, type_arena);
 
     LowerVirProgramOutput { vir_program }
+}
+
+/// Collect module metadata (constants and exports) from the type arena for
+/// codegen to use without direct arena access.
+type ModuleConstants = FxHashMap<(ModuleId, NameId), vole_identity::ConstantValue>;
+type ModuleExports =
+    FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>;
+
+fn collect_module_metadata(type_arena: &TypeArena) -> (ModuleConstants, ModuleExports) {
+    let mut constants = FxHashMap::default();
+    let mut exports = FxHashMap::default();
+
+    // Collect per-module constants from arena's module_metadata.
+    for (module_id, meta) in type_arena.all_module_metadata() {
+        for (name_id, value) in &meta.constants {
+            constants.insert((*module_id, *name_id), value.clone());
+        }
+    }
+
+    // Collect module type exports from all interned Module types.
+    for (type_id, module_info) in type_arena.all_module_types() {
+        let export_vec: Vec<(NameId, vole_identity::TypeId)> =
+            module_info.exports.iter().map(|&(n, t)| (n, t)).collect();
+        exports.insert(type_id, (module_info.module_id, export_vec));
+    }
+
+    (constants, exports)
 }
 
 /// Build a lookup map from monomorphized mangled NameId to VirFunction index.
@@ -657,6 +689,8 @@ fn run_early_vir_monomorphize(
         annotation_inits: FxHashMap::default(),
         module_bindings: FxHashMap::default(),
         module_module_bindings: FxHashMap::default(),
+        module_constants: FxHashMap::default(),
+        module_exports: FxHashMap::default(),
         vir_monomorph_base: usize::MAX,
         entity_metadata: vole_vir::VirEntityMetadata::new(),
         implement_dispatch: vole_vir::VirImplementDispatch::new(),

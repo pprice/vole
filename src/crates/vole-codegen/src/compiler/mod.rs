@@ -133,12 +133,6 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Get the type arena directly
-    #[inline]
-    fn arena(&self) -> &vole_sema::TypeArena {
-        self.analyzed.type_arena()
-    }
-
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
@@ -152,14 +146,18 @@ impl<'a> Compiler<'a> {
     }
 
     /// Convert a `VirTypeId` to sema `TypeId` (boundary helper).
+    ///
+    /// Uses the VirTypeTable reverse mapping — no arena access.
     #[allow(dead_code)]
     #[inline]
     fn sema_type_id(&self, vir_ty: VirTypeId) -> TypeId {
-        crate::types::vir_conversions::vir_to_sema_type_id(
-            vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        )
+        let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
+        if lossy != TypeId::UNKNOWN || vir_ty == VirTypeId::UNKNOWN {
+            return lossy;
+        }
+        self.vir_type_table()
+            .lookup_vir_type_id(vir_ty)
+            .unwrap_or(TypeId::UNKNOWN)
     }
 
     /// Get the "self" keyword symbol (panics if not interned - should never happen)
@@ -293,9 +291,9 @@ impl<'a> Compiler<'a> {
     // VIR query wrappers (Phase 3a migration)
     //
     // These mirror the `vir_query_*` helpers on `CodegenCtx`, providing a
-    // single call-site abstraction over the VirTypeTable-with-arena-fallback
-    // pattern.  Compiler-level code (registration, signature building) uses
-    // these instead of raw `self.arena().method()` calls.
+    // single call-site abstraction over VirTypeTable queries.
+    // Compiler-level code (registration, signature building) uses these
+    // instead of raw type-table calls.
     // =====================================================================
 
     /// Sema `TypeId` → `VirTypeId` translation.
@@ -312,16 +310,17 @@ impl<'a> Compiler<'a> {
         lookup.unwrap_or(VirTypeId::UNKNOWN)
     }
 
-    /// Look up an existing array type by element `TypeId` in the arena.
+    /// Look up an existing array type by element `TypeId` via VirTypeTable.
     #[inline]
     fn vir_query_lookup_array(&self, elem: TypeId) -> Option<TypeId> {
-        self.arena().lookup_array(elem)
+        self.vir_type_table().lookup_array_sema(elem)
     }
 
     /// Return all concrete element types for which a RuntimeIterator exists.
     #[inline]
     fn vir_query_all_concrete_runtime_iterator_elem_types(&self) -> Vec<TypeId> {
-        self.arena().all_concrete_runtime_iterator_elem_types()
+        self.vir_type_table()
+            .all_concrete_runtime_iterator_elem_types_sema()
     }
 
     /// Unwrap a type parameter `VirTypeId` to its `NameId` via VirTypeTable.
@@ -348,10 +347,11 @@ impl<'a> Compiler<'a> {
             .map(|(params, ret)| (params.to_vec(), ret))
     }
 
-    /// Look up the result of substituting type parameters in a type (read-only).
+    /// Look up the result of substituting type parameters in a type via VirTypeTable.
     ///
-    /// Tries VirTypeTable first; falls back to arena for compound types that
-    /// were not lowered into the VIR type table.
+    /// Falls back to arena for compound types that were not lowered into the
+    /// VIR type table (e.g., cross-module Self parameters in interface default
+    /// methods).
     #[inline]
     fn vir_query_lookup_substitute(
         &self,
@@ -360,23 +360,21 @@ impl<'a> Compiler<'a> {
     ) -> Option<TypeId> {
         self.vir_type_table()
             .lookup_substitute(ty, subs)
-            .or_else(|| self.arena().lookup_substitute(ty, subs))
+            .or_else(|| self.analyzed.type_arena().lookup_substitute(ty, subs))
     }
 
-    /// Access the arena's pre-interned primitive types.
+    /// Access the pre-interned primitive types.
     ///
-    /// Arena-only accessor — primitive TypeIds are constants.
+    /// Primitive `TypeId`s are compile-time constants — no arena query needed.
     #[inline]
     fn vir_query_primitives(&self) -> vole_sema::type_arena::PrimitiveTypes {
-        self.arena().primitives
+        vole_sema::type_arena::PrimitiveTypes::CONST
     }
 
-    /// Look up an existing runtime iterator type by element `TypeId` in the arena.
-    ///
-    /// Arena-only operation (type construction lookup, not a type predicate).
+    /// Look up an existing runtime iterator type by element `TypeId` via VirTypeTable.
     #[inline]
     fn vir_query_lookup_runtime_iterator(&self, elem: TypeId) -> Option<TypeId> {
-        self.arena().lookup_runtime_iterator(elem)
+        self.vir_type_table().lookup_runtime_iterator_sema(elem)
     }
 
     /// Unwrap a fallible `VirTypeId` to `(success, errors)` via VirTypeTable.
@@ -467,22 +465,7 @@ impl<'a> Compiler<'a> {
         let table = self.vir_type_table();
         match table.get(vir_ty) {
             vole_vir::VirType::Union { variants } => Some(variants.to_vec()),
-            vole_vir::VirType::Optional { inner } => {
-                // Look up the sema union to get the authoritative variant order.
-                let sema_id =
-                    crate::types::vir_conversions::vir_to_sema_type_id(vir_ty, table, self.arena());
-                if let Some(sema_variants) = self.arena().unwrap_union(sema_id) {
-                    let nil_id = self.arena().nil();
-                    Some(
-                        sema_variants
-                            .iter()
-                            .map(|&v| if v == nil_id { VirTypeId::NIL } else { *inner })
-                            .collect(),
-                    )
-                } else {
-                    Some(vec![*inner, VirTypeId::NIL])
-                }
-            }
+            vole_vir::VirType::Optional { inner } => Some(table.expand_optional_variants(*inner)),
             _ => None,
         }
     }

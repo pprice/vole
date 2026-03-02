@@ -91,7 +91,14 @@ fn substitute_one(
             target.intern(ty, layout)
         }
         VirType::Union { variants } => {
-            let new_variants = substitute_vec(variants, source, target, subs, memo);
+            let mut new_variants = substitute_vec(variants, source, target, subs, memo);
+            // Re-sort variants by union_sort_key (descending) to match sema's
+            // canonical order.  After substitution, type parameters are replaced
+            // with concrete types whose sort category may differ from the
+            // parameter's original category.  Without re-sorting, the variant
+            // order would reflect the generic template's order, causing tag
+            // mismatches with unions constructed from sema's concrete ordering.
+            new_variants.sort_by_key(|v| std::cmp::Reverse(target.union_sort_key(*v)));
             let ty = VirType::Union {
                 variants: new_variants,
             };

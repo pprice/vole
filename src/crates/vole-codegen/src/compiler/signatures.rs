@@ -3,7 +3,6 @@ use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
 use crate::types::vir_conversions::{vir_is_wide, vir_type_to_cranelift};
-use crate::types::{is_wide_fallible, type_id_to_cranelift};
 use vole_identity::{FunctionId, MethodId, TypeId, VirTypeId};
 use vole_vir::types::VirType;
 
@@ -39,10 +38,9 @@ impl Compiler<'_> {
     /// This helper handles the common pattern of converting resolved TypeIds
     /// to their Cranelift representations for function signatures.
     pub fn type_ids_to_cranelift(&self, type_ids: &[TypeId]) -> Vec<CraneliftType> {
-        let arena = self.arena();
         type_ids
             .iter()
-            .map(|&id| type_id_to_cranelift(id, arena, self.pointer_type))
+            .map(|&id| self.vir_query_type_to_cranelift(id))
             .collect()
     }
 
@@ -73,27 +71,29 @@ impl Compiler<'_> {
         return_type_id: Option<TypeId>,
         self_param: SelfParam,
     ) -> Signature {
-        let arena_ref = self.arena();
-
         // Build cranelift params starting with self if needed
         let mut cranelift_params: ParamVec = match &self_param {
             SelfParam::None => SmallVec::new(),
             SelfParam::Pointer => smallvec![self.pointer_type],
             SelfParam::TypedId(type_id) => {
-                smallvec![type_id_to_cranelift(*type_id, arena_ref, self.pointer_type)]
+                smallvec![self.vir_query_type_to_cranelift(*type_id)]
             }
         };
 
         // Add param types
         for &type_id in params_id {
-            cranelift_params.push(type_id_to_cranelift(type_id, arena_ref, self.pointer_type));
+            cranelift_params.push(self.vir_query_type_to_cranelift(type_id));
         }
 
         // Check if this is a fallible return type - use multi-value returns
         if let Some(ret_type_id) = return_type_id
             && self.vir_query_unwrap_fallible(ret_type_id).is_some()
         {
-            if is_wide_fallible(ret_type_id, arena_ref) {
+            // Check if success type is wide (i128/f128)
+            let is_wide = self
+                .vir_query_unwrap_fallible(ret_type_id)
+                .is_some_and(|(success_vir, _)| vir_is_wide(success_vir, self.vir_type_table()));
+            if is_wide {
                 // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
                 return self.jit.create_signature_multi_return(
                     &cranelift_params,
@@ -101,8 +101,6 @@ impl Compiler<'_> {
                 );
             }
             // Fallible returns: (tag: i64, payload: i64)
-            // We use i64 for both to have a uniform representation that works
-            // for both success values and error pointers.
             return self
                 .jit
                 .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64]);
@@ -118,7 +116,7 @@ impl Compiler<'_> {
         // Convert return type (filter out void)
         let ret = return_type_id
             .filter(|id| !id.is_void())
-            .map(|id| type_id_to_cranelift(id, arena_ref, self.pointer_type));
+            .map(|id| self.vir_query_type_to_cranelift(id));
 
         self.jit.create_signature(&cranelift_params, ret)
     }
@@ -127,8 +125,12 @@ impl Compiler<'_> {
     /// Used by signature building to decide small-return vs sret convention.
     /// Returns None if the type is not a struct.
     pub fn struct_field_count(&self, type_id: TypeId) -> Option<usize> {
-        let arena = self.arena();
-        crate::structs::struct_flat_slot_count(type_id, arena, self.analyzed)
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+            vir_ty,
+            self.vir_type_table(),
+            self.analyzed,
+        )
     }
 
     /// Build a Cranelift signature directly from a FunctionId.

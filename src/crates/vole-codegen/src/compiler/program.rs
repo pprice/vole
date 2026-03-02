@@ -7,7 +7,7 @@ use super::{Compiler, DeclareMode};
 
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CodegenCtx, type_id_to_cranelift};
+use crate::types::CodegenCtx;
 use vole_frontend::{Interner, Symbol};
 use vole_identity::{NameId, TypeId};
 use vole_vir::calls::CallTarget;
@@ -799,18 +799,15 @@ impl Compiler<'_> {
 
         // Build params from VIR function param Symbols + pre-resolved TypeIds
         let vir = vir_func.expect("VIR must be available for module function");
-        let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.arena();
-            vir.params
-                .iter()
-                .zip(param_type_ids.iter())
-                .map(|(&(sym, _, _), &type_id)| {
-                    let cranelift_type =
-                        type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
-                    (sym, type_id, cranelift_type)
-                })
-                .collect()
-        };
+        let params: Vec<(Symbol, TypeId, types::Type)> = vir
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .map(|(&(sym, _, _), &type_id)| {
+                let cranelift_type = self.vir_query_type_to_cranelift(type_id);
+                (sym, type_id, cranelift_type)
+            })
+            .collect();
 
         // Get function return type id from pre-resolved signature
         let return_type_id = Some(return_type_id).filter(|id| !id.is_void());
@@ -912,18 +909,15 @@ impl Compiler<'_> {
                 display_name,
             )
         });
-        let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.arena();
-            vir.params
-                .iter()
-                .zip(param_type_ids.iter())
-                .map(|(&(sym, _, _), &type_id)| {
-                    let cranelift_type =
-                        type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
-                    (sym, type_id, cranelift_type)
-                })
-                .collect()
-        };
+        let params: Vec<(Symbol, TypeId, types::Type)> = vir
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .map(|(&(sym, _, _), &type_id)| {
+                let cranelift_type = self.vir_query_type_to_cranelift(type_id);
+                (sym, type_id, cranelift_type)
+            })
+            .collect();
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();

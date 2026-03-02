@@ -4,13 +4,58 @@ use super::{Compiler, SelfParam};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{MethodInfo, TypeMetadata};
-use vole_identity::{MethodId, NameId, TypeDefId, TypeId};
+use vole_identity::{MethodId, NameId, TypeDefId, TypeId, VirTypeId};
 use vole_runtime::type_registry::{FieldTypeTag, alloc_type_id, register_instance_type};
+use vole_vir::type_table::VirTypeTable;
+use vole_vir::types::VirType;
 
-/// Convert a TypeId to a FieldTypeTag for runtime cleanup.
+/// Convert a VirTypeId to a FieldTypeTag for runtime cleanup.
 ///
 /// With RcHeader v2, we only need to distinguish Value (no cleanup) from Rc (needs rc_dec).
 /// Each RC allocation's own drop_fn handles type-specific cleanup.
+fn vir_type_id_to_field_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> FieldTypeTag {
+    // F128 is reserved as VirType::Unknown (no VirPrimitiveKind::F128 yet)
+    // but is a plain value type — must check before the Unknown arm.
+    if vir_ty == VirTypeId::F128 {
+        return FieldTypeTag::Value;
+    }
+    match table.get(vir_ty) {
+        VirType::Unknown => FieldTypeTag::UnknownHeap,
+        VirType::Interface { .. } => FieldTypeTag::Interface,
+        VirType::Primitive(vole_vir::types::VirPrimitiveKind::String)
+        | VirType::Array { .. }
+        | VirType::Class { .. }
+        | VirType::Function { .. } => FieldTypeTag::Rc,
+        VirType::Union { variants } => {
+            for &variant in variants {
+                if vir_type_id_to_field_tag(variant, table).needs_cleanup() {
+                    return FieldTypeTag::UnionHeap;
+                }
+            }
+            FieldTypeTag::Value
+        }
+        VirType::Optional { inner } => {
+            if vir_type_id_to_field_tag(*inner, table).needs_cleanup() {
+                FieldTypeTag::UnionHeap
+            } else {
+                FieldTypeTag::Value
+            }
+        }
+        _ => {
+            // Handle type (TypeId::HANDLE) maps to VirType::Primitive(Handle)
+            if vir_ty == VirTypeId::HANDLE {
+                FieldTypeTag::Rc
+            } else {
+                FieldTypeTag::Value
+            }
+        }
+    }
+}
+
+/// Arena-based fallback for field tag computation.
+///
+/// Used when the field type is not in the VIR type table (e.g. generic class
+/// fields with unresolved type parameters like `T | Empty`).
 fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) -> FieldTypeTag {
     if arena.is_unknown(ty) {
         FieldTypeTag::UnknownHeap
@@ -24,9 +69,6 @@ fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) ->
     {
         FieldTypeTag::Rc
     } else if let Some(variants) = arena.unwrap_union(ty) {
-        // Union fields use heap buffers. If any variant is RC, the buffer
-        // needs union_heap_cleanup (not plain rc_dec) to handle the inner
-        // payload and free the buffer.
         for &variant in variants {
             if type_id_to_field_tag(variant, arena).needs_cleanup() {
                 return FieldTypeTag::UnionHeap;
@@ -167,7 +209,7 @@ impl Compiler<'_> {
             .collect();
         fields_by_slot.sort_by_key(|(slot, _)| *slot);
 
-        let arena = self.arena();
+        let table = self.vir_type_table();
         let mut physical_slot = 0usize;
         for (ordinal, (_, field_id)) in fields_by_slot.iter().enumerate() {
             let field_def = self.analyzed.get_field(*field_id);
@@ -179,14 +221,27 @@ impl Compiler<'_> {
             // Structs use ordinal indices (struct_field_byte_offset iterates field_types).
             let slot_key = if is_class { physical_slot } else { ordinal };
             field_slots.insert(field_name, slot_key);
+            let vir_field_ty = table.lookup_type_id(field_def.sema_type_id);
             if is_class {
-                field_type_tags.push(type_id_to_field_tag(field_def.sema_type_id, arena));
+                let tag = if let Some(vir_ty) = vir_field_ty {
+                    vir_type_id_to_field_tag(vir_ty, table)
+                } else {
+                    // Field type not in VIR table (e.g. `T | Empty` in a
+                    // generic class where T is still a type parameter).
+                    // Fall back to the arena-based tag computation.
+                    type_id_to_field_tag(field_def.sema_type_id, self.analyzed.type_arena())
+                };
+                field_type_tags.push(tag);
                 // i128 uses 2 physical slots; add a Value tag for the high half
-                if crate::types::is_wide_type(field_def.sema_type_id, arena) {
+                if matches!(field_def.sema_type_id, TypeId::I128 | TypeId::F128) {
                     field_type_tags.push(FieldTypeTag::Value);
                 }
             }
-            physical_slot += crate::types::field_slot_count(field_def.sema_type_id, arena);
+            physical_slot += if matches!(field_def.sema_type_id, TypeId::I128 | TypeId::F128) {
+                2
+            } else {
+                1
+            };
         }
 
         Ok((field_slots, physical_slot, field_type_tags))

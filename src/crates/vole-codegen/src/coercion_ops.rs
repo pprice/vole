@@ -453,11 +453,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         value: CompiledValue,
         interface_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let interface_type_id = crate::types::vir_conversions::vir_to_sema_type_id(
-            interface_vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        );
+        let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(interface_vir_ty);
+        let interface_type_id =
+            if lossy != TypeId::UNKNOWN || interface_vir_ty == VirTypeId::UNKNOWN {
+                lossy
+            } else {
+                self.vir_type_table()
+                    .lookup_vir_type_id(interface_vir_ty)
+                    .unwrap_or(TypeId::UNKNOWN)
+            };
+
+        // When the sema TypeId is UNKNOWN (monomorphized context with dynamic VirTypeIds),
+        // decompose the interface type directly from VIR and use the decomposed boxing path.
+        if interface_type_id == TypeId::UNKNOWN
+            && let Some((type_def_id, vir_type_args)) =
+                self.vir_query_unwrap_interface_v(interface_vir_ty)
+        {
+            let type_args_ids: Vec<TypeId> = vir_type_args
+                .iter()
+                .map(|&v| self.sema_type_id(v))
+                .collect();
+            return crate::interfaces::box_interface_value_decomposed(
+                self.builder,
+                self.codegen_ctx,
+                self.env,
+                value,
+                interface_type_id,
+                type_def_id,
+                &type_args_ids,
+            );
+        }
+
         self.box_interface_value(value, interface_type_id)
     }
 

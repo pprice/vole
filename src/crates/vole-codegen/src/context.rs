@@ -359,16 +359,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 return Some(std::cell::Ref::map(cache, |opt| opt.as_ref().unwrap()));
             }
         }
-        // Build the TypeId map from VirTypeId substitutions.
+        // Build the TypeId map from VirTypeId substitutions via VirTypeTable.
         let table = self.vir_type_table();
-        let arena = self.arena();
         let sema_map: FxHashMap<NameId, TypeId> = subs
             .iter()
             .map(|(&name, &vir_ty)| {
-                (
-                    name,
-                    crate::types::vir_conversions::vir_to_sema_type_id(vir_ty, table, arena),
-                )
+                let type_id = table
+                    .lookup_vir_type_id(vir_ty)
+                    .or_else(|| {
+                        // For reserved/compat IDs, direct index mapping is safe.
+                        Some(crate::types::vir_conversions::vir_to_sema_type_id_lossy(
+                            vir_ty,
+                        ))
+                    })
+                    .unwrap_or(TypeId::UNKNOWN);
+                (name, type_id)
             })
             .collect();
         *self.sema_substitutions.borrow_mut() = Some(sema_map);
@@ -422,6 +427,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .insert(name, (var, self.vir_lookup_or_compat(type_id)));
     }
 
+    /// Bind a variable directly with a VirTypeId, skipping the sema TypeId round-trip.
+    ///
+    /// Used when the VirTypeId is known to be correct (e.g., from interface boxing
+    /// in monomorphized contexts where `sema_type_id` returns UNKNOWN).
+    pub fn bind_var_v(&mut self, name: Symbol, var: Variable, vir_type_id: VirTypeId) {
+        self.vars.insert(name, (var, vir_type_id));
+    }
+
     // ========== Context accessors ==========
 
     /// Get current module (as ModuleId)
@@ -441,14 +454,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn ptr_type(&self) -> Type {
         self.codegen_ctx.ptr_type()
-    }
-
-    /// Get the type arena.
-    /// Returns `&'ctx TypeArena` so that references obtained from it
-    /// have the full `'ctx` lifetime, enabling them to outlive `self` borrows.
-    #[inline]
-    pub fn arena(&self) -> &'ctx vole_sema::type_arena::TypeArena {
-        self.env.analyzed.type_arena()
     }
 
     /// Get the VIR type table for `VirTypeId`-based queries.
@@ -785,13 +790,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a sema `TypeId` is a SelfType placeholder.
     ///
-    /// Arena-only: VIR translates `Placeholder(SelfType)` as `VirType::Unknown`,
-    /// making it indistinguishable from genuinely unknown types.
-    /// No `_v` overload — SelfType detection requires the arena.
+    /// VIR resolves SelfType during lowering, so post-VIR types never contain
+    /// SelfType placeholders.  Always returns `false`.
     #[allow(dead_code)]
     #[inline]
-    pub fn vir_query_is_self_type(&self, type_id: TypeId) -> bool {
-        self.arena().is_self_type(type_id)
+    pub fn vir_query_is_self_type(&self, _type_id: TypeId) -> bool {
+        false
     }
 
     /// Check if a `VirTypeId` is an integer type via VirTypeTable.
@@ -897,34 +901,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Unwrap a union `VirTypeId` to its variant `VirTypeId`s via VirTypeTable.
     ///
     /// Also handles `VirType::Optional { inner }`, expanding it to a two-element
-    /// vector matching the sema arena's sorted variant order.  The sema arena
-    /// sorts union variants descending by `union_sort_key`, so the inner type
-    /// and nil may appear in either order depending on the inner type's sort key.
+    /// vector matching the sema arena's sorted variant order.  The VirTypeTable's
+    /// `expand_optional_variants()` replicates the sema sort key logic so the
+    /// inner type and nil appear in the correct order.
     #[allow(dead_code)]
     pub fn vir_query_unwrap_union_v(&self, vir_ty: VirTypeId) -> Option<Vec<VirTypeId>> {
         let table = self.vir_type_table();
         match table.get(vir_ty) {
             vole_vir::VirType::Union { variants } => Some(variants.to_vec()),
-            vole_vir::VirType::Optional { inner } => {
-                // Look up the sema union to get the authoritative variant order.
-                // The sema arena sorts variants by union_sort_key (descending),
-                // so [inner, NIL] vs [NIL, inner] depends on the inner type's
-                // sort category relative to nil's (both may be category 50).
-                let sema_id =
-                    crate::types::vir_conversions::vir_to_sema_type_id(vir_ty, table, self.arena());
-                if let Some(sema_variants) = self.arena().unwrap_union(sema_id) {
-                    let nil_id = self.arena().nil();
-                    Some(
-                        sema_variants
-                            .iter()
-                            .map(|&v| if v == nil_id { VirTypeId::NIL } else { *inner })
-                            .collect(),
-                    )
-                } else {
-                    // Fallback: if sema roundtrip fails, use [inner, NIL]
-                    Some(vec![*inner, VirTypeId::NIL])
-                }
-            }
+            vole_vir::VirType::Optional { inner } => Some(table.expand_optional_variants(*inner)),
             _ => None,
         }
     }
@@ -1060,55 +1045,52 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_query_unwrap_error_v(self.vir_lookup(type_id))
     }
 
-    /// Get the void `TypeId` from the arena.
+    /// Get the void `TypeId`.
     ///
-    /// This is a constant — no VirTypeTable query needed.
+    /// Constant — always `TypeId::VOID`.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_void(&self) -> TypeId {
-        self.arena().void()
+        TypeId::VOID
     }
 
-    /// Get the range `TypeId` from the arena.
+    /// Get the range `TypeId`.
     ///
-    /// This is a constant — no VirTypeTable query needed.
+    /// Constant — always `TypeId::RANGE`.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_range(&self) -> TypeId {
-        self.arena().range()
+        TypeId::RANGE
     }
 
-    /// Get the nil `TypeId` from the arena.
+    /// Get the nil `TypeId`.
     ///
-    /// This is a constant — no VirTypeTable query needed.
+    /// Constant — always `TypeId::NIL`.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_nil(&self) -> TypeId {
-        self.arena().nil()
+        TypeId::NIL
     }
 
-    /// Look up an existing array type by element `TypeId` in the arena.
-    ///
-    /// Arena-only operation (type construction lookup, not a type predicate).
+    /// Look up an existing array type by element `TypeId` via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_array(&self, elem: TypeId) -> Option<TypeId> {
-        self.arena().lookup_array(elem)
+        self.vir_type_table().lookup_array_sema(elem)
     }
 
-    /// Look up an existing union type by variant `TypeId`s in the arena.
-    ///
-    /// Arena-only operation (type construction lookup, not a type predicate).
+    /// Look up an existing union type by variant `TypeId`s via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_union(&self, variants: vole_identity::TypeIdVec) -> Option<TypeId> {
-        self.arena().lookup_union(variants)
+        self.vir_type_table().lookup_union_sema(&variants)
     }
 
-    /// Look up the result of substituting type parameters in a type (read-only).
+    /// Look up the result of substituting type parameters in a type via VirTypeTable.
     ///
-    /// Tries VirTypeTable first; falls back to arena for compound types that
-    /// were not lowered into the VIR type table.
+    /// Falls back to arena for compound types that were not lowered into the
+    /// VIR type table (e.g., cross-module Self parameters in interface default
+    /// methods).
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_substitute(
@@ -1118,22 +1100,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<TypeId> {
         self.vir_type_table()
             .lookup_substitute(ty, subs)
-            .or_else(|| self.arena().lookup_substitute(ty, subs))
+            .or_else(|| self.analyzed().type_arena().lookup_substitute(ty, subs))
     }
 
-    /// Look up an existing runtime iterator type by element `TypeId` in the arena.
-    ///
-    /// Arena-only operation (type construction lookup, not a type predicate).
+    /// Look up an existing runtime iterator type by element `TypeId` via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_runtime_iterator(&self, elem: TypeId) -> Option<TypeId> {
-        self.arena().lookup_runtime_iterator(elem)
+        self.vir_type_table().lookup_runtime_iterator_sema(elem)
     }
 
     /// Substitute type parameters in a type, panicking on failure.
     ///
-    /// Tries VirTypeTable first; falls back to arena for compound types that
-    /// were not lowered into the VIR type table.
+    /// Uses VirTypeTable exclusively.
     #[allow(dead_code)]
     #[track_caller]
     #[inline]
@@ -1145,7 +1124,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> TypeId {
         self.vir_type_table()
             .lookup_substitute(ty, subs)
-            .unwrap_or_else(|| self.arena().expect_substitute(ty, subs, context))
+            .or_else(|| self.analyzed().type_arena().lookup_substitute(ty, subs))
+            .unwrap_or_else(|| {
+                panic!(
+                    "vir_query_expect_substitute: type not found after substitution\n\
+                     Context: {context}\n\
+                     TypeId: {ty:?}\n\
+                     Location: {}",
+                    std::panic::Location::caller(),
+                )
+            })
     }
 
     /// Check if a `VirTypeId` contains any type parameter anywhere in its structure
@@ -1187,12 +1175,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unknown(&self) -> TypeId {
-        self.arena().unknown()
+        TypeId::UNKNOWN
     }
 
-    /// Look up an existing interface type by `TypeDefId` and type arguments.
-    ///
-    /// Arena-only operation (type construction lookup).
+    /// Look up an existing interface type by `TypeDefId` and type arguments
+    /// via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_interface(
@@ -1200,16 +1187,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_def_id: vole_identity::TypeDefId,
         type_args: vole_identity::TypeIdVec,
     ) -> Option<TypeId> {
-        self.arena().lookup_interface(type_def_id, type_args)
+        self.vir_type_table()
+            .lookup_interface_sema(type_def_id, &type_args)
     }
 
-    /// Access the arena's pre-interned primitive types.
+    /// Access the pre-interned primitive types.
     ///
-    /// Arena-only accessor — primitive TypeIds are constants.
+    /// Primitive `TypeId`s are compile-time constants — no arena query needed.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_primitives(&self) -> vole_sema::type_arena::PrimitiveTypes {
-        self.arena().primitives
+        vole_sema::type_arena::PrimitiveTypes::CONST
     }
 
     /// Check if a `VirTypeId` is a class type via VirTypeTable.
@@ -1289,50 +1277,56 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Unwrap a function `VirTypeId` to `(params, return_type)` as sema `TypeId`s.
     ///
-    /// VirTypeId-accepting overload — converts to sema TypeId, then uses the
-    /// arena directly to preserve Self placeholder TypeIds that would be lost
-    /// in the VIR roundtrip (VIR maps Placeholder -> Unknown).
+    /// Uses VirTypeTable to get the VIR params/ret, then converts each to
+    /// sema TypeId via the reverse mapping.  SelfType placeholders are already
+    /// resolved during VIR lowering.
     #[inline]
     pub fn vir_query_unwrap_function_sema_v(
         &self,
         vir_ty: VirTypeId,
     ) -> Option<(Vec<TypeId>, TypeId)> {
-        let type_id = crate::types::vir_conversions::vir_to_sema_type_id(
-            vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        );
-        let (arena_params, arena_ret, _) = self.arena().unwrap_function(type_id)?;
-        Some((arena_params.to_vec(), arena_ret))
+        let table = self.vir_type_table();
+        let (vir_params, vir_ret) = table.unwrap_function(vir_ty)?;
+        let params: Vec<TypeId> = vir_params
+            .iter()
+            .map(|&p| {
+                table
+                    .lookup_vir_type_id(p)
+                    .unwrap_or_else(|| crate::types::vir_conversions::vir_to_sema_type_id_lossy(p))
+            })
+            .collect();
+        let ret = table
+            .lookup_vir_type_id(vir_ret)
+            .unwrap_or_else(|| crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ret));
+        Some((params, ret))
     }
 
-    /// Look up an existing fixed-array type by element `TypeId` and size.
-    ///
-    /// Arena-only operation (type construction lookup, not a type predicate).
+    /// Look up an existing fixed-array type by element `TypeId` and size
+    /// via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_fixed_array(&self, element: TypeId, size: usize) -> Option<TypeId> {
-        self.arena().lookup_fixed_array(element, size)
+        self.vir_type_table().lookup_fixed_array_sema(element, size)
     }
 
     /// Unwrap a module type, returning the module ID and exported (name, type) pairs.
     ///
-    /// Arena-only operation (module types are not represented in VirTypeTable).
-    /// Returns cloned export data to avoid borrow conflicts.
+    /// Uses VirProgram's pre-populated module_exports map.
     #[allow(dead_code, clippy::type_complexity)]
     #[inline]
     pub fn vir_query_unwrap_module(
         &self,
         type_id: TypeId,
     ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
-        self.arena()
-            .unwrap_module(type_id)
-            .map(|m| (m.module_id, m.exports.clone()))
+        let vir = self.env.analyzed.vir_program();
+        vir.module_exports
+            .get(&type_id)
+            .map(|(mid, exports)| (*mid, exports.iter().copied().collect()))
     }
 
     /// Look up a compile-time constant in a module's metadata.
     ///
-    /// Arena-only operation (module metadata is not represented in VirTypeTable).
+    /// Uses VirProgram's pre-populated module_constants map.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_module_constant(
@@ -1340,9 +1334,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         module_id: ModuleId,
         name_id: NameId,
     ) -> Option<vole_identity::ConstantValue> {
-        self.arena()
-            .module_metadata(module_id)
-            .and_then(|meta| meta.constants.get(&name_id).cloned())
+        self.env
+            .analyzed
+            .vir_program()
+            .module_constants
+            .get(&(module_id, name_id))
+            .cloned()
     }
 
     /// Get the runtime tag for an array element `VirTypeId` via VirTypeTable.
@@ -1353,18 +1350,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get the flat slot count for a VIR struct type.
     ///
-    /// Falls back through compat_type_id() for compat-encoded VirTypeIds.
+    /// For compat-encoded VirTypeIds, resolves via VirTypeTable lookup.
     #[inline]
     pub fn vir_struct_flat_slot_count(&self, vir_ty: VirTypeId) -> Option<usize> {
-        if vir_ty.is_compat() {
-            return super::structs::struct_flat_slot_count(
-                vir_ty.compat_type_id(),
-                self.arena(),
-                self.analyzed(),
-            );
-        }
+        let resolved = self.resolve_compat(vir_ty);
         crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
-            vir_ty,
+            resolved,
             self.vir_type_table(),
             self.analyzed(),
         )
@@ -1372,26 +1363,31 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Compute the byte offset of field `slot` within a VIR struct type.
     ///
-    /// Falls back through compat_type_id() for compat-encoded VirTypeIds.
+    /// For compat-encoded VirTypeIds, resolves via VirTypeTable lookup.
     /// Panics if the type is not a struct or the slot is out of range.
     #[inline]
     pub fn vir_struct_field_byte_offset(&self, vir_ty: VirTypeId, slot: usize) -> i32 {
-        if vir_ty.is_compat() {
-            return super::structs::helpers::struct_field_byte_offset(
-                vir_ty.compat_type_id(),
-                slot,
-                self.arena(),
-                self.analyzed(),
-            )
-            .expect("INTERNAL: struct field offset must be computable for valid struct type");
-        }
+        let resolved = self.resolve_compat(vir_ty);
         crate::types::vir_struct_helpers::vir_struct_field_byte_offset(
-            vir_ty,
+            resolved,
             slot,
             self.vir_type_table(),
             self.analyzed(),
         )
         .expect("INTERNAL: struct field offset must be computable for valid struct type")
+    }
+
+    /// Resolve a compat-encoded `VirTypeId` to a proper `VirTypeId` via
+    /// `VirTypeTable::lookup_type_id`.  Non-compat IDs pass through unchanged.
+    #[inline]
+    fn resolve_compat(&self, vir_ty: VirTypeId) -> VirTypeId {
+        if vir_ty.is_compat() {
+            self.vir_type_table()
+                .lookup_type_id(vir_ty.compat_type_id())
+                .unwrap_or(vir_ty)
+        } else {
+            vir_ty
+        }
     }
 
     /// Get field slot and type for a field access using VirTypeId.
@@ -1411,29 +1407,34 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         vir_ty: VirTypeId,
         field_name: &str,
     ) -> CodegenResult<(usize, TypeId)> {
-        let type_id = crate::types::vir_conversions::vir_to_sema_type_id(
-            vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        );
+        let type_id = self
+            .vir_type_table()
+            .lookup_vir_type_id(vir_ty)
+            .unwrap_or_else(|| crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty));
         crate::structs::helpers::get_field_slot_and_type_id_cg(type_id, field_name, self)
     }
 
     /// Unwrap a module type from a `VirTypeId`.
     ///
-    /// Converts `VirTypeId` → `TypeId` internally, then delegates to the
-    /// arena-based module lookup (modules are not represented in VirTypeTable).
+    /// Converts `VirTypeId` → `TypeId` via VirTypeTable reverse mapping,
+    /// then looks up in VirProgram's module_exports.
     #[allow(clippy::type_complexity)]
     #[inline]
     pub fn vir_query_unwrap_module_v(
         &self,
         vir_ty: VirTypeId,
     ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
-        let type_id = crate::types::vir_conversions::vir_to_sema_type_id(
-            vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        );
+        let type_id = self
+            .vir_type_table()
+            .lookup_vir_type_id(vir_ty)
+            .or_else(|| {
+                let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
+                if lossy != TypeId::UNKNOWN {
+                    Some(lossy)
+                } else {
+                    None
+                }
+            })?;
         self.vir_query_unwrap_module(type_id)
     }
 
@@ -2095,9 +2096,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: usize,
         field_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        if let Some(wide) =
-            crate::types::wide_ops::WideType::from_type_id(field_type_id, self.arena())
-        {
+        if let Some(wide) = crate::types::wide_ops::WideType::from_type_id(field_type_id) {
             let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
             let wide_i128 =
                 crate::structs::helpers::load_wide_field(self, get_func_ref, instance, slot);
@@ -2246,7 +2245,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         key: FunctionKey,
         entry: &MonomorphIndexEntry,
     ) -> Option<FuncId> {
-        let arena = self.arena();
+        let table = self.vir_type_table();
         let ptr_type = self.ptr_type();
 
         let (func_type, has_self, mangled_name_id, pending, label) = match entry {
@@ -2278,7 +2277,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let sig = build_monomorph_signature(
             func_type,
             has_self,
-            arena,
+            table,
             self.analyzed(),
             ptr_type,
             self.codegen_ctx.module,
@@ -2390,12 +2389,24 @@ pub(crate) fn resolve_external_names(
 fn build_monomorph_signature(
     func_type: &vole_identity::FunctionType,
     has_self_param: bool,
-    arena: &vole_sema::type_arena::TypeArena,
+    table: &vole_vir::type_table::VirTypeTable,
     analyzed: &crate::analyzed::AnalyzedProgram,
     ptr_type: Type,
     module: &cranelift_jit::JITModule,
 ) -> cranelift::prelude::Signature {
-    use crate::types::{is_wide_fallible, type_id_to_cranelift};
+    use crate::types::vir_conversions::{vir_is_wide_fallible, vir_type_to_cranelift};
+
+    let vir_lookup = |tid: TypeId| -> VirTypeId {
+        table.lookup_type_id(tid).unwrap_or_else(|| {
+            // Fallback: for primitives, reserved IDs are identity-mapped.
+            let raw = tid.raw();
+            if raw < TypeId::FIRST_DYNAMIC {
+                VirTypeId::from_raw(raw)
+            } else {
+                VirTypeId::from_raw(raw | VirTypeId::COMPAT_FLAG)
+            }
+        })
+    };
 
     let mut sig = module.make_signature();
 
@@ -2406,15 +2417,17 @@ fn build_monomorph_signature(
 
     // Parameter types
     for &param_type_id in &func_type.params_id {
-        let cranelift_type = type_id_to_cranelift(param_type_id, arena, ptr_type);
+        let vir_ty = vir_lookup(param_type_id);
+        let cranelift_type = vir_type_to_cranelift(vir_ty, table, ptr_type);
         sig.params.push(AbiParam::new(cranelift_type));
     }
 
     let return_type_id = func_type.return_type_id;
+    let ret_vir = vir_lookup(return_type_id);
 
     // Fallible return type -> multi-value returns
-    if arena.unwrap_fallible(return_type_id).is_some() {
-        if is_wide_fallible(return_type_id, arena) {
+    if table.unwrap_fallible(ret_vir).is_some() {
+        if vir_is_wide_fallible(ret_vir, table) {
             // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
             sig.returns.push(AbiParam::new(types::I64));
             sig.returns.push(AbiParam::new(types::I64));
@@ -2429,7 +2442,7 @@ fn build_monomorph_signature(
 
     // Struct return type -> multi-value or sret
     if let Some(field_count) =
-        crate::structs::struct_flat_slot_count(return_type_id, arena, analyzed)
+        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(ret_vir, table, analyzed)
     {
         if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
             // Small struct: return in registers, padded to MAX_SMALL_STRUCT_FIELDS
@@ -2447,7 +2460,7 @@ fn build_monomorph_signature(
 
     // Normal return type
     if !return_type_id.is_void() {
-        let ret_cranelift = type_id_to_cranelift(return_type_id, arena, ptr_type);
+        let ret_cranelift = vir_type_to_cranelift(ret_vir, table, ptr_type);
         sig.returns.push(AbiParam::new(ret_cranelift));
     }
 

@@ -97,25 +97,27 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
         iter_type_id: TypeDefId,
     ) -> Option<TypeId> {
-        let arena = self.arena();
+        let table = self.vir_type_table();
         match method_name {
             // Methods returning Iterator<T> — convert to RuntimeIterator<elem_type_id>
             "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
-            | "flatten" | "flat_map" | "filter_map" => arena.lookup_runtime_iterator(elem_type_id),
+            | "flatten" | "flat_map" | "filter_map" => {
+                table.lookup_runtime_iterator_sema(elem_type_id)
+            }
 
             // Methods returning Iterator<[i64, T]> for enumerate.
             // The actual enumerate element is [i64, T], but the RuntimeIterator
             // is keyed on the base elem_type_id. Return that if it exists.
-            "enumerate" => arena.lookup_runtime_iterator(elem_type_id),
+            "enumerate" => table.lookup_runtime_iterator_sema(elem_type_id),
 
             // Methods returning Iterator<[T, T]> for zip
-            "zip" => arena.lookup_runtime_iterator(elem_type_id),
+            "zip" => table.lookup_runtime_iterator_sema(elem_type_id),
 
             // Methods returning Iterator<[T]> for chunks/windows
-            "chunks" | "windows" => arena.lookup_runtime_iterator(elem_type_id),
+            "chunks" | "windows" => table.lookup_runtime_iterator_sema(elem_type_id),
 
             // Method returning [T] (collect)
-            "collect" => arena.lookup_array(elem_type_id),
+            "collect" => table.lookup_array_sema(elem_type_id),
 
             // Methods returning i64
             "count" => Some(TypeId::I64),
@@ -124,19 +126,18 @@ impl Cg<'_, '_, '_> {
             "any" | "all" => Some(TypeId::BOOL),
 
             // Methods returning void
-            "for_each" => Some(arena.void()),
+            "for_each" => Some(TypeId::VOID),
 
             // Methods returning T (the element type)
             "sum" | "reduce" => Some(elem_type_id),
 
             // Methods returning T? (optional element): first, last, nth, find
-            // The optional type is a Union(T, nil). Try to look it up in the arena.
-            // If not found, fall back to elem_type_id (codegen will handle it).
-            "first" | "last" | "nth" | "find" => {
-                // Look for the optional type in the arena (Union with nil + elem).
-                // The arena may have interned T? during sema analysis.
-                arena.lookup_optional(elem_type_id)
-            }
+            // The optional type is a Union(T, nil). Try VirTypeTable first,
+            // fall back to type_arena for types not yet interned in VIR
+            // (Iterable default bodies where Optional wasn't lowered).
+            "first" | "last" | "nth" | "find" => table
+                .lookup_optional_sema(elem_type_id)
+                .or_else(|| self.analyzed().type_arena().lookup_optional(elem_type_id)),
 
             // next() -> T | Done — return the T type directly
             "next" => {
@@ -166,8 +167,8 @@ impl Cg<'_, '_, '_> {
             .iterator_type_def
             .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
         let interface_type_id = self
-            .arena()
-            .lookup_interface(iterator_type_def, smallvec![elem_type_id])
+            .vir_type_table()
+            .lookup_interface_sema(iterator_type_def, &[elem_type_id])
             .ok_or_else(|| {
                 CodegenError::internal_with_context(
                     "Iterator<T> interface type not pre-interned by sema",
@@ -188,9 +189,8 @@ impl Cg<'_, '_, '_> {
         // wasn't pre-interned (e.g. propagated class method monomorphs).
         // All RuntimeIterator types share the same RC-pointer layout.
         let runtime_iter_type_id = self
-            .arena()
-            .lookup_runtime_iterator(elem_type_id)
-            .or_else(|| self.arena().lookup_runtime_iterator(TypeId::I64))
+            .vir_query_lookup_runtime_iterator(elem_type_id)
+            .or_else(|| self.vir_query_lookup_runtime_iterator(TypeId::I64))
             .expect("RuntimeIterator<i64> must always be pre-interned");
         Ok(self.compiled_owned_with_ty(wrapped, types::I64, runtime_iter_type_id))
     }
@@ -388,8 +388,9 @@ impl Cg<'_, '_, '_> {
         // so that intermediate pipeline operations (map, filter) can properly manage
         // RC values (rc_dec consumed/rejected values of RC types).
         let result_elem_type = {
-            let arena = self.arena();
-            arena.unwrap_runtime_iterator(return_type_id)
+            let vir = self.vir_lookup(return_type_id);
+            self.vir_query_unwrap_runtime_iterator_v(vir)
+                .and_then(|elem_vir| self.vir_type_table().lookup_vir_type_id(elem_vir))
         };
         if let Some(result_elem_id) = result_elem_type {
             let tag = self.vir_query_unknown_type_tag(result_elem_id);
@@ -424,23 +425,24 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Core implementation of iterator return type conversion
-    /// Uses arena methods to check for Iterator interface and convert to RuntimeIterator
+    /// Uses VirTypeTable to check for Iterator interface and convert to RuntimeIterator
     fn convert_iterator_return_type_by_type_def_id(
         &self,
         ty: TypeId,
         iterator_type_id: TypeDefId,
     ) -> TypeId {
-        let arena = self.arena();
         // Check if this is an Interface type matching Iterator
-        if let Some((type_def_id, type_args)) = arena.unwrap_interface(ty)
+        if let Some((type_def_id, vir_type_args)) = self.vir_query_unwrap_interface(ty)
             && type_def_id == iterator_type_id
-            && let Some(&elem_type_id) = type_args.first()
+            && let Some(&elem_vir) = vir_type_args.first()
         {
+            // Convert element VirTypeId back to sema TypeId
+            let elem_type_id = self.sema_type_id(elem_vir);
             // Look up existing RuntimeIterator type if sema created one.
             // If not found, this is a user-defined Iterator (e.g., pure Vole
             // MapKeyIterator/SetIterator) — keep the original Interface type
             // for vtable dispatch.
-            if let Some(runtime_iter_id) = arena.lookup_runtime_iterator(elem_type_id) {
+            if let Some(runtime_iter_id) = self.vir_query_lookup_runtime_iterator(elem_type_id) {
                 return runtime_iter_id;
             }
         }

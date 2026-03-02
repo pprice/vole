@@ -252,11 +252,10 @@ impl Cg<'_, '_, '_> {
                 self.coerce_value_to_f128(right)?,
             )
         } else {
-            // Convert operands - access arena via env to avoid borrow conflict
-            let arena = self.env.analyzed.type_arena();
+            // Convert operands to matching types
             (
-                convert_to_type(self.builder, left, result_ty, arena),
-                convert_to_type(self.builder, right, result_ty, arena),
+                convert_to_type(self.builder, left, result_ty),
+                convert_to_type(self.builder, right, result_ty),
             )
         };
 

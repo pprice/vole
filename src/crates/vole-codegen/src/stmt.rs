@@ -40,6 +40,7 @@ impl Cg<'_, '_, '_> {
         declared_type_id_opt: Option<TypeId>,
         sentinel_hint_type_id: Option<TypeId>,
         storage: LetStorageHint,
+        declared_vir_type: Option<VirTypeId>,
     ) -> CodegenResult<(Value, TypeId, bool)> {
         let mut is_stack_union = false;
 
@@ -91,11 +92,23 @@ impl Cg<'_, '_, '_> {
             let is_runtime_iterator = self.vir_query_is_runtime_iterator(final_type_id);
 
             if !is_final_interface && !is_runtime_iterator {
-                let cranelift_ty = self.cranelift_type(final_type_id);
-                let boxed = self.box_interface_value(
-                    self.compiled_with_ty(final_value, cranelift_ty, final_type_id),
-                    declared_type_id,
-                )?;
+                // When the sema declared type is UNKNOWN but VIR declared type is
+                // an interface, use the init's original VirTypeId for the value (so
+                // vtable builder can resolve the concrete type) and box via VIR path.
+                let boxed = if declared_type_id == TypeId::UNKNOWN
+                    && let Some(declared_vir) = declared_vir_type
+                    && self.vir_query_is_interface_v(declared_vir)
+                {
+                    // Use init's VirTypeId to preserve concrete type information
+                    let cranelift_ty = self.builder.func.dfg.value_type(final_value);
+                    let value_to_box = CompiledValue::new(final_value, cranelift_ty, init.type_id);
+                    self.box_interface_value_v(value_to_box, declared_vir)?
+                } else {
+                    let cranelift_ty = self.cranelift_type(final_type_id);
+                    let value_to_box =
+                        self.compiled_with_ty(final_value, cranelift_ty, final_type_id);
+                    self.box_interface_value(value_to_box, declared_type_id)?
+                };
                 final_value = boxed.value;
                 final_type_id = self.sema_type_id(boxed.type_id);
             }
@@ -260,11 +273,14 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let union_type_id = crate::types::vir_conversions::vir_to_sema_type_id(
-            union_vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        );
+        let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(union_vir_ty);
+        let union_type_id = if lossy != TypeId::UNKNOWN || union_vir_ty == VirTypeId::UNKNOWN {
+            lossy
+        } else {
+            self.vir_type_table()
+                .lookup_vir_type_id(union_vir_ty)
+                .unwrap_or(TypeId::UNKNOWN)
+        };
         self.construct_union_id(value, union_type_id)
     }
 
@@ -548,9 +564,10 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.sema_type_id(self.try_substitute_type_v(*ty))
                 };
+                let declared_vir = declared_type.map(|dt| self.try_substitute_type_v(dt));
                 let declared =
                     declared_type.map(|dt| self.sema_type_id(self.try_substitute_type_v(dt)));
-                self.compile_vir_let(*name, value, binding_ty, *storage, declared)
+                self.compile_vir_let(*name, value, binding_ty, *storage, declared, declared_vir)
             }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
@@ -671,11 +688,16 @@ impl Cg<'_, '_, '_> {
         if it.next().is_some() {
             None
         } else {
-            let table = self.vir_type_table();
-            let arena = self.arena();
-            Some(crate::types::vir_conversions::vir_to_sema_type_id(
-                first, table, arena,
-            ))
+            let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(first);
+            if lossy != TypeId::UNKNOWN || first == VirTypeId::UNKNOWN {
+                Some(lossy)
+            } else {
+                Some(
+                    self.vir_type_table()
+                        .lookup_vir_type_id(first)
+                        .unwrap_or(TypeId::UNKNOWN),
+                )
+            }
         }
     }
 
@@ -779,7 +801,7 @@ impl Cg<'_, '_, '_> {
                 // Plain value return (with type conversion if needed).
                 let return_value = if let Some(ret_vir_ty) = return_vir_ty {
                     let target_ty = self.cranelift_type_v(ret_vir_ty);
-                    convert_to_type(self.builder, compiled, target_ty, self.arena())
+                    convert_to_type(self.builder, compiled, target_ty)
                 } else {
                     compiled.value
                 };
@@ -886,13 +908,20 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
         // Reconstruct single error TypeId: if one error, convert directly;
-        // if multiple, the arena's fallible stores them as a union.
+        // if multiple, use the fallible's error union VirTypeId.
         let error_type_id = if error_virs.len() == 1 {
             self.sema_type_id(error_virs[0])
         } else {
-            self.arena()
-                .unwrap_fallible(return_type_id)
-                .map(|(_, err)| err)
+            // Multiple errors form a union; resolve via VIR fallible unwrap
+            self.vir_query_unwrap_fallible(return_type_id)
+                .and_then(|(_, errs)| {
+                    // Build a union VirTypeId from the error variants and resolve to sema
+                    let union_vir = self
+                        .vir_type_table()
+                        .lookup_union_v(errs)
+                        .unwrap_or(VirTypeId::UNKNOWN);
+                    self.vir_type_table().lookup_vir_type_id(union_vir)
+                })
                 .unwrap_or(TypeId::UNKNOWN)
         };
 
@@ -1015,6 +1044,7 @@ impl Cg<'_, '_, '_> {
         binding_ty: TypeId,
         storage: LetStorageHint,
         declared_type: Option<TypeId>,
+        declared_vir_type: Option<VirTypeId>,
     ) -> CodegenResult<bool> {
         // Pre-register recursive lambdas so they can capture themselves.
         let preregistered_var = self.preregister_recursive_vir_lambda(name, value_expr);
@@ -1041,15 +1071,40 @@ impl Cg<'_, '_, '_> {
         };
 
         let sentinel_hint_type_id = self.sentinel_hint_type_id_from_vir_expr(value_expr);
-        let (final_value, final_type_id, is_stack_union) =
-            self.coerce_let_init(&init, declared_type_id_opt, sentinel_hint_type_id, storage)?;
+        let (final_value, final_type_id, is_stack_union) = self.coerce_let_init(
+            &init,
+            declared_type_id_opt,
+            sentinel_hint_type_id,
+            storage,
+            declared_vir_type,
+        )?;
+
+        // When the sema TypeId round-trip loses the interface type (returns UNKNOWN),
+        // use the VIR declared type directly for variable binding. This happens in
+        // monomorphized contexts where dynamically-allocated VirTypeIds don't have
+        // reverse mappings in the VirTypeTable.
+        let bind_vir_override = if final_type_id == TypeId::UNKNOWN
+            && storage == LetStorageHint::Interface
+            && let Some(dv) = declared_vir_type
+            && self.vir_query_is_interface_v(dv)
+        {
+            Some(dv)
+        } else {
+            None
+        };
 
         // Use preregistered var for recursive lambdas, otherwise declare new.
         let var = if let Some(var) = preregistered_var {
             self.builder.def_var(var, final_value);
             var
         } else {
-            let cranelift_ty = self.cranelift_type(final_type_id);
+            // When we have a VIR override for the variable type, use pointer type
+            // (interfaces are always heap-allocated pointers).
+            let cranelift_ty = if bind_vir_override.is_some() {
+                self.ptr_type()
+            } else {
+                self.cranelift_type(final_type_id)
+            };
             let actual_ty = self.builder.func.dfg.value_type(final_value);
             if cranelift_ty != actual_ty {
                 return Err(CodegenError::internal_with_context(
@@ -1063,7 +1118,11 @@ impl Cg<'_, '_, '_> {
             }
             let var = self.builder.declare_var(cranelift_ty);
             self.builder.def_var(var, final_value);
-            self.bind_var(name, var, final_type_id);
+            if let Some(vir_override) = bind_vir_override {
+                self.bind_var_v(name, var, vir_override);
+            } else {
+                self.bind_var(name, var, final_type_id);
+            }
             var
         };
 

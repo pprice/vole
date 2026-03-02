@@ -12,7 +12,6 @@
 
 use cranelift::prelude::*;
 use vole_identity::{TypeId, VirTypeId};
-use vole_sema::type_arena::TypeArena;
 use vole_vir::type_table::VirTypeTable;
 
 use crate::types::CompiledValue;
@@ -27,7 +26,7 @@ pub enum WideType {
 impl WideType {
     /// Try to classify a Vole `TypeId` as a wide type.
     /// Returns `None` for non-wide types.
-    pub fn from_type_id(type_id: TypeId, _arena: &TypeArena) -> Option<Self> {
+    pub fn from_type_id(type_id: TypeId) -> Option<Self> {
         if type_id == TypeId::I128 {
             Some(WideType::I128)
         } else if type_id == TypeId::F128 {

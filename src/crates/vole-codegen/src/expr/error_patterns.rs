@@ -7,8 +7,8 @@ use rustc_hash::FxHashMap;
 
 use crate::errors::CodegenResult;
 use crate::types::{
-    CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, fallible_error_tag_by_id,
-    load_fallible_payload, load_fallible_tag,
+    CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, load_fallible_payload,
+    load_fallible_tag,
 };
 
 use vole_frontend::Symbol;
@@ -49,11 +49,15 @@ impl Cg<'_, '_, '_> {
         let error_type_id = if error_virs.len() == 1 {
             self.sema_type_id(error_virs[0])
         } else {
-            // Multiple errors form a union in sema; get the original error TypeId
-            // from the arena since it stores the error as a single (union) type.
-            self.arena()
-                .unwrap_fallible(scrutinee_type_id)
-                .map(|(_, err)| err)
+            // Multiple errors form a union; resolve via VIR
+            self.vir_query_unwrap_fallible(scrutinee_type_id)
+                .and_then(|(_, errs)| {
+                    let union_vir = self
+                        .vir_type_table()
+                        .lookup_union_v(errs)
+                        .unwrap_or(VirTypeId::UNKNOWN);
+                    self.vir_type_table().lookup_vir_type_id(union_vir)
+                })
                 .unwrap_or(TypeId::UNKNOWN)
         };
 
@@ -175,17 +179,39 @@ impl Cg<'_, '_, '_> {
 
     /// Look up the numeric error tag for a named error type within a fallible error union.
     ///
-    /// Thin wrapper around `fallible_error_tag_by_id` that pulls all context
-    /// arguments from `self`.
+    /// Uses VIR type table to resolve error types without arena access.
     pub(crate) fn error_tag_for(&self, error_type_id: TypeId, error_name: Symbol) -> Option<i64> {
-        fallible_error_tag_by_id(
-            error_type_id,
-            error_name,
-            self.arena(),
-            self.interner(),
-            self.name_table(),
-            self.analyzed(),
-        )
+        let error_name_str = self.interner().resolve(error_name);
+        let vir_ty = self.vir_lookup(error_type_id);
+        let table = self.vir_type_table();
+
+        // Check if it's a single Error type
+        if let Some(type_def_id) = table.unwrap_error(vir_ty) {
+            let info_name = self
+                .name_table()
+                .last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
+            if info_name.as_deref() == Some(error_name_str) {
+                return Some(1);
+            }
+            return None;
+        }
+
+        // Check if it's a Union of error types
+        if let Some(variants) = self.vir_query_unwrap_union_v(vir_ty) {
+            for (idx, &variant) in variants.iter().enumerate() {
+                if let Some(type_def_id) = table.unwrap_error(variant) {
+                    let info_name = self
+                        .name_table()
+                        .last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
+                    if info_name.as_deref() == Some(error_name_str) {
+                        return Some((idx + 1) as i64);
+                    }
+                }
+            }
+            return None;
+        }
+
+        None
     }
 
     /// Extract field bindings from an error record pattern. Loads fields from the

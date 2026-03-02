@@ -12,13 +12,24 @@ use vole_identity::{TypeId, VirTypeId};
 impl Cg<'_, '_, '_> {
     /// Convenience wrapper: compute struct field byte offset, panicking on invalid types.
     pub(crate) fn struct_field_byte_offset(&self, type_id: TypeId, slot: usize) -> i32 {
-        super::helpers::struct_field_byte_offset(type_id, slot, self.arena(), self.analyzed())
-            .expect("INTERNAL: struct field offset must be computable for valid struct type")
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_struct_helpers::vir_struct_field_byte_offset(
+            vir_ty,
+            slot,
+            self.vir_type_table(),
+            self.analyzed(),
+        )
+        .expect("INTERNAL: struct field offset must be computable for valid struct type")
     }
 
     /// Compute total byte size of a struct type (None if type is not a struct).
     pub(crate) fn struct_total_byte_size(&self, type_id: TypeId) -> Option<u32> {
-        super::helpers::struct_total_byte_size(type_id, self.arena(), self.analyzed())
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_struct_helpers::vir_struct_total_byte_size(
+            vir_ty,
+            self.vir_type_table(),
+            self.analyzed(),
+        )
     }
 
     /// VirTypeId-native variant of [`struct_flat_field_cranelift_types`].

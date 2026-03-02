@@ -119,6 +119,12 @@ impl Compiler<'_> {
             // Check if this function belongs to the program module or a loaded module
             let func_module = self.analyzed.name_table().module_of(instance.original_name);
             if func_module == program_module {
+                // During module phase, skip program-level monomorphs — their types
+                // (classes, structs) aren't registered in type_metadata yet.  They
+                // will be compiled later in compile_program_body's program phase.
+                if !is_program_phase {
+                    continue;
+                }
                 self.compile_monomorphized_function(instance)?;
             } else {
                 // Module function — needs module interner for compile_env

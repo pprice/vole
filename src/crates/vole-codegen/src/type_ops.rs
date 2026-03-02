@@ -12,7 +12,7 @@ use cranelift_codegen::ir::FuncRef;
 use vole_identity::{TypeDefId, TypeId, VirTypeId};
 
 use super::context::Cg;
-use super::types::{CompiledValue, type_id_size, type_id_to_cranelift, value_to_word};
+use super::types::CompiledValue;
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Type context & substitution ==========
@@ -100,27 +100,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Boundary helper for codegen call-sites that still need a sema `TypeId`
     /// (e.g. function-call signatures, sema-based struct layout, interface
     /// boxing).  New code should prefer VirTypeId-native APIs (`_v` variants).
+    ///
+    /// Uses the VirTypeTable reverse mapping — no arena access.
     #[inline]
     pub fn sema_type_id(&self, vir_ty: VirTypeId) -> TypeId {
-        super::types::vir_conversions::vir_to_sema_type_id(
-            vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        )
+        let lossy = super::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
+        if lossy != TypeId::UNKNOWN || vir_ty == VirTypeId::UNKNOWN {
+            return lossy;
+        }
+        self.vir_type_table()
+            .lookup_vir_type_id(vir_ty)
+            .unwrap_or(TypeId::UNKNOWN)
     }
 
     /// Convert a slice of TypeIds to Cranelift types
     pub fn cranelift_types(&self, type_ids: &[TypeId]) -> Vec<Type> {
-        let arena = self.arena();
         type_ids
             .iter()
-            .map(|&ty| type_id_to_cranelift(ty, arena, self.ptr_type()))
+            .map(|&ty| self.vir_query_type_to_cranelift(ty))
             .collect()
     }
 
     /// Get the size (in bytes) of a TypeId.
     pub fn type_size(&self, ty: TypeId) -> u32 {
-        type_id_size(ty, self.ptr_type(), self.analyzed(), self.arena())
+        self.type_size_v(self.vir_lookup(ty))
     }
 
     /// Get the size (in bytes) of a `VirTypeId` via the VIR type table.
@@ -137,12 +140,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Returns (total_size_bytes, per_element_byte_offsets).
     pub fn tuple_layout(&self, elem_type_ids: &[TypeId]) -> (u32, Vec<i32>) {
-        super::types::tuple_layout_id(
-            elem_type_ids,
-            self.ptr_type(),
-            self.analyzed(),
-            self.arena(),
-        )
+        let vir_elems: Vec<VirTypeId> = elem_type_ids
+            .iter()
+            .map(|&ty| self.vir_lookup(ty))
+            .collect();
+        self.tuple_layout_v(&vir_elems)
     }
 
     /// Compute the memory layout for a tuple type from `VirTypeId` elements.
@@ -160,33 +162,40 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a typed value to its word (i64) representation for generic dispatch.
     ///
-    /// Wrapper around `value_to_word` that internalizes ptr_type/analyzed/arena
+    /// Wrapper around `vir_value_to_word` that internalizes ptr_type/analyzed/table
     /// parameters for call sites.
     pub fn emit_word(
         &mut self,
         compiled: &CompiledValue,
         heap_alloc_ref: Option<FuncRef>,
     ) -> crate::errors::CodegenResult<Value> {
-        let ptr_type = self.ptr_type();
-        let analyzed = self.analyzed();
-        let arena = self.arena();
-        value_to_word(
+        let ptr_type = self.codegen_ctx.ptr_type();
+        let analyzed = self.env.analyzed;
+        let table = &self.env.analyzed.vir_program().type_table;
+        super::types::vir_conversions::vir_value_to_word(
             self.builder,
             compiled,
             ptr_type,
             heap_alloc_ref,
-            arena,
             analyzed,
+            table,
         )
     }
 
     /// Convert an i64 value back to its proper type (reverse of convert_to_i64_for_storage)
     pub fn convert_from_i64_storage(&mut self, word: Value, type_id: TypeId) -> Value {
-        use super::types::word_to_value_type_id;
-        let ptr_type = self.ptr_type();
-        let analyzed = self.analyzed();
-        let arena = self.arena();
-        word_to_value_type_id(self.builder, word, type_id, ptr_type, analyzed, arena)
+        let vir_ty = self.vir_lookup(type_id);
+        let ptr_type = self.codegen_ctx.ptr_type();
+        let analyzed = self.env.analyzed;
+        let table = &self.env.analyzed.vir_program().type_table;
+        super::types::vir_conversions::vir_word_to_value(
+            self.builder,
+            word,
+            vir_ty,
+            ptr_type,
+            analyzed,
+            table,
+        )
     }
 
     // ========== Type resolution ==========
@@ -215,12 +224,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
 
-        // Fallback to arena-based lookup via sema TypeId
-        let sema_ty = super::types::vir_conversions::vir_to_sema_type_id(
-            vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        );
+        // Fallback to sema TypeId path (lossy + reverse lookup, no arena)
+        let lossy = super::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
+        let sema_ty = if lossy != TypeId::UNKNOWN || vir_ty == VirTypeId::UNKNOWN {
+            lossy
+        } else {
+            self.vir_type_table()
+                .lookup_vir_type_id(vir_ty)
+                .unwrap_or(TypeId::UNKNOWN)
+        };
         self.find_nil_variant(sema_ty)
     }
 
@@ -322,24 +334,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         variant_idx: Value,
         variants: &[TypeId],
     ) -> Value {
-        let variant_tags: Vec<i64> = {
-            let arena = self.arena();
-            variants
-                .iter()
-                .map(|&variant| crate::types::array_element_tag_id(variant, arena))
-                .collect()
-        };
-        let default_tag = variant_tags[0];
-        let mut runtime_tag = self.iconst_cached(types::I64, default_tag);
-
-        for (idx, &tag) in variant_tags.iter().enumerate().skip(1) {
-            let idx_val = self.iconst_cached(types::I8, idx as i64);
-            let is_match = self.builder.ins().icmp(IntCC::Equal, variant_idx, idx_val);
-            let tag_val = self.iconst_cached(types::I64, tag);
-            runtime_tag = self.builder.ins().select(is_match, tag_val, runtime_tag);
-        }
-
-        runtime_tag
+        let vir_variants: Vec<VirTypeId> = variants.iter().map(|&v| self.vir_lookup(v)).collect();
+        self.union_variant_index_to_array_tag_v(variant_idx, &vir_variants)
     }
 
     #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
@@ -348,36 +344,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         array_tag: Value,
         variants: &[TypeId],
     ) -> Value {
-        let variant_tags: Vec<i64> = {
-            let arena = self.arena();
-            variants
-                .iter()
-                .map(|&variant| crate::types::array_element_tag_id(variant, arena))
-                .collect()
-        };
-        let mut variant_idx = self.iconst_cached(types::I8, 0);
-        let first_match = self
-            .builder
-            .ins()
-            .icmp_imm(IntCC::Equal, array_tag, variant_tags[0]);
-        let mut matched_any = first_match;
-
-        for (idx, &runtime_tag) in variant_tags.iter().enumerate().skip(1) {
-            let is_match = self
-                .builder
-                .ins()
-                .icmp_imm(IntCC::Equal, array_tag, runtime_tag);
-            let idx_val = self.iconst_cached(types::I8, idx as i64);
-            variant_idx = self.builder.ins().select(is_match, idx_val, variant_idx);
-            matched_any = self.builder.ins().bor(matched_any, is_match);
-        }
-
-        // Strict contract: unknown tags are a hard runtime fault.
-        self.builder
-            .ins()
-            .trapz(matched_any, crate::trap_codes::PANIC);
-
-        variant_idx
+        let vir_variants: Vec<VirTypeId> = variants.iter().map(|&v| self.vir_lookup(v)).collect();
+        self.array_tag_to_union_variant_index_v(array_tag, &vir_variants)
     }
 
     pub(crate) fn union_variant_index_to_array_tag_v(

@@ -337,6 +337,14 @@ impl VirTypeTable {
         matches!(self.get(id), VirType::Error { .. })
     }
 
+    /// Extract the `TypeDefId` from an `Error` type.
+    pub fn unwrap_error(&self, id: VirTypeId) -> Option<TypeDefId> {
+        match self.get(id) {
+            VirType::Error { def } => Some(*def),
+            _ => None,
+        }
+    }
+
     // -- Layout predicates --------------------------------------------------
 
     /// Whether this type is reference-counted (from layout). Returns `false`
@@ -367,6 +375,52 @@ impl VirTypeTable {
     /// no layout is available.
     pub fn storage_class(&self, id: VirTypeId) -> Option<StorageClass> {
         self.get_layout(id).map(|l| l.storage)
+    }
+
+    // -- Union variant ordering -----------------------------------------------
+
+    /// Compute the sort key for a type used as a union variant.
+    ///
+    /// Mirrors the sema arena's `union_sort_key` so that Optional expansion
+    /// produces the same `[inner, NIL]` or `[NIL, inner]` order that sema
+    /// used when creating the original union type.
+    ///
+    /// Sort is descending by `(category, tiebreaker)`.
+    pub fn union_sort_key(&self, id: VirTypeId) -> (u32, u64) {
+        match self.get(id) {
+            VirType::Primitive(_) => (100, id.raw() as u64),
+            VirType::Array { .. } | VirType::FixedArray { .. } => (90, id.raw() as u64),
+            VirType::Tuple { .. } => (85, id.raw() as u64),
+            VirType::Function { .. } => (80, id.raw() as u64),
+            VirType::Fallible { .. } => (75, id.raw() as u64),
+            VirType::RuntimeIterator { .. } => (70, id.raw() as u64),
+            VirType::Class { def, .. }
+            | VirType::Struct { def, .. }
+            | VirType::Interface { def, .. }
+            | VirType::Error { def } => (50, def.index() as u64),
+            VirType::Param { .. } => (40, id.raw() as u64),
+            VirType::Optional { .. } | VirType::Union { .. } => (30, id.raw() as u64),
+            VirType::Void => (20, id.raw() as u64),
+            VirType::Never => (15, id.raw() as u64),
+            VirType::Range => (10, id.raw() as u64),
+            VirType::MetaType => (10, id.raw() as u64),
+            VirType::Unknown => (5, id.raw() as u64),
+        }
+    }
+
+    /// Expand an Optional type into its union variant order.
+    ///
+    /// Returns the two-element variant list `[inner, NIL]` or `[NIL, inner]`
+    /// matching the sema arena's sort order.
+    pub fn expand_optional_variants(&self, inner: VirTypeId) -> Vec<VirTypeId> {
+        let inner_key = self.union_sort_key(inner);
+        let nil_key = self.union_sort_key(VirTypeId::NIL);
+        // Descending sort: higher key comes first.
+        if inner_key >= nil_key {
+            vec![inner, VirTypeId::NIL]
+        } else {
+            vec![VirTypeId::NIL, inner]
+        }
     }
 }
 
@@ -765,6 +819,149 @@ impl VirTypeTable {
 }
 
 // ---------------------------------------------------------------------------
+// Type-construction lookups (find an interned compound type by its parts)
+// ---------------------------------------------------------------------------
+
+impl VirTypeTable {
+    /// Look up an array type by its element `VirTypeId`.
+    ///
+    /// Returns `Some(id)` if `Array { elem }` was already interned, `None`
+    /// otherwise.
+    pub fn lookup_array_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
+        self.lookup(&VirType::Array { elem })
+    }
+
+    /// Look up a runtime iterator type by its element `VirTypeId`.
+    ///
+    /// Returns `Some(id)` if `RuntimeIterator { elem }` was already interned,
+    /// `None` otherwise.
+    pub fn lookup_runtime_iterator_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
+        self.lookup(&VirType::RuntimeIterator { elem })
+    }
+
+    /// Look up a fixed-array type by element and length.
+    ///
+    /// Returns `Some(id)` if `FixedArray { elem, len }` was already interned,
+    /// `None` otherwise.
+    pub fn lookup_fixed_array_v(&self, elem: VirTypeId, len: u32) -> Option<VirTypeId> {
+        self.lookup(&VirType::FixedArray { elem, len })
+    }
+
+    /// Look up an interface type by `TypeDefId` and type arguments.
+    ///
+    /// Returns `Some(id)` if `Interface { def, type_args }` was already interned,
+    /// `None` otherwise.
+    pub fn lookup_interface_v(
+        &self,
+        def: TypeDefId,
+        type_args: Vec<VirTypeId>,
+    ) -> Option<VirTypeId> {
+        self.lookup(&VirType::Interface { def, type_args })
+    }
+
+    /// Look up a union type by its variant `VirTypeId`s.
+    ///
+    /// Returns `Some(id)` if `Union { variants }` was already interned,
+    /// `None` otherwise.
+    pub fn lookup_union_v(&self, variants: Vec<VirTypeId>) -> Option<VirTypeId> {
+        self.lookup(&VirType::Union { variants })
+    }
+
+    // -- sema TypeId convenience wrappers ------------------------------------
+    //
+    // These convert TypeId→VirTypeId, do the lookup, then convert back.
+    // They are transitional helpers for codegen callers that still operate
+    // on sema `TypeId` values.
+
+    /// Look up an array type by element `TypeId`.
+    pub fn lookup_array_sema(&self, elem: TypeId) -> Option<TypeId> {
+        let elem_vir = self.lookup_type_id(elem)?;
+        let arr = self.lookup_array_v(elem_vir)?;
+        self.lookup_vir_type_id(arr)
+    }
+
+    /// Look up a runtime iterator type by element `TypeId`.
+    pub fn lookup_runtime_iterator_sema(&self, elem: TypeId) -> Option<TypeId> {
+        let elem_vir = self.lookup_type_id(elem)?;
+        let iter = self.lookup_runtime_iterator_v(elem_vir)?;
+        self.lookup_vir_type_id(iter)
+    }
+
+    /// Look up a fixed-array type by element `TypeId` and length.
+    pub fn lookup_fixed_array_sema(&self, elem: TypeId, len: usize) -> Option<TypeId> {
+        let elem_vir = self.lookup_type_id(elem)?;
+        let fa = self.lookup_fixed_array_v(elem_vir, len as u32)?;
+        self.lookup_vir_type_id(fa)
+    }
+
+    /// Look up an interface type by `TypeDefId` and sema type args.
+    pub fn lookup_interface_sema(&self, def: TypeDefId, type_args: &[TypeId]) -> Option<TypeId> {
+        let vir_args: Vec<VirTypeId> = type_args
+            .iter()
+            .map(|&a| self.lookup_type_id(a))
+            .collect::<Option<Vec<_>>>()?;
+        let iface = self.lookup_interface_v(def, vir_args)?;
+        self.lookup_vir_type_id(iface)
+    }
+
+    /// Look up an optional type (`T?`) by its inner element `VirTypeId`.
+    ///
+    /// Checks both `Optional { inner }` and `Union { [inner, NIL] }` since
+    /// some paths intern optionals as explicit Optional while others use the
+    /// general Union representation.
+    pub fn lookup_optional_v(&self, inner: VirTypeId) -> Option<VirTypeId> {
+        self.lookup(&VirType::Optional { inner }).or_else(|| {
+            // Fall back to Union representation (sorted by raw ID)
+            let mut variants = vec![inner, VirTypeId::NIL];
+            variants.sort_by_key(|v| v.raw());
+            self.lookup(&VirType::Union { variants })
+        })
+    }
+
+    /// Look up an optional type (`T?`) by its inner element `TypeId`.
+    pub fn lookup_optional_sema(&self, inner: TypeId) -> Option<TypeId> {
+        let inner_vir = self.lookup_type_id(inner)?;
+        let opt = self.lookup_optional_v(inner_vir)?;
+        self.lookup_vir_type_id(opt)
+    }
+
+    /// Look up a union type by variant `TypeId`s.
+    pub fn lookup_union_sema(&self, variants: &[TypeId]) -> Option<TypeId> {
+        let vir_variants: Vec<VirTypeId> = variants
+            .iter()
+            .map(|&v| self.lookup_type_id(v))
+            .collect::<Option<Vec<_>>>()?;
+        let union = self.lookup_union_v(vir_variants)?;
+        self.lookup_vir_type_id(union)
+    }
+
+    // -- bulk queries ---------------------------------------------------------
+
+    /// Return all concrete element types for which a `RuntimeIterator` exists.
+    ///
+    /// Skips abstract `Param` elements (type parameters).  Returns sema
+    /// `TypeId` values so callers that still traffic in `TypeId` can use the
+    /// result directly.
+    pub fn all_concrete_runtime_iterator_elem_types_sema(&self) -> Vec<TypeId> {
+        self.types
+            .iter()
+            .filter_map(|ty| {
+                if let VirType::RuntimeIterator { elem } = ty {
+                    // Skip abstract TypeParam elements
+                    if matches!(self.types[elem.raw() as usize], VirType::Param { .. }) {
+                        None
+                    } else {
+                        self.lookup_vir_type_id(*elem)
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Type substitution (replaces arena-based substitution for codegen)
 // ---------------------------------------------------------------------------
 
@@ -1048,10 +1245,14 @@ impl VirTypeTable {
                 self.lookup(&VirType::Tuple { elems: new_elems })
             }
             VirType::Union { variants } => {
-                let new_variants = self.substitute_native_vec(variants, subs)?;
+                let mut new_variants = self.substitute_native_vec(variants, subs)?;
                 if new_variants == *variants {
                     return Some(vir_id);
                 }
+                // Re-sort variants by union_sort_key (descending) to match
+                // sema's canonical order after substitution.  See substitute.rs
+                // for the equivalent fix in the monomorphization pipeline.
+                new_variants.sort_by_key(|v| std::cmp::Reverse(self.union_sort_key(*v)));
                 self.lookup(&VirType::Union {
                     variants: new_variants,
                 })

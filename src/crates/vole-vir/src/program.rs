@@ -114,6 +114,20 @@ pub struct VirProgram {
     /// Value is `(module_id, export_name, export_vir_type)`.
     pub module_module_bindings: FxHashMap<String, FxHashMap<Symbol, (ModuleId, Symbol, VirTypeId)>>,
 
+    /// Per-module compile-time constant values (e.g. `math.PI`).
+    ///
+    /// Populated during VIR lowering from `TypeArena::module_metadata`.
+    /// Keyed by `(ModuleId, NameId)`.
+    pub module_constants: FxHashMap<(ModuleId, NameId), vole_identity::ConstantValue>,
+
+    /// Module type exports: `(ModuleId, exports)`.
+    ///
+    /// Populated during VIR lowering from `SemaType::Module` entries.
+    /// Keyed by the sema `TypeId` of the module type so that codegen can
+    /// resolve `obj.@field` on module values without arena access.
+    pub module_exports:
+        FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>,
+
     /// Base index of VIR-monomorphized functions within `functions`.
     ///
     /// Functions at indices `>= vir_monomorph_base` were produced by the VIR
