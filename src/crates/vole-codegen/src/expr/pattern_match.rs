@@ -28,20 +28,19 @@ impl Cg<'_, '_, '_> {
         &self,
         value_vir: VirTypeId,
         tested_vir: VirTypeId,
-    ) -> IsCheckResult {
+    ) -> VirIsCheckResult {
         if value_vir == VirTypeId::UNKNOWN {
-            let tested_type_id = self.sema_type_id(tested_vir);
-            IsCheckResult::CheckUnknown(tested_type_id)
+            VirIsCheckResult::CheckUnknown(tested_vir, tested_vir)
         } else if let Some(variants) = self.vir_query_unwrap_union_v(value_vir) {
             if let Some(index) = variants.iter().position(|&v| v == tested_vir) {
-                IsCheckResult::CheckTag(index as u32)
+                VirIsCheckResult::CheckTag(index as u32)
             } else {
-                IsCheckResult::AlwaysFalse
+                VirIsCheckResult::AlwaysFalse
             }
         } else if value_vir == tested_vir {
-            IsCheckResult::AlwaysTrue
+            VirIsCheckResult::AlwaysTrue
         } else {
-            IsCheckResult::AlwaysFalse
+            VirIsCheckResult::AlwaysFalse
         }
     }
 
@@ -58,6 +57,7 @@ impl Cg<'_, '_, '_> {
     /// check: (1) tag == Instance, (2) the instance's `type_id` field matches
     /// the annotation type's registered runtime type_id. This distinguishes
     /// different annotation types that all share the Instance tag.
+    #[allow(dead_code)]
     pub(super) fn compile_unknown_is_check(
         &mut self,
         tagged_value_ptr: Value,
@@ -167,26 +167,37 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an equality check for two values based on their Vole type.
     /// Handles string comparison via runtime function, floats via fcmp, and integers via icmp.
+    #[allow(dead_code)]
     fn compile_equality_check(
         &mut self,
         type_id: TypeId,
         left: Value,
         right: Value,
     ) -> CodegenResult<Value> {
+        self.compile_equality_check_v(self.vir_lookup(type_id), left, right)
+    }
+
+    /// VirTypeId variant: compile an equality check for two values.
+    fn compile_equality_check_v(
+        &mut self,
+        vir_ty: VirTypeId,
+        left: Value,
+        right: Value,
+    ) -> CodegenResult<Value> {
         use crate::RuntimeKey;
         use cranelift::prelude::FloatCC;
 
-        if self.vir_query_is_string(type_id) {
+        if self.vir_query_is_string_v(vir_ty) {
             Ok(self.call_runtime(RuntimeKey::StringEq, &[left, right])?)
-        } else if self.vir_query_is_float(type_id) {
+        } else if self.vir_query_is_float_v(vir_ty) {
             Ok(self.builder.ins().fcmp(FloatCC::Equal, left, right))
-        } else if type_id.is_integer() || type_id.is_bool() {
+        } else if vir_ty.is_integer() || vir_ty == VirTypeId::BOOL {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
         } else {
             Err(CodegenError::type_mismatch(
                 "equality comparison",
                 "string, float, integer, or bool",
-                format!("{type_id:?}"),
+                self.vir_query_display_basic_v(vir_ty),
             ))
         }
     }
@@ -208,52 +219,52 @@ impl Cg<'_, '_, '_> {
         arms: &[vole_vir::VirMatchArm],
         vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let result_type_id = self.sema_type_id(vir_result_type_id);
         let scrutinee = self.compile_vir_expr(scrutinee_expr)?;
         let scrutinee_type_id = scrutinee.type_id;
 
-        let mut effective_result_type = self.try_substitute_type(result_type_id);
+        let mut effective_result_vir = self.try_substitute_type_v(vir_result_type_id);
 
         // Repair degraded match result metadata by inferring from arm result
         // types when they provide a consistent concrete shape.
-        let mut arm_types: Vec<TypeId> = Vec::new();
+        let mut arm_vir_types: Vec<VirTypeId> = Vec::new();
         for arm in arms {
-            let arm_ty = self.sema_type_id(self.try_substitute_type_v(arm.ty));
-            if arm_ty != TypeId::UNKNOWN && !arm_types.contains(&arm_ty) {
-                arm_types.push(arm_ty);
+            let arm_vir = self.try_substitute_type_v(arm.ty);
+            if arm_vir != VirTypeId::UNKNOWN && !arm_vir_types.contains(&arm_vir) {
+                arm_vir_types.push(arm_vir);
             }
         }
-        if arm_types.len() > 1
-            && let Some(inferred_union) = self.vir_query_lookup_union(arm_types.clone().into())
-            && (!self.vir_query_is_union(effective_result_type)
-                || effective_result_type.is_unknown()
-                || self.vir_query_is_function(effective_result_type))
+        if arm_vir_types.len() > 1
+            && let Some(inferred_union) =
+                self.vir_type_table().lookup_union_v(arm_vir_types.clone())
+            && (!self.vir_query_is_union_v(effective_result_vir)
+                || effective_result_vir == VirTypeId::UNKNOWN
+                || self.vir_query_is_function_v(effective_result_vir))
         {
-            effective_result_type = inferred_union;
-        } else if let [single] = arm_types.as_slice()
-            && (effective_result_type.is_unknown()
-                || self.vir_query_is_function(effective_result_type))
+            effective_result_vir = inferred_union;
+        } else if let [single] = arm_vir_types.as_slice()
+            && (effective_result_vir == VirTypeId::UNKNOWN
+                || self.vir_query_is_function_v(effective_result_vir))
         {
-            effective_result_type = *single;
+            effective_result_vir = *single;
         }
 
         // Replicate the nil-arm union return type adjustment from match_expr.
-        if !self.vir_query_is_union(effective_result_type) {
+        if !self.vir_query_is_union_v(effective_result_vir) {
             let has_nil_arm = arms.iter().any(|arm| {
                 arm.ty != VirTypeId::UNKNOWN
-                    && self.vir_query_is_nil(self.sema_type_id(self.try_substitute_type_v(arm.ty)))
+                    && self.vir_query_is_nil_v(self.try_substitute_type_v(arm.ty))
             });
             if has_nil_arm && let Some(ret_vir_ty) = self.return_type {
                 let ret_vir_ty = self.try_substitute_type_v(ret_vir_ty);
                 if self.vir_query_is_union_v(ret_vir_ty) {
-                    effective_result_type = self.sema_type_id(ret_vir_ty);
+                    effective_result_vir = ret_vir_ty;
                 }
             }
         }
 
-        let result_cranelift_type = self.cranelift_type(effective_result_type);
-        let is_void = effective_result_type.is_void();
-        let result_vir_ty = self.to_vir_type(effective_result_type);
+        let result_cranelift_type = self.cranelift_type_v(effective_result_vir);
+        let is_void = effective_result_vir == VirTypeId::VOID;
+        let result_vir_ty = effective_result_vir;
 
         // Try switch optimization for dense integer literal arms.
         if let Some(analysis) = match_switch::analyze_vir_switch(arms, scrutinee_type_id) {
@@ -261,7 +272,6 @@ impl Cg<'_, '_, '_> {
                 arms,
                 analysis,
                 scrutinee,
-                effective_result_type,
                 result_vir_ty,
                 result_cranelift_type,
                 is_void,
@@ -271,7 +281,6 @@ impl Cg<'_, '_, '_> {
         self.compile_vir_match_chain(
             arms,
             scrutinee,
-            effective_result_type,
             result_vir_ty,
             result_cranelift_type,
             is_void,
@@ -280,12 +289,10 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a VIR match using the standard chain of if-else blocks.
-    #[expect(clippy::too_many_arguments)]
     fn compile_vir_match_chain(
         &mut self,
         arms: &[vole_vir::VirMatchArm],
         scrutinee: CompiledValue,
-        result_type_id: TypeId,
         result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
@@ -318,7 +325,6 @@ impl Cg<'_, '_, '_> {
                 arm_blocks[i],
                 next_block,
                 merge_block,
-                result_type_id,
                 result_vir_ty,
                 result_cranelift_type,
                 is_void,
@@ -344,7 +350,6 @@ impl Cg<'_, '_, '_> {
         arm_block: Block,
         next_block: Block,
         merge_block: Block,
-        result_type_id: TypeId,
         result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
@@ -390,7 +395,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_to_block(body_block);
         let saved_vars = std::mem::replace(&mut self.vars, arm_variables);
-        let body_result = self.compile_vir_arm_body(&arm.body, result_type_id)?;
+        let body_result = self.compile_vir_arm_body_v(&arm.body, result_vir_ty)?;
         let _ = std::mem::replace(&mut self.vars, saved_vars);
 
         self.emit_match_arm_exit(
@@ -438,7 +443,7 @@ impl Cg<'_, '_, '_> {
                     let sub_tested = self.try_substitute_type_v(*tested_type);
                     let sub_scrutinee = self.try_substitute_type_v(scrutinee.type_id);
                     let effective_result = self.compute_is_check_result(sub_scrutinee, sub_tested);
-                    self.compile_is_check_result(&effective_result, scrutinee)?
+                    self.compile_vir_is_check_result(&effective_result, scrutinee)?
                 } else {
                     self.compile_vir_is_check_result(result, scrutinee)?
                 };
@@ -465,8 +470,8 @@ impl Cg<'_, '_, '_> {
                 *arm_variables = std::mem::replace(&mut self.vars, saved_vars);
 
                 let coerced_lit = self.convert_for_select(lit_val.value, scrutinee.ty);
-                let cmp = self.compile_equality_check(
-                    self.sema_type_id(self.try_substitute_type_v(*scrutinee_ty)),
+                let cmp = self.compile_equality_check_v(
+                    self.try_substitute_type_v(*scrutinee_ty),
                     scrutinee.value,
                     coerced_lit,
                 )?;
@@ -474,20 +479,17 @@ impl Cg<'_, '_, '_> {
             }
 
             vole_vir::VirPattern::Val { name } => {
-                let (var_val, var_type_id) =
+                let (var_val, var_vir_ty) =
                     if let Some(&(var, var_vir_ty)) = arm_variables.get(name) {
-                        (self.builder.use_var(var), self.sema_type_id(var_vir_ty))
+                        (self.builder.use_var(var), var_vir_ty)
                     } else if let Some(binding) = self.get_capture(name).copied() {
                         let captured = self.load_capture(&binding)?;
-                        (
-                            captured.value,
-                            self.sema_type_id(self.try_substitute_type_v(captured.type_id)),
-                        )
+                        (captured.value, self.try_substitute_type_v(captured.type_id))
                     } else {
                         return Err(CodegenError::internal("undefined variable in val pattern"));
                     };
 
-                let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
+                let cmp = self.compile_equality_check_v(var_vir_ty, scrutinee.value, var_val)?;
                 Ok(Some(cmp))
             }
 
@@ -498,7 +500,7 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_success_pattern(
                 inner,
                 scrutinee,
-                self.sema_type_id(self.try_substitute_type_v(*success_type)),
+                self.try_substitute_type_v(*success_type),
                 arm_variables,
             ),
 
@@ -541,7 +543,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         inner: &Option<Box<vole_vir::VirPattern>>,
         scrutinee: &CompiledValue,
-        success_type: TypeId,
+        success_vir: VirTypeId,
         arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
     ) -> CodegenResult<Option<Value>> {
         let tag = load_fallible_tag(self.builder, scrutinee.value);
@@ -551,15 +553,14 @@ impl Cg<'_, '_, '_> {
             .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
 
         if let Some(inner_pat) = inner {
-            let success_type_id = self.try_substitute_type(success_type);
-            let payload_ty = self.cranelift_type(success_type_id);
+            let payload_ty = self.cranelift_type_v(success_vir);
             let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
 
             // The inner pattern is a VIR pattern (e.g. Binding for `success x`).
             if let vole_vir::VirPattern::Binding { name, .. } = inner_pat.as_ref() {
                 let var = self.builder.declare_var(payload_ty);
                 self.builder.def_var(var, payload);
-                arm_variables.insert(*name, (var, self.to_vir_type(success_type_id)));
+                arm_variables.insert(*name, (var, success_vir));
             }
         }
         Ok(Some(is_success))
@@ -588,8 +589,7 @@ impl Cg<'_, '_, '_> {
                         .ins()
                         .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
                 let error_vir_ty = self.try_substitute_type_v(*error_ty);
-                let error_type_id = self.sema_type_id(error_vir_ty);
-                let payload_ty = self.cranelift_type(error_type_id);
+                let payload_ty = self.cranelift_type_v(error_vir_ty);
                 let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
                 let var = self.builder.declare_var(payload_ty);
                 self.builder.def_var(var, payload);
@@ -700,7 +700,7 @@ impl Cg<'_, '_, '_> {
                     let sub_tested = self.try_substitute_type_v(*tested);
                     let sub_scrutinee = self.try_substitute_type_v(scrutinee.type_id);
                     let effective_result = self.compute_is_check_result(sub_scrutinee, sub_tested);
-                    self.compile_is_check_result(&effective_result, scrutinee)?
+                    self.compile_vir_is_check_result(&effective_result, scrutinee)?
                 } else {
                     self.compile_vir_is_check_result(vir_result, scrutinee)?
                 }
@@ -782,6 +782,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an IsCheckResult into a condition value (if runtime check needed).
+    #[allow(dead_code)]
     fn compile_is_check_result(
         &mut self,
         result: &IsCheckResult,
@@ -831,10 +832,10 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a VIR match arm body, coercing the result to the match result type.
-    fn compile_vir_arm_body(
+    fn compile_vir_arm_body_v(
         &mut self,
         body: &vole_vir::VirBody,
-        result_type_id: TypeId,
+        result_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let body_result = if let Some(trailing) = &body.trailing {
             let mut terminated = false;
@@ -846,10 +847,10 @@ impl Cg<'_, '_, '_> {
             }
             if terminated {
                 self.void_value()
-            } else if self.vir_query_is_union(result_type_id)
+            } else if self.vir_query_is_union_v(result_vir_ty)
                 && matches!(trailing.as_ref(), vole_vir::VirExpr::ArrayLiteral { .. })
                 && let Some(expected_variant) =
-                    self.preferred_array_like_union_variant(result_type_id)
+                    self.preferred_array_like_union_variant_v(result_vir_ty)
             {
                 self.compile_vir_expr_with_expected_type(trailing, expected_variant)?
             } else {
@@ -862,7 +863,7 @@ impl Cg<'_, '_, '_> {
         if body_result.type_id == VirTypeId::NEVER {
             return Ok(body_result);
         }
-        self.coerce_to_type_id(body_result, result_type_id)
+        self.coerce_to_type(body_result, result_vir_ty)
     }
 
     /// Emit the exit jump for a match arm body to the merge block.
@@ -892,13 +893,11 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Emit a VIR match using Cranelift's Switch for O(1) dispatch.
-    #[expect(clippy::too_many_arguments)]
     fn emit_vir_switch_match(
         &mut self,
         arms: &[vole_vir::VirMatchArm],
         analysis: match_switch::SwitchAnalysis,
         scrutinee: CompiledValue,
-        result_type_id: TypeId,
         result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
@@ -935,7 +934,7 @@ impl Cg<'_, '_, '_> {
             self.switch_to_block(body_blocks[i]);
             self.builder.seal_block(body_blocks[i]);
 
-            let body_result = self.compile_vir_arm_body(&arm.body, result_type_id)?;
+            let body_result = self.compile_vir_arm_body_v(&arm.body, result_vir_ty)?;
             self.emit_match_arm_exit(
                 body_result,
                 result_vir_ty,

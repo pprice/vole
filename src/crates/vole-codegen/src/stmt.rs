@@ -420,18 +420,16 @@ impl Cg<'_, '_, '_> {
         Ok(self.compiled_with_ty(ptr, ptr_type, union_type_id))
     }
 
-    /// Resolve the TypeDefId for the named error type from a fallible error type.
-    ///
-    /// Handles both single error types and unions of error types by matching
-    /// the error name against the type definitions.
-    fn resolve_raise_error_type_def(
+    /// VirTypeId variant: resolve the TypeDefId for the named error type from a
+    /// fallible error type.
+    fn resolve_raise_error_type_def_v(
         &self,
-        error_type_id: TypeId,
+        error_vir: VirTypeId,
         error_name_sym: Symbol,
     ) -> CodegenResult<vole_identity::TypeDefId> {
         let raise_error_name = self.interner().resolve(error_name_sym);
         let name_table = self.name_table();
-        let result = if let Some(type_def_id) = self.vir_query_unwrap_error(error_type_id) {
+        let result = if let Some(type_def_id) = self.vir_query_unwrap_error_v(error_vir) {
             // Single error type
             let name =
                 name_table.last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
@@ -440,10 +438,10 @@ impl Cg<'_, '_, '_> {
             } else {
                 None
             }
-        } else if let Some(vir_variants) = self.vir_query_unwrap_union(error_type_id) {
+        } else if let Some(vir_variants) = self.vir_query_unwrap_union_v(error_vir) {
             // Union of error types
             vir_variants.iter().find_map(|&v| {
-                if let Some(type_def_id) = self.vir_query_unwrap_error(self.sema_type_id(v)) {
+                if let Some(type_def_id) = self.vir_query_unwrap_error_v(v) {
                     let name = name_table
                         .last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
                     if name.as_deref() == Some(raise_error_name) {
@@ -666,6 +664,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// Used to compile array literals in `return` statements with an expected
     /// target type when VIR expression metadata is degraded.
+    #[allow(dead_code)]
     pub(crate) fn preferred_array_like_union_variant(
         &self,
         union_type_id: TypeId,
@@ -896,8 +895,6 @@ impl Cg<'_, '_, '_> {
                 "raise statement used outside of a function with declared return type",
             )
         })?;
-        let return_type_id = self.sema_type_id(return_vir_ty);
-
         let (_success_vir, error_virs) = self
             .vir_query_unwrap_fallible_v(return_vir_ty)
             .ok_or_else(|| {
@@ -907,31 +904,21 @@ impl Cg<'_, '_, '_> {
                     "non-fallible type",
                 )
             })?;
-        // Reconstruct single error TypeId: if one error, convert directly;
-        // if multiple, use the fallible's error union VirTypeId.
-        let error_type_id = if error_virs.len() == 1 {
-            self.sema_type_id(error_virs[0])
+        // Reconstruct error VirTypeId: single error → use directly;
+        // multiple errors → build union VirTypeId.
+        let error_vir = if error_virs.len() == 1 {
+            error_virs[0]
         } else {
-            // Multiple errors form a union; resolve via VIR fallible unwrap
-            self.vir_query_unwrap_fallible(return_type_id)
-                .and_then(|(_, errs)| {
-                    // Build a union VirTypeId from the error variants and resolve to sema
-                    let union_vir = self
-                        .vir_type_table()
-                        .lookup_union_v(errs)
-                        .unwrap_or(VirTypeId::UNKNOWN);
-                    self.vir_type_table().lookup_vir_type_id(union_vir)
-                })
-                .unwrap_or(TypeId::UNKNOWN)
+            self.vir_type_table()
+                .lookup_union_v(error_virs)
+                .unwrap_or(VirTypeId::UNKNOWN)
         };
 
-        let error_tag = self
-            .error_tag_for(error_type_id, error_name)
-            .ok_or_else(|| {
-                CodegenError::not_found("error type", self.interner().resolve(error_name))
-            })?;
+        let error_tag = self.error_tag_for_v(error_vir, error_name).ok_or_else(|| {
+            CodegenError::not_found("error type", self.interner().resolve(error_name))
+        })?;
 
-        let error_type_def_id = self.resolve_raise_error_type_def(error_type_id, error_name)?;
+        let error_type_def_id = self.resolve_raise_error_type_def_v(error_vir, error_name)?;
 
         let error_fields: Vec<_> = self
             .analyzed()

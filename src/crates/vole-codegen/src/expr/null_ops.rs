@@ -39,6 +39,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Produce a nil value wrapped in the given optional result type.
+    #[allow(dead_code)]
     pub(super) fn compile_nil_for_optional(
         &mut self,
         result_type_id: TypeId,
@@ -47,6 +48,16 @@ impl Cg<'_, '_, '_> {
         let zero = self.iconst_cached(types::I8, 0);
         let nil_val = self.compiled_with_ty(zero, types::I8, nil_type_id);
         self.coerce_to_type_id(nil_val, result_type_id)
+    }
+
+    /// VirTypeId variant: produce a nil value wrapped in the given optional result type.
+    pub(super) fn compile_nil_for_optional_v(
+        &mut self,
+        result_vir: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let zero = self.iconst_cached(types::I8, 0);
+        let nil_val = CompiledValue::new(zero, types::I8, VirTypeId::NIL);
+        self.coerce_to_type(nil_val, result_vir)
     }
 
     /// Load a captured variable from closure
@@ -102,9 +113,7 @@ impl Cg<'_, '_, '_> {
             self.call_runtime(RuntimeKey::ClosureGetCapture, &[closure_ptr, index_val])?;
 
         // Structs: copy all flat slots from value (stack ptr) to heap slot.
-        // Bridge to sema TypeId for struct_flat_slot_count (no compat handling).
-        let sema_type_id = self.sema_type_id(binding.vole_type);
-        if let Some(flat_count) = self.struct_flat_slot_count(sema_type_id) {
+        if let Some(flat_count) = self.vir_struct_flat_slot_count(binding.vole_type) {
             for slot in 0..flat_count {
                 let offset = (slot as i32) * 8;
                 let val = self
@@ -151,29 +160,16 @@ impl Cg<'_, '_, '_> {
         default_expr: &VirExpr,
         vir_inner_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let inner_type_id = self.sema_type_id(vir_inner_type_id);
         let value = self.compile_vir_expr(value_expr)?;
         let nil_tag = self.find_nil_variant_vir(value.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
         })?;
 
-        let is_multi_variant_inner = self.vir_query_is_union(inner_type_id);
+        let is_multi_variant_inner = self.vir_query_is_union_v(vir_inner_type_id);
         if is_multi_variant_inner {
-            self.vir_null_coalesce_union(
-                default_expr,
-                value,
-                inner_type_id,
-                vir_inner_type_id,
-                nil_tag,
-            )
+            self.vir_null_coalesce_union(default_expr, value, vir_inner_type_id, nil_tag)
         } else {
-            self.vir_null_coalesce_scalar(
-                default_expr,
-                value,
-                inner_type_id,
-                vir_inner_type_id,
-                nil_tag,
-            )
+            self.vir_null_coalesce_scalar(default_expr, value, vir_inner_type_id, nil_tag)
         }
     }
 
@@ -182,11 +178,10 @@ impl Cg<'_, '_, '_> {
         &mut self,
         default_expr: &VirExpr,
         value: CompiledValue,
-        inner_type_id: TypeId,
         vir_inner_type_id: VirTypeId,
         nil_tag: usize,
     ) -> CodegenResult<CompiledValue> {
-        let cranelift_type = self.cranelift_type(inner_type_id);
+        let cranelift_type = self.cranelift_type_v(vir_inner_type_id);
 
         let is_nil = self.tag_eq(value.value, nil_tag as i64);
         let nil_block = self.builder.create_block();
@@ -241,7 +236,6 @@ impl Cg<'_, '_, '_> {
         &mut self,
         default_expr: &VirExpr,
         value: CompiledValue,
-        inner_type_id: TypeId,
         vir_inner_type_id: VirTypeId,
         nil_tag: usize,
     ) -> CodegenResult<CompiledValue> {
@@ -261,7 +255,7 @@ impl Cg<'_, '_, '_> {
         let default_ptr = if self.vir_query_is_union_v(default_val.type_id) {
             default_val.value
         } else {
-            let boxed = self.construct_union_id(default_val, inner_type_id)?;
+            let boxed = self.construct_union_id_v(default_val, vir_inner_type_id)?;
             boxed.value
         };
         let default_arg = BlockArg::from(default_ptr);
@@ -289,7 +283,6 @@ impl Cg<'_, '_, '_> {
         vir_inner_type_id: VirTypeId,
         vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let inner_type_id = self.sema_type_id(vir_inner_type_id);
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self
             .find_nil_variant_vir(scrutinee.type_id)
@@ -301,10 +294,8 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
-        let result_type_id = self.sema_type_id(vir_result_type_id);
-        let result_type_id = self.try_substitute_type(result_type_id);
-        let result_vir_ty = self.to_vir_type(result_type_id);
-        let result_cranelift_type = self.cranelift_type(result_type_id);
+        let result_vir_ty = self.try_substitute_type_v(vir_result_type_id);
+        let result_cranelift_type = self.cranelift_type_v(result_vir_ty);
         let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
 
         let nil_block = self.builder.create_block();
@@ -318,7 +309,7 @@ impl Cg<'_, '_, '_> {
 
         // Nil branch: produce nil wrapped as result type
         self.switch_and_seal(nil_block);
-        let nil_val = self.compile_nil_for_optional(result_type_id)?;
+        let nil_val = self.compile_nil_for_optional_v(result_vir_ty)?;
         self.jump_with_owned_result(
             nil_val,
             result_vir_ty,
@@ -329,7 +320,7 @@ impl Cg<'_, '_, '_> {
 
         // Not-nil branch: extract inner, do field access
         self.switch_and_seal(not_nil_block);
-        let inner = self.extract_optional_inner(scrutinee, inner_type_id);
+        let inner = self.extract_optional_inner_v(scrutinee, vir_inner_type_id);
         let body_val = self.optional_chain_field_access(inner, field)?;
         let body_coerced = self.coerce_to_type(body_val, result_vir_ty)?;
         self.jump_with_owned_result(
@@ -364,7 +355,6 @@ impl Cg<'_, '_, '_> {
             result_type_id: vir_result_type_id,
         } = args;
 
-        let inner_type_id = self.sema_type_id(vir_inner_type_id);
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self
             .find_nil_variant_vir(scrutinee.type_id)
@@ -376,9 +366,8 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
-        let result_type_id = self.try_substitute_type(self.sema_type_id(vir_result_type_id));
-        let result_vir_ty = self.to_vir_type(result_type_id);
-        let result_cranelift_type = self.cranelift_type(result_type_id);
+        let result_vir_ty = self.try_substitute_type_v(vir_result_type_id);
+        let result_cranelift_type = self.cranelift_type_v(result_vir_ty);
         let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
 
         let nil_block = self.builder.create_block();
@@ -392,7 +381,7 @@ impl Cg<'_, '_, '_> {
 
         // Nil branch
         self.switch_and_seal(nil_block);
-        let nil_val = self.compile_nil_for_optional(result_type_id)?;
+        let nil_val = self.compile_nil_for_optional_v(result_vir_ty)?;
         self.jump_with_owned_result(
             nil_val,
             result_vir_ty,
@@ -403,7 +392,7 @@ impl Cg<'_, '_, '_> {
 
         // Not-nil branch: extract inner, call method via VIR method_call path
         self.switch_and_seal(not_nil_block);
-        let inner = self.extract_optional_inner(scrutinee, inner_type_id);
+        let inner = self.extract_optional_inner_v(scrutinee, vir_inner_type_id);
         let body_val = self.vir_optional_chain_method_call(
             inner,
             method,
@@ -478,7 +467,6 @@ impl Cg<'_, '_, '_> {
         value_expr: &VirExpr,
         vir_success_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let success_type_id = self.sema_type_id(vir_success_type_id);
         let fallible = self.compile_vir_expr(value_expr)?;
 
         // Load tag from fallible (offset 0)
@@ -493,7 +481,7 @@ impl Cg<'_, '_, '_> {
         let error_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
 
-        let payload_ty = self.cranelift_type(success_type_id);
+        let payload_ty = self.cranelift_type_v(vir_success_type_id);
         self.builder.append_block_param(merge_block, payload_ty);
 
         self.emit_brif(is_success, success_block, error_block);
@@ -506,7 +494,7 @@ impl Cg<'_, '_, '_> {
         // Success block: extract payload
         self.switch_and_seal(success_block);
         let payload_i64 = load_fallible_payload(self.builder, fallible.value, types::I64);
-        let payload = self.convert_from_i64_storage(payload_i64, success_type_id);
+        let payload = self.convert_from_i64_storage_v(payload_i64, vir_success_type_id);
         let payload_arg = BlockArg::from(payload);
         self.builder.ins().jump(merge_block, &[payload_arg]);
 
@@ -515,17 +503,17 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(result, payload_ty, vir_success_type_id))
     }
 
-    /// Extract the inner (non-nil) value from an optional union.
+    /// Extract the inner (non-nil) value from an optional union (VirTypeId variant).
     ///
     /// Reads the payload from the union's data area.  Used by both optional
     /// chain field access and optional chain method call.
-    fn extract_optional_inner(
+    fn extract_optional_inner_v(
         &mut self,
         scrutinee: CompiledValue,
-        inner_type_id: TypeId,
+        inner_vir: VirTypeId,
     ) -> CompiledValue {
-        let inner_type_id = self.try_substitute_type(inner_type_id);
-        let inner_cranelift_type = self.cranelift_type(inner_type_id);
+        let inner_vir = self.try_substitute_type_v(inner_vir);
+        let inner_cranelift_type = self.cranelift_type_v(inner_vir);
         let union_size = self.type_size_v(scrutinee.type_id);
         if union_size > union_layout::TAG_ONLY_SIZE {
             let loaded = self.builder.ins().load(
@@ -534,10 +522,10 @@ impl Cg<'_, '_, '_> {
                 scrutinee.value,
                 union_layout::PAYLOAD_OFFSET,
             );
-            self.compiled_with_ty(loaded, inner_cranelift_type, inner_type_id)
+            CompiledValue::new(loaded, inner_cranelift_type, inner_vir)
         } else {
             let zero = self.iconst_cached(inner_cranelift_type, 0);
-            self.compiled_with_ty(zero, inner_cranelift_type, inner_type_id)
+            CompiledValue::new(zero, inner_cranelift_type, inner_vir)
         }
     }
 

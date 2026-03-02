@@ -184,7 +184,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert an i64 value back to its proper type (reverse of convert_to_i64_for_storage)
     pub fn convert_from_i64_storage(&mut self, word: Value, type_id: TypeId) -> Value {
-        let vir_ty = self.vir_lookup(type_id);
+        self.convert_from_i64_storage_v(word, self.vir_lookup(type_id))
+    }
+
+    /// VirTypeId variant: convert a value from i64 storage representation.
+    pub fn convert_from_i64_storage_v(&mut self, word: Value, vir_ty: VirTypeId) -> Value {
         let ptr_type = self.codegen_ctx.ptr_type();
         let analyzed = self.env.analyzed;
         let table = &self.env.analyzed.vir_program().type_table;

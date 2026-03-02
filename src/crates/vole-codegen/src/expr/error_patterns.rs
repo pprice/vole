@@ -36,38 +36,27 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         scrutinee_vir_type_id: VirTypeId,
     ) -> CodegenResult<()> {
-        // Bridge to sema TypeId for downstream RC analysis (will be eliminated
-        // when error_patterns.rs migrates to VirTypeId).
-        let scrutinee_type_id = self.sema_type_id(scrutinee_vir_type_id);
-        let fallible_types = self.vir_query_unwrap_fallible(scrutinee_type_id);
+        let fallible_types = self.vir_query_unwrap_fallible_v(scrutinee_vir_type_id);
         let Some((success_vir, error_virs)) = fallible_types else {
             return Ok(());
         };
-        let success_type_id = self.sema_type_id(success_vir);
-        // Reconstruct single error TypeId: if one error, convert directly;
-        // if multiple, the arena's fallible stores them as a union.
-        let error_type_id = if error_virs.len() == 1 {
-            self.sema_type_id(error_virs[0])
+        // Reconstruct error VirTypeId: single error → use directly;
+        // multiple errors → build union VirTypeId.
+        let error_vir = if error_virs.len() == 1 {
+            error_virs[0]
         } else {
-            // Multiple errors form a union; resolve via VIR
-            self.vir_query_unwrap_fallible(scrutinee_type_id)
-                .and_then(|(_, errs)| {
-                    let union_vir = self
-                        .vir_type_table()
-                        .lookup_union_v(errs)
-                        .unwrap_or(VirTypeId::UNKNOWN);
-                    self.vir_type_table().lookup_vir_type_id(union_vir)
-                })
-                .unwrap_or(TypeId::UNKNOWN)
+            self.vir_type_table()
+                .lookup_union_v(error_virs)
+                .unwrap_or(VirTypeId::UNKNOWN)
         };
 
-        let success_rc = self.rc_state(success_type_id).needs_cleanup();
+        let success_rc = self.rc_state_v(success_vir).needs_cleanup();
         // Error types may have RC payloads even though the error struct itself
         // isn't RC-tracked.  Single-field error structs store their field value
         // directly as the payload (no wrapping pointer), so if that field is RC
         // we must rc_dec the payload.
-        let error_rc = self.rc_state(error_type_id).needs_cleanup()
-            || self.fallible_error_payload_needs_rc(error_type_id);
+        let error_rc = self.rc_state_v(error_vir).needs_cleanup()
+            || self.fallible_error_payload_needs_rc_v(error_vir);
 
         if !success_rc && !error_rc {
             return Ok(());
@@ -120,33 +109,32 @@ impl Cg<'_, '_, '_> {
     /// to rc_dec: either 0 fields (payload=null, rc_dec is no-op) or 1 RC field.
     /// Mixed unions (some RC, some non-RC single-field) are NOT safe and we skip
     /// cleanup to avoid calling rc_dec on non-pointer values.
-    fn fallible_error_payload_needs_rc(&self, error_type_id: TypeId) -> bool {
-        if self.error_type_single_field_is_rc(error_type_id) {
+    /// VirTypeId variant of `fallible_error_payload_needs_rc`.
+    fn fallible_error_payload_needs_rc_v(&self, error_vir: VirTypeId) -> bool {
+        if self.error_type_single_field_is_rc_v(error_vir) {
             return true;
         }
-        if let Some(vir_variants) = self.vir_query_unwrap_union(error_type_id) {
-            let variants: Vec<TypeId> =
-                vir_variants.iter().map(|&v| self.sema_type_id(v)).collect();
+        if let Some(vir_variants) = self.vir_query_unwrap_union_v(error_vir) {
             // All variants must be safe for unconditional rc_dec:
             // - 0 fields: payload is null (rc_dec is no-op)
             // - 1 RC field: payload is an RC pointer (rc_dec works)
             // If ANY variant has 1 non-RC field or 2+ fields, we can't safely rc_dec.
-            let any_rc = variants
+            let any_rc = vir_variants
                 .iter()
-                .any(|&tid| self.error_type_single_field_is_rc(tid));
+                .any(|&v| self.error_type_single_field_is_rc_v(v));
             let all_safe = any_rc
-                && variants
+                && vir_variants
                     .iter()
-                    .all(|&tid| self.error_variant_safe_for_rc_dec(tid));
+                    .all(|&v| self.error_variant_safe_for_rc_dec_v(v));
             return all_safe;
         }
         false
     }
 
-    /// Check if an error variant is safe for unconditional rc_dec.
+    /// VirTypeId variant: check if an error variant is safe for unconditional rc_dec.
     /// True for: 0 fields (null payload) or 1 RC field.
-    fn error_variant_safe_for_rc_dec(&self, type_id: TypeId) -> bool {
-        let Some(type_def_id) = self.vir_query_unwrap_error_or_struct_def(type_id) else {
+    fn error_variant_safe_for_rc_dec_v(&self, vir_ty: VirTypeId) -> bool {
+        let Some(type_def_id) = self.vir_query_unwrap_error_or_struct_def_v(vir_ty) else {
             return false;
         };
         let fields: Vec<_> = self.analyzed().fields_on_type(type_def_id).collect();
@@ -160,9 +148,10 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Check if an error/struct type has exactly one field and that field is RC.
-    fn error_type_single_field_is_rc(&self, type_id: TypeId) -> bool {
-        let Some(type_def_id) = self.vir_query_unwrap_error_or_struct_def(type_id) else {
+    /// VirTypeId variant: check if an error/struct type has exactly one field
+    /// and that field is RC.
+    fn error_type_single_field_is_rc_v(&self, vir_ty: VirTypeId) -> bool {
+        let Some(type_def_id) = self.vir_query_unwrap_error_or_struct_def_v(vir_ty) else {
             return false;
         };
         let fields: Vec<_> = self.analyzed().fields_on_type(type_def_id).collect();
@@ -177,16 +166,14 @@ impl Cg<'_, '_, '_> {
     // Record field extraction helpers
     // =========================================================================
 
-    /// Look up the numeric error tag for a named error type within a fallible error union.
-    ///
-    /// Uses VIR type table to resolve error types without arena access.
-    pub(crate) fn error_tag_for(&self, error_type_id: TypeId, error_name: Symbol) -> Option<i64> {
+    /// Look up the numeric error tag for a named error type within a fallible
+    /// error union.  VirTypeId-native variant.
+    pub(crate) fn error_tag_for_v(&self, error_vir: VirTypeId, error_name: Symbol) -> Option<i64> {
         let error_name_str = self.interner().resolve(error_name);
-        let vir_ty = self.vir_lookup(error_type_id);
         let table = self.vir_type_table();
 
         // Check if it's a single Error type
-        if let Some(type_def_id) = table.unwrap_error(vir_ty) {
+        if let Some(type_def_id) = table.unwrap_error(error_vir) {
             let info_name = self
                 .name_table()
                 .last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
@@ -197,7 +184,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a Union of error types
-        if let Some(variants) = self.vir_query_unwrap_union_v(vir_ty) {
+        if let Some(variants) = self.vir_query_unwrap_union_v(error_vir) {
             for (idx, &variant) in variants.iter().enumerate() {
                 if let Some(type_def_id) = table.unwrap_error(variant) {
                     let info_name = self
@@ -212,6 +199,14 @@ impl Cg<'_, '_, '_> {
         }
 
         None
+    }
+
+    /// Look up the numeric error tag for a named error type within a fallible error union.
+    ///
+    /// Uses VIR type table to resolve error types without arena access.
+    #[allow(dead_code)]
+    pub(crate) fn error_tag_for(&self, error_type_id: TypeId, error_name: Symbol) -> Option<i64> {
+        self.error_tag_for_v(self.vir_lookup(error_type_id), error_name)
     }
 
     /// Extract field bindings from an error record pattern. Loads fields from the
