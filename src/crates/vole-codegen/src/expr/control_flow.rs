@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
 
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 
 use crate::ops::sextend_const;
 
@@ -158,7 +158,7 @@ impl Cg<'_, '_, '_> {
         let then_terminated = then_flag && then_val.is_none();
         if !then_terminated {
             let then_result = then_val.unwrap_or_else(|| self.void_value());
-            if self.cv_type_id(&then_result) == TypeId::NEVER {
+            if then_result.type_id == VirTypeId::NEVER {
                 self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
             } else if !is_void {
                 self.jump_with_owned_result(
@@ -180,7 +180,7 @@ impl Cg<'_, '_, '_> {
             let terminated = flag && val.is_none();
             if !terminated {
                 let else_result = val.unwrap_or_else(|| self.void_value());
-                if self.cv_type_id(&else_result) == TypeId::NEVER {
+                if else_result.type_id == VirTypeId::NEVER {
                     self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
                 } else if !is_void {
                     self.jump_with_owned_result(

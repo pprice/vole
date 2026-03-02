@@ -498,7 +498,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         arg_source: &ArgSource<'_>,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let Some(iface_type_def_id) = self.interface_type_def_id(self.cv_type_id(obj)) else {
+        let Some(iface_type_def_id) = self.interface_type_def_id_v(obj.type_id) else {
             return Ok(None);
         };
 

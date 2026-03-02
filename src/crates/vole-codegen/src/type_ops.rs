@@ -113,6 +113,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Unlike `sema_type_from_vir()`, this does **not** call `try_substitute_type()`,
     /// matching the old `CompiledValue::type_id: TypeId` semantics.
+    #[allow(dead_code)] // Scheduled for removal in vol-bmeu.
     #[inline]
     pub fn cv_type_id(&self, cv: &CompiledValue) -> TypeId {
         self.cv_type_id_from_vir(cv.type_id)
@@ -269,7 +270,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap an interface `VirTypeId`, returning the `TypeDefId` if it is one.
-    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
     pub fn interface_type_def_id_v(&self, vir_ty: VirTypeId) -> Option<TypeDefId> {
         self.vir_query_unwrap_interface_v(vir_ty).map(|(id, _)| id)
     }

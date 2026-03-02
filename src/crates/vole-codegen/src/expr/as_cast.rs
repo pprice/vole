@@ -104,8 +104,7 @@ impl Cg<'_, '_, '_> {
         target_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let payload_ty = self.cranelift_type(target_type_id);
-        let payload =
-            self.load_union_payload(union_value.value, self.cv_type_id(&union_value), payload_ty);
+        let payload = self.load_union_payload_v(union_value.value, union_value.type_id, payload_ty);
         Ok(CompiledValue::new(
             payload,
             payload_ty,

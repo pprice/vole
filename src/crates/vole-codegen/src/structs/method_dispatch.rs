@@ -314,7 +314,7 @@ impl Cg<'_, '_, '_> {
         let word_type = self.ptr_type();
         let word_bytes = word_type.bytes() as i32;
         let dispatch_func_type_id = self
-            .vir_query_unwrap_interface_sema(self.cv_type_id(obj))
+            .vir_query_unwrap_interface_v(obj.type_id)
             .and_then(|(interface_type_def_id, _)| {
                 self.analyzed()
                     .interface_method_ids_ordered(interface_type_def_id)

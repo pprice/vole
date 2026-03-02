@@ -379,7 +379,11 @@ impl Cg<'_, '_, '_> {
         } else if let Some(binding) = self.get_capture(&capture.name).copied() {
             // Transitive capture: load from parent closure's captures
             let captured = self.load_capture(&binding)?;
-            Ok((captured.value, self.cv_type_id(&captured), false))
+            Ok((
+                captured.value,
+                self.cv_type_id_from_vir(captured.type_id),
+                false,
+            ))
         } else if let Some(capture_name) = capture_name.as_deref()
             && let Some(binding) = self.captures.as_ref().and_then(|captures| {
                 captures.bindings.iter().find_map(|(sym, binding)| {
@@ -391,7 +395,11 @@ impl Cg<'_, '_, '_> {
         {
             // Same fallback for transitive captures when Symbol IDs differ by interner.
             let captured = self.load_capture(&binding)?;
-            Ok((captured.value, self.cv_type_id(&captured), false))
+            Ok((
+                captured.value,
+                self.cv_type_id_from_vir(captured.type_id),
+                false,
+            ))
         } else {
             let format_sym = |sym: Symbol| {
                 resolve_symbol_text(sym)

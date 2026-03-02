@@ -310,17 +310,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 )?;
                 // Dec the boxed interface instance (which transitively frees
                 // the closure via instance_drop).
-                self.emit_rc_dec_for_type(boxed.value, self.cv_type_id(&boxed))?;
+                self.emit_rc_dec_for_type_v(boxed.value, boxed.type_id)?;
                 return Ok(Some(result));
             }
         }
 
         // If it's a function type, call as closure
         // Note: Global lambdas don't support default params lookup (call_expr_id is a placeholder)
-        if self.vir_query_is_function(self.cv_type_id(&lambda_val)) {
+        if self.vir_query_is_function_v(lambda_val.type_id) {
             let result = self.call_closure_value(
                 lambda_val.value,
-                self.cv_type_id(&lambda_val),
+                self.cv_type_id_from_vir(lambda_val.type_id),
                 arg_source,
                 call_expr_id,
             )?;
@@ -334,7 +334,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // If it's an interface type (functional interface), call via vtable
         if let Some(result) = self.try_call_functional_interface(&lambda_val, arg_source)? {
             // Dec the interface instance created by the global init.
-            self.emit_rc_dec_for_type(lambda_val.value, self.cv_type_id(&lambda_val))?;
+            self.emit_rc_dec_for_type_v(lambda_val.value, lambda_val.type_id)?;
             return Ok(Some(result));
         }
 
