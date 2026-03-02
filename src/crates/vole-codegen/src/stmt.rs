@@ -123,7 +123,7 @@ impl Cg<'_, '_, '_> {
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<(usize, Value, TypeId)> {
         let resolved_value_type_id =
-            self.try_substitute_type(self.cv_type_id_from_vir(value.type_id));
+            self.cv_type_id_from_vir(self.try_substitute_type_v(value.type_id));
 
         // Direct type match
         if let Some(pos) = variants.iter().position(|&v| v == resolved_value_type_id) {
@@ -274,9 +274,8 @@ impl Cg<'_, '_, '_> {
         };
 
         // Coerce the payload value to the variant's Cranelift type if needed.
-        let variant_type_id =
-            self.cv_type_id_from_vir(self.try_substitute_type_v(hint.variant_type));
-        let target_ty = self.cranelift_type(variant_type_id);
+        let variant_vir_ty = self.try_substitute_type_v(hint.variant_type);
+        let target_ty = self.cranelift_type_v(variant_vir_ty);
         let actual_value = if target_ty != value.ty && target_ty.is_int() && value.ty.is_int() {
             if target_ty.bytes() < value.ty.bytes() {
                 self.builder.ins().ireduce(target_ty, value.value)
@@ -303,7 +302,7 @@ impl Cg<'_, '_, '_> {
         if union_size > union_layout::TAG_ONLY_SIZE {
             // Sentinel variants have no payload data; zero the slot to avoid
             // undefined behaviour in generic cleanup paths.
-            let is_sentinel = self.vir_query_is_sentinel(variant_type_id);
+            let is_sentinel = self.vir_query_is_sentinel_v(variant_vir_ty);
             let payload = if is_sentinel {
                 self.iconst_cached(types::I64, 0)
             } else {
@@ -339,7 +338,7 @@ impl Cg<'_, '_, '_> {
         // Also check the substituted type, since generic code may produce values
         // whose raw type_id is e.g. `T | nil` but after substitution matches the
         // concrete union type `i64 | nil`.
-        let resolved_type_id = self.try_substitute_type(self.cv_type_id_from_vir(value.type_id));
+        let resolved_type_id = self.cv_type_id_from_vir(self.try_substitute_type_v(value.type_id));
         if self.cv_type_id_from_vir(value.type_id) == union_type_id
             || resolved_type_id == union_type_id
         {
@@ -596,7 +595,7 @@ impl Cg<'_, '_, '_> {
                 // Match-expression type metadata can degrade in generic module
                 // bodies. Recompile with the declared return union as the
                 // expected result type.
-                compiled = self.compile_vir_match(scrutinee, arms, ret_type_id)?;
+                compiled = self.compile_vir_match(scrutinee, arms, self.vir_lookup(ret_type_id))?;
                 compiled.type_id = self.try_substitute_type_v(compiled.type_id);
             }
 
@@ -1214,15 +1213,15 @@ impl Cg<'_, '_, '_> {
         match kind {
             vole_vir::DestructureTupleKind::Tuple => {
                 // True tuple: compute layout from element types.
-                let elem_type_ids: Vec<TypeId> = elements
+                let elem_vir_tys: Vec<VirTypeId> = elements
                     .iter()
-                    .map(|e| self.cv_type_id_from_vir(self.try_substitute_type_v(e.ty)))
+                    .map(|e| self.try_substitute_type_v(e.ty))
                     .collect();
-                let (_, offsets) = self.tuple_layout(&elem_type_ids);
+                let (_, offsets) = self.tuple_layout_v(&elem_vir_tys);
                 for (i, elem) in elements.iter().enumerate() {
                     let offset = offsets[i];
-                    let elem_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(elem.ty));
-                    let elem_cr_type = self.cranelift_type(elem_ty);
+                    let elem_vir_ty = self.try_substitute_type_v(elem.ty);
+                    let elem_cr_type = self.cranelift_type_v(elem_vir_ty);
                     let elem_value =
                         self.builder
                             .ins()
@@ -1232,9 +1231,9 @@ impl Cg<'_, '_, '_> {
             }
             vole_vir::DestructureTupleKind::FixedArray { elem_ty, .. } => {
                 // Fixed array: all elements have the same type and size.
-                let elem_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(elem_ty));
-                let elem_cr_type = self.cranelift_type(elem_ty);
-                let elem_size = self.type_size(elem_ty).div_ceil(8) * 8;
+                let elem_vir_ty = self.try_substitute_type_v(elem_ty);
+                let elem_cr_type = self.cranelift_type_v(elem_vir_ty);
+                let elem_size = self.type_size_v(elem_vir_ty).div_ceil(8) * 8;
                 for (i, elem) in elements.iter().enumerate() {
                     let offset = (i as i32) * (elem_size as i32);
                     let elem_value =
@@ -1314,8 +1313,9 @@ impl Cg<'_, '_, '_> {
             if !has_self_capture {
                 return None;
             }
-            let sema_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(*ty));
-            let cranelift_ty = self.cranelift_type(sema_ty);
+            let vir_ty = self.try_substitute_type_v(*ty);
+            let cranelift_ty = self.cranelift_type_v(vir_ty);
+            let sema_ty = self.cv_type_id_from_vir(vir_ty);
             let var = self.builder.declare_var(cranelift_ty);
             self.vars.insert(name, (var, sema_ty));
             return Some(var);

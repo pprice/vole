@@ -206,8 +206,9 @@ impl Cg<'_, '_, '_> {
         &mut self,
         scrutinee_expr: &vole_vir::VirExpr,
         arms: &[vole_vir::VirMatchArm],
-        result_type_id: TypeId,
+        vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
         let scrutinee = self.compile_vir_expr(scrutinee_expr)?;
         let scrutinee_type_id = scrutinee.type_id;
 
@@ -254,6 +255,7 @@ impl Cg<'_, '_, '_> {
 
         let result_cranelift_type = self.cranelift_type(effective_result_type);
         let is_void = effective_result_type.is_void();
+        let result_vir_ty = self.vir_lookup(effective_result_type);
 
         // Try switch optimization for dense integer literal arms.
         if let Some(analysis) = match_switch::analyze_vir_switch(arms, scrutinee_type_id) {
@@ -262,6 +264,7 @@ impl Cg<'_, '_, '_> {
                 analysis,
                 scrutinee,
                 effective_result_type,
+                result_vir_ty,
                 result_cranelift_type,
                 is_void,
             );
@@ -271,6 +274,7 @@ impl Cg<'_, '_, '_> {
             arms,
             scrutinee,
             effective_result_type,
+            result_vir_ty,
             result_cranelift_type,
             is_void,
             scrutinee_type_id,
@@ -278,11 +282,13 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a VIR match using the standard chain of if-else blocks.
+    #[expect(clippy::too_many_arguments)]
     fn compile_vir_match_chain(
         &mut self,
         arms: &[vole_vir::VirMatchArm],
         scrutinee: CompiledValue,
         result_type_id: TypeId,
+        result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
         scrutinee_type_id: VirTypeId,
@@ -315,6 +321,7 @@ impl Cg<'_, '_, '_> {
                 next_block,
                 merge_block,
                 result_type_id,
+                result_vir_ty,
                 result_cranelift_type,
                 is_void,
             )?;
@@ -327,7 +334,7 @@ impl Cg<'_, '_, '_> {
 
         self.cleanup_fallible_scrutinee(&scrutinee, scrutinee_type_id)?;
 
-        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
+        self.merge_block_result(merge_block, result_cranelift_type, result_vir_ty, is_void)
     }
 
     /// Compile a single VIR match arm: pattern check, guard, body, and jump to merge.
@@ -340,6 +347,7 @@ impl Cg<'_, '_, '_> {
         next_block: Block,
         merge_block: Block,
         result_type_id: TypeId,
+        result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
     ) -> CodegenResult<()> {
@@ -389,7 +397,7 @@ impl Cg<'_, '_, '_> {
 
         self.emit_match_arm_exit(
             body_result,
-            result_type_id,
+            result_vir_ty,
             result_cranelift_type,
             is_void,
             merge_block,
@@ -882,7 +890,7 @@ impl Cg<'_, '_, '_> {
     fn emit_match_arm_exit(
         &mut self,
         body_result: CompiledValue,
-        result_type_id: TypeId,
+        result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
         merge_block: Block,
@@ -890,10 +898,10 @@ impl Cg<'_, '_, '_> {
         if body_result.type_id == VirTypeId::NEVER {
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         } else if !is_void {
-            let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
+            let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
             self.jump_with_owned_result(
                 body_result,
-                result_type_id,
+                result_vir_ty,
                 result_cranelift_type,
                 result_needs_rc,
                 merge_block,
@@ -905,12 +913,14 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Emit a VIR match using Cranelift's Switch for O(1) dispatch.
+    #[expect(clippy::too_many_arguments)]
     fn emit_vir_switch_match(
         &mut self,
         arms: &[vole_vir::VirMatchArm],
         analysis: match_switch::SwitchAnalysis,
         scrutinee: CompiledValue,
         result_type_id: TypeId,
+        result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
     ) -> CodegenResult<CompiledValue> {
@@ -949,7 +959,7 @@ impl Cg<'_, '_, '_> {
             let body_result = self.compile_vir_arm_body(&arm.body, result_type_id)?;
             self.emit_match_arm_exit(
                 body_result,
-                result_type_id,
+                result_vir_ty,
                 result_cranelift_type,
                 is_void,
                 merge_block,
@@ -958,6 +968,6 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
 
-        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
+        self.merge_block_result(merge_block, result_cranelift_type, result_vir_ty, is_void)
     }
 }

@@ -350,7 +350,8 @@ impl Cg<'_, '_, '_> {
                 .is_some())
             && let VirExpr::ArrayLiteral { elements, .. } = expr
         {
-            let result = self.compile_vir_array_literal(elements, expected_type_id)?;
+            let vir_ty = self.vir_lookup(expected_type_id);
+            let result = self.compile_vir_array_literal(elements, vir_ty)?;
             return Ok(self.mark_rc_owned(result));
         }
         if self
@@ -358,7 +359,8 @@ impl Cg<'_, '_, '_> {
             .is_some()
             && let VirExpr::RepeatLiteral { element, count, .. } = expr
         {
-            let result = self.compile_vir_repeat_literal(element, *count, expected_type_id)?;
+            let vir_ty = self.vir_lookup(expected_type_id);
+            let result = self.compile_vir_repeat_literal(element, *count, vir_ty)?;
             return Ok(self.mark_rc_owned(result));
         }
         self.compile_vir_expr(expr)
@@ -430,7 +432,7 @@ impl Cg<'_, '_, '_> {
                 let compiled = self.compile_vir_expr(value)?;
                 self.compile_vir_coerce(
                     compiled,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*to)),
+                    self.try_substitute_type_v(*to),
                     *vir_from,
                     *vir_to,
                     kind,
@@ -440,11 +442,7 @@ impl Cg<'_, '_, '_> {
             // -- Calls ----------------------------------------------------
             VirExpr::Call {
                 target, args, ty, ..
-            } => self.compile_vir_call(
-                target,
-                args,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
-            ),
+            } => self.compile_vir_call(target, args, self.try_substitute_type_v(*ty)),
             VirExpr::MethodCall {
                 receiver,
                 method,
@@ -475,7 +473,7 @@ impl Cg<'_, '_, '_> {
                 cond,
                 then_body,
                 else_body.as_ref(),
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                self.try_substitute_type_v(*ty),
             ),
 
             VirExpr::Block {
@@ -491,18 +489,12 @@ impl Cg<'_, '_, '_> {
                 arms,
                 ty,
                 ..
-            } => self.compile_vir_match(
-                scrutinee,
-                arms,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
-            ),
+            } => self.compile_vir_match(scrutinee, arms, self.try_substitute_type_v(*ty)),
 
             // -- Construction -------------------------------------------------
             VirExpr::ArrayLiteral { elements, ty, .. } => {
-                let result = self.compile_vir_array_literal(
-                    elements,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
-                )?;
+                let result =
+                    self.compile_vir_array_literal(elements, self.try_substitute_type_v(*ty))?;
                 Ok(self.mark_rc_owned(result))
             }
             VirExpr::RepeatLiteral {
@@ -511,7 +503,7 @@ impl Cg<'_, '_, '_> {
                 let result = self.compile_vir_repeat_literal(
                     element,
                     *count,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                    self.try_substitute_type_v(*ty),
                 )?;
                 Ok(self.mark_rc_owned(result))
             }
@@ -524,7 +516,7 @@ impl Cg<'_, '_, '_> {
                 let result = self.compile_vir_struct_literal(
                     *type_def,
                     fields,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                    self.try_substitute_type_v(*ty),
                 )?;
                 Ok(self.mark_rc_owned(result))
             }
@@ -537,7 +529,7 @@ impl Cg<'_, '_, '_> {
                 let result = self.compile_vir_class_instance(
                     *type_def,
                     fields,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                    self.try_substitute_type_v(*ty),
                 )?;
                 Ok(self.mark_rc_owned(result))
             }
@@ -566,7 +558,7 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_index(
                 object,
                 index,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                self.try_substitute_type_v(*ty),
                 *union_storage,
             ),
             VirExpr::IndexStore {
@@ -607,22 +599,20 @@ impl Cg<'_, '_, '_> {
                 ..
             } => self.compile_vir_as_cast(
                 value,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*target_ty)),
+                self.try_substitute_type_v(*target_ty),
                 *kind,
                 *result,
             ),
 
             // -- Reflection ---------------------------------------------------
-            VirExpr::MetaAccess { kind, ty, .. } => self.compile_vir_meta_access(
-                kind,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
-            ),
+            VirExpr::MetaAccess { kind, ty, .. } => {
+                self.compile_vir_meta_access(kind, self.try_substitute_type_v(*ty))
+            }
 
             // -- Variables ------------------------------------------------
-            VirExpr::LocalLoad { name, ty, .. } => self.compile_local_load(
-                *name,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
-            ),
+            VirExpr::LocalLoad { name, ty, .. } => {
+                self.compile_local_load(*name, self.try_substitute_type_v(*ty))
+            }
             VirExpr::LocalStore { name, value } => self.compile_local_store(*name, value),
 
             // -- Null / optional operations --------------------------------
@@ -634,7 +624,7 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_null_coalesce(
                 value,
                 default,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*inner_type)),
+                self.try_substitute_type_v(*inner_type),
             ),
             VirExpr::OptionalChain {
                 object,
@@ -645,8 +635,8 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_optional_chain(
                 object,
                 *field,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*inner_type)),
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                self.try_substitute_type_v(*inner_type),
+                self.try_substitute_type_v(*ty),
             ),
             VirExpr::OptionalMethodCall {
                 object,
@@ -663,17 +653,14 @@ impl Cg<'_, '_, '_> {
                 method_args,
                 dispatch,
                 call_node_id: *call_node_id,
-                inner_type_id: self.cv_type_id_from_vir(self.try_substitute_type_v(*inner_type)),
-                result_type_id: self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                inner_type_id: self.try_substitute_type_v(*inner_type),
+                result_type_id: self.try_substitute_type_v(*ty),
             }),
             VirExpr::Try {
                 value,
                 success_type,
                 ..
-            } => self.compile_vir_try(
-                value,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*success_type)),
-            ),
+            } => self.compile_vir_try(value, self.try_substitute_type_v(*success_type)),
 
             // -- Lambda / closure ------------------------------------------
             VirExpr::Lambda {
@@ -687,7 +674,7 @@ impl Cg<'_, '_, '_> {
                     params,
                     body,
                     captures,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                    self.try_substitute_type_v(*ty),
                 )?;
                 Ok(self.mark_rc_owned(result))
             }
@@ -886,7 +873,7 @@ impl Cg<'_, '_, '_> {
     fn compile_vir_coerce(
         &mut self,
         value: CompiledValue,
-        to: TypeId,
+        to: VirTypeId,
         vir_from: VirTypeId,
         vir_to: VirTypeId,
         kind: &CoerceKind,
@@ -904,11 +891,11 @@ impl Cg<'_, '_, '_> {
                 } else {
                     sextend_const(self.builder, target_ty, value.value)
                 };
-                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
+                Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::IntTruncate => {
                 let result = self.builder.ins().ireduce(target_ty, value.value);
-                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
+                Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::IntToFloat => {
                 let result = if vir_is_unsigned(vir_from, table) {
@@ -916,7 +903,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.builder.ins().fcvt_from_sint(target_ty, value.value)
                 };
-                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
+                Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::FloatToInt => {
                 let result = if vir_is_unsigned(vir_to, table) {
@@ -924,28 +911,35 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.builder.ins().fcvt_to_sint(target_ty, value.value)
                 };
-                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
+                Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::FloatExtend => {
                 let result = self.builder.ins().fpromote(target_ty, value.value);
-                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
+                Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::FloatTruncate => {
                 let result = self.builder.ins().fdemote(target_ty, value.value);
-                Ok(CompiledValue::new(result, target_ty, self.vir_lookup(to)))
+                Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::InterfaceBox {
                 interface_type_def,
                 interface_type_args,
-            } => self.compile_coerce_interface_box(
-                value,
-                to,
-                *interface_type_def,
-                interface_type_args,
-            ),
-            CoerceKind::Unbox => self.compile_coerce_unbox(value, to),
+            } => {
+                let to_id = self.cv_type_id_from_vir(to);
+                self.compile_coerce_interface_box(
+                    value,
+                    to_id,
+                    *interface_type_def,
+                    interface_type_args,
+                )
+            }
+            CoerceKind::Unbox => {
+                let to_id = self.cv_type_id_from_vir(to);
+                self.compile_coerce_unbox(value, to_id)
+            }
             CoerceKind::IteratorWrap { interface_type, .. } => {
-                self.compile_coerce_iterator_wrap_enriched(value, to, *interface_type)
+                let to_id = self.cv_type_id_from_vir(to);
+                self.compile_coerce_iterator_wrap_enriched(value, to_id, *interface_type)
             }
         }
     }
@@ -1043,11 +1037,15 @@ impl Cg<'_, '_, '_> {
     /// 3. **Non-local identifiers** — module bindings, globals, function refs,
     ///    and sentinel fallback are delegated to the full `identifier()` path
     ///    (these will migrate to dedicated VIR nodes later).
-    fn compile_local_load(&mut self, sym: Symbol, ty: TypeId) -> CodegenResult<CompiledValue> {
+    fn compile_local_load(
+        &mut self,
+        sym: Symbol,
+        vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
         // 1. Sentinel types — always i8(0).
-        if self.vir_query_is_sentinel(ty) {
+        if self.vir_query_is_sentinel_v(vir_ty) {
             let value = self.iconst_cached(types::I8, 0);
-            return Ok(CompiledValue::new(value, types::I8, self.vir_lookup(ty)));
+            return Ok(CompiledValue::new(value, types::I8, vir_ty));
         }
 
         // 2. Captured variable — load from closure environment.
@@ -1056,6 +1054,8 @@ impl Cg<'_, '_, '_> {
         {
             return self.load_capture(&binding);
         }
+
+        let ty = self.cv_type_id_from_vir(vir_ty);
 
         // 3. Local variable — vars map lookup with narrowing.
         if let Some((var, var_type_id)) = self.vars.get(&sym) {
@@ -1288,13 +1288,14 @@ impl Cg<'_, '_, '_> {
     fn compile_vir_meta_access(
         &mut self,
         kind: &VirMetaKind,
-        ty: TypeId,
+        vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         use crate::reflection::{
             compile_dynamic_meta_from_value, compile_static_meta_with_type,
             resolve_reflection_types,
         };
 
+        let ty = self.cv_type_id_from_vir(vir_ty);
         let result_ty = if ty == TypeId::UNKNOWN {
             resolve_reflection_types(self)
                 .ok()
@@ -1465,10 +1466,11 @@ impl Cg<'_, '_, '_> {
     fn compile_vir_as_cast(
         &mut self,
         value_expr: &VirExpr,
-        target_ty: TypeId,
+        vir_target_ty: VirTypeId,
         kind: AsCastKind,
         result: IsCheckResult,
     ) -> CodegenResult<CompiledValue> {
+        let target_ty = self.cv_type_id_from_vir(vir_target_ty);
         let value = self.compile_vir_expr(value_expr)?;
         match result {
             IsCheckResult::AlwaysTrue => self.vir_as_cast_always_true(kind, value, target_ty),

@@ -11,7 +11,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, native_type_to_cranelift};
 use crate::union_layout;
 
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_runtime::native_registry::NativeType;
 use vole_vir::{CallTarget, VirRef};
 
@@ -26,8 +26,9 @@ impl Cg<'_, '_, '_> {
         &mut self,
         target: &CallTarget,
         args: &[VirRef],
-        ty: TypeId,
+        vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let ty = self.cv_type_id_from_vir(vir_ty);
         match target {
             CallTarget::Direct { function_id } => {
                 self.compile_vir_direct_call(*function_id, args, ty)

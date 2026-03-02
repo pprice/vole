@@ -51,9 +51,10 @@ impl Cg<'_, '_, '_> {
         &mut self,
         object: &VirExpr,
         index: &VirExpr,
-        ty: TypeId,
+        vir_ty: VirTypeId,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
+        let ty = self.cv_type_id_from_vir(vir_ty);
         let obj = self.compile_vir_expr(object)?;
 
         if let Some(elem_type_ids) = self.vir_query_unwrap_tuple_v(obj.type_id) {

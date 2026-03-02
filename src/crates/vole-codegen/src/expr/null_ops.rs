@@ -10,7 +10,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag};
 use crate::union_layout;
 
-use vole_identity::{NodeId, TypeId};
+use vole_identity::{NodeId, TypeId, VirTypeId};
 use vole_vir::VirExpr;
 use vole_vir::expr::VirMethodDispatchMeta;
 
@@ -22,8 +22,8 @@ pub(super) struct VirOptionalMethodCallArgs<'a> {
     pub method_args: &'a [vole_vir::VirRef],
     pub dispatch: &'a VirMethodDispatchMeta,
     pub call_node_id: NodeId,
-    pub inner_type_id: TypeId,
-    pub result_type_id: TypeId,
+    pub inner_type_id: VirTypeId,
+    pub result_type_id: VirTypeId,
 }
 
 impl Cg<'_, '_, '_> {
@@ -154,8 +154,9 @@ impl Cg<'_, '_, '_> {
         &mut self,
         value_expr: &VirExpr,
         default_expr: &VirExpr,
-        inner_type_id: TypeId,
+        vir_inner_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let inner_type_id = self.cv_type_id_from_vir(vir_inner_type_id);
         let value = self.compile_vir_expr(value_expr)?;
         let nil_tag = self.find_nil_variant_vir(value.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
@@ -163,9 +164,21 @@ impl Cg<'_, '_, '_> {
 
         let is_multi_variant_inner = self.vir_query_is_union(inner_type_id);
         if is_multi_variant_inner {
-            self.vir_null_coalesce_union(default_expr, value, inner_type_id, nil_tag)
+            self.vir_null_coalesce_union(
+                default_expr,
+                value,
+                inner_type_id,
+                vir_inner_type_id,
+                nil_tag,
+            )
         } else {
-            self.vir_null_coalesce_scalar(default_expr, value, inner_type_id, nil_tag)
+            self.vir_null_coalesce_scalar(
+                default_expr,
+                value,
+                inner_type_id,
+                vir_inner_type_id,
+                nil_tag,
+            )
         }
     }
 
@@ -175,6 +188,7 @@ impl Cg<'_, '_, '_> {
         default_expr: &VirExpr,
         value: CompiledValue,
         inner_type_id: TypeId,
+        vir_inner_type_id: VirTypeId,
         nil_tag: usize,
     ) -> CodegenResult<CompiledValue> {
         let cranelift_type = self.cranelift_type(inner_type_id);
@@ -186,7 +200,7 @@ impl Cg<'_, '_, '_> {
         self.builder.append_block_param(merge_block, cranelift_type);
 
         let result_needs_rc =
-            self.rc_scopes.has_active_scope() && self.rc_state(inner_type_id).needs_cleanup();
+            self.rc_scopes.has_active_scope() && self.rc_state_v(vir_inner_type_id).needs_cleanup();
 
         self.emit_brif(is_nil, nil_block, not_nil_block);
 
@@ -194,7 +208,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(nil_block);
         let default_val = self.compile_vir_expr(default_expr)?;
         if result_needs_rc && default_val.is_borrowed() {
-            self.emit_rc_inc_for_type(default_val.value, inner_type_id)?;
+            self.emit_rc_inc_for_type_v(default_val.value, vir_inner_type_id)?;
         }
         let default_coerced =
             self.coerce_int_type(default_val.value, default_val.ty, cranelift_type);
@@ -212,7 +226,7 @@ impl Cg<'_, '_, '_> {
                 union_layout::PAYLOAD_OFFSET,
             );
             if result_needs_rc && value.is_borrowed() {
-                self.emit_rc_inc_for_type(loaded, inner_type_id)?;
+                self.emit_rc_inc_for_type_v(loaded, vir_inner_type_id)?;
             }
             loaded
         } else {
@@ -223,7 +237,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        let cv = CompiledValue::new(result, cranelift_type, self.vir_lookup(inner_type_id));
+        let cv = CompiledValue::new(result, cranelift_type, vir_inner_type_id);
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -233,6 +247,7 @@ impl Cg<'_, '_, '_> {
         default_expr: &VirExpr,
         value: CompiledValue,
         inner_type_id: TypeId,
+        vir_inner_type_id: VirTypeId,
         nil_tag: usize,
     ) -> CodegenResult<CompiledValue> {
         let ptr_type = self.ptr_type();
@@ -264,7 +279,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result_ptr = self.builder.block_params(merge_block)[0];
-        let cv = CompiledValue::new(result_ptr, ptr_type, self.vir_lookup(inner_type_id));
+        let cv = CompiledValue::new(result_ptr, ptr_type, vir_inner_type_id);
         Ok(cv)
     }
 
@@ -276,9 +291,10 @@ impl Cg<'_, '_, '_> {
         &mut self,
         object_expr: &VirExpr,
         field: vole_frontend::Symbol,
-        inner_type_id: TypeId,
-        result_type_id: TypeId,
+        vir_inner_type_id: VirTypeId,
+        vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let inner_type_id = self.cv_type_id_from_vir(vir_inner_type_id);
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self
             .find_nil_variant_vir(scrutinee.type_id)
@@ -290,9 +306,11 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
+        let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
         let result_type_id = self.try_substitute_type(result_type_id);
+        let result_vir_ty = self.vir_lookup(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
-        let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
+        let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
 
         let nil_block = self.builder.create_block();
         let not_nil_block = self.builder.create_block();
@@ -308,7 +326,7 @@ impl Cg<'_, '_, '_> {
         let nil_val = self.compile_nil_for_optional(result_type_id)?;
         self.jump_with_owned_result(
             nil_val,
-            result_type_id,
+            result_vir_ty,
             result_cranelift_type,
             result_needs_rc,
             merge_block,
@@ -321,14 +339,14 @@ impl Cg<'_, '_, '_> {
         let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
         self.jump_with_owned_result(
             body_coerced,
-            result_type_id,
+            result_vir_ty,
             result_cranelift_type,
             result_needs_rc,
             merge_block,
         )?;
 
         self.switch_and_seal(merge_block);
-        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, false)
+        self.merge_block_result(merge_block, result_cranelift_type, result_vir_ty, false)
     }
 
     /// Compile a VIR `OptionalMethodCall` expression (`obj?.method(args)`).
@@ -347,10 +365,11 @@ impl Cg<'_, '_, '_> {
             method_args,
             dispatch,
             call_node_id,
-            inner_type_id,
-            result_type_id,
+            inner_type_id: vir_inner_type_id,
+            result_type_id: vir_result_type_id,
         } = args;
 
+        let inner_type_id = self.cv_type_id_from_vir(vir_inner_type_id);
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self
             .find_nil_variant_vir(scrutinee.type_id)
@@ -362,9 +381,10 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
-        let result_type_id = self.try_substitute_type(result_type_id);
+        let result_type_id = self.try_substitute_type(self.cv_type_id_from_vir(vir_result_type_id));
+        let result_vir_ty = self.vir_lookup(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
-        let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
+        let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
 
         let nil_block = self.builder.create_block();
         let not_nil_block = self.builder.create_block();
@@ -380,7 +400,7 @@ impl Cg<'_, '_, '_> {
         let nil_val = self.compile_nil_for_optional(result_type_id)?;
         self.jump_with_owned_result(
             nil_val,
-            result_type_id,
+            result_vir_ty,
             result_cranelift_type,
             result_needs_rc,
             merge_block,
@@ -399,14 +419,14 @@ impl Cg<'_, '_, '_> {
         let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
         self.jump_with_owned_result(
             body_coerced,
-            result_type_id,
+            result_vir_ty,
             result_cranelift_type,
             result_needs_rc,
             merge_block,
         )?;
 
         self.switch_and_seal(merge_block);
-        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, false)
+        self.merge_block_result(merge_block, result_cranelift_type, result_vir_ty, false)
     }
 
     /// Compile a method call on the unwrapped inner value of a VIR optional chain.
@@ -463,8 +483,9 @@ impl Cg<'_, '_, '_> {
     pub(super) fn compile_vir_try(
         &mut self,
         value_expr: &VirExpr,
-        success_type_id: TypeId,
+        vir_success_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let success_type_id = self.cv_type_id_from_vir(vir_success_type_id);
         let fallible = self.compile_vir_expr(value_expr)?;
 
         // Load tag from fallible (offset 0)
@@ -498,11 +519,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::new(
-            result,
-            payload_ty,
-            self.vir_lookup(success_type_id),
-        ))
+        Ok(CompiledValue::new(result, payload_ty, vir_success_type_id))
     }
 
     /// Extract the inner (non-nil) value from an optional union.

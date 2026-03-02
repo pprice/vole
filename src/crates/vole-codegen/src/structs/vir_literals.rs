@@ -16,7 +16,7 @@ use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 use vole_frontend::Symbol;
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_runtime::value::RuntimeTypeId;
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
@@ -29,8 +29,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         type_def_id: vole_identity::TypeDefId,
         fields: &[(Symbol, vole_vir::VirRef)],
-        result_type_id: TypeId,
+        vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
         // Sentinels are zero-field structs represented as i8(0).
         if self.analyzed().is_sentinel_type(type_def_id) {
             let value = self.iconst_cached(types::I8, 0);
@@ -125,8 +126,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         type_def_id: vole_identity::TypeDefId,
         fields: &[(Symbol, vole_vir::VirRef)],
-        result_type_id: TypeId,
+        vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
         // Sentinels are zero-field structs represented as i8(0).
         if self.analyzed().is_sentinel_type(type_def_id) {
             let value = self.iconst_cached(types::I8, 0);

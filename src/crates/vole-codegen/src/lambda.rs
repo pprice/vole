@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use vole_frontend::{Capture, Symbol};
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_sema::type_arena::TypeArena;
 use vole_vir::VirBody;
 use vole_vir::expr::VirCapture;
@@ -103,9 +103,9 @@ impl Cg<'_, '_, '_> {
         param_names: &[Symbol],
         body: &VirBody,
         vir_captures: &[VirCapture],
-        ty: TypeId,
+        vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let func_type_id = ty;
+        let func_type_id = self.cv_type_id_from_vir(vir_ty);
         let (param_type_ids, return_type_id) = self.unwrap_lambda_func_type(func_type_id)?;
 
         let captures: Vec<Capture> = vir_captures

@@ -74,13 +74,13 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn jump_with_owned_result(
         &mut self,
         val: CompiledValue,
-        type_id: TypeId,
+        vir_ty: VirTypeId,
         cranelift_type: Type,
         needs_rc: bool,
         merge_block: Block,
     ) -> Result<(), CodegenError> {
         if needs_rc && val.is_borrowed() {
-            self.emit_rc_inc_for_type(val.value, type_id)?;
+            self.emit_rc_inc_for_type_v(val.value, vir_ty)?;
         }
         let converted = self.convert_for_select(val.value, cranelift_type);
         self.builder.ins().jump(merge_block, &[converted.into()]);
@@ -96,15 +96,15 @@ impl Cg<'_, '_, '_> {
         &mut self,
         merge_block: Block,
         cranelift_type: Type,
-        type_id: TypeId,
+        vir_ty: VirTypeId,
         is_void: bool,
     ) -> CodegenResult<CompiledValue> {
         if is_void {
             return Ok(self.void_value());
         }
         let result = self.builder.block_params(merge_block)[0];
-        let mut cv = CompiledValue::new(result, cranelift_type, self.vir_lookup(type_id));
-        if self.rc_state(type_id).needs_cleanup() {
+        let mut cv = CompiledValue::new(result, cranelift_type, vir_ty);
+        if self.rc_state_v(vir_ty).needs_cleanup() {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
         Ok(cv)
@@ -124,11 +124,11 @@ impl Cg<'_, '_, '_> {
         cond: &vole_vir::VirExpr,
         then_body: &vole_vir::VirBody,
         else_body: Option<&vole_vir::VirBody>,
-        result_type_id: TypeId,
+        result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let condition = self.compile_vir_expr(cond)?;
-        let is_void = self.vir_query_is_void(result_type_id);
-        let result_cranelift_type = self.cranelift_type(result_type_id);
+        let is_void = self.vir_query_is_void_v(result_type_id);
+        let result_cranelift_type = self.cranelift_type_v(result_type_id);
 
         // Create basic blocks
         let then_block = self.builder.create_block();
@@ -142,7 +142,7 @@ impl Cg<'_, '_, '_> {
 
         self.emit_brif(condition.value, then_block, else_block);
 
-        let result_needs_rc = !is_void && self.rc_state(result_type_id).needs_cleanup();
+        let result_needs_rc = !is_void && self.rc_state_v(result_type_id).needs_cleanup();
 
         // Compile then branch
         //
@@ -210,11 +210,7 @@ impl Cg<'_, '_, '_> {
         if then_terminated && else_terminated {
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
             let dummy = self.cached_void_val;
-            return Ok(CompiledValue::new(
-                dummy,
-                types::I64,
-                self.vir_lookup(TypeId::NEVER),
-            ));
+            return Ok(CompiledValue::new(dummy, types::I64, VirTypeId::NEVER));
         }
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)

@@ -8,7 +8,7 @@ use crate::RuntimeKey;
 use crate::errors::CodegenResult;
 use crate::types::CompiledValue;
 
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 
 use super::super::context::Cg;
 use super::super::structs::split_i128_for_storage;
@@ -59,8 +59,9 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn compile_vir_array_literal(
         &mut self,
         elements: &[vole_vir::VirRef],
-        array_type_id: TypeId,
+        vir_array_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let array_type_id = self.cv_type_id_from_vir(vir_array_type_id);
         // If sema inferred a tuple type, use stack allocation.
         let elem_type_ids = self.vir_query_unwrap_tuple_sema(array_type_id);
         if let Some(elem_type_ids) = elem_type_ids {
@@ -133,8 +134,9 @@ impl Cg<'_, '_, '_> {
         &mut self,
         element: &vole_vir::VirExpr,
         count: usize,
-        type_id: TypeId,
+        vir_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        let type_id = self.cv_type_id_from_vir(vir_type_id);
         let mut elem_value = self.compile_vir_expr(element)?;
         let (elem_type_id, result_type_id) =
             if let Some((elem_type_id, _)) = self.vir_query_unwrap_fixed_array_sema(type_id) {
