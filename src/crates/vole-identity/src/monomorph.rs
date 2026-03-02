@@ -9,6 +9,7 @@
 use crate::NameId;
 use crate::function_type::FunctionType;
 use crate::type_id::TypeId;
+use crate::vir_type_id::VirTypeId;
 use rustc_hash::FxHashMap;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -203,18 +204,24 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
 // ============================================================================
 
 /// Key for looking up monomorphized function instances.
-/// Uses a string representation for hashability since Type doesn't implement Hash.
+///
+/// `type_keys` uses `VirTypeId` so codegen can construct keys directly from
+/// VIR type information without converting back to sema `TypeId`.  In sema
+/// (where no VirTypeTable exists yet), keys are built via
+/// `VirTypeId::from_type_id()` which preserves the raw u32 for
+/// hashing/equality.  During VIR lowering the keys are translated to
+/// proper VirTypeTable indices via `translate_type_id`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MonomorphKey {
     /// Original generic function name
     pub func_name: NameId,
     /// Opaque type keys for concrete types
-    pub type_keys: Vec<TypeId>,
+    pub type_keys: Vec<VirTypeId>,
 }
 
 impl MonomorphKey {
     /// Create a key from function name and concrete type arguments
-    pub fn new(func_name: NameId, type_keys: Vec<TypeId>) -> Self {
+    pub fn new(func_name: NameId, type_keys: Vec<VirTypeId>) -> Self {
         Self {
             func_name,
             type_keys,
@@ -275,6 +282,8 @@ pub type MonomorphCache = MonomorphCacheBase<MonomorphKey, MonomorphInstance>;
 
 /// Key for looking up monomorphized class method instances.
 /// Identifies a specific instantiation of a generic class method.
+///
+/// See [`MonomorphKey`] for details on the `VirTypeId` key convention.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClassMethodMonomorphKey {
     /// The class's NameId
@@ -282,12 +291,12 @@ pub struct ClassMethodMonomorphKey {
     /// The method's NameId
     pub method_name: NameId,
     /// Opaque type keys for the class's concrete type arguments
-    pub type_keys: Vec<TypeId>,
+    pub type_keys: Vec<VirTypeId>,
 }
 
 impl ClassMethodMonomorphKey {
     /// Create a new key for a class method monomorphization
-    pub fn new(class_name: NameId, method_name: NameId, type_keys: Vec<TypeId>) -> Self {
+    pub fn new(class_name: NameId, method_name: NameId, type_keys: Vec<VirTypeId>) -> Self {
         Self {
             class_name,
             method_name,
@@ -343,6 +352,8 @@ pub type ClassMethodMonomorphCache =
 /// Key for looking up monomorphized static method instances on generic classes.
 /// Identifies a specific instantiation of a generic class's static method.
 /// Supports both class-level and method-level type parameters.
+///
+/// See [`MonomorphKey`] for details on the `VirTypeId` key convention.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StaticMethodMonomorphKey {
     /// The class's NameId
@@ -350,9 +361,9 @@ pub struct StaticMethodMonomorphKey {
     /// The method's NameId
     pub method_name: NameId,
     /// Opaque type keys for the class's concrete type arguments (e.g., T in Box<T>)
-    pub class_type_keys: Vec<TypeId>,
+    pub class_type_keys: Vec<VirTypeId>,
     /// Opaque type keys for the method's concrete type arguments (e.g., U in func convert<U>)
-    pub method_type_keys: Vec<TypeId>,
+    pub method_type_keys: Vec<VirTypeId>,
 }
 
 impl StaticMethodMonomorphKey {
@@ -360,8 +371,8 @@ impl StaticMethodMonomorphKey {
     pub fn new(
         class_name: NameId,
         method_name: NameId,
-        class_type_keys: Vec<TypeId>,
-        method_type_keys: Vec<TypeId>,
+        class_type_keys: Vec<VirTypeId>,
+        method_type_keys: Vec<VirTypeId>,
     ) -> Self {
         Self {
             class_name,

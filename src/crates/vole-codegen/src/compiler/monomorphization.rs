@@ -348,6 +348,12 @@ impl Compiler<'_> {
         self.type_depends_on_program_definitions_inner(self.vir_lookup(type_id), &mut visited)
     }
 
+    /// VirTypeId variant of `type_depends_on_program_definitions`.
+    fn type_depends_on_program_definitions_v(&self, vir_ty: VirTypeId) -> bool {
+        let mut visited = FxHashSet::default();
+        self.type_depends_on_program_definitions_inner(vir_ty, &mut visited)
+    }
+
     fn type_depends_on_program_definitions_inner(
         &self,
         vir_ty: VirTypeId,
@@ -918,7 +924,7 @@ impl Compiler<'_> {
         // Sources of concrete type arguments per class:
         // - Static method monomorphs: (class_name, class_type_keys)
         // - Class method monomorphs: (class_name, type_keys)
-        let mut class_concrete_type_args: FxHashMap<NameId, Vec<Vec<TypeId>>> =
+        let mut class_concrete_type_args: FxHashMap<NameId, Vec<Vec<VirTypeId>>> =
             FxHashMap::default();
 
         // Collect from concrete static method monomorphs
@@ -939,7 +945,7 @@ impl Compiler<'_> {
             if key
                 .class_type_keys
                 .iter()
-                .any(|&tk| self.vir_query_contains_type_param(tk))
+                .any(|&tk| self.vir_query_contains_type_param_v(tk))
             {
                 continue;
             }
@@ -961,7 +967,7 @@ impl Compiler<'_> {
             if key
                 .class_type_keys
                 .iter()
-                .any(|&tk| self.type_depends_on_program_definitions(tk))
+                .any(|&tk| self.type_depends_on_program_definitions_v(tk))
             {
                 continue;
             }
@@ -987,7 +993,7 @@ impl Compiler<'_> {
             if key
                 .type_keys
                 .iter()
-                .any(|&tk| self.vir_query_contains_type_param(tk))
+                .any(|&tk| self.vir_query_contains_type_param_v(tk))
             {
                 continue;
             }
@@ -1035,7 +1041,7 @@ impl Compiler<'_> {
                 .type_keys
                 .iter()
                 .enumerate()
-                .filter_map(|(i, &tk)| self.vir_query_unwrap_type_param(tk).map(|name| (i, name)))
+                .filter_map(|(i, &tk)| self.vir_query_unwrap_type_param_v(tk).map(|name| (i, name)))
                 .collect();
             if abstract_type_param_positions.is_empty() {
                 continue;
@@ -1053,12 +1059,12 @@ impl Compiler<'_> {
                     continue; // Arity mismatch
                 }
 
-                let concrete_type_keys: Vec<TypeId> = abstract_key
+                let concrete_type_keys: Vec<VirTypeId> = abstract_key
                     .type_keys
                     .iter()
                     .enumerate()
                     .map(|(i, &tk)| {
-                        if self.vir_query_unwrap_type_param(tk).is_some() {
+                        if self.vir_query_unwrap_type_param_v(tk).is_some() {
                             concrete_type_args[i]
                         } else {
                             tk
@@ -1069,7 +1075,7 @@ impl Compiler<'_> {
                 // Skip if any concrete type_keys still contain TypeParams
                 if concrete_type_keys
                     .iter()
-                    .any(|&tk| self.vir_query_contains_type_param(tk))
+                    .any(|&tk| self.vir_query_contains_type_param_v(tk))
                 {
                     continue;
                 }
@@ -1095,9 +1101,11 @@ impl Compiler<'_> {
 
                 // Build a substitution map from TypeParam NameIds to concrete types
                 // using the abstract template's substitution structure.
+                // Convert VirTypeId back to TypeId for substitution operations
+                // (only key construction uses VirTypeId natively).
                 let concrete_subs: FxHashMap<NameId, TypeId> = abstract_type_param_positions
                     .iter()
-                    .map(|&(i, param_name)| (param_name, concrete_type_args[i]))
+                    .map(|&(i, param_name)| (param_name, self.sema_type_id(concrete_type_args[i])))
                     .collect();
 
                 // Build concrete substitutions for the class method (key_name -> concrete_ty)

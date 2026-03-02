@@ -6,7 +6,7 @@ use crate::generic::{TypeConstraint, TypeParamInfo, merge_type_params};
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::{NameId, TypeDefId};
+use vole_identity::{NameId, TypeDefId, VirTypeId};
 
 impl Analyzer {
     /// Get field type from a struct-like type by looking up the type definition
@@ -1371,7 +1371,10 @@ impl Analyzer {
             .iter()
             .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
             .collect();
-        let type_keys: Vec<_> = type_args_id.to_vec();
+        let type_keys: Vec<_> = type_args_id
+            .iter()
+            .map(|&ty| VirTypeId::from_type_id(ty))
+            .collect();
         let key = MonomorphKey::new(name_id, type_keys);
 
         if !self.entity_registry_mut().monomorph_cache.contains(&key) {

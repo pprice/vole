@@ -291,10 +291,11 @@ impl Analyzer {
         let registry = self.entity_registry();
         let type_def_id = registry.type_by_name(class_name)?;
         let generic_info = registry.type_generic_info(type_def_id)?;
-        let type_keys: Vec<ArenaTypeId> = generic_info
+        let type_keys: Vec<VirTypeId> = generic_info
             .type_params
             .iter()
             .filter_map(|tp| substitutions.get(&tp.name_id).copied())
+            .map(VirTypeId::from_type_id)
             .collect();
         Some(ClassMethodMonomorphKey::new(
             class_name,
@@ -312,23 +313,25 @@ impl Analyzer {
     ) -> Option<StaticMethodMonomorphKey> {
         let registry = self.entity_registry();
         let type_def_id = registry.type_by_name(class_name)?;
-        let class_type_keys: Vec<ArenaTypeId> = registry
+        let class_type_keys: Vec<VirTypeId> = registry
             .type_generic_info(type_def_id)
             .map(|generic_info| {
                 generic_info
                     .type_params
                     .iter()
                     .filter_map(|tp| substitutions.get(&tp.name_id).copied())
+                    .map(VirTypeId::from_type_id)
                     .collect()
             })
             .unwrap_or_default();
 
         let method_id = registry.find_static_method_on_type(type_def_id, method_name)?;
         let method = registry.get_method(method_id);
-        let method_type_keys: Vec<ArenaTypeId> = method
+        let method_type_keys: Vec<VirTypeId> = method
             .method_type_params
             .iter()
             .filter_map(|tp| substitutions.get(&tp.name_id).copied())
+            .map(VirTypeId::from_type_id)
             .collect();
 
         Some(StaticMethodMonomorphKey::new(
@@ -344,7 +347,7 @@ impl Analyzer {
         &mut self,
         identity_inst: &crate::generic::ClassMethodMonomorphInstance,
         concrete_subs: &FxHashMap<NameId, ArenaTypeId>,
-        type_keys: &[ArenaTypeId],
+        type_keys: &[VirTypeId],
     ) -> Option<crate::generic::ClassMethodMonomorphInstance> {
         let type_def_id = self
             .entity_registry()
@@ -382,7 +385,10 @@ impl Analyzer {
         }
 
         let kind = { self.entity_registry().get_type(type_def_id).kind };
-        let type_args: crate::type_arena::TypeIdVec = type_keys.iter().copied().collect();
+        let type_args: crate::type_arena::TypeIdVec = type_keys
+            .iter()
+            .map(|&v| ArenaTypeId::from_raw(v.raw()))
+            .collect();
         let self_type = match kind {
             TypeDefKind::Class => self.type_arena_mut().class(type_def_id, type_args),
             TypeDefKind::Struct | TypeDefKind::Sentinel => {

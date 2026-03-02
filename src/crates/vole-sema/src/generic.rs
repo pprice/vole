@@ -374,6 +374,7 @@ mod tests {
     use super::*;
     use crate::TypeArena;
     use rustc_hash::FxHashMap;
+    use vole_identity::VirTypeId;
 
     #[test]
     fn test_type_param_scope() {
@@ -409,10 +410,10 @@ mod tests {
         let func_sym = interner.intern("foo");
         let func_name = names.intern(names.main_module(), &[func_sym], &interner);
 
-        // Use ArenaTypeId directly (TypeKey is no longer needed)
-        let key1 = MonomorphKey::new(func_name, vec![arena.i64()]);
-        let key2 = MonomorphKey::new(func_name, vec![arena.string()]);
-        let key1_dup = MonomorphKey::new(func_name, vec![arena.i64()]);
+        // Use VirTypeId (raw-preserved from TypeId) for monomorph keys
+        let key1 = MonomorphKey::new(func_name, vec![VirTypeId::from_type_id(arena.i64())]);
+        let key2 = MonomorphKey::new(func_name, vec![VirTypeId::from_type_id(arena.string())]);
+        let key1_dup = MonomorphKey::new(func_name, vec![VirTypeId::from_type_id(arena.i64())]);
 
         assert!(!cache.contains(&key1));
 

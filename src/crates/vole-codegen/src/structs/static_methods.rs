@@ -266,11 +266,11 @@ impl Cg<'_, '_, '_> {
                 key.method_name,
                 key.class_type_keys
                     .iter()
-                    .map(|&ty| self.sema_type_id(self.try_substitute_type_v(ty)))
+                    .map(|&ty| self.try_substitute_type_v(ty))
                     .collect(),
                 key.method_type_keys
                     .iter()
-                    .map(|&ty| self.sema_type_id(self.try_substitute_type_v(ty)))
+                    .map(|&ty| self.try_substitute_type_v(ty))
                     .collect(),
             )
         });
@@ -281,32 +281,25 @@ impl Cg<'_, '_, '_> {
             // with abstract TypeParam keys. Rewrite those keys through the current
             // substitution map before looking in the monomorph cache.
             let effective_key = if let Some(subs) = self.substitutions {
-                let table = self.vir_type_table();
-                let unwrap_param = |type_id: TypeId| -> Option<NameId> {
-                    let vir = table.lookup_type_id(type_id)?;
-                    match table.get(vir) {
-                        VirType::Param { name } => Some(*name),
-                        _ => None,
-                    }
+                let unwrap_param = |vir_ty: VirTypeId| -> Option<NameId> {
+                    self.vir_query_unwrap_type_param_v(vir_ty)
                 };
                 let needs_substitution = mono_key
                     .class_type_keys
                     .iter()
                     .chain(mono_key.method_type_keys.iter())
-                    .any(|&type_id| unwrap_param(type_id).is_some());
+                    .any(|&vir_ty| unwrap_param(vir_ty).is_some());
                 if needs_substitution {
-                    let map_keys = |keys: &[TypeId]| {
+                    let map_keys = |keys: &[VirTypeId]| {
                         keys.iter()
-                            .map(|&type_id| {
-                                if let Some(name_id) = unwrap_param(type_id) {
-                                    subs.get(&name_id)
-                                        .map(|&v| self.sema_type_id(v))
-                                        .unwrap_or(type_id)
+                            .map(|&vir_ty| {
+                                if let Some(name_id) = unwrap_param(vir_ty) {
+                                    subs.get(&name_id).copied().unwrap_or(vir_ty)
                                 } else {
-                                    type_id
+                                    vir_ty
                                 }
                             })
-                            .collect::<Vec<TypeId>>()
+                            .collect::<Vec<VirTypeId>>()
                     };
                     StaticMethodMonomorphKey::new(
                         mono_key.class_name,
@@ -339,7 +332,9 @@ impl Cg<'_, '_, '_> {
         let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
         let subs = self.substitutions;
         let table = self.vir_type_table();
-        let is_type_param = |type_id: TypeId| -> bool {
+        let is_type_param_v =
+            |vir_ty: VirTypeId| -> bool { matches!(table.get(vir_ty), VirType::Param { .. }) };
+        let is_type_param_sema = |type_id: TypeId| -> bool {
             table
                 .lookup_type_id(type_id)
                 .is_some_and(|vir| matches!(table.get(vir), VirType::Param { .. }))
@@ -360,7 +355,7 @@ impl Cg<'_, '_, '_> {
                         if let Some(ctx_vir_ty) = subs.get(name_id).copied() {
                             if ctx_vir_ty == *inst_vir_ty {
                                 matches += 1;
-                            } else if !is_type_param(instance.substitutions[name_id]) {
+                            } else if !is_type_param_sema(instance.substitutions[name_id]) {
                                 // Concrete mismatch: this candidate does not match
                                 // the current monomorphized call context.
                                 incompatible = true;
@@ -378,11 +373,11 @@ impl Cg<'_, '_, '_> {
                 let concrete_key = key
                     .class_type_keys
                     .iter()
-                    .all(|&type_id| !is_type_param(type_id))
+                    .all(|&vir_ty| !is_type_param_v(vir_ty))
                     && key
                         .method_type_keys
                         .iter()
-                        .all(|&type_id| !is_type_param(type_id));
+                        .all(|&vir_ty| !is_type_param_v(vir_ty));
 
                 // Prefer substitution-compatible concrete instances first.
                 let score = (

@@ -95,6 +95,28 @@ impl VirTypeId {
         self.0 & Self::COMPAT_FLAG != 0
     }
 
+    /// Raw-preserving conversion from a sema `TypeId`.
+    ///
+    /// Creates a `VirTypeId` with the same raw `u32` as the given `TypeId`.
+    /// This is intended for key-level identity (monomorph cache keys) where
+    /// the raw value is used only for hashing/equality, not for table lookup.
+    /// For proper VirTypeTable-indexed translation, use `translate_type_id`.
+    #[inline]
+    pub fn from_type_id(ty: TypeId) -> Self {
+        VirTypeId(ty.raw())
+    }
+
+    /// Raw-preserving conversion back to a sema `TypeId`.
+    ///
+    /// Inverse of `from_type_id()`.  Recovers the original `TypeId` from a
+    /// `VirTypeId` that was created via the raw-preserving path.  This is
+    /// NOT valid for VirTypeIds that were assigned by the VirTypeTable
+    /// (use `lookup_vir_type_id` for those).
+    #[inline]
+    pub fn to_type_id_raw(self) -> TypeId {
+        TypeId::from_raw(self.0)
+    }
+
     /// Strip the compat flag to recover the original TypeId raw value.
     /// Only valid when `is_compat()` returns true.
     #[inline]

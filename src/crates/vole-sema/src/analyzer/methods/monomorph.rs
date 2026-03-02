@@ -6,7 +6,7 @@ use crate::generic::{
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
-use vole_identity::{NameId, TypeDefId};
+use vole_identity::{NameId, TypeDefId, VirTypeId};
 
 /// Generic context for recording method monomorphizations.
 pub(crate) struct GenericContext<'a> {
@@ -77,8 +77,11 @@ impl Analyzer {
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);
 
-        // Use TypeIds directly as keys
-        let type_keys: Vec<_> = type_args_id.iter().copied().collect();
+        // Use VirTypeIds as keys (raw-preserving conversion from TypeId)
+        let type_keys: Vec<_> = type_args_id
+            .iter()
+            .map(|&ty| VirTypeId::from_type_id(ty))
+            .collect();
 
         // Create the monomorph key
         let key = ClassMethodMonomorphKey::new(class_name_id, method_name_id, type_keys);
@@ -212,18 +215,20 @@ impl Analyzer {
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);
 
-        // Use TypeIds directly as keys for class type params
+        // Use VirTypeIds as keys (raw-preserving conversion from TypeId)
         let class_type_keys: Vec<_> = generic_ctx
             .class_type_params
             .iter()
             .filter_map(|tp| generic_ctx.inferred.get(&tp.name_id).copied())
+            .map(VirTypeId::from_type_id)
             .collect();
 
-        // Use TypeIds directly as keys for method type params
+        // Use VirTypeIds as keys for method type params
         let method_type_keys: Vec<_> = generic_ctx
             .method_type_params
             .iter()
             .filter_map(|tp| generic_ctx.inferred.get(&tp.name_id).copied())
+            .map(VirTypeId::from_type_id)
             .collect();
 
         // Create the monomorph key with separate class and method type keys

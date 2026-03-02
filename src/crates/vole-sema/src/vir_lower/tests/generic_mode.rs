@@ -19,7 +19,7 @@ use vole_frontend::ast::{
     AsCastExpr, AsCastKind, CallArg, CallExpr, ExprKind, ForStmt, IsExpr, MethodCallExpr, Stmt,
     StringPart, TypeExpr, TypeExprKind,
 };
-use vole_identity::StringConversion;
+use vole_identity::{StringConversion, VirTypeId};
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{IsCheckResult, VirExpr, VirStringPart};
 use vole_vir::stmt::{VirIterKind, VirStmt};
@@ -476,7 +476,7 @@ fn generic_mode_call_with_monomorph_key_emits_generic_call() {
     // Set the MonomorphKey on the call node — type arg is a type param T.
     let t_name_id = name_table.intern_raw(name_table.main_module(), &["T"]);
     let t_type_id = type_arena.type_param(t_name_id);
-    let key = MonomorphKey::new(callee_name_id, vec![t_type_id]);
+    let key = MonomorphKey::new(callee_name_id, vec![VirTypeId::from_type_id(t_type_id)]);
 
     let mut node_map = empty_node_map();
     node_map.set_generic(call_node_id, key);
@@ -588,7 +588,7 @@ fn concrete_mode_call_with_monomorph_key_still_emits_unresolved() {
         span: dummy_span(),
     };
 
-    let key = MonomorphKey::new(callee_name_id, vec![TypeId::I64]);
+    let key = MonomorphKey::new(callee_name_id, vec![VirTypeId::from_type_id(TypeId::I64)]);
     let mut node_map = empty_node_map();
     node_map.set_generic(call_node_id, key);
 
@@ -651,7 +651,10 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
     );
     node_map.set_generic(
         call_id,
-        MonomorphKey::new(NameId::new_for_test(400), vec![TypeId::I64]),
+        MonomorphKey::new(
+            NameId::new_for_test(400),
+            vec![VirTypeId::from_type_id(TypeId::I64)],
+        ),
     );
     node_map.set_substituted_return_type(call_id, TypeId::STRING);
     node_map.set_resolved_call_args(call_id, vec![Some(0), None]);
@@ -660,7 +663,10 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
         ClassMethodMonomorphKey::new(
             NameId::new_for_test(300),
             NameId::new_for_test(301),
-            vec![TypeId::I64, TypeId::BOOL],
+            vec![
+                VirTypeId::from_type_id(TypeId::I64),
+                VirTypeId::from_type_id(TypeId::BOOL),
+            ],
         ),
     );
     node_map.set_static_method_generic(
@@ -668,8 +674,8 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
         StaticMethodMonomorphKey::new(
             NameId::new_for_test(500),
             NameId::new_for_test(501),
-            vec![TypeId::I64],
-            vec![TypeId::BOOL],
+            vec![VirTypeId::from_type_id(TypeId::I64)],
+            vec![VirTypeId::from_type_id(TypeId::BOOL)],
         ),
     );
 

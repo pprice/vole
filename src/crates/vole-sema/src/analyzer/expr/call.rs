@@ -3,7 +3,7 @@ use crate::implement_registry::TypeMappingKind;
 use crate::node_map::LambdaDefaults;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::{NameId, Namer};
+use vole_identity::{NameId, Namer, VirTypeId};
 
 use super::super::methods::call_args::NamedArgContext;
 
@@ -351,7 +351,10 @@ impl Analyzer {
                     type_args = ?type_args_id.iter().map(|&id| self.type_display_id(id)).collect::<Vec<_>>(),
                     "generic instantiation"
                 );
-                let type_keys: Vec<_> = type_args_id.to_vec();
+                let type_keys: Vec<_> = type_args_id
+                    .iter()
+                    .map(|&ty| VirTypeId::from_type_id(ty))
+                    .collect();
                 let key = MonomorphKey::new(original_name_id, type_keys);
 
                 if !self.entity_registry_mut().monomorph_cache.contains(&key) {

@@ -14,7 +14,7 @@ use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, module_name_id};
-use vole_identity::{ModuleId, MonomorphKey, NameId, TypeDefId, TypeId};
+use vole_identity::{ModuleId, MonomorphKey, NameId, TypeDefId, TypeId, VirTypeId};
 use vole_vir::expr::{VirFunctionMonomorphKey, VirResolvedMethod};
 
 use super::methods::ArgSource;
@@ -73,19 +73,17 @@ impl Cg<'_, '_, '_> {
 
         // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
         let monomorph_key = vir_generic_key.map(|key| {
-            let effective_type_keys: Vec<TypeId> = key
+            let effective_type_keys: Vec<VirTypeId> = key
                 .type_keys
                 .iter()
-                .map(|&type_id| {
-                    let sema_type_id = self.sema_type_id(self.try_substitute_type_v(type_id));
+                .map(|&vir_ty| {
+                    let substituted = self.try_substitute_type_v(vir_ty);
                     if let Some(subs) = self.substitutions
-                        && let Some(name_id) = self.vir_query_unwrap_type_param(sema_type_id)
+                        && let Some(name_id) = self.vir_query_unwrap_type_param_v(substituted)
                     {
-                        subs.get(&name_id)
-                            .map(|&v| self.sema_type_id(v))
-                            .unwrap_or(sema_type_id)
+                        subs.get(&name_id).copied().unwrap_or(substituted)
                     } else {
-                        sema_type_id
+                        substituted
                     }
                 })
                 .collect();

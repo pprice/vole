@@ -953,7 +953,7 @@ impl Cg<'_, '_, '_> {
                 key.method_name,
                 key.type_keys
                     .iter()
-                    .map(|&ty| self.sema_type_id(self.try_substitute_type_v(ty)))
+                    .map(|&ty| self.try_substitute_type_v(ty))
                     .collect(),
             )
         });
@@ -969,18 +969,16 @@ impl Cg<'_, '_, '_> {
                     let needs_substitution = monomorph_key
                         .type_keys
                         .iter()
-                        .any(|&type_id| self.vir_query_unwrap_type_param(type_id).is_some());
+                        .any(|&vir_ty| self.vir_query_unwrap_type_param_v(vir_ty).is_some());
                     if needs_substitution {
-                        let concrete_keys: Vec<TypeId> = monomorph_key
+                        let concrete_keys: Vec<VirTypeId> = monomorph_key
                             .type_keys
                             .iter()
-                            .map(|&type_id| {
-                                if let Some(name_id) = self.vir_query_unwrap_type_param(type_id) {
-                                    subs.get(&name_id)
-                                        .map(|&v| self.sema_type_id(v))
-                                        .unwrap_or(type_id)
+                            .map(|&vir_ty| {
+                                if let Some(name_id) = self.vir_query_unwrap_type_param_v(vir_ty) {
+                                    subs.get(&name_id).copied().unwrap_or(vir_ty)
                                 } else {
-                                    type_id
+                                    vir_ty
                                 }
                             })
                             .collect();

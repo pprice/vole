@@ -50,7 +50,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use vole_frontend::ast::*;
 use vole_frontend::{Interner, Parser, Span};
-use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, TypeDefId};
+use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, TypeDefId, VirTypeId};
 
 pub(crate) use context::{AnalyzerContext, ResolverGuard};
 pub(crate) use output::MethodLookup;

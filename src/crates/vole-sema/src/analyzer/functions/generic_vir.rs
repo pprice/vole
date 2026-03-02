@@ -258,7 +258,7 @@ impl Analyzer {
             // Remove newly added entries with TypeParam type keys.
             !key.type_keys
                 .iter()
-                .any(|&tk| type_arena.contains_type_param(tk))
+                .any(|&tk| type_arena.contains_type_param(ArenaTypeId::from_raw(tk.raw())))
         });
     }
 

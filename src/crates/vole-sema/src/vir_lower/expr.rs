@@ -7,7 +7,7 @@
 use crate::{StringConversion, TypeArena};
 use vole_frontend::Expr;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::{MonomorphKey, TypeId, VirTypeId};
 
 use vole_vir::calls::{CallTarget, LambdaDefaultsInfo};
 use vole_vir::expr::{
@@ -967,8 +967,16 @@ fn lower_method_dispatch_meta(
         .get_generic(expr_id)
         .map(|key| VirFunctionMonomorphKey {
             func_name: key.func_name,
-            type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
-            vir_type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
+            type_keys: key
+                .type_keys
+                .iter()
+                .map(|&ty| ctx.translate(ty.to_type_id_raw()))
+                .collect(),
+            vir_type_keys: key
+                .type_keys
+                .iter()
+                .map(|&ty| ctx.translate(ty.to_type_id_raw()))
+                .collect(),
         });
 
     let substituted_return_type = ctx
@@ -986,8 +994,16 @@ fn lower_method_dispatch_meta(
             .map(|key| VirClassMethodMonomorphKey {
                 class_name: key.class_name,
                 method_name: key.method_name,
-                type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
-                vir_type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
+                type_keys: key
+                    .type_keys
+                    .iter()
+                    .map(|&ty| ctx.translate(ty.to_type_id_raw()))
+                    .collect(),
+                vir_type_keys: key
+                    .type_keys
+                    .iter()
+                    .map(|&ty| ctx.translate(ty.to_type_id_raw()))
+                    .collect(),
             });
     let static_method_generic =
         ctx.node_map
@@ -998,22 +1014,22 @@ fn lower_method_dispatch_meta(
                 class_type_keys: key
                     .class_type_keys
                     .iter()
-                    .map(|&ty| ctx.translate(ty))
+                    .map(|&ty| ctx.translate(ty.to_type_id_raw()))
                     .collect(),
                 vir_class_type_keys: key
                     .class_type_keys
                     .iter()
-                    .map(|&ty| ctx.translate(ty))
+                    .map(|&ty| ctx.translate(ty.to_type_id_raw()))
                     .collect(),
                 method_type_keys: key
                     .method_type_keys
                     .iter()
-                    .map(|&ty| ctx.translate(ty))
+                    .map(|&ty| ctx.translate(ty.to_type_id_raw()))
                     .collect(),
                 vir_method_type_keys: key
                     .method_type_keys
                     .iter()
-                    .map(|&ty| ctx.translate(ty))
+                    .map(|&ty| ctx.translate(ty.to_type_id_raw()))
                     .collect(),
             });
 
@@ -1279,7 +1295,19 @@ fn lower_call(
     // In generic mode, check if this call has a MonomorphKey — that means
     // it targets another generic function.  Emit GenericCall so the VIR
     // monomorphization pass can resolve it to a concrete callee later.
-    let monomorph_key = ctx.node_map.get_generic(expr.id).cloned();
+    //
+    // The sema-side key has raw-preserved VirTypeIds (from_type_id).
+    // Translate them to proper VirTypeTable indices so the key matches
+    // what VirProgram stores.
+    let monomorph_key = ctx.node_map.get_generic(expr.id).map(|key| {
+        MonomorphKey::new(
+            key.func_name,
+            key.type_keys
+                .iter()
+                .map(|&ty| ctx.translate(ty.to_type_id_raw()))
+                .collect(),
+        )
+    });
     let make_unresolved = |rca, ld, mk| CallTarget::Unresolved {
         callee_sym,
         call_node_id: expr.id,
@@ -1311,7 +1339,11 @@ fn lower_call(
 fn generic_call_target(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> Option<CallTarget> {
     let key = ctx.node_map.get_generic(expr.id)?;
     let function_id = ctx.entities.function_by_name(key.func_name)?;
-    let type_args: Vec<VirTypeId> = key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect();
+    let type_args: Vec<VirTypeId> = key
+        .type_keys
+        .iter()
+        .map(|&ty| ctx.translate(ty.to_type_id_raw()))
+        .collect();
     Some(CallTarget::GenericCall {
         function_id,
         type_args,

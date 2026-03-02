@@ -73,7 +73,8 @@ fn populate_free_monomorphs(
     let mut by_key = FxHashMap::default();
     for (key, instance) in keyed_instances {
         let info = translate_free_monomorph(&instance, type_arena, type_table);
-        by_key.insert(key, instance.mangled_name);
+        let translated_key = translate_monomorph_key(&key, type_arena, type_table);
+        by_key.insert(translated_key, instance.mangled_name);
         map.insert(instance.mangled_name, info);
     }
     (map, by_key)
@@ -117,7 +118,8 @@ fn populate_class_method_monomorphs(
     let mut map = FxHashMap::default();
     for (key, instance) in keyed_instances {
         let info = translate_class_method_monomorph(&instance, type_arena, type_table);
-        map.insert(key, info);
+        let translated_key = translate_class_method_monomorph_key(&key, type_arena, type_table);
+        map.insert(translated_key, info);
     }
     map
 }
@@ -168,7 +170,8 @@ fn populate_static_method_monomorphs(
     let mut map = FxHashMap::default();
     for (key, instance) in keyed_instances {
         let info = translate_static_method_monomorph(&instance, type_arena, type_table);
-        map.insert(key, info);
+        let translated_key = translate_static_method_monomorph_key(&key, type_arena, type_table);
+        map.insert(translated_key, info);
     }
     map
 }
@@ -197,6 +200,62 @@ fn translate_static_method_monomorph(
         substitutions: instance.substitutions.clone(),
         vir_substitutions,
     }
+}
+
+// ============================================================================
+// Key translation helpers
+// ============================================================================
+
+/// Translate a `MonomorphKey`'s raw-preserved `VirTypeId` type_keys into
+/// proper VirTypeTable indices.
+fn translate_monomorph_key(
+    key: &MonomorphKey,
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+) -> MonomorphKey {
+    MonomorphKey::new(
+        key.func_name,
+        translate_vir_type_keys(&key.type_keys, type_arena, type_table),
+    )
+}
+
+/// Translate a `ClassMethodMonomorphKey`'s raw-preserved type_keys.
+fn translate_class_method_monomorph_key(
+    key: &ClassMethodMonomorphKey,
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+) -> ClassMethodMonomorphKey {
+    ClassMethodMonomorphKey::new(
+        key.class_name,
+        key.method_name,
+        translate_vir_type_keys(&key.type_keys, type_arena, type_table),
+    )
+}
+
+/// Translate a `StaticMethodMonomorphKey`'s raw-preserved type_keys.
+fn translate_static_method_monomorph_key(
+    key: &StaticMethodMonomorphKey,
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+) -> StaticMethodMonomorphKey {
+    StaticMethodMonomorphKey::new(
+        key.class_name,
+        key.method_name,
+        translate_vir_type_keys(&key.class_type_keys, type_arena, type_table),
+        translate_vir_type_keys(&key.method_type_keys, type_arena, type_table),
+    )
+}
+
+/// Translate a slice of raw-preserved `VirTypeId`s (created via
+/// `VirTypeId::from_type_id`) into proper VirTypeTable-indexed `VirTypeId`s.
+fn translate_vir_type_keys(
+    keys: &[VirTypeId],
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+) -> Vec<VirTypeId> {
+    keys.iter()
+        .map(|&vir_ty| translate_type_id(type_table, vir_ty.to_type_id_raw(), type_arena))
+        .collect()
 }
 
 // ============================================================================
