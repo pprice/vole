@@ -593,17 +593,6 @@ impl AnalyzedProgram {
             .generic_external_method(type_def_id, method_name)
     }
 
-    /// Render a short human-readable type name for diagnostics/debug output.
-    #[allow(dead_code)]
-    pub(crate) fn display_type_id_short(&self, type_id: vole_sema::type_arena::TypeId) -> String {
-        vole_sema::type_display::display_type_id_short(
-            type_id,
-            self.type_arena(),
-            self.name_table(),
-            self.vir_program.entity_metadata(),
-        )
-    }
-
     /// Render a VIR type as a human-readable string using entity metadata for names.
     ///
     /// VIR-native equivalent of [`display_type_id_short`](Self::display_type_id_short).
@@ -650,18 +639,6 @@ impl AnalyzedProgram {
     ) -> Option<&vole_vir::VirMethodImplInfo> {
         self.vir_program
             .implement_method_by_name(type_name_id, method_name_id)
-    }
-
-    /// Resolve and look up an implement-registry method from a sema TypeId.
-    #[allow(dead_code)] // Bridge method; will be removed by vol-bmeu.
-    pub(crate) fn implement_method_for_type(
-        &self,
-        type_id: vole_sema::type_arena::TypeId,
-        method_name_id: NameId,
-    ) -> Option<(NameId, &vole_vir::VirMethodImplInfo)> {
-        let type_name_id = self.impl_type_name_id_from_type_id(type_id)?;
-        let method_impl = self.implement_method_by_name(type_name_id, method_name_id)?;
-        Some((type_name_id, method_impl))
     }
 
     /// Resolve the implement-registry type key NameId from a `VirTypeId`.

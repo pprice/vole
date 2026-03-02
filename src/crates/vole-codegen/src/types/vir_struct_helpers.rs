@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // types/vir_struct_helpers.rs
 //
 // VirTypeTable-based struct/class field layout helpers for code generation.
@@ -7,10 +8,6 @@
 // require EntityRegistry access for field lists (TypeDefId -> field
 // names/types), but all type queries go through VirTypeTable.
 //
-// Many functions here are not yet called outside tests because callers are
-// migrated incrementally (vol-y01m).
-#![allow(dead_code)]
-
 use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 

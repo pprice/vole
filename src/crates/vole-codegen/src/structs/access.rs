@@ -21,17 +21,6 @@ impl Cg<'_, '_, '_> {
         super::helpers::struct_total_byte_size(type_id, self.arena(), self.analyzed())
     }
 
-    /// Return (byte_offset, cranelift_type) pairs for all flat fields of a struct.
-    ///
-    /// Returns None if type_id is not a struct. Used for struct equality comparison.
-    #[allow(dead_code)] // Bridge method; will be removed by vol-bmeu.
-    pub(crate) fn struct_flat_field_cranelift_types(
-        &self,
-        type_id: TypeId,
-    ) -> Option<Vec<(i32, Type)>> {
-        super::helpers::struct_flat_field_cranelift_types(type_id, self.arena(), self.analyzed())
-    }
-
     /// VirTypeId-native variant of [`struct_flat_field_cranelift_types`].
     ///
     /// Returns None if `vir_ty` is not a struct. Used for struct equality comparison.

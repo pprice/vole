@@ -1,8 +1,7 @@
+#![allow(dead_code)]
 // types/function_ctx.rs
 //
 // Per-function compilation context.
-
-#![allow(dead_code)]
 
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;

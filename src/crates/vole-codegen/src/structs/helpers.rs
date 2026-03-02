@@ -7,7 +7,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::uextend_const;
 use crate::types::CompiledValue;
 use vole_identity::{NameId, TypeDefId, TypeId, TypeIdVec};
-use vole_sema::type_arena::{SemaType as ArenaType, TypeArena};
+use vole_sema::type_arena::TypeArena;
 use vole_vir::type_table::VirTypeTable;
 
 pub(crate) trait StructEntityLookup {
@@ -440,104 +440,6 @@ pub(crate) fn is_payload_union(type_id: TypeId, arena: &TypeArena) -> bool {
     } else {
         false
     }
-}
-
-/// Map a leaf TypeId to its Cranelift type for equality comparison.
-/// Wide types (i128, f128) map to their 128-bit Cranelift types.
-/// Float types map to F32/F64/F128 so callers can use fcmp instead of icmp.
-/// All other primitive/pointer types (integers, bool, string, handles, etc.)
-/// are compared as I64 after zero-extension to a uniform slot width.
-#[allow(dead_code)] // Bridge function; will be removed by vol-bmeu.
-fn leaf_cranelift_type(type_id: TypeId, arena: &TypeArena) -> Type {
-    match type_id {
-        TypeId::F32 => types::F32,
-        TypeId::F64 => types::F64,
-        TypeId::F128 => types::F128,
-        TypeId::I128 => types::I128,
-        _ => {
-            let ty = arena.get(type_id);
-            debug_assert!(
-                matches!(
-                    ty,
-                    ArenaType::Primitive(_)
-                        | ArenaType::Handle
-                        | ArenaType::Void
-                        | ArenaType::Struct { .. }
-                        | ArenaType::Unknown
-                ),
-                "INTERNAL: leaf_cranelift_type called with unexpected SemaType {:?} for TypeId {:?}; \
-                 only primitive/pointer types are valid struct field leaf types",
-                ty,
-                type_id
-            );
-            types::I64
-        }
-    }
-}
-
-/// Collect (byte_offset, cranelift_type) for every leaf slot in a struct,
-/// recursively flattening nested struct fields.
-///
-/// Wide types (i128, f128) occupy 16 bytes but produce a single entry so
-/// callers can issue one wide load+compare rather than two i64 compares.
-/// Returns None if `type_id` is not a struct type.
-#[allow(dead_code)] // Bridge function; will be removed by vol-bmeu.
-pub(crate) fn struct_flat_field_cranelift_types(
-    type_id: TypeId,
-    arena: &TypeArena,
-    entities: &impl StructEntityLookup,
-) -> Option<Vec<(i32, Type)>> {
-    let (type_def_id, type_args) = arena.unwrap_struct(type_id)?;
-    let field_types = entities.generic_field_types(type_def_id)?;
-
-    let subs = build_type_arg_subs(type_def_id, type_args, entities);
-    let vt = entities.vir_type_table();
-
-    let mut result = Vec::new();
-    let mut offset = 0i32;
-    for field_type in &field_types {
-        let concrete = substitute_field_type(*field_type, &subs, arena, vt);
-        collect_leaf_slots(concrete, arena, entities, &mut offset, &mut result);
-    }
-    Some(result)
-}
-
-/// Recursively collect leaf (offset, cranelift_type) entries for a field type.
-/// Nested structs are flattened; leaf types produce a single entry.
-#[allow(dead_code)] // Bridge function; will be removed by vol-bmeu.
-fn collect_leaf_slots(
-    type_id: TypeId,
-    arena: &TypeArena,
-    entities: &impl StructEntityLookup,
-    offset: &mut i32,
-    out: &mut Vec<(i32, Type)>,
-) {
-    // Recursively flatten nested structs
-    if let Some((nested_def, nested_args)) = arena.unwrap_struct(type_id)
-        && let Some(nested_field_types) = entities.generic_field_types(nested_def)
-    {
-        let nested_subs = build_type_arg_subs(nested_def, nested_args, entities);
-        let vt = entities.vir_type_table();
-        for field_type in &nested_field_types {
-            let concrete = substitute_field_type(*field_type, &nested_subs, arena, vt);
-            collect_leaf_slots(concrete, arena, entities, offset, out);
-        }
-        return;
-    }
-    // Payload-carrying unions occupy 2 x 8-byte slots (tag + payload) inline,
-    // comparable as two i64 words (like i128 but without reconstruction).
-    if is_payload_union(type_id, arena) {
-        out.push((*offset, types::I64));
-        *offset += 8;
-        out.push((*offset, types::I64));
-        *offset += 8;
-        return;
-    }
-    // Leaf field: emit one entry and advance offset by the field's byte size
-    let cl_type = leaf_cranelift_type(type_id, arena);
-    out.push((*offset, cl_type));
-    let byte_size = crate::types::field_byte_size(type_id, arena) as i32;
-    *offset += byte_size;
 }
 
 /// Compute the byte offset of field `slot` within a struct, accounting

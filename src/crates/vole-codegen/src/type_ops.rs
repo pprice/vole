@@ -97,16 +97,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_query_type_to_cranelift_v(vir_ty)
     }
 
-    /// Recover the raw sema `TypeId` from a `CompiledValue`'s `VirTypeId`.
-    ///
-    /// Does **not** call `try_substitute_type()`, matching the old
-    /// `CompiledValue::type_id: TypeId` semantics.
-    #[allow(dead_code)] // Scheduled for removal in vol-bmeu.
-    #[inline]
-    pub fn cv_type_id(&self, cv: &CompiledValue) -> TypeId {
-        self.cv_type_id_from_vir(cv.type_id)
-    }
-
     /// Convert a `VirTypeId` to sema `TypeId` without substitution.
     #[inline]
     pub fn cv_type_id_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
@@ -195,22 +185,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let analyzed = self.analyzed();
         let arena = self.arena();
         word_to_value_type_id(self.builder, word, type_id, ptr_type, analyzed, arena)
-    }
-
-    /// Convert an i64 value back to its proper type using a `VirTypeId`.
-    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
-    pub fn convert_from_i64_storage_v(&mut self, word: Value, vir_ty: VirTypeId) -> Value {
-        let ptr_type = self.ptr_type();
-        let analyzed = self.analyzed();
-        let table = &analyzed.vir_program().type_table;
-        super::types::vir_conversions::vir_word_to_value(
-            self.builder,
-            word,
-            vir_ty,
-            ptr_type,
-            analyzed,
-            table,
-        )
     }
 
     // ========== Type resolution ==========

@@ -319,12 +319,6 @@ pub(crate) fn is_wide_type(ty: TypeId, _arena: &TypeArena) -> bool {
     matches!(ty, TypeId::I128 | TypeId::F128)
 }
 
-/// Get the byte size of a field: 16 for i128 (wide) types, 8 for all others.
-#[allow(dead_code)] // Bridge function; will be removed by vol-bmeu.
-pub(crate) fn field_byte_size(ty: TypeId, arena: &TypeArena) -> u32 {
-    if is_wide_type(ty, arena) { 16 } else { 8 }
-}
-
 /// Get the slot count of a field: 2 for i128 (wide) types, 1 for all others.
 pub(crate) fn field_slot_count(ty: TypeId, arena: &TypeArena) -> usize {
     if is_wide_type(ty, arena) { 2 } else { 1 }
