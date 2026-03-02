@@ -16,10 +16,11 @@ use rustc_hash::FxHashMap;
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
+use crate::types::vir_conversions::vir_type_to_cranelift;
 use crate::types::{CodegenCtx, MethodInfo};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{MethodId, ModuleId, NameId, TypeDefId, TypeId};
+use vole_identity::{MethodId, ModuleId, NameId, TypeDefId, TypeId, VirTypeId};
 use vole_vir::VirImplementBlockEntry;
 
 impl Compiler<'_> {
@@ -82,33 +83,29 @@ impl Compiler<'_> {
             }
             let sig = {
                 let method_def = self.analyzed.get_method(semantic_method_id);
-                let (param_type_ids, return_type_id) =
-                    match self.vir_query_unwrap_function_sema(method_def.signature_id) {
-                        Some((params, ret)) => {
-                            let subst_params: Vec<TypeId> = params
-                                .iter()
-                                .map(|&p| {
-                                    if self.vir_query_is_self_type(p) {
-                                        self_type_id
-                                    } else {
-                                        self.vir_query_lookup_substitute(p, &type_param_subs)
-                                            .unwrap_or(p)
-                                    }
-                                })
-                                .collect();
-                            let subst_ret = if self.vir_query_is_self_type(ret) {
-                                self_type_id
-                            } else {
-                                self.vir_query_lookup_substitute(ret, &type_param_subs)
-                                    .unwrap_or(ret)
-                            };
-                            (subst_params, subst_ret)
+                let subst_params: Vec<TypeId> = method_def
+                    .param_types
+                    .iter()
+                    .map(|&vir_ty| {
+                        if vir_ty == VirTypeId::UNKNOWN {
+                            self_type_id
+                        } else {
+                            let tid = self.cv_type_id_from_vir(vir_ty);
+                            self.vir_query_lookup_substitute(tid, &type_param_subs)
+                                .unwrap_or(tid)
                         }
-                        None => (vec![], self.vir_query_void()),
-                    };
+                    })
+                    .collect();
+                let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
+                    self_type_id
+                } else {
+                    let tid = self.cv_type_id_from_vir(method_def.return_type);
+                    self.vir_query_lookup_substitute(tid, &type_param_subs)
+                        .unwrap_or(tid)
+                };
                 self.build_signature_from_type_ids(
-                    &param_type_ids,
-                    Some(return_type_id),
+                    &subst_params,
+                    Some(subst_ret),
                     SelfParam::TypedId(self_type_id),
                 )
             };
@@ -190,33 +187,29 @@ impl Compiler<'_> {
             }
             let sig = {
                 let method_def = self.analyzed.get_method(semantic_method_id);
-                let (param_type_ids, return_type_id) =
-                    match self.vir_query_unwrap_function_sema(method_def.signature_id) {
-                        Some((params, ret)) => {
-                            let subst_params: Vec<TypeId> = params
-                                .iter()
-                                .map(|&p| {
-                                    if self.vir_query_is_self_type(p) {
-                                        self_type_id
-                                    } else {
-                                        self.vir_query_lookup_substitute(p, &type_param_subs)
-                                            .unwrap_or(p)
-                                    }
-                                })
-                                .collect();
-                            let subst_ret = if self.vir_query_is_self_type(ret) {
-                                self_type_id
-                            } else {
-                                self.vir_query_lookup_substitute(ret, &type_param_subs)
-                                    .unwrap_or(ret)
-                            };
-                            (subst_params, subst_ret)
+                let subst_params: Vec<TypeId> = method_def
+                    .param_types
+                    .iter()
+                    .map(|&vir_ty| {
+                        if vir_ty == VirTypeId::UNKNOWN {
+                            self_type_id
+                        } else {
+                            let tid = self.cv_type_id_from_vir(vir_ty);
+                            self.vir_query_lookup_substitute(tid, &type_param_subs)
+                                .unwrap_or(tid)
                         }
-                        None => (vec![], self.vir_query_void()),
-                    };
+                    })
+                    .collect();
+                let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
+                    self_type_id
+                } else {
+                    let tid = self.cv_type_id_from_vir(method_def.return_type);
+                    self.vir_query_lookup_substitute(tid, &type_param_subs)
+                        .unwrap_or(tid)
+                };
                 self.build_signature_from_type_ids(
-                    &param_type_ids,
-                    Some(return_type_id),
+                    &subst_params,
+                    Some(subst_ret),
                     SelfParam::TypedId(self_type_id),
                 )
             };
@@ -362,8 +355,7 @@ impl Compiler<'_> {
 
         let method_return_type_id = {
             let method_def = self.analyzed.get_method(method_id);
-            self.vir_query_unwrap_function_sema(method_def.signature_id)
-                .map(|(_, ret)| ret)
+            Some(self.cv_type_id_from_vir(method_def.return_type))
         };
 
         // Get the VIR function (must be available — implement block methods are always lowered)
@@ -421,33 +413,34 @@ impl Compiler<'_> {
                 )
             })?;
 
-            // Use pre-resolved signature from MethodDef
+            // Use VIR method definition for param/return types
             let method_def = self.analyzed.get_method(method_id);
-            let (param_type_ids, ret) = self
-                .vir_query_unwrap_function_sema(method_def.signature_id)
-                .ok_or_else(|| {
-                    CodegenError::internal("method compilation: missing function signature")
-                })?;
+            let param_vir_types = method_def.param_types.clone();
+            let return_vir_type = method_def.return_type;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
-            let return_type_id = Some(ret).filter(|r| !r.is_void());
+            let return_type_id = {
+                let tid = self.cv_type_id_from_vir(return_vir_type);
+                Some(tid).filter(|r| !r.is_void())
+            };
             self.jit.ctx.func.signature = sig;
 
             // Build param info from VirMethodDef.param_names
             let interner = self.interner_for_module(module_id);
-            let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
+            let table = self.vir_type_table();
             let method_def = self.analyzed.get_method(method_id);
             let params: Vec<_> = method_def
                 .param_names
                 .iter()
-                .zip(param_type_ids.iter())
-                .zip(param_cranelift_types.iter())
-                .map(|((name_str, &type_id), &cranelift_type)| {
+                .zip(param_vir_types.iter())
+                .map(|(name_str, &vir_ty)| {
                     let sym = interner.lookup(name_str).unwrap_or_else(|| {
                         self.analyzed
                             .interner()
                             .lookup(name_str)
                             .unwrap_or_else(|| panic!("param name '{}' not interned", name_str))
                     });
+                    let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
+                    let type_id = self.cv_type_id_from_vir(vir_ty);
                     (sym, type_id, cranelift_type)
                 })
                 .collect();
@@ -531,11 +524,10 @@ impl Compiler<'_> {
         let interner = interner_override.unwrap_or(self.analyzed.interner());
         let params = self.build_method_params_from_vir(method_id, interner)?;
 
-        // Get the method's return type from the pre-resolved signature
+        // Get the method's return type from VIR method definition
         let method_return_type_id = {
             let method_def = self.analyzed.get_method(method_id);
-            self.vir_query_unwrap_function_sema(method_def.signature_id)
-                .map(|(_, ret)| ret)
+            Some(self.cv_type_id_from_vir(method_def.return_type))
         };
 
         // Create function builder and compile
@@ -635,16 +627,12 @@ impl Compiler<'_> {
         interner: &Interner,
     ) -> CodegenResult<Vec<(Symbol, TypeId, types::Type)>> {
         let method_def = self.analyzed.get_method(method_id);
-        let (param_type_ids, _) = self
-            .vir_query_unwrap_function_sema(method_def.signature_id)
-            .ok_or_else(|| {
-                CodegenError::internal("method compilation: missing function signature")
-            })?;
+        let table = self.vir_type_table();
         let params = method_def
             .param_names
             .iter()
-            .zip(param_type_ids.iter())
-            .map(|(name_str, &type_id)| {
+            .zip(method_def.param_types.iter())
+            .map(|(name_str, &vir_ty)| {
                 let sym = interner
                     .lookup(name_str)
                     .or_else(|| self.analyzed.interner().lookup(name_str))
@@ -654,7 +642,8 @@ impl Compiler<'_> {
                             name_str, method_id
                         )
                     });
-                let cranelift_type = self.vir_query_type_to_cranelift(type_id);
+                let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
+                let type_id = self.cv_type_id_from_vir(vir_ty);
                 (sym, type_id, cranelift_type)
             })
             .collect();
@@ -809,34 +798,32 @@ impl Compiler<'_> {
                 }
             }
 
-            // Get signature data from sema, substituting:
-            //   1. Placeholder(SelfType) -> self_type_id
+            // Get signature data from VIR method definition, substituting:
+            //   1. VirTypeId::UNKNOWN (Self placeholder) -> self_type_id
             //   2. TypeParam(T) -> concrete element type (via type_param_subs)
+            let method_def = self.analyzed.get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
-                let method_def = self.analyzed.get_method(semantic_method_id);
-                match self.vir_query_unwrap_function_sema(method_def.signature_id) {
-                    Some((params, ret)) => {
-                        let subst_params: Vec<TypeId> = params
-                            .iter()
-                            .map(|&p| {
-                                if self.vir_query_is_self_type(p) {
-                                    self_type_id
-                                } else {
-                                    self.vir_query_lookup_substitute(p, &type_param_subs)
-                                        .unwrap_or(p)
-                                }
-                            })
-                            .collect();
-                        let subst_ret = if self.vir_query_is_self_type(ret) {
+                let subst_params: Vec<TypeId> = method_def
+                    .param_types
+                    .iter()
+                    .map(|&vir_ty| {
+                        if vir_ty == VirTypeId::UNKNOWN {
                             self_type_id
                         } else {
-                            self.vir_query_lookup_substitute(ret, &type_param_subs)
-                                .unwrap_or(ret)
-                        };
-                        (subst_params, subst_ret)
-                    }
-                    None => continue,
-                }
+                            let tid = self.cv_type_id_from_vir(vir_ty);
+                            self.vir_query_lookup_substitute(tid, &type_param_subs)
+                                .unwrap_or(tid)
+                        }
+                    })
+                    .collect();
+                let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
+                    self_type_id
+                } else {
+                    let tid = self.cv_type_id_from_vir(method_def.return_type);
+                    self.vir_query_lookup_substitute(tid, &type_param_subs)
+                        .unwrap_or(tid)
+                };
+                (subst_params, subst_ret)
             };
 
             let sig = self.build_signature_from_type_ids(
@@ -1046,26 +1033,26 @@ impl Compiler<'_> {
                 // return type. Params fall back to abstract type on failure (safe for ptr-size).
                 let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
                     let method_def = self.analyzed.get_method(*semantic_method_id);
-                    self.vir_query_unwrap_function_sema(method_def.signature_id)
-                        .and_then(|(params, ret)| {
-                            let subst_params: Vec<TypeId> = params
-                                .iter()
-                                .map(|&p| {
-                                    if self.vir_query_is_self_type(p) {
-                                        self_type_id
-                                    } else {
-                                        self.vir_query_lookup_substitute(p, &concrete_subs)
-                                            .unwrap_or(p)
-                                    }
-                                })
-                                .collect();
-                            let subst_ret = if self.vir_query_is_self_type(ret) {
-                                Some(self_type_id)
+                    let subst_params: Vec<TypeId> = method_def
+                        .param_types
+                        .iter()
+                        .map(|&vir_ty| {
+                            if vir_ty == VirTypeId::UNKNOWN {
+                                self_type_id
                             } else {
-                                self.vir_query_lookup_substitute(ret, &concrete_subs)
-                            };
-                            subst_ret.map(|ret| (subst_params, ret))
+                                let tid = self.cv_type_id_from_vir(vir_ty);
+                                self.vir_query_lookup_substitute(tid, &concrete_subs)
+                                    .unwrap_or(tid)
+                            }
                         })
+                        .collect();
+                    let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
+                        Some(self_type_id)
+                    } else {
+                        let tid = self.cv_type_id_from_vir(method_def.return_type);
+                        self.vir_query_lookup_substitute(tid, &concrete_subs)
+                    };
+                    subst_ret.map(|ret| (subst_params, ret))
                 };
                 let (param_type_ids, return_type_id) = match maybe_type_ids {
                     Some(x) => x,
@@ -1249,26 +1236,26 @@ impl Compiler<'_> {
                 // Build the concrete signature (same as compile path)
                 let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
                     let method_def = self.analyzed.get_method(*semantic_method_id);
-                    self.vir_query_unwrap_function_sema(method_def.signature_id)
-                        .and_then(|(params, ret)| {
-                            let subst_params: Vec<TypeId> = params
-                                .iter()
-                                .map(|&p| {
-                                    if self.vir_query_is_self_type(p) {
-                                        self_type_id
-                                    } else {
-                                        self.vir_query_lookup_substitute(p, &concrete_subs)
-                                            .unwrap_or(p)
-                                    }
-                                })
-                                .collect();
-                            let subst_ret = if self.vir_query_is_self_type(ret) {
-                                Some(self_type_id)
+                    let subst_params: Vec<TypeId> = method_def
+                        .param_types
+                        .iter()
+                        .map(|&vir_ty| {
+                            if vir_ty == VirTypeId::UNKNOWN {
+                                self_type_id
                             } else {
-                                self.vir_query_lookup_substitute(ret, &concrete_subs)
-                            };
-                            subst_ret.map(|ret| (subst_params, ret))
+                                let tid = self.cv_type_id_from_vir(vir_ty);
+                                self.vir_query_lookup_substitute(tid, &concrete_subs)
+                                    .unwrap_or(tid)
+                            }
                         })
+                        .collect();
+                    let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
+                        Some(self_type_id)
+                    } else {
+                        let tid = self.cv_type_id_from_vir(method_def.return_type);
+                        self.vir_query_lookup_substitute(tid, &concrete_subs)
+                    };
+                    subst_ret.map(|ret| (subst_params, ret))
                 };
                 let (param_type_ids, return_type_id) = match maybe_type_ids {
                     Some(x) => x,

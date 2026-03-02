@@ -146,18 +146,24 @@ impl Compiler<'_> {
 
     /// Build a Cranelift signature directly from a MethodId.
     ///
-    /// This is a convenience method that retrieves the method definition
-    /// and builds the signature from its pre-resolved TypeIds.
+    /// Uses the VIR method definition's `param_types` and `return_type`
+    /// (VirTypeId) instead of unwrapping the sema TypeId signature.
     pub fn build_signature_for_method(
         &self,
         method_id: MethodId,
         self_param: SelfParam,
     ) -> Signature {
         let method_def = self.analyzed.method_def(method_id);
-        let (params, ret) = self
-            .vir_query_unwrap_function_sema(method_def.signature_id)
-            .expect("INTERNAL: method signature: missing function signature");
-        self.build_signature_from_type_ids(&params, Some(ret), self_param)
+        let vir_self_param = match self_param {
+            SelfParam::None => VirSelfParam::None,
+            SelfParam::Pointer => VirSelfParam::Pointer,
+            SelfParam::TypedId(type_id) => VirSelfParam::Typed(self.vir_lookup(type_id)),
+        };
+        self.build_signature_from_vir_types(
+            &method_def.param_types,
+            method_def.return_type,
+            vir_self_param,
+        )
     }
 
     // ========================================================================

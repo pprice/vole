@@ -319,6 +319,7 @@ impl<'a> Compiler<'a> {
     }
 
     /// Get the void `TypeId` from the arena.
+    #[allow(dead_code)]
     #[inline]
     fn vir_query_void(&self) -> TypeId {
         self.arena().void()
@@ -334,6 +335,7 @@ impl<'a> Compiler<'a> {
     ///
     /// Arena-only: VIR translates `Placeholder(SelfType)` as `VirType::Unknown`,
     /// making it indistinguishable from genuinely unknown types.
+    #[allow(dead_code)]
     #[inline]
     fn vir_query_is_self_type(&self, type_id: TypeId) -> bool {
         self.arena().is_self_type(type_id)

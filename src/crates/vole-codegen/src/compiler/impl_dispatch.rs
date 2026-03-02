@@ -11,7 +11,8 @@ use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::ModuleCompileInfo;
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CodegenCtx, TypeMetadata, type_id_to_cranelift};
+use crate::types::vir_conversions::vir_type_to_cranelift;
+use crate::types::{CodegenCtx, TypeMetadata};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use rustc_hash::FxHashSet;
 use vole_frontend::{Interner, Symbol};
@@ -183,16 +184,10 @@ impl Compiler<'_> {
         // Use TypeId directly for self binding
         let self_type_id = metadata.vole_type;
 
-        // Get param and return types from sema (pre-resolved signature)
+        // Get param and return types from VIR method definition
         let method_def = self.analyzed.get_method(method_id);
-        let (param_type_ids, method_return_type_id) = {
-            let (params, ret) = self
-                .vir_query_unwrap_function_sema(method_def.signature_id)
-                .ok_or_else(|| {
-                    CodegenError::internal("method signature: expected function type")
-                })?;
-            (params, Some(ret))
-        };
+        let param_vir_types = &method_def.param_types;
+        let return_vir_type = method_def.return_type;
 
         // Get VIR function (must be available at this point)
         let vir_func = self
@@ -209,17 +204,17 @@ impl Compiler<'_> {
         // signature's param types (since codegen adds `self` separately via
         // SelfParam::Pointer). If VIR has more params than the signature,
         // skip the leading `self` entry to keep the zip aligned.
-        let vir_params_offset = vir_func.params.len().saturating_sub(param_type_ids.len());
+        let vir_params_offset = vir_func.params.len().saturating_sub(param_vir_types.len());
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.arena();
+            let table = self.vir_type_table();
             vir_func
                 .params
                 .iter()
                 .skip(vir_params_offset)
-                .zip(param_type_ids.iter())
-                .map(|(&(sym, _, _), &type_id)| {
-                    let cranelift_type =
-                        type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
+                .zip(param_vir_types.iter())
+                .map(|(&(sym, _, _), &vir_ty)| {
+                    let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
+                    let type_id = self.cv_type_id_from_vir(vir_ty);
                     (sym, type_id, cranelift_type)
                 })
                 .collect()
@@ -231,6 +226,7 @@ impl Compiler<'_> {
         // by using the method's defining type module.
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
+        let method_return_type_id = Some(self.cv_type_id_from_vir(return_vir_type));
 
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -296,16 +292,10 @@ impl Compiler<'_> {
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
             self.jit.ctx.func.signature = sig;
 
-            // Get param and return types from sema (pre-resolved signature)
+            // Get param and return types from VIR method definition
             let method_def = self.analyzed.get_method(method_id);
-            let (param_type_ids, return_type_id) = {
-                let (params, ret) = self
-                    .vir_query_unwrap_function_sema(method_def.signature_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal("static method signature: expected function type")
-                    })?;
-                (params, ret)
-            };
+            let param_vir_types = &method_def.param_types;
+            let return_vir_type = method_def.return_type;
 
             // Get VIR function (must be available)
             let vir_func = self
@@ -315,14 +305,15 @@ impl Compiler<'_> {
 
             // Build params using VIR function param Symbols
             let params: Vec<_> = {
-                let arena_ref = self.arena();
+                let table = self.vir_type_table();
                 vir_func
                     .params
                     .iter()
-                    .zip(param_type_ids.iter())
-                    .map(|(&(sym, _, _), &type_id)| {
+                    .zip(param_vir_types.iter())
+                    .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
-                            type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
+                            vir_type_to_cranelift(vir_ty, table, self.pointer_type);
+                        let type_id = self.cv_type_id_from_vir(vir_ty);
                         (sym, type_id, cranelift_type)
                     })
                     .collect()
@@ -330,6 +321,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
+            let return_type_id = self.cv_type_id_from_vir(return_vir_type);
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -401,10 +393,10 @@ impl Compiler<'_> {
             .find(|meta| {
                 // Use unwrap_class for classes, unwrap_struct for structs
                 let found_def_id = if is_class {
-                    self.vir_query_unwrap_class_sema(meta.vole_type)
+                    self.vir_query_unwrap_class(meta.vole_type)
                         .map(|(id, _)| id)
                 } else {
-                    self.vir_query_unwrap_struct_sema(meta.vole_type)
+                    self.vir_query_unwrap_struct(meta.vole_type)
                         .map(|(id, _)| id)
                 };
                 found_def_id.is_some_and(|id| {
@@ -486,16 +478,10 @@ impl Compiler<'_> {
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
             self.jit.ctx.func.signature = sig;
 
-            // Get param and return types from sema
+            // Get param and return types from VIR method definition
             let method_def = self.analyzed.get_method(method_id);
-            let (param_type_ids, return_type_id) = {
-                let (params, ret) = self
-                    .vir_query_unwrap_function_sema(method_def.signature_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal("method signature: expected function type")
-                    })?;
-                (params, Some(ret))
-            };
+            let param_vir_types = &method_def.param_types;
+            let return_vir_type = method_def.return_type;
 
             // Get VIR function (must be available)
             let vir_func = self
@@ -510,17 +496,18 @@ impl Compiler<'_> {
             // Build params using VIR function param Symbols.
             // Skip leading `self` param if VIR has more params than the signature
             // (explicit `self: T` in source is excluded from the method signature).
-            let vir_params_offset = vir_func.params.len().saturating_sub(param_type_ids.len());
+            let vir_params_offset = vir_func.params.len().saturating_sub(param_vir_types.len());
             let params: Vec<_> = {
-                let arena_ref = self.arena();
+                let table = self.vir_type_table();
                 vir_func
                     .params
                     .iter()
                     .skip(vir_params_offset)
-                    .zip(param_type_ids.iter())
-                    .map(|(&(sym, _, _), &type_id)| {
+                    .zip(param_vir_types.iter())
+                    .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
-                            type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
+                            vir_type_to_cranelift(vir_ty, table, self.pointer_type);
+                        let type_id = self.cv_type_id_from_vir(vir_ty);
                         (sym, type_id, cranelift_type)
                     })
                     .collect()
@@ -529,6 +516,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
+            let return_type_id = Some(self.cv_type_id_from_vir(return_vir_type));
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -593,14 +581,8 @@ impl Compiler<'_> {
 
             // Get param and return types from sema
             let method_def = self.analyzed.get_method(method_id);
-            let (param_type_ids, return_type_id) = {
-                let (params, ret) = self
-                    .vir_query_unwrap_function_sema(method_def.signature_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal("static method signature: expected function type")
-                    })?;
-                (params, Some(ret))
-            };
+            let param_vir_types = &method_def.param_types;
+            let return_vir_type = method_def.return_type;
 
             // Get VIR function (must be available)
             let vir_func = self
@@ -610,14 +592,15 @@ impl Compiler<'_> {
 
             // Build params using VIR function param Symbols
             let params: Vec<_> = {
-                let arena_ref = self.arena();
+                let table = self.vir_type_table();
                 vir_func
                     .params
                     .iter()
-                    .zip(param_type_ids.iter())
-                    .map(|(&(sym, _, _), &type_id)| {
+                    .zip(param_vir_types.iter())
+                    .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
-                            type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
+                            vir_type_to_cranelift(vir_ty, table, self.pointer_type);
+                        let type_id = self.cv_type_id_from_vir(vir_ty);
                         (sym, type_id, cranelift_type)
                     })
                     .collect()
@@ -625,6 +608,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
+            let return_type_id = Some(self.cv_type_id_from_vir(return_vir_type));
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
