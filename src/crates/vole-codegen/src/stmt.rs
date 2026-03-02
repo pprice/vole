@@ -30,91 +30,80 @@ impl Cg<'_, '_, '_> {
     ///
     /// Handles: unknown boxing, union wrapping, integer narrowing/widening,
     /// float promotion/demotion, and interface boxing. Returns the coerced
-    /// value, its type, and whether a stack-allocated union was constructed.
+    /// value, its VirTypeId, and whether a stack-allocated union was constructed.
     ///
     /// The `storage` hint (pre-computed during VIR lowering) drives the
     /// coercion branch instead of querying `TypeArena` at compile time.
     fn coerce_let_init(
         &mut self,
         init: &CompiledValue,
-        declared_type_id_opt: Option<TypeId>,
+        declared_vir_opt: Option<VirTypeId>,
         sentinel_hint_type_id: Option<TypeId>,
         storage: LetStorageHint,
-        declared_vir_type: Option<VirTypeId>,
-    ) -> CodegenResult<(Value, TypeId, bool)> {
+    ) -> CodegenResult<(Value, VirTypeId, bool)> {
         let mut is_stack_union = false;
 
-        let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
-            declared_type_id_opt
-        {
+        let (mut final_value, mut final_vir_ty) = if let Some(declared_vir) = declared_vir_opt {
             match storage {
                 LetStorageHint::Unknown if !init.type_id.is_unknown() => {
                     // Box value to unknown type (TaggedValue)
                     let boxed = self.box_to_unknown(*init)?;
-                    (boxed.value, self.sema_type_id(boxed.type_id))
+                    (boxed.value, boxed.type_id)
                 }
                 LetStorageHint::Union { tag_hint } if !self.vir_query_is_union_v(init.type_id) => {
                     let wrapped = if let Some(hint) = tag_hint {
-                        self.construct_union_from_hint(*init, declared_type_id, &hint)?
+                        // Bridge to TypeId for construct_union_from_hint.
+                        let declared_sema = self.sema_type_id(declared_vir);
+                        self.construct_union_from_hint(*init, declared_sema, &hint)?
                     } else {
+                        // Bridge to TypeId for construct_union_id_with_hint.
+                        let declared_sema = self.sema_type_id(declared_vir);
                         self.construct_union_id_with_hint(
                             *init,
-                            declared_type_id,
+                            declared_sema,
                             sentinel_hint_type_id,
                         )?
                     };
                     is_stack_union = true;
-                    (wrapped.value, self.sema_type_id(wrapped.type_id))
+                    (wrapped.value, wrapped.type_id)
                 }
                 LetStorageHint::Numeric if init.type_id.is_numeric() => {
-                    let coerced = self.coerce_to_type_id(*init, declared_type_id)?;
-                    (coerced.value, self.sema_type_id(coerced.type_id))
+                    let coerced = self.coerce_to_type(*init, declared_vir)?;
+                    (coerced.value, coerced.type_id)
                 }
                 LetStorageHint::Interface => {
                     // For functional interfaces, keep the actual function type
                     // from the lambda. This preserves the is_closure flag for
                     // proper calling convention.
-                    (init.value, self.sema_type_id(init.type_id))
+                    (init.value, init.type_id)
                 }
-                _ => (init.value, declared_type_id),
+                _ => (init.value, declared_vir),
             }
         } else {
-            (init.value, self.sema_type_id(init.type_id))
+            (init.value, init.type_id)
         };
 
         // Box value if assigning to interface type
-        if let Some(declared_type_id) = declared_type_id_opt
+        if let Some(declared_vir) = declared_vir_opt
             && storage == LetStorageHint::Interface
         {
-            let is_final_interface = self.vir_query_is_interface(final_type_id);
+            let is_final_interface = self.vir_query_is_interface_v(final_vir_ty);
             // RuntimeIterator is an internal concrete type that implements Iterator
             // dispatch directly via runtime_iterator_method; skip interface boxing.
-            let is_runtime_iterator = self.vir_query_is_runtime_iterator(final_type_id);
+            let is_runtime_iterator = self.vir_query_is_runtime_iterator_v(final_vir_ty);
 
             if !is_final_interface && !is_runtime_iterator {
-                // When the sema declared type is UNKNOWN but VIR declared type is
-                // an interface, use the init's original VirTypeId for the value (so
-                // vtable builder can resolve the concrete type) and box via VIR path.
-                let boxed = if declared_type_id == TypeId::UNKNOWN
-                    && let Some(declared_vir) = declared_vir_type
-                    && self.vir_query_is_interface_v(declared_vir)
-                {
-                    // Use init's VirTypeId to preserve concrete type information
-                    let cranelift_ty = self.builder.func.dfg.value_type(final_value);
-                    let value_to_box = CompiledValue::new(final_value, cranelift_ty, init.type_id);
-                    self.box_interface_value_v(value_to_box, declared_vir)?
-                } else {
-                    let cranelift_ty = self.cranelift_type(final_type_id);
-                    let value_to_box =
-                        self.compiled_with_ty(final_value, cranelift_ty, final_type_id);
-                    self.box_interface_value(value_to_box, declared_type_id)?
-                };
+                // When the init is not an interface but VIR declared type is
+                // an interface, box via VIR path.
+                let cranelift_ty = self.builder.func.dfg.value_type(final_value);
+                let value_to_box = CompiledValue::new(final_value, cranelift_ty, init.type_id);
+                let boxed = self.box_interface_value_v(value_to_box, declared_vir)?;
                 final_value = boxed.value;
-                final_type_id = self.sema_type_id(boxed.type_id);
+                final_vir_ty = boxed.type_id;
             }
         }
 
-        Ok((final_value, final_type_id, is_stack_union))
+        Ok((final_value, final_vir_ty, is_stack_union))
     }
 
     /// Find the union variant tag for a value's type, with integer widening/narrowing fallback.
@@ -557,15 +546,13 @@ impl Cg<'_, '_, '_> {
                 storage,
                 declared_type,
             } => {
-                let binding_ty = if *vir_ty != VirTypeId::UNKNOWN {
-                    self.sema_type_id(self.try_substitute_type_v(*vir_ty))
+                let binding_vir = if *vir_ty != VirTypeId::UNKNOWN {
+                    self.try_substitute_type_v(*vir_ty)
                 } else {
-                    self.sema_type_id(self.try_substitute_type_v(*ty))
+                    self.try_substitute_type_v(*ty)
                 };
                 let declared_vir = declared_type.map(|dt| self.try_substitute_type_v(dt));
-                let declared =
-                    declared_type.map(|dt| self.sema_type_id(self.try_substitute_type_v(dt)));
-                self.compile_vir_let(*name, value, binding_ty, *storage, declared, declared_vir)
+                self.compile_vir_let(*name, value, binding_vir, *storage, declared_vir)
             }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
@@ -1028,9 +1015,8 @@ impl Cg<'_, '_, '_> {
         &mut self,
         name: Symbol,
         value_expr: &vole_vir::VirExpr,
-        binding_ty: TypeId,
+        binding_vir: VirTypeId,
         storage: LetStorageHint,
-        declared_type: Option<TypeId>,
         declared_vir_type: Option<VirTypeId>,
     ) -> CodegenResult<bool> {
         // Pre-register recursive lambdas so they can capture themselves.
@@ -1039,11 +1025,17 @@ impl Cg<'_, '_, '_> {
             self.self_capture = Some(name);
         }
 
-        let declared_type_id_opt =
-            self.vir_let_declared_type(value_expr, binding_ty, declared_type);
+        let declared_vir_opt =
+            self.vir_let_declared_type_v(value_expr, binding_vir, declared_vir_type);
 
-        let init = if let Some(declared_type_id) = declared_type_id_opt {
-            self.compile_vir_let_init_with_declared_type(value_expr, declared_type_id)?
+        let init = if let Some(declared_vir) = declared_vir_opt {
+            if declared_vir.is_compat() {
+                // Compat-encoded VirTypeId: bridge through TypeId to avoid
+                // VirTypeTable index panic.
+                self.compile_vir_expr_with_expected_type(value_expr, declared_vir.compat_type_id())?
+            } else {
+                self.compile_vir_expr_with_expected_type_v(value_expr, declared_vir)?
+            }
         } else {
             self.compile_vir_expr(value_expr)?
         };
@@ -1058,46 +1050,21 @@ impl Cg<'_, '_, '_> {
         };
 
         let sentinel_hint_type_id = self.sentinel_hint_type_id_from_vir_expr(value_expr);
-        let (final_value, final_type_id, is_stack_union) = self.coerce_let_init(
-            &init,
-            declared_type_id_opt,
-            sentinel_hint_type_id,
-            storage,
-            declared_vir_type,
-        )?;
-
-        // When the sema TypeId round-trip loses the interface type (returns UNKNOWN),
-        // use the VIR declared type directly for variable binding. This happens in
-        // monomorphized contexts where dynamically-allocated VirTypeIds don't have
-        // reverse mappings in the VirTypeTable.
-        let bind_vir_override = if final_type_id == TypeId::UNKNOWN
-            && storage == LetStorageHint::Interface
-            && let Some(dv) = declared_vir_type
-            && self.vir_query_is_interface_v(dv)
-        {
-            Some(dv)
-        } else {
-            None
-        };
+        let (final_value, final_vir_ty, is_stack_union) =
+            self.coerce_let_init(&init, declared_vir_opt, sentinel_hint_type_id, storage)?;
 
         // Use preregistered var for recursive lambdas, otherwise declare new.
         let var = if let Some(var) = preregistered_var {
             self.builder.def_var(var, final_value);
             var
         } else {
-            // When we have a VIR override for the variable type, use pointer type
-            // (interfaces are always heap-allocated pointers).
-            let cranelift_ty = if bind_vir_override.is_some() {
-                self.ptr_type()
-            } else {
-                self.cranelift_type(final_type_id)
-            };
+            let cranelift_ty = self.cranelift_type_v(final_vir_ty);
             let actual_ty = self.builder.func.dfg.value_type(final_value);
             if cranelift_ty != actual_ty {
                 return Err(CodegenError::internal_with_context(
                     "VIR let type mismatch",
                     format!(
-                        "name={} binding_ty={binding_ty:?} init_ty={:?} final_type={final_type_id:?} declared={declared_type_id_opt:?} cranelift={cranelift_ty:?} actual={actual_ty:?} expr={value_expr:?}",
+                        "name={} binding_vir={binding_vir:?} init_ty={:?} final_vir={final_vir_ty:?} declared={declared_vir_opt:?} cranelift={cranelift_ty:?} actual={actual_ty:?} expr={value_expr:?}",
                         self.interner().resolve(name),
                         init.type_id,
                     ),
@@ -1105,11 +1072,7 @@ impl Cg<'_, '_, '_> {
             }
             let var = self.builder.declare_var(cranelift_ty);
             self.builder.def_var(var, final_value);
-            if let Some(vir_override) = bind_vir_override {
-                self.bind_var_v(name, var, vir_override);
-            } else {
-                self.bind_var(name, var, final_type_id);
-            }
+            self.vars.insert(name, (var, final_vir_ty));
             var
         };
 
@@ -1119,7 +1082,7 @@ impl Cg<'_, '_, '_> {
             &init,
             value_expr,
             final_value,
-            final_type_id,
+            final_vir_ty,
             is_stack_union,
         )?;
 
@@ -1133,6 +1096,7 @@ impl Cg<'_, '_, '_> {
     /// TEMP(N279-C): when VIR expression type IDs degrade to `unknown`, use the
     /// declared let-binding type to keep array/repeat literal element lowering
     /// coherent with the binding's concrete type.
+    #[allow(dead_code)]
     fn compile_vir_let_init_with_declared_type(
         &mut self,
         value_expr: &vole_vir::VirExpr,
@@ -1192,11 +1156,7 @@ impl Cg<'_, '_, '_> {
         use vole_vir::VirDestructurePattern;
         match pattern {
             VirDestructurePattern::Bind { name, ty, .. } => {
-                self.compile_vir_destructure_bind(
-                    *name,
-                    self.sema_type_id(self.try_substitute_type_v(*ty)),
-                    value,
-                )?;
+                self.compile_vir_destructure_bind(*name, self.try_substitute_type_v(*ty), value)?;
             }
             VirDestructurePattern::Wildcard => {}
             VirDestructurePattern::Tuple { elements, kind } => {
@@ -1231,19 +1191,19 @@ impl Cg<'_, '_, '_> {
     fn compile_vir_destructure_bind(
         &mut self,
         name: Symbol,
-        ty: TypeId,
+        vir_ty: VirTypeId,
         value: Value,
     ) -> CodegenResult<()> {
-        let cr_type = self.cranelift_type(ty);
+        let cr_type = self.cranelift_type_v(vir_ty);
         let var = self.builder.declare_var(cr_type);
         self.builder.def_var(var, value);
-        self.bind_var(name, var, ty);
+        self.vars.insert(name, (var, vir_ty));
 
         // Extracted elements borrow from the parent composite.
         // RC_inc + register so scope-exit dec balances the borrow.
-        if self.rc_scopes.has_active_scope() && self.rc_state(ty).needs_cleanup() {
-            self.emit_rc_inc_for_type(value, ty)?;
-            let drop_flag = self.register_rc_local_id(var, ty);
+        if self.rc_scopes.has_active_scope() && self.rc_state_v(vir_ty).needs_cleanup() {
+            self.emit_rc_inc_for_type_v(value, vir_ty)?;
+            let drop_flag = self.register_rc_local(var, vir_ty);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
         Ok(())
@@ -1308,13 +1268,12 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<()> {
         for field in fields {
             let field_vir_ty = self.try_substitute_type_v(field.ty);
-            let field_ty = self.sema_type_id(field_vir_ty);
             let converted = if is_struct {
                 // Structs are stack-allocated: load field directly from pointer + offset
-                self.struct_field_load(value, field.slot as usize, field_ty, source_ty)?
+                self.struct_field_load_v(value, field.slot as usize, field_vir_ty, source_ty)?
             } else {
                 // Classes are heap-allocated: use runtime field access
-                self.get_instance_field(value, field.slot as usize, field_ty)?
+                self.get_instance_field_v(value, field.slot as usize, field_vir_ty)?
             };
 
             let var = self.builder.declare_var(converted.ty);
@@ -1372,21 +1331,21 @@ impl Cg<'_, '_, '_> {
         None
     }
 
-    /// Determine the declared type for a VIR let binding.
+    /// Determine the declared type for a VIR let binding (VirTypeId-native).
     ///
     /// The lowering phase encodes the declared type (or inferred type)
-    /// as `binding_ty`.  We pass this as the declared type to
+    /// as `binding_vir`.  We pass this as the declared type to
     /// `coerce_let_init`, which is a no-op when the declared type
     /// matches the init value type at the Cranelift level.
-    /// We must include `TypeId::UNKNOWN` (the Vole `unknown` type) since
+    /// We must include VirTypeId::UNKNOWN (the Vole `unknown` type) since
     /// it triggers `box_to_unknown` in `coerce_let_init` when the init
     /// value is a concrete type.
-    fn vir_let_declared_type(
+    fn vir_let_declared_type_v(
         &self,
         value_expr: &vole_vir::VirExpr,
-        binding_ty: TypeId,
-        declared_type: Option<TypeId>,
-    ) -> Option<TypeId> {
+        binding_vir: VirTypeId,
+        declared_vir: Option<VirTypeId>,
+    ) -> Option<VirTypeId> {
         // For MethodCall inits, use the VIR-carried declared type annotation.
         // Method calls may have codegen-computed return types that differ from
         // the sema expression type (e.g. sum() on Iterator<[i64]> returns i64
@@ -1394,10 +1353,10 @@ impl Cg<'_, '_, '_> {
         // Some(annotated_type) for typed lets, None for untyped lets, which
         // lets coerce_let_init use init.type_id (the codegen-computed type).
         if matches!(value_expr, vole_vir::VirExpr::MethodCall { .. }) {
-            return declared_type;
+            return declared_vir;
         }
-        // For pure VIR inits: always pass binding_ty as declared type.
-        Some(binding_ty)
+        // For pure VIR inits: always pass binding_vir as declared type.
+        Some(binding_vir)
     }
 
     /// Extract sentinel type hint from a VIR let initializer, if present.
@@ -1429,23 +1388,21 @@ impl Cg<'_, '_, '_> {
         init: &CompiledValue,
         value_expr: &vole_vir::VirExpr,
         final_value: Value,
-        final_type_id: TypeId,
+        final_vir_ty: VirTypeId,
         is_stack_union: bool,
     ) -> CodegenResult<()> {
         // Detect whether coerce_let_init called box_to_unknown (new TaggedValue).
-        // Use sema_type_id for the init check — vir_query_is_unknown_v would
-        // miss array/function types that exist in VirTypeTable but can't be resolved
-        // back to sema TypeId (sema_type_id returns TypeId::UNKNOWN for those).
-        let init_sema_ty = self.sema_type_id(init.type_id);
-        let created_tagged_value =
-            self.vir_query_is_unknown(final_type_id) && !self.vir_query_is_unknown(init_sema_ty);
+        // The init's VirTypeId is checked directly: if the final type is unknown
+        // but the init type is not, then box_to_unknown was called.
+        let init_is_unknown = init.type_id.is_unknown();
+        let created_tagged_value = self.vir_query_is_unknown_v(final_vir_ty) && !init_is_unknown;
 
         if self.rc_scopes.has_active_scope() && created_tagged_value {
-            let drop_flag = self.register_rc_local_id(var, final_type_id);
+            let drop_flag = self.register_rc_local(var, final_vir_ty);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         } else if self.rc_scopes.has_active_scope()
-            && final_type_id == TypeId::UNKNOWN
-            && init_sema_ty == TypeId::UNKNOWN
+            && self.vir_query_is_unknown_v(final_vir_ty)
+            && init_is_unknown
             && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
         {
             // TEMP(N279-C): mixed VIR/sema metadata can degrade array-literal
@@ -1454,21 +1411,21 @@ impl Cg<'_, '_, '_> {
             // scope-exit emits rc_dec and array element closures are released.
             let drop_flag = self.register_rc_local(var, VirTypeId::HANDLE);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
-        } else if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup()
+        } else if self.rc_scopes.has_active_scope() && self.rc_state_v(final_vir_ty).needs_cleanup()
         {
             let is_borrow = init.is_borrowed();
             if self.cf.in_loop() && is_borrow {
                 // Borrow inside loop: skip inc and RC registration.
             } else {
                 if is_borrow {
-                    self.emit_rc_inc_for_type(final_value, final_type_id)?;
+                    self.emit_rc_inc_for_type_v(final_value, final_vir_ty)?;
                 }
-                let drop_flag = self.register_rc_local_id(var, final_type_id);
+                let drop_flag = self.register_rc_local(var, final_vir_ty);
                 crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
             }
         } else if self.rc_scopes.has_active_scope() {
-            self.register_vir_let_composite_rc(var, init, value_expr, final_value, final_type_id)?;
-            self.register_vir_let_union_rc(var, init, final_value, final_type_id, is_stack_union)?;
+            self.register_vir_let_composite_rc(var, init, value_expr, final_value, final_vir_ty)?;
+            self.register_vir_let_union_rc(var, init, final_value, final_vir_ty, is_stack_union)?;
         }
         Ok(())
     }
@@ -1483,9 +1440,9 @@ impl Cg<'_, '_, '_> {
         _init: &CompiledValue,
         value_expr: &vole_vir::VirExpr,
         final_value: Value,
-        final_type_id: TypeId,
+        final_vir_ty: VirTypeId,
     ) -> CodegenResult<()> {
-        let rc_state = self.rc_state(final_type_id);
+        let rc_state = self.rc_state_v(final_vir_ty);
         let Some(offsets) = rc_state.shallow_offsets() else {
             return Ok(());
         };
@@ -1524,17 +1481,17 @@ impl Cg<'_, '_, '_> {
         var: Variable,
         init: &CompiledValue,
         final_value: Value,
-        final_type_id: TypeId,
+        final_vir_ty: VirTypeId,
         is_stack_union: bool,
     ) -> CodegenResult<()> {
-        if !(is_stack_union || self.vir_query_is_union(final_type_id)) {
+        if !(is_stack_union || self.vir_query_is_union_v(final_vir_ty)) {
             return Ok(());
         }
         // Already handled by composite RC path.
-        if self.rc_state(final_type_id).shallow_offsets().is_some() {
+        if self.rc_state_v(final_vir_ty).shallow_offsets().is_some() {
             return Ok(());
         }
-        let rc_state = self.rc_state(final_type_id);
+        let rc_state = self.rc_state_v(final_vir_ty);
         let Some(rc_tags) = rc_state.union_variants() else {
             return Ok(());
         };

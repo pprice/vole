@@ -54,7 +54,6 @@ impl Cg<'_, '_, '_> {
         vir_ty: VirTypeId,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
-        let ty = self.sema_type_id(vir_ty);
         let obj = self.compile_vir_expr(object)?;
 
         if let Some(elem_type_ids) = self.vir_query_unwrap_tuple_v(obj.type_id) {
@@ -64,7 +63,7 @@ impl Cg<'_, '_, '_> {
             return self.vir_index_fixed_array(obj, index, element_id, size);
         }
         if let Some(element_id) = self.vir_query_unwrap_array_v(obj.type_id) {
-            return self.vir_index_dynamic_array(obj, index, element_id, ty, union_storage);
+            return self.vir_index_dynamic_array(obj, index, element_id, vir_ty, union_storage);
         }
         if let Some((tuple_elems, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
             if let Some(elem_type_ids) = tuple_elems {
@@ -74,7 +73,7 @@ impl Cg<'_, '_, '_> {
                 return self.vir_index_fixed_array(obj, index, element_id, size);
             }
             if let Some(element_id) = dyn_array {
-                return self.vir_index_dynamic_array(obj, index, element_id, ty, union_storage);
+                return self.vir_index_dynamic_array(obj, index, element_id, vir_ty, union_storage);
             }
         }
 
@@ -222,19 +221,17 @@ impl Cg<'_, '_, '_> {
         obj: CompiledValue,
         index: &VirExpr,
         element_id: VirTypeId,
-        expected_element_id: TypeId,
+        expected_element_vir: VirTypeId,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
         let idx = self.compile_vir_expr(index)?;
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[obj.value, idx.value])?;
-        let expected_element_id = self.try_substitute_type(expected_element_id);
-        let element_sema_id = self.sema_type_id(element_id);
-        let mut resolved_element_id = self.try_substitute_type(element_sema_id);
-        let resolved_is_abstract = resolved_element_id == TypeId::UNKNOWN
-            || self.vir_query_contains_type_param(resolved_element_id)
-            || self.vir_query_is_self_type(resolved_element_id);
-        if resolved_is_abstract && expected_element_id != TypeId::UNKNOWN {
-            resolved_element_id = expected_element_id;
+        let expected_vir = self.try_substitute_type_v(expected_element_vir);
+        let mut resolved_vir = self.try_substitute_type_v(element_id);
+        let resolved_is_abstract = resolved_vir == VirTypeId::UNKNOWN
+            || self.vir_query_contains_type_param_v(resolved_vir);
+        if resolved_is_abstract && expected_vir != VirTypeId::UNKNOWN {
+            resolved_vir = expected_vir;
         }
 
         if let Some(storage) = union_storage {
@@ -242,19 +239,18 @@ impl Cg<'_, '_, '_> {
                 UnionStorageKind::Inline => {
                     let raw_tag =
                         self.call_runtime(RuntimeKey::ArrayGetTag, &[obj.value, idx.value])?;
-                    self.decode_dynamic_array_union_element(raw_tag, raw_value, resolved_element_id)
+                    self.decode_dynamic_array_union_element_v(raw_tag, raw_value, resolved_vir)
                 }
-                UnionStorageKind::Heap => {
-                    self.copy_union_heap_to_stack(raw_value, resolved_element_id)
-                }
+                UnionStorageKind::Heap => self.copy_union_heap_to_stack_v(raw_value, resolved_vir),
             };
             return Ok(cv);
         }
-        if let Some(wide) = self.vir_query_wide_type(resolved_element_id) {
+        if let Some(wide) = self.vir_query_wide_type_v(resolved_vir) {
             let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_value])?;
-            return Ok(wide.compiled_value_from_i128(self.builder, wide_bits, resolved_element_id));
+            // TypeId parameter is unused by compiled_value_from_i128 — pass UNKNOWN.
+            return Ok(wide.compiled_value_from_i128(self.builder, wide_bits, TypeId::UNKNOWN));
         }
-        let mut cv = self.convert_field_value(raw_value, resolved_element_id);
+        let mut cv = self.convert_field_value_v(raw_value, resolved_vir);
         self.mark_borrowed_if_rc(&mut cv);
         Ok(cv)
     }
@@ -339,9 +335,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let elem_vir_ty = self.vir_query_unwrap_array_v(arr.type_id);
         let (tag_val, value_bits, val) = if let Some(vir_ty) = elem_vir_ty {
-            // Bridge to sema TypeId for prepare_dynamic_array_store (no _v variant yet).
-            let elem_sema_id = self.sema_type_id(vir_ty);
-            self.prepare_dynamic_array_store(val, elem_sema_id)?
+            self.prepare_dynamic_array_store_with_hint_v(val, vir_ty, None)?
         } else {
             self.prepare_dynamic_array_store_untyped(val)?
         };

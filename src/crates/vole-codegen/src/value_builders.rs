@@ -326,6 +326,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Extract a value from a TaggedValue (unknown type) after type narrowing.
     /// The raw_value is the value field from the TaggedValue (already loaded from offset 8).
     /// This converts it to the appropriate Cranelift type based on the narrowed type.
+    #[allow(dead_code)]
     pub fn extract_unknown_value(&mut self, raw_value: Value, type_id: TypeId) -> CompiledValue {
         self.convert_field_value(raw_value, type_id)
     }
@@ -437,6 +438,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// This prevents use-after-free when reading union elements from dynamic arrays,
     /// since the array slot may be overwritten (e.g. by rehash) while the value is
     /// still in use.
+    #[allow(dead_code)]
     pub fn copy_union_heap_to_stack(
         &mut self,
         heap_ptr: Value,
@@ -858,6 +860,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Sentinel-only unions have `union_size == TAG_ONLY_SIZE` (8 bytes, tag only)
     /// and carry no payload data, so this returns an `iconst 0` for those.
+    #[allow(dead_code)]
     pub fn load_union_payload(
         &mut self,
         union_ptr: Value,

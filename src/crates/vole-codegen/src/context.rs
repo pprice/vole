@@ -422,6 +422,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Boundary method: converts `TypeId` → `VirTypeId` via `vir_lookup_or_compat`
     /// and stores the binding in `self.vars`.
+    #[allow(dead_code)]
     pub fn bind_var(&mut self, name: Symbol, var: Variable, type_id: TypeId) {
         self.vars
             .insert(name, (var, self.vir_lookup_or_compat(type_id)));
@@ -683,6 +684,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Unwrap a nominal type to its TypeDefId via VirTypeTable.
     #[inline]
+    #[allow(dead_code)]
     pub fn vir_query_unwrap_nominal(&self, type_id: TypeId) -> Option<vole_identity::TypeDefId> {
         self.vir_query_unwrap_nominal_v(self.vir_lookup(type_id))
     }
@@ -2164,6 +2166,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let result_raw =
                 self.call_runtime(RuntimeKey::InstanceGetField, &[instance, slot_val])?;
             Ok(self.convert_field_value(result_raw, field_type_id))
+        }
+    }
+
+    /// VirTypeId-native variant of `get_instance_field`.
+    pub fn get_instance_field_v(
+        &mut self,
+        instance: Value,
+        slot: usize,
+        field_vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        if let Some(wide) = self.vir_query_wide_type_v(field_vir_ty) {
+            let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
+            let wide_i128 =
+                crate::structs::helpers::load_wide_field(self, get_func_ref, instance, slot);
+            Ok(wide.compiled_value_from_i128(self.builder, wide_i128, TypeId::UNKNOWN))
+        } else {
+            let slot_val = self.iconst_cached(types::I32, slot as i64);
+            let result_raw =
+                self.call_runtime(RuntimeKey::InstanceGetField, &[instance, slot_val])?;
+            Ok(self.convert_field_value_v(result_raw, field_vir_ty))
         }
     }
 

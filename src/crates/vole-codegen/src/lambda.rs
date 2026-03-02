@@ -292,10 +292,10 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().call(rc_inc_ref, &[current_value]);
             }
 
-            // Prefer VIR-native size lookup; fall back through sema_type_id
+            // Prefer VIR-native size lookup; fall back through compat_type_id
             // for compat-encoded VirTypeIds that are not yet in the VirTypeTable.
             let size = if vole_vir_ty.is_compat() {
-                self.type_size(self.sema_type_id(vole_vir_ty))
+                self.type_size(vole_vir_ty.compat_type_id())
             } else {
                 self.type_size_v(vole_vir_ty)
             };

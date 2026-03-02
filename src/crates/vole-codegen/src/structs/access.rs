@@ -165,6 +165,58 @@ impl Cg<'_, '_, '_> {
         Ok(cv)
     }
 
+    /// VirTypeId-native variant of `struct_field_load`.
+    pub fn struct_field_load_v(
+        &mut self,
+        struct_ptr: Value,
+        slot: usize,
+        field_vir_ty: VirTypeId,
+        parent_vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let offset = self.vir_struct_field_byte_offset(parent_vir_ty, slot);
+
+        if self.vir_query_is_struct_v(field_vir_ty) {
+            let ptr_type = self.ptr_type();
+            let field_ptr = if offset == 0 {
+                struct_ptr
+            } else {
+                self.builder.ins().iadd_imm(struct_ptr, offset as i64)
+            };
+            return Ok(CompiledValue::new(field_ptr, ptr_type, field_vir_ty));
+        }
+
+        if self.vir_query_is_payload_union_v(field_vir_ty) {
+            let ptr_type = self.ptr_type();
+            let field_ptr = if offset == 0 {
+                struct_ptr
+            } else {
+                self.builder.ins().iadd_imm(struct_ptr, offset as i64)
+            };
+            return Ok(CompiledValue::new(field_ptr, ptr_type, field_vir_ty));
+        }
+
+        if let Some(wide) = self.vir_query_wide_type_v(field_vir_ty) {
+            let low = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), struct_ptr, offset);
+            let high = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), struct_ptr, offset + 8);
+            let wide_i128 = reconstruct_i128(self.builder, low, high);
+            return Ok(wide.compiled_value_from_i128(self.builder, wide_i128, TypeId::UNKNOWN));
+        }
+
+        let raw_value = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), struct_ptr, offset);
+        let mut cv = self.convert_field_value_v(raw_value, field_vir_ty);
+        self.mark_borrowed_if_rc(&mut cv);
+        Ok(cv)
+    }
+
     /// Assign to a struct's inline union field with proper coercion and RC cleanup.
     ///
     /// 1. RC-dec the old union payload (if any RC variant is active)

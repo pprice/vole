@@ -487,6 +487,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Register a RC local using a sema `TypeId`, converting to `VirTypeId`.
     ///
     /// Boundary bridge for callers that have `TypeId` from sema APIs.
+    #[allow(dead_code)]
     pub fn register_rc_local_id(&mut self, variable: Variable, type_id: TypeId) -> Variable {
         self.register_rc_local(variable, self.vir_lookup_or_compat(type_id))
     }
@@ -551,7 +552,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// ensure RC variant tags match the runtime layout.
     pub fn rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
         if vir_ty.is_compat() {
-            return self.rc_state(self.sema_type_id(vir_ty));
+            return self.rc_state(vir_ty.compat_type_id());
         }
         // Optional variant ordering may differ between VIR convention
         // (tag 0 = inner, tag 1 = nil) and sema's canonical sort order.

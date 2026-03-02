@@ -266,19 +266,11 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // Unwrap function type to get params and return type
-        let (param_ids, return_type_id) = {
-            let (vir_params, vir_ret) =
-                self.vir_query_unwrap_function(func_type_id)
-                    .ok_or_else(|| {
-                        CodegenError::type_mismatch(
-                            "closure wrapper",
-                            "function type",
-                            "non-function",
-                        )
-                    })?;
-            let params: Vec<TypeId> = vir_params.iter().map(|&v| self.sema_type_id(v)).collect();
-            (params, self.sema_type_id(vir_ret))
-        };
+        let (param_ids, return_type_id) = self
+            .vir_query_unwrap_function_sema_v(self.vir_lookup(func_type_id))
+            .ok_or_else(|| {
+                CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
+            })?;
 
         let wrapper_func_id =
             self.create_closure_wrapper(orig_func_id, &param_ids, return_type_id)?;
@@ -935,13 +927,9 @@ impl Cg<'_, '_, '_> {
                 *interface_type_def,
                 interface_type_args,
             ),
-            CoerceKind::Unbox => {
-                let to_id = self.sema_type_id(to);
-                self.compile_coerce_unbox(value, to_id)
-            }
+            CoerceKind::Unbox => self.compile_coerce_unbox_v(value, to),
             CoerceKind::IteratorWrap { interface_type, .. } => {
-                let to_id = self.sema_type_id(to);
-                self.compile_coerce_iterator_wrap_enriched(value, to_id, *interface_type)
+                self.compile_coerce_iterator_wrap_enriched(value, to, *interface_type)
             }
         }
     }
@@ -976,19 +964,23 @@ impl Cg<'_, '_, '_> {
     ///
     /// Loads the data word at offset 0 from the interface box `[data, vtable]`
     /// and converts it back to the concrete Cranelift type.
-    fn compile_coerce_unbox(
+    fn compile_coerce_unbox_v(
         &mut self,
         value: CompiledValue,
-        concrete_type_id: TypeId,
+        concrete_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let ptr_ty = self.ptr_type();
         let data_word = self
             .builder
             .ins()
             .load(ptr_ty, MemFlags::new(), value.value, 0);
-        let concrete_val = self.convert_from_i64_storage(data_word, concrete_type_id);
-        let concrete_ty = self.cranelift_type(concrete_type_id);
-        Ok(self.compiled_with_ty(concrete_val, concrete_ty, concrete_type_id))
+        let concrete_val = self.convert_from_i64_storage_v(data_word, concrete_vir_ty);
+        let concrete_ty = self.cranelift_type_v(concrete_vir_ty);
+        Ok(CompiledValue::new(
+            concrete_val,
+            concrete_ty,
+            concrete_vir_ty,
+        ))
     }
 
     /// Wrap a concrete iterator as a `RuntimeIterator` (enriched path).
@@ -996,20 +988,20 @@ impl Cg<'_, '_, '_> {
     /// Uses pre-resolved `interface_type` from `CoerceKind::IteratorWrap`
     /// to skip `unwrap_runtime_iterator` and `lookup_interface` arena queries.
     ///
-    /// 1. Converts the pre-resolved `Iterator<elem>` VirTypeId to sema TypeId.
-    /// 2. Boxes the value as that interface.
+    /// 1. Resolves the `Iterator<elem>` VirTypeId through monomorphization.
+    /// 2. Boxes the value as that interface via VirTypeId-native path.
     /// 3. Wraps via `InterfaceIter` runtime call.
     /// 4. Consumes the intermediate boxed interface.
     fn compile_coerce_iterator_wrap_enriched(
         &mut self,
         value: CompiledValue,
-        runtime_iter_type_id: TypeId,
+        runtime_iter_vir_ty: VirTypeId,
         interface_type: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let interface_type_id = self.sema_type_id(self.try_substitute_type_v(interface_type));
+        let resolved_interface = self.try_substitute_type_v(interface_type);
 
         // Box as Iterator<elem> interface
-        let mut boxed = self.box_interface_value(value, interface_type_id)?;
+        let mut boxed = self.box_interface_value_v(value, resolved_interface)?;
 
         // Wrap via InterfaceIter runtime call
         let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[boxed.value])?;
@@ -1017,7 +1009,11 @@ impl Cg<'_, '_, '_> {
         // Release the intermediate boxed interface (InterfaceIter took its own ref)
         self.consume_rc_value(&mut boxed)?;
 
-        Ok(self.compiled_owned_with_ty(wrapped, types::I64, runtime_iter_type_id))
+        Ok(CompiledValue::owned(
+            wrapped,
+            types::I64,
+            runtime_iter_vir_ty,
+        ))
     }
 
     /// Compile a VIR `LocalLoad` — variable/identifier lookup.
@@ -1047,15 +1043,13 @@ impl Cg<'_, '_, '_> {
             return self.load_capture(&binding);
         }
 
-        let ty = self.sema_type_id(vir_ty);
-
         // 3. Local variable — vars map lookup with narrowing.
         if let Some((var, var_type_id)) = self.vars.get(&sym) {
-            return self.compile_local_var_load(*var, *var_type_id, ty);
+            return self.compile_local_var_load(*var, *var_type_id, vir_ty);
         }
 
         // 4. Non-local fallback: module bindings, globals, function refs.
-        self.compile_non_local_load(sym, ty)
+        self.compile_non_local_load(sym, vir_ty)
     }
 
     /// Load a local variable from the vars map, handling union narrowing,
@@ -1064,40 +1058,40 @@ impl Cg<'_, '_, '_> {
         &mut self,
         var: Variable,
         var_vir_ty: VirTypeId,
-        narrowed_ty: TypeId,
+        narrowed_vir: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let val = self.builder.use_var(var);
         let cl_ty = self.builder.func.dfg.value_type(val);
-        // Bridge to sema TypeId for downstream helpers that still require it.
-        let var_type_id = self.sema_type_id(var_vir_ty);
 
         // Union narrowing: if VIR type differs from declared type, extract
         // the payload from the tagged union.
-        let resolved_union_type_id = self.try_substitute_type(var_type_id);
-        let narrowed_type_id = self.try_substitute_type(narrowed_ty);
-        if self.vir_query_is_union(resolved_union_type_id)
-            && !self.vir_query_is_union(narrowed_type_id)
-            && narrowed_type_id != resolved_union_type_id
+        let resolved_union_vir = self.try_substitute_type_v(var_vir_ty);
+        let narrowed_resolved = self.try_substitute_type_v(narrowed_vir);
+        if self.vir_query_is_union_v(resolved_union_vir)
+            && !self.vir_query_is_union_v(narrowed_resolved)
+            && narrowed_resolved != resolved_union_vir
             && let Some(narrowed_variant) =
-                self.find_union_variant(resolved_union_type_id, narrowed_type_id)
+                self.find_union_variant_v(resolved_union_vir, narrowed_resolved)
         {
-            let payload_ty = self.cranelift_type(narrowed_variant);
-            let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
-            let mut cv = self.compiled_with_ty(payload, payload_ty, narrowed_variant);
+            let payload_ty = self.cranelift_type_v(narrowed_variant);
+            let payload = self.load_union_payload_v(val, resolved_union_vir, payload_ty);
+            let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
             self.mark_borrowed_if_rc(&mut cv);
             return Ok(cv);
         }
 
         // Unknown extraction: if declared type is unknown but VIR type is
         // concrete, extract the value from the TaggedValue.
-        if self.vir_query_is_unknown(var_type_id) && !self.vir_query_is_unknown(narrowed_type_id) {
+        if self.vir_query_is_unknown_v(var_vir_ty)
+            && !self.vir_query_is_unknown_v(narrowed_resolved)
+        {
             let raw_value = self.builder.ins().load(
                 types::I64,
                 MemFlags::new(),
                 val,
                 union_layout::PAYLOAD_OFFSET,
             );
-            let extracted = self.extract_unknown_value(raw_value, narrowed_type_id);
+            let extracted = self.extract_unknown_value_v(raw_value, narrowed_resolved);
             return Ok(extracted);
         }
 
@@ -1114,35 +1108,39 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Find a union variant matching the narrowed type, with integer fallback.
-    fn find_union_variant(
+    ///
+    /// Returns the matching variant's VirTypeId.
+    fn find_union_variant_v(
         &self,
-        union_type_id: TypeId,
-        narrowed_type_id: TypeId,
-    ) -> Option<TypeId> {
-        let narrowed_vir = self.to_vir_type(narrowed_type_id);
-        self.vir_query_unwrap_union(union_type_id)
+        union_vir_ty: VirTypeId,
+        narrowed_vir: VirTypeId,
+    ) -> Option<VirTypeId> {
+        self.vir_query_unwrap_union_v(union_vir_ty)
             .and_then(|variants| {
                 variants
                     .iter()
                     .copied()
                     .find(|&v| v == narrowed_vir)
                     .or_else(|| {
-                        if self.vir_query_is_integer(narrowed_type_id) {
+                        if self.vir_query_is_integer_v(narrowed_vir) {
                             variants
                                 .iter()
                                 .copied()
-                                .find(|&v| self.vir_query_is_integer(self.sema_type_id(v)))
+                                .find(|&v| self.vir_query_is_integer_v(v))
                         } else {
                             None
                         }
                     })
-                    .map(|v| self.sema_type_id(v))
             })
     }
 
     /// Handle non-local identifier resolution: module bindings, globals,
     /// function references, and sentinel fallback.
-    fn compile_non_local_load(&mut self, sym: Symbol, ty: TypeId) -> CodegenResult<CompiledValue> {
+    fn compile_non_local_load(
+        &mut self,
+        sym: Symbol,
+        vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
         // Module binding
         if let Some(&(module_id, export_name, export_type_id)) = self.lookup_module_binding(&sym) {
             return self.module_binding_value(module_id, export_name, export_type_id);
@@ -1161,9 +1159,10 @@ impl Cg<'_, '_, '_> {
             ));
         }
 
-        // Function reference
-        if self.vir_query_is_function(ty) {
-            return self.function_reference(sym, ty);
+        // Function reference — bridge to sema TypeId for function_reference.
+        let sema_ty = self.sema_type_id(vir_ty);
+        if self.vir_query_is_function_v(vir_ty) {
+            return self.function_reference(sym, sema_ty);
         }
 
         // Sentinel fallback (name-based resolution)
@@ -1200,7 +1199,7 @@ impl Cg<'_, '_, '_> {
         if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
             && let Some(global_vir_ty) = self.analyzed().global_vir_type(name_id)
         {
-            *value = self.coerce_to_type_id(*value, self.sema_type_id(global_vir_ty))?;
+            *value = self.coerce_to_type(*value, global_vir_ty)?;
         }
         Ok(())
     }
@@ -1288,15 +1287,17 @@ impl Cg<'_, '_, '_> {
             resolve_reflection_types,
         };
 
-        let ty = self.sema_type_id(vir_ty);
-        let result_ty = if ty == TypeId::UNKNOWN {
-            resolve_reflection_types(self)
-                .ok()
-                .map(|i| i.type_meta_type_id)
-                .unwrap_or(TypeId::UNKNOWN)
-        } else {
-            ty
-        };
+        // Bridge to sema TypeId for reflection APIs that require it.
+        // Try VirTypeTable reverse lookup first, then fall back to reflection resolution.
+        let result_ty = self
+            .vir_type_table()
+            .lookup_vir_type_id(vir_ty)
+            .or_else(|| {
+                resolve_reflection_types(self)
+                    .ok()
+                    .map(|i| i.type_meta_type_id)
+            })
+            .unwrap_or(TypeId::UNKNOWN);
 
         match kind {
             VirMetaKind::Static { type_def, object } => {
@@ -1362,21 +1363,19 @@ impl Cg<'_, '_, '_> {
                 param_name,
             )
         })?;
-        let concrete_type_id = self.sema_type_id(concrete_vir_ty);
-
         // Interface types require dynamic dispatch via vtable.
-        if self.vir_query_is_interface(concrete_type_id) {
+        if self.vir_query_is_interface_v(concrete_vir_ty) {
             let obj = self.compile_vir_expr(value)?;
             return compile_dynamic_meta_from_value(self, obj, result_ty);
         }
 
         // Concrete nominal types (class/struct) are resolved statically.
-        if let Some(type_def_id) = self.vir_query_unwrap_nominal(concrete_type_id) {
+        if let Some(type_def_id) = self.vir_query_unwrap_nominal_v(concrete_vir_ty) {
             return compile_static_meta_with_type(self, type_def_id, result_ty);
         }
 
         // Unsupported concrete type (primitive, array, function, etc.)
-        let display = self.vir_query_display_basic(concrete_type_id);
+        let display = self.vir_query_display_basic_v(concrete_vir_ty);
         Err(CodegenError::unsupported_with_context(
             "T.@meta: concrete type does not support reflection",
             display,
@@ -1464,22 +1463,21 @@ impl Cg<'_, '_, '_> {
         kind: AsCastKind,
         result: IsCheckResult,
     ) -> CodegenResult<CompiledValue> {
-        let target_ty = self.sema_type_id(vir_target_ty);
         let value = self.compile_vir_expr(value_expr)?;
         match result {
-            IsCheckResult::AlwaysTrue => self.vir_as_cast_always_true(kind, value, target_ty),
-            IsCheckResult::AlwaysFalse => self.vir_as_cast_always_false(kind, target_ty),
+            IsCheckResult::AlwaysTrue => self.vir_as_cast_always_true(kind, value, vir_target_ty),
+            IsCheckResult::AlwaysFalse => self.vir_as_cast_always_false(kind, vir_target_ty),
             IsCheckResult::CheckTag(tag_index) => {
-                self.vir_as_cast_check_tag(kind, value, tag_index, target_ty)
+                self.vir_as_cast_check_tag(kind, value, tag_index, vir_target_ty)
             }
             IsCheckResult::CheckUnknown(_tested_compat, tested_vir_type_id) => {
                 let concrete_tested = self.try_substitute_type_v(tested_vir_type_id);
-                let tested_sema = self.sema_type_id(if concrete_tested != VirTypeId::UNKNOWN {
+                let tested_vir = if concrete_tested != VirTypeId::UNKNOWN {
                     concrete_tested
                 } else {
                     tested_vir_type_id
-                });
-                self.vir_as_cast_check_unknown(kind, value, tested_sema, target_ty)
+                };
+                self.vir_as_cast_check_unknown(kind, value, tested_vir, vir_target_ty)
             }
         }
     }
@@ -1489,12 +1487,12 @@ impl Cg<'_, '_, '_> {
         &mut self,
         kind: AsCastKind,
         value: CompiledValue,
-        target_ty: TypeId,
+        target_vir: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         match kind {
             AsCastKind::Checked => {
-                // target_ty is T | nil — wrap the value.
-                self.coerce_to_type_id(value, target_ty)
+                // target_vir is T | nil — wrap the value.
+                self.coerce_to_type(value, target_vir)
             }
             AsCastKind::Unchecked => {
                 // Value is already T — pass through.
@@ -1507,12 +1505,12 @@ impl Cg<'_, '_, '_> {
     fn vir_as_cast_always_false(
         &mut self,
         kind: AsCastKind,
-        target_ty: TypeId,
+        target_vir: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         match kind {
             AsCastKind::Checked => {
-                // target_ty is T | nil — always returns nil.
-                self.compile_nil_for_optional(target_ty)
+                // target_vir is T | nil — always returns nil.
+                self.compile_nil_for_optional_v(target_vir)
             }
             AsCastKind::Unchecked => {
                 // Always panics.
@@ -1532,7 +1530,7 @@ impl Cg<'_, '_, '_> {
         kind: AsCastKind,
         value: CompiledValue,
         tag_index: u32,
-        target_ty: TypeId,
+        target_vir: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         // Derive the tested type from the union variants via VirTypeTable.
         let tested_vir_ty = self
@@ -1541,19 +1539,18 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| {
                 CodegenError::internal("as cast CheckTag: cannot derive tested type from union")
             })?;
-        let tested_type_id = self.sema_type_id(tested_vir_ty);
         let is_match = self.tag_eq(value.value, tag_index as i64);
         match kind {
             AsCastKind::Checked => {
-                // target_ty is T | nil
-                self.as_cast_safe_branch_with_type(is_match, target_ty, |cg| {
-                    cg.extract_union_payload_typed(value, tested_type_id)
+                // target_vir is T | nil
+                self.as_cast_safe_branch_v(is_match, target_vir, |cg| {
+                    cg.extract_union_payload_typed_v(value, tested_vir_ty)
                 })
             }
             AsCastKind::Unchecked => {
-                // target_ty is T
-                self.as_cast_unsafe_branch_with_type(is_match, tested_type_id, 0, |cg| {
-                    cg.extract_union_payload_typed(value, tested_type_id)
+                // target_vir is T
+                self.as_cast_unsafe_branch_v(is_match, tested_vir_ty, 0, |cg| {
+                    cg.extract_union_payload_typed_v(value, tested_vir_ty)
                 })
             }
         }
@@ -1564,40 +1561,38 @@ impl Cg<'_, '_, '_> {
         &mut self,
         kind: AsCastKind,
         value: CompiledValue,
-        tested_type_id: TypeId,
-        target_ty: TypeId,
+        tested_vir: VirTypeId,
+        target_vir: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let tag = self
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), value.value, 0);
-        let expected_tag = self.vir_query_unknown_type_tag(tested_type_id);
+        let expected_tag = self.vir_query_unknown_type_tag_v(tested_vir);
         let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
         let is_match = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
         match kind {
             AsCastKind::Checked => {
-                // target_ty is T | nil
-                self.as_cast_safe_branch_with_type(is_match, target_ty, |cg| {
+                // target_vir is T | nil
+                self.as_cast_safe_branch_v(is_match, target_vir, |cg| {
                     let raw_value = cg.builder.ins().load(
                         types::I64,
                         MemFlags::new(),
                         value.value,
                         union_layout::PAYLOAD_OFFSET,
                     );
-                    Ok(cg.extract_unknown_value(raw_value, tested_type_id))
+                    Ok(cg.extract_unknown_value_v(raw_value, tested_vir))
                 })
             }
-            AsCastKind::Unchecked => {
-                self.as_cast_unsafe_branch_with_type(is_match, tested_type_id, 0, |cg| {
-                    let raw_value = cg.builder.ins().load(
-                        types::I64,
-                        MemFlags::new(),
-                        value.value,
-                        union_layout::PAYLOAD_OFFSET,
-                    );
-                    Ok(cg.extract_unknown_value(raw_value, tested_type_id))
-                })
-            }
+            AsCastKind::Unchecked => self.as_cast_unsafe_branch_v(is_match, tested_vir, 0, |cg| {
+                let raw_value = cg.builder.ins().load(
+                    types::I64,
+                    MemFlags::new(),
+                    value.value,
+                    union_layout::PAYLOAD_OFFSET,
+                );
+                Ok(cg.extract_unknown_value_v(raw_value, tested_vir))
+            }),
         }
     }
 

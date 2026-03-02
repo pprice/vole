@@ -2222,20 +2222,19 @@ fn resolve_vtable_target<C: VtableCtx>(
     {
         // Use substituted VIR types when available, falling back to converting
         // the implement registry's sema TypeId types to VirTypeId.
-        let (param_vir_types, return_vir_type) =
-            substituted_vir_types.unwrap_or_else(|| {
-                let vir_table = &ctx.analyzed().vir_program().type_table;
-                let params: Vec<VirTypeId> = impl_
-                    .func_sig
-                    .params
-                    .iter()
-                    .map(|&p| vir_table.lookup_type_id(p).unwrap_or(VirTypeId::UNKNOWN))
-                    .collect();
-                let ret = vir_table
-                    .lookup_type_id(impl_.func_sig.return_type)
-                    .unwrap_or(VirTypeId::UNKNOWN);
-                (params, ret)
-            });
+        let (param_vir_types, return_vir_type) = substituted_vir_types.unwrap_or_else(|| {
+            let vir_table = &ctx.analyzed().vir_program().type_table;
+            let params: Vec<VirTypeId> = impl_
+                .func_sig
+                .params
+                .iter()
+                .map(|&p| vir_table.lookup_type_id(p).unwrap_or(VirTypeId::UNKNOWN))
+                .collect();
+            let ret = vir_table
+                .lookup_type_id(impl_.func_sig.return_type)
+                .unwrap_or(VirTypeId::UNKNOWN);
+            (params, ret)
+        });
         let returns_void = is_void_v(return_vir_type, ctx);
         let callee_ret = impl_.func_sig.return_type;
         let union_tag_remap = build_union_tag_remap_v(

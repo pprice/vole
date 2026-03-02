@@ -8,20 +8,35 @@ use cranelift::prelude::*;
 use crate::errors::CodegenResult;
 use crate::types::CompiledValue;
 
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 
 use super::super::context::Cg;
 
 impl Cg<'_, '_, '_> {
     /// Core safe-branch: if match -> extract and wrap nullable, else -> nil.
+    #[allow(dead_code)]
     pub(super) fn as_cast_safe_branch_with_type(
         &mut self,
         is_match: Value,
         nullable_type_id: TypeId,
         extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
     ) -> CodegenResult<CompiledValue> {
-        let result_cranelift_type = self.cranelift_type(nullable_type_id);
-        let result_needs_rc = self.rc_state(nullable_type_id).needs_cleanup();
+        self.as_cast_safe_branch_v(
+            is_match,
+            self.vir_lookup_or_compat(nullable_type_id),
+            extract,
+        )
+    }
+
+    /// VirTypeId-native safe-branch: if match -> extract and wrap nullable, else -> nil.
+    pub(super) fn as_cast_safe_branch_v(
+        &mut self,
+        is_match: Value,
+        nullable_vir: VirTypeId,
+        extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
+    ) -> CodegenResult<CompiledValue> {
+        let result_cranelift_type = self.cranelift_type_v(nullable_vir);
+        let result_needs_rc = self.rc_state_v(nullable_vir).needs_cleanup();
 
         let match_block = self.builder.create_block();
         let no_match_block = self.builder.create_block();
@@ -34,26 +49,27 @@ impl Cg<'_, '_, '_> {
         // Match block: extract value, wrap as nullable
         self.switch_and_seal(match_block);
         let extracted = extract(self)?;
-        let wrapped = self.coerce_to_type_id(extracted, nullable_type_id)?;
+        let wrapped = self.coerce_to_type(extracted, nullable_vir)?;
         if result_needs_rc && wrapped.is_borrowed() {
-            self.emit_rc_inc_for_type(wrapped.value, nullable_type_id)?;
+            self.emit_rc_inc_for_type_v(wrapped.value, nullable_vir)?;
         }
         let wrapped_arg = BlockArg::from(wrapped.value);
         self.builder.ins().jump(merge_block, &[wrapped_arg]);
 
         // No-match block: produce nil
         self.switch_and_seal(no_match_block);
-        let nil_val = self.compile_nil_for_optional(nullable_type_id)?;
+        let nil_val = self.compile_nil_for_optional_v(nullable_vir)?;
         let nil_arg = BlockArg::from(nil_val.value);
         self.builder.ins().jump(merge_block, &[nil_arg]);
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        let cv = self.compiled_with_ty(result, result_cranelift_type, nullable_type_id);
+        let cv = CompiledValue::new(result, result_cranelift_type, nullable_vir);
         Ok(self.mark_rc_owned(cv))
     }
 
     /// Core unsafe-branch: if match -> extract, else -> panic.
+    #[allow(dead_code)]
     pub(super) fn as_cast_unsafe_branch_with_type(
         &mut self,
         is_match: Value,
@@ -61,7 +77,23 @@ impl Cg<'_, '_, '_> {
         line: u32,
         extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
     ) -> CodegenResult<CompiledValue> {
-        let result_cranelift_type = self.cranelift_type(tested_type_id);
+        self.as_cast_unsafe_branch_v(
+            is_match,
+            self.vir_lookup_or_compat(tested_type_id),
+            line,
+            extract,
+        )
+    }
+
+    /// VirTypeId-native unsafe-branch: if match -> extract, else -> panic.
+    pub(super) fn as_cast_unsafe_branch_v(
+        &mut self,
+        is_match: Value,
+        tested_vir: VirTypeId,
+        line: u32,
+        extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
+    ) -> CodegenResult<CompiledValue> {
+        let result_cranelift_type = self.cranelift_type_v(tested_vir);
 
         let match_block = self.builder.create_block();
         let panic_block = self.builder.create_block();
@@ -86,17 +118,21 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        Ok(self.compiled_with_ty(result, result_cranelift_type, tested_type_id))
+        Ok(CompiledValue::new(
+            result,
+            result_cranelift_type,
+            tested_vir,
+        ))
     }
 
-    /// Extract a union payload with a known target type.
-    pub(super) fn extract_union_payload_typed(
+    /// Extract a union payload with a known target type (VirTypeId-native).
+    pub(super) fn extract_union_payload_typed_v(
         &mut self,
         union_value: CompiledValue,
-        target_type_id: TypeId,
+        target_vir: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let payload_ty = self.cranelift_type(target_type_id);
+        let payload_ty = self.cranelift_type_v(target_vir);
         let payload = self.load_union_payload_v(union_value.value, union_value.type_id, payload_ty);
-        Ok(self.compiled_with_ty(payload, payload_ty, target_type_id))
+        Ok(CompiledValue::new(payload, payload_ty, target_vir))
     }
 }
