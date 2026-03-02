@@ -316,7 +316,7 @@ impl Cg<'_, '_, '_> {
             .collect();
         if let Some(func_subs) = self.substitutions {
             for (&k, &v) in func_subs {
-                subs.insert(k, v);
+                subs.insert(k, self.cv_type_id_from_vir(v));
             }
         }
 
@@ -664,13 +664,20 @@ impl Cg<'_, '_, '_> {
                         .analyzed()
                         .generic_external_method(type_def_id, method_name_id)
                 {
-                    let empty_substitutions = rustc_hash::FxHashMap::default();
-                    let substitutions = self.substitutions.unwrap_or(&empty_substitutions);
-                    let key = self.resolve_intrinsic_key_for_monomorph(
-                        method_name_str,
-                        &generic_ext_info.type_mappings,
-                        substitutions,
-                    )?;
+                    let key = {
+                        let empty_substitutions = rustc_hash::FxHashMap::default();
+                        let sema_subs_ref = self.sema_substitutions();
+                        let substitutions: &rustc_hash::FxHashMap<NameId, TypeId> =
+                            match &sema_subs_ref {
+                                Some(r) => r,
+                                None => &empty_substitutions,
+                            };
+                        self.resolve_intrinsic_key_for_monomorph(
+                            method_name_str,
+                            &generic_ext_info.type_mappings,
+                            substitutions,
+                        )?
+                    };
                     let ext_module_path = self
                         .name_table()
                         .last_segment_str(generic_ext_info.module_path)
@@ -949,7 +956,9 @@ impl Cg<'_, '_, '_> {
                             .iter()
                             .map(|&type_id| {
                                 if let Some(name_id) = self.vir_query_unwrap_type_param(type_id) {
-                                    subs.get(&name_id).copied().unwrap_or(type_id)
+                                    subs.get(&name_id)
+                                        .map(|&v| self.cv_type_id_from_vir(v))
+                                        .unwrap_or(type_id)
                                 } else {
                                     type_id
                                 }

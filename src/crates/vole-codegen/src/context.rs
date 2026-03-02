@@ -174,11 +174,17 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub return_type: Option<VirTypeId>,
     /// Module being compiled (None for main program)
     pub current_module: Option<ModuleId>,
-    /// Type parameter substitutions for monomorphized generics
-    pub substitutions: Option<&'a FxHashMap<NameId, TypeId>>,
+    /// Type parameter substitutions for monomorphized generics (VirTypeId-native).
+    pub substitutions: Option<&'a FxHashMap<NameId, VirTypeId>>,
     /// Backend selection policy for dual runtime/intrinsic callables.
     pub(crate) callable_backend_preference: CallableBackendPreference,
-    /// Cache for substituted types
+    /// Lazily-computed sema TypeId substitutions derived from VirTypeId substitutions.
+    ///
+    /// Populated on first access via [`sema_substitutions()`].  Callers that still
+    /// work at the TypeId level (e.g. `try_substitute_type`, monomorph key rewriting)
+    /// use this to avoid converting per-lookup.
+    pub(crate) sema_substitutions: RefCell<Option<FxHashMap<NameId, TypeId>>>,
+    /// Cache for substituted types (TypeId → TypeId)
     pub(crate) substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
     /// Module export bindings registered within this function body (destructuring imports inside a function).
     /// Looked up first; falls back to `global_module_bindings` for top-level registrations.
@@ -292,6 +298,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             current_module: None,
             substitutions: None,
             callable_backend_preference: CallableBackendPreference::PreferInline,
+            sema_substitutions: RefCell::new(None),
             substitution_cache: RefCell::new(FxHashMap::default()),
             // No clone: local_module_bindings starts empty for within-function inserts.
             // Global bindings are accessed via the read-only reference below.
@@ -330,10 +337,38 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self
     }
 
-    /// Set type parameter substitutions for monomorphized generics.
-    pub fn with_substitutions(mut self, subs: Option<&'a FxHashMap<NameId, TypeId>>) -> Self {
+    /// Set type parameter substitutions for monomorphized generics (VirTypeId-native).
+    pub fn with_substitutions(mut self, subs: Option<&'a FxHashMap<NameId, VirTypeId>>) -> Self {
         self.substitutions = subs;
         self
+    }
+
+    /// Get a lazily-computed sema `TypeId` substitution map derived from the
+    /// VirTypeId-native `self.substitutions`.
+    ///
+    /// Returns `None` when no substitutions are active. The result is cached so
+    /// the conversion (VirTypeId → TypeId via `cv_type_id_from_vir`) is performed
+    /// at most once per `Cg` lifetime.
+    pub fn sema_substitutions(&self) -> Option<std::cell::Ref<'_, FxHashMap<NameId, TypeId>>> {
+        let subs = self.substitutions?;
+        // Populate cache if empty.
+        {
+            let cache = self.sema_substitutions.borrow();
+            if cache.is_some() {
+                // Already populated — return a Ref that maps into the inner Option.
+                return Some(std::cell::Ref::map(cache, |opt| opt.as_ref().unwrap()));
+            }
+        }
+        // Build the TypeId map from VirTypeId substitutions.
+        let sema_map: FxHashMap<NameId, TypeId> = subs
+            .iter()
+            .map(|(&name, &vir_ty)| (name, self.cv_type_id_from_vir(vir_ty)))
+            .collect();
+        *self.sema_substitutions.borrow_mut() = Some(sema_map);
+        Some(std::cell::Ref::map(
+            self.sema_substitutions.borrow(),
+            |opt| opt.as_ref().unwrap(),
+        ))
     }
 
     /// Set the yielder variable for generator body compilation.
@@ -1809,7 +1844,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if let Some(subs) = self.substitutions
                 && let Some(subst) = self
                     .vir_type_table()
-                    .lookup_substitute_vir(value.type_id, subs)
+                    .substitute_vir_ids(value.type_id, subs)
             {
                 value.type_id = subst;
             }

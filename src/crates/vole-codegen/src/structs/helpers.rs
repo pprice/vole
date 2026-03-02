@@ -63,7 +63,8 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     // Apply function-level substitutions first (for monomorphized generics)
     // This handles the case where type_id is a TypeParam that needs to be
     // substituted with a concrete type (e.g., in duck typing with structural constraints)
-    let resolved_type_id = if let Some(func_subs) = cg.substitutions {
+    let sema_subs_ref = cg.sema_substitutions();
+    let resolved_type_id = if let Some(ref func_subs) = sema_subs_ref {
         tracing::debug!(
             ?type_id,
             type_display = %arena.display_basic(type_id),
@@ -119,8 +120,8 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     // Merge in function-level substitutions (monomorphization context).
     // Prefer concrete function substitutions over placeholder type args from
     // partially-specialized generic instances.
-    if let Some(func_subs) = cg.substitutions {
-        for (&k, &v) in func_subs {
+    if let Some(ref func_subs) = sema_subs_ref {
+        for (&k, &v) in func_subs.iter() {
             let should_override = combined_subs
                 .get(&k)
                 .is_some_and(|&existing| arena.unwrap_type_param(existing).is_some());
@@ -129,6 +130,8 @@ pub(crate) fn get_field_slot_and_type_id_cg(
             }
         }
     }
+    // Drop the borrow on sema_substitutions before mutable access to cg.
+    drop(sema_subs_ref);
 
     // Compute physical slot: i128 fields use 2 u64 slots, all others use 1.
     // Physical slot is the sum of slot widths for all fields before this one.

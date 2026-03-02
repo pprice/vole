@@ -190,7 +190,7 @@ impl Cg<'_, '_, '_> {
                                         "{} ({:?}) -> {}",
                                         self.name_table().display(*k),
                                         k,
-                                        self.vir_query_display_basic(*v)
+                                        self.vir_query_display_basic_v(*v)
                                     )
                                 })
                                 .collect::<Vec<_>>()
@@ -228,7 +228,7 @@ impl Cg<'_, '_, '_> {
                                     "{} ({:?}) -> {}",
                                     self.name_table().display(*k),
                                     k,
-                                    self.vir_query_display_basic(*v)
+                                    self.vir_query_display_basic_v(*v)
                                 )
                             })
                             .collect::<Vec<_>>()

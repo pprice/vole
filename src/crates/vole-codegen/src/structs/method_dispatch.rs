@@ -82,7 +82,9 @@ impl Cg<'_, '_, '_> {
                     if let Some(subs) = self.substitutions
                         && let Some(name_id) = self.vir_query_unwrap_type_param(sema_type_id)
                     {
-                        subs.get(&name_id).copied().unwrap_or(sema_type_id)
+                        subs.get(&name_id)
+                            .map(|&v| self.cv_type_id_from_vir(v))
+                            .unwrap_or(sema_type_id)
                     } else {
                         sema_type_id
                     }

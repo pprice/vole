@@ -882,10 +882,13 @@ impl Compiler<'_> {
                 {
                     config = config.with_iterable_default_body();
                 }
-                let subs = if type_param_subs.is_empty() {
+                let vir_subs = self
+                    .analyzed
+                    .interface_impl_type_param_vir_subs(type_def_id, interface_tdef_id);
+                let subs = if vir_subs.is_empty() {
                     None
                 } else {
-                    Some(&type_param_subs)
+                    Some(&vir_subs)
                 };
                 let vir_func = self
                     .analyzed
@@ -1021,6 +1024,11 @@ impl Compiler<'_> {
             let mut concrete_subs = FxHashMap::default();
             concrete_subs.insert(t_name_id, elem_type);
 
+            // VirTypeId-native substitution for Cg context
+            let vir_elem_type = self.vir_lookup(elem_type);
+            let mut concrete_vir_subs: FxHashMap<NameId, VirTypeId> = FxHashMap::default();
+            concrete_vir_subs.insert(t_name_id, vir_elem_type);
+
             for (semantic_method_id, method_name_id, method_name_str) in &default_methods {
                 // Build a unique mangled name: "__array_iterable_{elem_type_idx}_{method_name}"
                 // elem_type.index() is a stable u32 index that uniquely identifies the type.
@@ -1140,7 +1148,7 @@ impl Compiler<'_> {
                         config,
                         &vir_func.body,
                         iface_module_id,
-                        Some(&concrete_subs),
+                        Some(&concrete_vir_subs),
                     )?;
                 }
                 self.finalize_function(func_id)?;

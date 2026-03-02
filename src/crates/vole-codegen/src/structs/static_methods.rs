@@ -293,7 +293,9 @@ impl Cg<'_, '_, '_> {
                         keys.iter()
                             .map(|&type_id| {
                                 if let Some(name_id) = arena.unwrap_type_param(type_id) {
-                                    subs.get(&name_id).copied().unwrap_or(type_id)
+                                    subs.get(&name_id)
+                                        .map(|&v| self.cv_type_id_from_vir(v))
+                                        .unwrap_or(type_id)
                                 } else {
                                     type_id
                                 }
@@ -343,11 +345,14 @@ impl Cg<'_, '_, '_> {
                 let substitution_matches = if let Some(subs) = subs {
                     let mut matches = 0usize;
                     let mut incompatible = false;
-                    for (name_id, inst_ty) in &instance.substitutions {
-                        if let Some(ctx_ty) = subs.get(name_id).copied() {
-                            if ctx_ty == *inst_ty {
+                    for (name_id, inst_vir_ty) in &instance.vir_substitutions {
+                        if let Some(ctx_vir_ty) = subs.get(name_id).copied() {
+                            if ctx_vir_ty == *inst_vir_ty {
                                 matches += 1;
-                            } else if arena.unwrap_type_param(*inst_ty).is_none() {
+                            } else if arena
+                                .unwrap_type_param(instance.substitutions[name_id])
+                                .is_none()
+                            {
                                 // Concrete mismatch: this candidate does not match
                                 // the current monomorphized call context.
                                 incompatible = true;

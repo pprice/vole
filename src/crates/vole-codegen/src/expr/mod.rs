@@ -1359,7 +1359,7 @@ impl Cg<'_, '_, '_> {
             )
         })?;
 
-        let concrete_type_id = substitutions.get(&name_id).copied().ok_or_else(|| {
+        let concrete_vir_ty = substitutions.get(&name_id).copied().ok_or_else(|| {
             let param_name = self
                 .analyzed()
                 .last_segment(name_id)
@@ -1369,6 +1369,7 @@ impl Cg<'_, '_, '_> {
                 param_name,
             )
         })?;
+        let concrete_type_id = self.cv_type_id_from_vir(concrete_vir_ty);
 
         // Interface types require dynamic dispatch via vtable.
         if self.vir_query_is_interface(concrete_type_id) {

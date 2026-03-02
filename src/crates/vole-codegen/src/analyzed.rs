@@ -396,6 +396,27 @@ impl AnalyzedProgram {
             .collect()
     }
 
+    /// Build VirTypeId-native interface type-parameter substitutions for a concrete
+    /// implementation.  Mirrors [`interface_impl_type_param_subs`] but returns
+    /// `VirTypeId` values instead of sema `TypeId`.
+    pub(crate) fn interface_impl_type_param_vir_subs(
+        &self,
+        implementing_type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> FxHashMap<NameId, VirTypeId> {
+        let sema_subs = self.interface_impl_type_param_subs(implementing_type_id, interface_id);
+        let type_table = &self.vir_program.type_table;
+        sema_subs
+            .into_iter()
+            .map(|(name, tid)| {
+                let vir_ty = type_table
+                    .lookup_type_id(tid)
+                    .unwrap_or_else(|| VirTypeId::from_raw(tid.raw() | VirTypeId::COMPAT_FLAG));
+                (name, vir_ty)
+            })
+            .collect()
+    }
+
     /// Get the full NameId for a semantic method.
     pub(crate) fn method_full_name(&self, method_id: MethodId) -> NameId {
         self.entity_metadata()

@@ -491,7 +491,7 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
     config: FunctionCompileConfig,
     vir_body: &VirBody,
     module_id: Option<vole_identity::ModuleId>,
-    substitutions: Option<&FxHashMap<vole_identity::NameId, TypeId>>,
+    substitutions: Option<&FxHashMap<vole_identity::NameId, VirTypeId>>,
 ) -> CodegenResult<()> {
     // Auto-detect sret convention.
     let config = if let Some(ret_type_id) = config.return_type_id {

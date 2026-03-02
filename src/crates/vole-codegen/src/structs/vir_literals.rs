@@ -304,10 +304,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some(subs) = self.substitutions {
             let type_def = self.analyzed().type_def(type_def_id);
             if type_def.is_generic && !type_def.type_params.is_empty() {
-                let concrete_args: Vec<_> = type_def
+                let concrete_args: Vec<TypeId> = type_def
                     .type_params
                     .iter()
-                    .filter_map(|&tp| subs.get(&tp).copied())
+                    .filter_map(|&tp| subs.get(&tp).copied().map(|v| self.cv_type_id_from_vir(v)))
                     .collect();
                 if concrete_args.len() == type_def.type_params.len() {
                     self.mono_instance_type_id_with_args(base_type_id, type_def_id, concrete_args)

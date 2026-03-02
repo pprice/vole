@@ -151,8 +151,9 @@ fn vir_is_sentinel_or_void(
 /// the sema TypeId round-trip.
 ///
 /// `func_subs` are the monomorphization substitutions from the function
-/// context (still `NameId -> TypeId` because that is what `Cg::substitutions`
-/// provides).
+/// context (`NameId -> TypeId`).  Note: `Cg::substitutions` now stores
+/// VirTypeId-native maps; callers convert via `sema_substitutions()` when
+/// calling this function.
 pub(crate) fn vir_get_field_slot_and_type_id(
     vir_ty: VirTypeId,
     field_name: &str,

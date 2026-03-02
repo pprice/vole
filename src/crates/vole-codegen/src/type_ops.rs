@@ -17,19 +17,18 @@ use super::types::{CompiledValue, type_id_size, type_id_to_cranelift, value_to_w
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Type context & substitution ==========
 
-    /// Substitute type parameters using current substitutions
+    /// Substitute type parameters using current substitutions (TypeId level).
     ///
-    /// Uses expect_substitute for read-only lookup since sema pre-computes all
-    /// substituted types when creating MonomorphInstance.
+    /// Derives a sema `TypeId` substitution map from the VirTypeId-native
+    /// `self.substitutions` and delegates to `vir_query_expect_substitute`.
     #[inline]
     pub fn substitute_type(&self, ty: TypeId) -> TypeId {
-        if let Some(substitutions) = self.substitutions {
+        if let Some(sema_subs) = self.sema_substitutions() {
             // Check cache first
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            let result = self.vir_query_expect_substitute(ty, substitutions, "Cg::substitute_type");
-            // Cache the result
+            let result = self.vir_query_expect_substitute(ty, &sema_subs, "Cg::substitute_type");
             self.substitution_cache.borrow_mut().insert(ty, result);
             result
         } else {
@@ -41,12 +40,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// This is a best-effort version that doesn't panic if the substituted type
     /// doesn't exist in the arena.
     pub fn try_substitute_type(&self, ty: TypeId) -> TypeId {
-        if let Some(substitutions) = self.substitutions {
+        if let Some(sema_subs) = self.sema_substitutions() {
             // Check cache first
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            if let Some(result) = self.vir_query_lookup_substitute(ty, substitutions) {
+            if let Some(result) = self.vir_query_lookup_substitute(ty, &sema_subs) {
                 self.substitution_cache.borrow_mut().insert(ty, result);
                 result
             } else {
@@ -74,7 +73,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.vir_lookup_or_compat(substituted)
             } else {
                 self.vir_type_table()
-                    .lookup_substitute_vir(vir_ty, substitutions)
+                    .substitute_vir_ids(vir_ty, substitutions)
                     .unwrap_or(vir_ty)
             }
         } else {

@@ -21,7 +21,8 @@ struct ExpandedMethodData {
     mangled_name_str: String,
     template_mangled_name: NameId,
     func_type: vole_identity::FunctionType,
-    substitutions: FxHashMap<NameId, TypeId>,
+    /// VirTypeId-native substitutions for Cg context.
+    vir_substitutions: FxHashMap<NameId, VirTypeId>,
     class_name: NameId,
     self_type: TypeId,
     external_info: Option<crate::analyzed::ExternalMethodInfoRef>,
@@ -219,7 +220,7 @@ impl Compiler<'_> {
                     config,
                     &vir_func.body,
                     Some(module_id),
-                    Some(&instance.substitutions),
+                    Some(&instance.vir_substitutions),
                 )?;
             }
 
@@ -295,7 +296,7 @@ impl Compiler<'_> {
                 config,
                 &vir_func.body,
                 None,
-                Some(&instance.substitutions),
+                Some(&instance.vir_substitutions),
             )?;
         }
 
@@ -627,7 +628,7 @@ impl Compiler<'_> {
                     config,
                     &vir_func.body,
                     cg_module_id,
-                    Some(&instance.substitutions),
+                    Some(&instance.vir_substitutions),
                 )?;
             }
 
@@ -818,7 +819,7 @@ impl Compiler<'_> {
                     config,
                     &vir_func.body,
                     cg_module_id,
-                    Some(&instance.substitutions),
+                    Some(&instance.vir_substitutions),
                 )?;
             }
 
@@ -1154,13 +1155,19 @@ impl Compiler<'_> {
                     "expanding abstract class method monomorph template"
                 );
 
+                // Build VirTypeId-native substitutions for Cg context.
+                let concrete_vir_subs: FxHashMap<NameId, VirTypeId> = concrete_class_subs
+                    .iter()
+                    .map(|(&k, &v)| (k, self.vir_lookup(v)))
+                    .collect();
+
                 expanded_keys.insert(concrete_key.clone());
                 expanded.push(ExpandedMethodData {
                     concrete_key,
                     mangled_name_str,
                     template_mangled_name: tmpl.mangled_name,
                     func_type: concrete_func_type,
-                    substitutions: concrete_class_subs,
+                    vir_substitutions: concrete_vir_subs,
                     class_name: tmpl.class_name,
                     self_type: concrete_self_type,
                     external_info: tmpl
@@ -1293,7 +1300,7 @@ impl Compiler<'_> {
                         config,
                         &vir_func.body,
                         cg_module_id,
-                        Some(&data.substitutions),
+                        Some(&data.vir_substitutions),
                     )?;
                 }
 
