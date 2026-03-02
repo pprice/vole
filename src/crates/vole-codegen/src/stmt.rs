@@ -1315,7 +1315,7 @@ impl Cg<'_, '_, '_> {
                 (
                     module_id,
                     binding.export_name,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(binding.export_ty)),
+                    self.try_substitute_type_v(binding.export_ty),
                 ),
             );
         }

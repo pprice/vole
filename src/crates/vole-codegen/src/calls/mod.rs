@@ -75,13 +75,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Check if it's a captured closure (e.g., recursive lambda or captured function)
         if self.has_captures()
             && let Some(binding) = self.get_capture(&callee_sym).copied()
-            && self.vir_query_is_function(binding.vole_type)
+            && self.vir_query_is_function_v(binding.vole_type)
         {
             let captured = self.load_capture(&binding)?;
-            let func_vir_type_id = self.vir_lookup(binding.vole_type);
             return self.call_closure_value(
                 captured.value,
-                func_vir_type_id,
+                binding.vole_type,
                 arg_source,
                 call_expr_id,
             );

@@ -69,13 +69,13 @@ impl Cg<'_, '_, '_> {
         // Structs are captured by value — the heap slot contains the full struct
         // data (not a pointer to a pointer). Return heap_ptr directly as the
         // struct pointer.
-        if self.vir_query_is_struct(binding.vole_type) {
+        if self.vir_query_is_struct_v(binding.vole_type) {
             let ptr_type = self.ptr_type();
-            let cv = CompiledValue::new(heap_ptr, ptr_type, self.vir_lookup(binding.vole_type));
+            let cv = CompiledValue::new(heap_ptr, ptr_type, binding.vole_type);
             return Ok(cv);
         }
 
-        let cranelift_ty = self.cranelift_type(binding.vole_type);
+        let cranelift_ty = self.cranelift_type_v(binding.vole_type);
         let value = self
             .builder
             .ins()
@@ -84,7 +84,7 @@ impl Cg<'_, '_, '_> {
         // Capture loads are borrows — the closure owns the reference via its
         // capture slot.  Marking as Borrowed ensures the return path inc's the
         // value when it leaves the closure body, giving the caller a +1 ref.
-        let mut cv = CompiledValue::new(value, cranelift_ty, self.vir_lookup(binding.vole_type));
+        let mut cv = CompiledValue::new(value, cranelift_ty, binding.vole_type);
         self.mark_borrowed_if_rc(&mut cv);
         Ok(cv)
     }
@@ -104,8 +104,10 @@ impl Cg<'_, '_, '_> {
         let heap_ptr =
             self.call_runtime(RuntimeKey::ClosureGetCapture, &[closure_ptr, index_val])?;
 
-        // Structs: copy all flat slots from value (stack ptr) to heap slot
-        if let Some(flat_count) = self.struct_flat_slot_count(binding.vole_type) {
+        // Structs: copy all flat slots from value (stack ptr) to heap slot.
+        // Bridge to sema TypeId for struct_flat_slot_count (no compat handling).
+        let sema_type_id = self.cv_type_id_from_vir(binding.vole_type);
+        if let Some(flat_count) = self.struct_flat_slot_count(sema_type_id) {
             for slot in 0..flat_count {
                 let offset = (slot as i32) * 8;
                 let val = self
@@ -119,14 +121,10 @@ impl Cg<'_, '_, '_> {
             value.mark_consumed();
             value.debug_assert_rc_handled("closure capture assign");
             let ptr_type = self.ptr_type();
-            return Ok(CompiledValue::new(
-                heap_ptr,
-                ptr_type,
-                self.vir_lookup(binding.vole_type),
-            ));
+            return Ok(CompiledValue::new(heap_ptr, ptr_type, binding.vole_type));
         }
 
-        let cranelift_ty = self.cranelift_type(binding.vole_type);
+        let cranelift_ty = self.cranelift_type_v(binding.vole_type);
         self.builder
             .ins()
             .store(MemFlags::new(), value.value, heap_ptr, 0);
@@ -137,7 +135,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             value.value,
             cranelift_ty,
-            self.vir_lookup(binding.vole_type),
+            binding.vole_type,
         ))
     }
 

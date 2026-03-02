@@ -112,7 +112,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         module_id: ModuleId,
         export_name: Symbol,
-        export_type_id: TypeId,
+        export_vir_type: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let export_name_str = self.interner().resolve(export_name);
         let module_path = self.name_table().module_path(module_id).to_string();
@@ -139,20 +139,16 @@ impl Cg<'_, '_, '_> {
                 }
                 ConstantValue::String(s) => self.string_literal(&s),
             }
-        } else if self.vir_query_is_function(export_type_id) {
+        } else if self.vir_query_is_function_v(export_vir_type) {
             // Functions cannot be used as values directly - must be called
             Err(CodegenError::unsupported_with_context(
                 "function as value",
                 format!("use {}() to call the function", export_name_str),
             ))
-        } else if self.vir_query_is_sentinel(export_type_id) {
+        } else if self.vir_query_is_sentinel_v(export_vir_type) {
             // Sentinel exports are zero-field structs - emit i8(0)
             let value = self.iconst_cached(types::I8, 0);
-            Ok(CompiledValue::new(
-                value,
-                types::I8,
-                self.vir_lookup(export_type_id),
-            ))
+            Ok(CompiledValue::new(value, types::I8, export_vir_type))
         } else {
             Err(CodegenError::not_found(
                 "module export constant",

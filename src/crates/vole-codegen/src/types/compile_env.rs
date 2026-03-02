@@ -5,14 +5,14 @@
 use rustc_hash::FxHashMap;
 
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{ModuleId, TypeId};
+use vole_identity::{ModuleId, VirTypeId};
 
 use crate::AnalyzedProgram;
 
 use super::CodegenState;
 
-/// Module export binding: (module_id, export_name, type_id)
-pub type ModuleExportBinding = (ModuleId, Symbol, TypeId);
+/// Module export binding: (module_id, export_name, vir_type_id)
+pub type ModuleExportBinding = (ModuleId, Symbol, VirTypeId);
 
 /// Compilation environment for a session/unit.
 ///

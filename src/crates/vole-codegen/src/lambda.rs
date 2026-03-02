@@ -9,7 +9,6 @@ use cranelift_module::Module;
 
 use vole_frontend::{Capture, Symbol};
 use vole_identity::{TypeId, VirTypeId};
-use vole_sema::type_arena::TypeArena;
 use vole_vir::VirBody;
 use vole_vir::expr::VirCapture;
 
@@ -24,12 +23,12 @@ use crate::errors::{CodegenError, CodegenResult};
 pub(crate) struct CaptureBinding {
     /// Index in the closure's captures array
     pub index: usize,
-    /// Vole type of the captured variable (interned TypeId)
-    pub vole_type: TypeId,
+    /// Vole type of the captured variable (VIR type)
+    pub vole_type: VirTypeId,
 }
 
 impl CaptureBinding {
-    pub fn new(index: usize, vole_type: TypeId) -> Self {
+    pub fn new(index: usize, vole_type: VirTypeId) -> Self {
         Self { index, vole_type }
     }
 }
@@ -42,22 +41,16 @@ pub(crate) fn build_capture_bindings(
     captures: &[Capture],
     variables: &FxHashMap<Symbol, (Variable, VirTypeId)>,
     parent_captures: Option<&FxHashMap<Symbol, CaptureBinding>>,
-    arena: &TypeArena,
-    vir_type_table: &vole_vir::type_table::VirTypeTable,
 ) -> FxHashMap<Symbol, CaptureBinding> {
     let mut bindings = FxHashMap::default();
-    let default_type_id = arena.primitives.i64;
     for (i, capture) in captures.iter().enumerate() {
-        // First check local variables (bridge VirTypeId→TypeId), then parent captures,
-        // finally fall back to i64.
-        let vole_type_id = variables
+        // First check local variables, then parent captures, finally fall back to i64.
+        let vir_type_id = variables
             .get(&capture.name)
-            .map(|(_, vir_ty)| {
-                crate::types::vir_conversions::vir_to_sema_type_id(*vir_ty, vir_type_table, arena)
-            })
+            .map(|(_, vir_ty)| *vir_ty)
             .or_else(|| parent_captures?.get(&capture.name).map(|b| b.vole_type))
-            .unwrap_or(default_type_id);
-        bindings.insert(capture.name, CaptureBinding::new(i, vole_type_id));
+            .unwrap_or(VirTypeId::I64);
+        bindings.insert(capture.name, CaptureBinding::new(i, vir_type_id));
     }
     bindings
 }
@@ -193,8 +186,6 @@ impl Cg<'_, '_, '_> {
                 captures,
                 &self.vars,
                 parent_captures,
-                self.arena(),
-                self.vir_type_table(),
             ))
         } else {
             None
@@ -302,9 +293,9 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().call(rc_inc_ref, &[current_value]);
             }
 
-            // Bridge to sema TypeId for size/copy.
-            let vole_type_id = self.cv_type_id_from_vir(vole_vir_ty);
-            let size = self.type_size(vole_type_id);
+            // Size and struct-copy use sema helpers that need TypeId for compat IDs.
+            let sema_type_id = self.cv_type_id_from_vir(vole_vir_ty);
+            let size = self.type_size(sema_type_id);
             let size_val = self.iconst_cached(types::I64, size as i64);
 
             let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
@@ -313,7 +304,7 @@ impl Cg<'_, '_, '_> {
             // Structs are stack-allocated pointers -- we must copy the full struct
             // data into the heap allocation (not just store the stack pointer,
             // which would dangle after the creating function returns).
-            self.copy_value_to_heap(current_value, heap_ptr, vole_type_id);
+            self.copy_value_to_heap(current_value, heap_ptr, sema_type_id);
 
             let index_val = self.iconst_cached(types::I64, i as i64);
             self.builder
@@ -378,11 +369,7 @@ impl Cg<'_, '_, '_> {
         } else if let Some(binding) = self.get_capture(&capture.name).copied() {
             // Transitive capture: load from parent closure's captures.
             let captured = self.load_capture(&binding)?;
-            Ok((
-                captured.value,
-                self.vir_lookup_or_compat(binding.vole_type),
-                false,
-            ))
+            Ok((captured.value, binding.vole_type, false))
         } else if let Some(capture_name) = capture_name.as_deref()
             && let Some(binding) = self.captures.as_ref().and_then(|captures| {
                 captures.bindings.iter().find_map(|(sym, binding)| {
@@ -394,11 +381,7 @@ impl Cg<'_, '_, '_> {
         {
             // Same fallback for transitive captures when Symbol IDs differ by interner.
             let captured = self.load_capture(&binding)?;
-            Ok((
-                captured.value,
-                self.vir_lookup_or_compat(binding.vole_type),
-                false,
-            ))
+            Ok((captured.value, binding.vole_type, false))
         } else {
             let format_sym = |sym: Symbol| {
                 resolve_symbol_text(sym)

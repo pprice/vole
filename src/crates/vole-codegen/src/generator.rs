@@ -15,7 +15,7 @@ use cranelift_module::Module;
 use rustc_hash::FxHashMap;
 
 use vole_frontend::Symbol;
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_vir::VirBody;
 
 use crate::compiler::common::{DefaultReturn, compile_vir_body_with_cg};
@@ -132,13 +132,16 @@ fn compile_generator_body<'ctx>(
         .set_return_type(body_func_key, TypeId::VOID);
 
     // Build capture bindings: each parameter becomes a closure capture
+    let vir_type_table = &env.analyzed.vir_program().type_table;
     let mut capture_bindings: FxHashMap<Symbol, crate::lambda::CaptureBinding> =
         FxHashMap::default();
     for (i, &name) in param_names.iter().enumerate() {
-        capture_bindings.insert(
-            name,
-            crate::lambda::CaptureBinding::new(i, param_type_ids[i]),
-        );
+        let vir_ty = vir_type_table
+            .lookup_type_id(param_type_ids[i])
+            .unwrap_or_else(|| {
+                VirTypeId::from_raw(param_type_ids[i].raw() | VirTypeId::COMPAT_FLAG)
+            });
+        capture_bindings.insert(name, crate::lambda::CaptureBinding::new(i, vir_ty));
     }
     let has_captures = !capture_bindings.is_empty();
 

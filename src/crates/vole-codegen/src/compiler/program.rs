@@ -44,9 +44,8 @@ impl Compiler<'_> {
     pub(super) fn register_global_module_bindings(&mut self) {
         let vir = self.analyzed.vir_program();
         for (&binding_sym, &(module_id, export_name, vir_export_ty)) in &vir.module_bindings {
-            let export_type_id = self.cv_type_id_from_vir(vir_export_ty);
             self.global_module_bindings
-                .insert(binding_sym, (module_id, export_name, export_type_id));
+                .insert(binding_sym, (module_id, export_name, vir_export_ty));
         }
     }
 
@@ -66,10 +65,7 @@ impl Compiler<'_> {
         };
         module_bindings
             .iter()
-            .map(|(&binding_sym, &(module_id, export_name, vir_export_ty))| {
-                let export_type_id = self.cv_type_id_from_vir(vir_export_ty);
-                (binding_sym, (module_id, export_name, export_type_id))
-            })
+            .map(|(&binding_sym, &binding)| (binding_sym, binding))
             .collect()
     }
 
