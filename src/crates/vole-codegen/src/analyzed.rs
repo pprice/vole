@@ -695,18 +695,6 @@ impl AnalyzedProgram {
         Some((type_name_id, method_impl))
     }
 
-    /// Convert a `VirTypeId` to sema `TypeId` using VIR structure and arena lookups.
-    ///
-    /// Delegates to [`vir_to_sema_type_id`](crate::types::vir_conversions::vir_to_sema_type_id).
-    /// Use this for legacy APIs that still require sema TypeId (e.g., vtable compilation).
-    pub(crate) fn resolve_sema_type_id(&self, vir_ty: VirTypeId) -> vole_sema::type_arena::TypeId {
-        crate::types::vir_conversions::vir_to_sema_type_id(
-            vir_ty,
-            &self.vir_program.type_table,
-            &self.types,
-        )
-    }
-
     /// Look up a VIR function by its monomorphized mangled NameId.
     /// Returns `None` if no VIR function was lowered for this instance.
     pub(crate) fn get_vir_monomorph(&self, mangled_name_id: NameId) -> Option<&VirFunction> {

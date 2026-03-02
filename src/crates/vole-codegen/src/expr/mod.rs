@@ -929,15 +929,12 @@ impl Cg<'_, '_, '_> {
             CoerceKind::InterfaceBox {
                 interface_type_def,
                 interface_type_args,
-            } => {
-                let to_id = self.sema_type_id(to);
-                self.compile_coerce_interface_box(
-                    value,
-                    to_id,
-                    *interface_type_def,
-                    interface_type_args,
-                )
-            }
+            } => self.compile_coerce_interface_box(
+                value,
+                to,
+                *interface_type_def,
+                interface_type_args,
+            ),
             CoerceKind::Unbox => {
                 let to_id = self.sema_type_id(to);
                 self.compile_coerce_unbox(value, to_id)
@@ -952,27 +949,26 @@ impl Cg<'_, '_, '_> {
     /// Box a concrete value as an interface type (enriched path).
     ///
     /// Uses pre-decomposed interface info from `CoerceKind::InterfaceBox`
-    /// to skip the `unwrap_interface` arena query.  Vtable generation still
-    /// uses sema TypeIds internally.
+    /// to skip the `unwrap_interface` arena query. VirTypeId-native throughout.
     fn compile_coerce_interface_box(
         &mut self,
         value: CompiledValue,
-        interface_type_id: TypeId,
+        interface_vir_ty: VirTypeId,
         interface_type_def: TypeDefId,
         interface_type_args: &[VirTypeId],
     ) -> CodegenResult<CompiledValue> {
-        let type_args_ids: Vec<TypeId> = interface_type_args
+        let type_arg_virs: Vec<VirTypeId> = interface_type_args
             .iter()
-            .map(|vir| self.sema_type_id(self.try_substitute_type_v(*vir)))
+            .map(|vir| self.try_substitute_type_v(*vir))
             .collect();
         crate::interfaces::box_interface_value_decomposed(
             self.builder,
             self.codegen_ctx,
             self.env,
             value,
-            interface_type_id,
+            interface_vir_ty,
             interface_type_def,
-            &type_args_ids,
+            &type_arg_virs,
         )
     }
 

@@ -73,13 +73,14 @@ impl Cg<'_, '_, '_> {
             let first = self.compile_vir_expr(&elements[0])?;
             let inferred_elem = self.try_substitute_type_v(first.type_id);
             if !self.vir_query_is_unknown_v(inferred_elem)
-                && let Some(inferred_array_vir) = self.vir_query_lookup_array_v(inferred_elem) {
-                    // TEMP(N279-C): mixed VIR/sema metadata can degrade array literal
-                    // type IDs to unknown. Infer from the first concrete element so
-                    // let-binding coercion/RC bookkeeping remains correct.
-                    elem_vir = Some(inferred_elem);
-                    result_array_vir = inferred_array_vir;
-                }
+                && let Some(inferred_array_vir) = self.vir_query_lookup_array_v(inferred_elem)
+            {
+                // TEMP(N279-C): mixed VIR/sema metadata can degrade array literal
+                // type IDs to unknown. Infer from the first concrete element so
+                // let-binding coercion/RC bookkeeping remains correct.
+                elem_vir = Some(inferred_elem);
+                result_array_vir = inferred_array_vir;
+            }
             first_compiled = Some(first);
         }
 
