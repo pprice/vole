@@ -171,7 +171,7 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     ///    may mutate instance fields, making cached loads stale.
     pub field_cache: FxHashMap<(Value, u32), Value>,
     /// Return type of the current function
-    pub return_type: Option<TypeId>,
+    pub return_type: Option<VirTypeId>,
     /// Module being compiled (None for main program)
     pub current_module: Option<ModuleId>,
     /// Type parameter substitutions for monomorphized generics
@@ -318,9 +318,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self
     }
 
-    /// Set the return type.
+    /// Set the return type, converting from sema `TypeId` to `VirTypeId`.
     pub fn with_return_type(mut self, return_type: Option<TypeId>) -> Self {
-        self.return_type = return_type;
+        self.return_type = return_type.map(|ty| self.vir_lookup(ty));
         self
     }
 

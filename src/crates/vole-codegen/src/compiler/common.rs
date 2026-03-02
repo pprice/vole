@@ -197,7 +197,7 @@ fn emit_implicit_return(
         // Check if the return type is fallible - need multi-value return
         let is_fallible_return = cg
             .return_type
-            .map(|ret_type_id| cg.vir_query_unwrap_fallible_sema(ret_type_id).is_some())
+            .map(|ret_vir_ty| cg.vir_query_is_fallible_v(ret_vir_ty))
             .unwrap_or(false);
 
         // Check if the function has a void return type. Expression-bodied default methods
@@ -205,7 +205,7 @@ fn emit_implicit_return(
         // The Cranelift signature for void functions has no return values.
         let is_void_return = cg
             .return_type
-            .map(|ret_type_id| cg.vir_query_is_void(ret_type_id))
+            .map(|ret_vir_ty| cg.vir_query_is_void_v(ret_vir_ty))
             .unwrap_or(false);
 
         if is_void_return {
@@ -223,7 +223,7 @@ fn emit_implicit_return(
 
             let is_wide = cg
                 .return_type
-                .is_some_and(|ret| cg.vir_query_is_wide_fallible(ret));
+                .is_some_and(|ret| cg.vir_query_is_wide_fallible_v(ret));
 
             if is_wide {
                 // Wide fallible (i128 success): load low/high from offset 8/16
@@ -249,19 +249,19 @@ fn emit_implicit_return(
                 let payload = cg.load_union_payload_v(value.value, value.type_id, types::I64);
                 cg.builder.ins().return_(&[tag, payload]);
             }
-        } else if let Some(ret_type_id) = cg.return_type
-            && cg.is_small_struct_return(ret_type_id)
+        } else if let Some(ret_vir_ty) = cg.return_type
+            && cg.is_small_struct_return(cg.cv_type_id_from_vir(ret_vir_ty))
         {
-            cg.emit_small_struct_return(value.value, ret_type_id)?;
-        } else if let Some(ret_type_id) = cg.return_type
-            && cg.is_sret_struct_return(ret_type_id)
+            cg.emit_small_struct_return(value.value, cg.cv_type_id_from_vir(ret_vir_ty))?;
+        } else if let Some(ret_vir_ty) = cg.return_type
+            && cg.is_sret_struct_return(cg.cv_type_id_from_vir(ret_vir_ty))
         {
-            cg.emit_sret_struct_return(value.value, ret_type_id)?;
-        } else if let Some(ret_type_id) = cg.return_type
-            && cg.vir_query_is_union(ret_type_id)
+            cg.emit_sret_struct_return(value.value, cg.cv_type_id_from_vir(ret_vir_ty))?;
+        } else if let Some(ret_vir_ty) = cg.return_type
+            && cg.vir_query_is_union_v(ret_vir_ty)
         {
             // For union return types, wrap the value in a union
-            let wrapped = cg.construct_union_id(value, ret_type_id)?;
+            let wrapped = cg.construct_union_id(value, cg.cv_type_id_from_vir(ret_vir_ty))?;
             cg.builder.ins().return_(&[wrapped.value]);
         } else {
             // Coerce the value to match the function return type if needed.
@@ -389,7 +389,9 @@ fn compile_vir_block_body(
     cg: &mut Cg,
     stmts: &[VirStmt],
 ) -> CodegenResult<(bool, Option<(CompiledValue, Option<Variable>)>)> {
-    let has_trailing_expr = cg.return_type.is_some_and(|ret| !cg.vir_query_is_void(ret))
+    let has_trailing_expr = cg
+        .return_type
+        .is_some_and(|ret| !cg.vir_query_is_void_v(ret))
         && matches!(
             stmts.last(),
             Some(VirStmt::Expr { value }) if !value.is_void_if()
@@ -591,9 +593,9 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
             .insert(*name, (*var, cg.cv_type_id_from_vir(*vir_ty)));
     }
 
-    // Set return type using Cg's bridge.
+    // Set return type directly from VIR (already VirTypeId).
     if has_return {
-        cg.return_type = Some(cg.cv_type_id_from_vir(vir_func.return_type));
+        cg.return_type = Some(vir_func.return_type);
     }
 
     compile_vir_body_with_cg(&mut cg, &vir_func.body, DefaultReturn::Empty)?;

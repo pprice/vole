@@ -245,10 +245,10 @@ impl Cg<'_, '_, '_> {
                         self.cv_type_id_from_vir(self.try_substitute_type_v(arm.ty)),
                     )
             });
-            if has_nil_arm && let Some(ret_type_id) = self.return_type {
-                let ret_type_id = self.try_substitute_type(ret_type_id);
-                if self.vir_query_is_union(ret_type_id) {
-                    effective_result_type = ret_type_id;
+            if has_nil_arm && let Some(ret_vir_ty) = self.return_type {
+                let ret_vir_ty = self.try_substitute_type_v(ret_vir_ty);
+                if self.vir_query_is_union_v(ret_vir_ty) {
+                    effective_result_type = self.cv_type_id_from_vir(ret_vir_ty);
                 }
             }
         }

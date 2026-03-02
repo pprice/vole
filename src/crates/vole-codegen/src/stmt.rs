@@ -569,16 +569,17 @@ impl Cg<'_, '_, '_> {
         value: Option<&vole_vir::VirExpr>,
         convention: vole_vir::stmt::ReturnConvention,
     ) -> CodegenResult<bool> {
-        let return_type_id = self.return_type;
+        let return_type_vir = self.return_type;
         if let Some(value_expr) = value {
             // For Unresolved conventions, determine union-ness at codegen time.
             let is_union_return = matches!(convention, vole_vir::stmt::ReturnConvention::Union)
                 || (matches!(convention, vole_vir::stmt::ReturnConvention::Unresolved)
-                    && return_type_id.is_some_and(|ret_id| self.vir_query_is_union(ret_id)));
+                    && return_type_vir.is_some_and(|ret_id| self.vir_query_is_union_v(ret_id)));
             let mut compiled = if is_union_return
-                && let Some(ret_type_id) = return_type_id
+                && let Some(ret_vir_ty) = return_type_vir
                 && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
-                && let Some(expected_variant) = self.preferred_array_like_union_variant(ret_type_id)
+                && let Some(expected_variant) =
+                    self.preferred_array_like_union_variant(self.cv_type_id_from_vir(ret_vir_ty))
             {
                 self.compile_vir_expr_with_expected_type(value_expr, expected_variant)?
             } else {
@@ -586,7 +587,7 @@ impl Cg<'_, '_, '_> {
             };
             compiled.type_id = self.try_substitute_type_v(compiled.type_id);
             if is_union_return
-                && let Some(ret_type_id) = return_type_id
+                && let Some(ret_vir_ty) = return_type_vir
                 && self.vir_query_is_function_v(compiled.type_id)
                 && let vole_vir::VirExpr::Match {
                     scrutinee, arms, ..
@@ -595,7 +596,7 @@ impl Cg<'_, '_, '_> {
                 // Match-expression type metadata can degrade in generic module
                 // bodies. Recompile with the declared return union as the
                 // expected result type.
-                compiled = self.compile_vir_match(scrutinee, arms, self.vir_lookup(ret_type_id))?;
+                compiled = self.compile_vir_match(scrutinee, arms, ret_vir_ty)?;
                 compiled.type_id = self.try_substitute_type_v(compiled.type_id);
             }
 
@@ -622,7 +623,7 @@ impl Cg<'_, '_, '_> {
             compiled.mark_consumed();
             compiled.debug_assert_rc_handled("VirStmt::Return");
 
-            self.emit_return_value(compiled, return_type_id, convention)?;
+            self.emit_return_value(compiled, return_type_vir, convention)?;
         } else {
             self.emit_rc_cleanup_all_scopes(None)?;
             self.builder.ins().return_(&[]);
@@ -672,14 +673,14 @@ impl Cg<'_, '_, '_> {
     /// Emit the actual return instruction, handling all return conventions.
     ///
     /// Dispatches on the pre-computed `ReturnConvention` from VIR lowering
-    /// instead of querying the type arena at compile time.  The `return_type_id`
+    /// instead of querying the type arena at compile time.  The `return_vir_ty`
     /// is still needed for type-specific operations (vtable generation, union
     /// wrapping, struct layout) but the dispatch decision itself is read from
     /// the convention.
     fn emit_return_value(
         &mut self,
         compiled: CompiledValue,
-        return_type_id: Option<TypeId>,
+        return_vir_ty: Option<VirTypeId>,
         convention: vole_vir::stmt::ReturnConvention,
     ) -> CodegenResult<()> {
         use vole_vir::stmt::ReturnConvention;
@@ -688,22 +689,22 @@ impl Cg<'_, '_, '_> {
         // sema-monomorphized methods whose return type contains type parameters
         // that sema couldn't fully substitute during VIR lowering.
         let convention = if convention == ReturnConvention::Unresolved {
-            if let Some(ret_type_id) = return_type_id {
-                if self.vir_query_is_interface(ret_type_id) {
+            if let Some(ret_vir_ty) = return_vir_ty {
+                if self.vir_query_is_interface_v(ret_vir_ty) {
                     ReturnConvention::InterfaceBox
-                } else if self.vir_query_is_unknown(ret_type_id) {
+                } else if self.vir_query_is_unknown_v(ret_vir_ty) {
                     ReturnConvention::UnknownBox
-                } else if self.vir_query_is_fallible(ret_type_id) {
-                    if self.vir_query_is_wide_fallible(ret_type_id) {
+                } else if self.vir_query_is_fallible_v(ret_vir_ty) {
+                    if self.vir_query_is_wide_fallible_v(ret_vir_ty) {
                         ReturnConvention::WideFallible
                     } else {
                         ReturnConvention::Fallible
                     }
-                } else if self.vir_query_is_struct(ret_type_id) {
+                } else if self.vir_query_is_struct_v(ret_vir_ty) {
                     ReturnConvention::Struct
-                } else if self.vir_query_is_union(ret_type_id) {
+                } else if self.vir_query_is_union_v(ret_vir_ty) {
                     ReturnConvention::Union
-                } else if self.vir_query_is_void(ret_type_id) {
+                } else if self.vir_query_is_void_v(ret_vir_ty) {
                     ReturnConvention::Void
                 } else {
                     ReturnConvention::Scalar
@@ -721,12 +722,13 @@ impl Cg<'_, '_, '_> {
             }
             ReturnConvention::InterfaceBox => {
                 // NOTE: box_interface_value requires sema TypeId for vtable generation.
-                let ret_type_id =
-                    return_type_id.expect("InterfaceBox convention requires return type");
+                let ret_vir_ty =
+                    return_vir_ty.expect("InterfaceBox convention requires return type");
                 if !self.vir_query_is_interface_v(compiled.type_id)
                     && !self.vir_query_is_runtime_iterator_v(compiled.type_id)
                 {
-                    let boxed = self.box_interface_value(compiled, ret_type_id)?;
+                    let boxed =
+                        self.box_interface_value(compiled, self.cv_type_id_from_vir(ret_vir_ty))?;
                     self.builder.ins().return_(&[boxed.value]);
                 } else {
                     // Already an interface value — return directly.
@@ -734,7 +736,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
             ReturnConvention::UnknownBox => {
-                if !self.vir_query_is_unknown(self.cv_type_id_from_vir(compiled.type_id)) {
+                if !self.vir_query_is_unknown_v(compiled.type_id) {
                     let boxed = self.box_to_unknown_no_inc(compiled)?;
                     self.builder.ins().return_(&[boxed.value]);
                 } else {
@@ -753,7 +755,9 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().return_(&[tag_val, low, high]);
             }
             ReturnConvention::Struct => {
-                let ret_type_id = return_type_id.expect("Struct convention requires return type");
+                let ret_type_id = self.cv_type_id_from_vir(
+                    return_vir_ty.expect("Struct convention requires return type"),
+                );
                 if self.is_small_struct_return(ret_type_id) {
                     self.emit_small_struct_return(compiled.value, ret_type_id)?;
                 } else {
@@ -761,16 +765,16 @@ impl Cg<'_, '_, '_> {
                 }
             }
             ReturnConvention::Union => {
-                let ret_type_id = return_type_id.expect("Union convention requires return type");
+                let ret_type_id = self.cv_type_id_from_vir(
+                    return_vir_ty.expect("Union convention requires return type"),
+                );
                 let wrapped = self.construct_union_id(compiled, ret_type_id)?;
                 self.builder.ins().return_(&[wrapped.value]);
             }
             ReturnConvention::Scalar => {
                 // Plain value return (with type conversion if needed).
-                // NOTE: convert_to_type requires arena for detailed type inspection.
-                // This is a boundary case retained until CompiledValue carries VirTypeId.
-                let return_value = if let Some(ret_type_id) = return_type_id {
-                    let target_ty = self.cranelift_type(ret_type_id);
+                let return_value = if let Some(ret_vir_ty) = return_vir_ty {
+                    let target_ty = self.cranelift_type_v(ret_vir_ty);
                     convert_to_type(self.builder, compiled, target_ty, self.arena())
                 } else {
                     compiled.value
@@ -861,11 +865,12 @@ impl Cg<'_, '_, '_> {
         error_name: Symbol,
         fields: &[(Symbol, vole_vir::refs::VirRef)],
     ) -> CodegenResult<bool> {
-        let return_type_id = self.return_type.ok_or_else(|| {
+        let return_vir_ty = self.return_type.ok_or_else(|| {
             CodegenError::internal(
                 "raise statement used outside of a function with declared return type",
             )
         })?;
+        let return_type_id = self.cv_type_id_from_vir(return_vir_ty);
 
         let (_success_type_id, error_type_id) = self
             .vir_query_unwrap_fallible_sema(return_type_id)
@@ -903,7 +908,7 @@ impl Cg<'_, '_, '_> {
 
         self.emit_rc_cleanup_all_scopes(None)?;
 
-        if self.vir_query_is_wide_fallible(return_type_id) {
+        if self.vir_query_is_wide_fallible_v(return_vir_ty) {
             let zero = self.iconst_cached(types::I64, 0);
             self.builder.ins().return_(&[tag_val, payload_val, zero]);
         } else {
