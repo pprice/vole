@@ -414,7 +414,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         pattern: &vole_vir::VirPattern,
         scrutinee: &CompiledValue,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
         arm_block: Block,
         next_block: Block,
         effective_arm_block: &mut Block,
@@ -425,13 +425,7 @@ impl Cg<'_, '_, '_> {
             vole_vir::VirPattern::Binding { name, ty: _, .. } => {
                 let var = self.builder.declare_var(scrutinee.ty);
                 self.builder.def_var(var, scrutinee.value);
-                arm_variables.insert(
-                    *name,
-                    (
-                        var,
-                        self.cv_type_id_from_vir(self.try_substitute_type_v(scrutinee.type_id)),
-                    ),
-                );
+                arm_variables.insert(*name, (var, self.try_substitute_type_v(scrutinee.type_id)));
                 Ok(None)
             }
 
@@ -458,13 +452,7 @@ impl Cg<'_, '_, '_> {
                 if let Some((name, bind_ty, _)) = binding {
                     let var = self.builder.declare_var(scrutinee.ty);
                     self.builder.def_var(var, scrutinee.value);
-                    arm_variables.insert(
-                        *name,
-                        (
-                            var,
-                            self.cv_type_id_from_vir(self.try_substitute_type_v(*bind_ty)),
-                        ),
-                    );
+                    arm_variables.insert(*name, (var, self.try_substitute_type_v(*bind_ty)));
                 }
 
                 Ok(cond)
@@ -492,8 +480,11 @@ impl Cg<'_, '_, '_> {
 
             vole_vir::VirPattern::Val { name } => {
                 let (var_val, var_type_id) =
-                    if let Some(&(var, var_type_id)) = arm_variables.get(name) {
-                        (self.builder.use_var(var), var_type_id)
+                    if let Some(&(var, var_vir_ty)) = arm_variables.get(name) {
+                        (
+                            self.builder.use_var(var),
+                            self.cv_type_id_from_vir(var_vir_ty),
+                        )
                     } else if let Some(binding) = self.get_capture(name).copied() {
                         let captured = self.load_capture(&binding)?;
                         (
@@ -559,7 +550,7 @@ impl Cg<'_, '_, '_> {
         inner: &Option<Box<vole_vir::VirPattern>>,
         scrutinee: &CompiledValue,
         success_type: TypeId,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
     ) -> CodegenResult<Option<Value>> {
         let tag = load_fallible_tag(self.builder, scrutinee.value);
         let is_success = self
@@ -576,7 +567,7 @@ impl Cg<'_, '_, '_> {
             if let vole_vir::VirPattern::Binding { name, .. } = inner_pat.as_ref() {
                 let var = self.builder.declare_var(payload_ty);
                 self.builder.def_var(var, payload);
-                arm_variables.insert(*name, (var, success_type_id));
+                arm_variables.insert(*name, (var, self.vir_lookup_or_compat(success_type_id)));
             }
         }
         Ok(Some(is_success))
@@ -588,7 +579,7 @@ impl Cg<'_, '_, '_> {
         kind: &vole_vir::VirErrorPatternKind,
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
     ) -> CodegenResult<Option<Value>> {
         match kind {
             vole_vir::VirErrorPatternKind::Bare => {
@@ -604,12 +595,13 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
-                let error_type_id = self.cv_type_id_from_vir(self.try_substitute_type_v(*error_ty));
+                let error_vir_ty = self.try_substitute_type_v(*error_ty);
+                let error_type_id = self.cv_type_id_from_vir(error_vir_ty);
                 let payload_ty = self.cranelift_type(error_type_id);
                 let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
                 let var = self.builder.declare_var(payload_ty);
                 self.builder.def_var(var, payload);
-                arm_variables.insert(*name, (var, error_type_id));
+                arm_variables.insert(*name, (var, error_vir_ty));
                 Ok(Some(is_error))
             }
 
@@ -656,7 +648,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         bindings: &[vole_vir::VirTupleBinding],
         scrutinee: &CompiledValue,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
     ) -> CodegenResult<Option<Value>> {
         let elem_vir_type_ids = self.vir_query_unwrap_tuple_v(scrutinee.type_id);
         if let Some(elem_vir_type_ids) = elem_vir_type_ids {
@@ -676,13 +668,8 @@ impl Cg<'_, '_, '_> {
                     );
                     let var = self.builder.declare_var(elem_cr_type);
                     self.builder.def_var(var, value);
-                    arm_variables.insert(
-                        *name,
-                        (
-                            var,
-                            self.cv_type_id_from_vir(self.try_substitute_type_v(elem_vir_type_id)),
-                        ),
-                    );
+                    arm_variables
+                        .insert(*name, (var, self.try_substitute_type_v(elem_vir_type_id)));
                 }
                 // Wildcard and other patterns: nothing to bind.
             }
@@ -709,7 +696,7 @@ impl Cg<'_, '_, '_> {
         is_union_payload: bool,
         _is_struct: bool,
         scrutinee: &CompiledValue,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
         arm_block: Block,
         next_block: Block,
         effective_arm_block: &mut Block,
@@ -783,7 +770,7 @@ impl Cg<'_, '_, '_> {
         fields: &[vole_vir::VirRecordFieldBinding],
         field_source: Value,
         field_source_type: VirTypeId,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
     ) -> CodegenResult<()> {
         let is_struct = self.vir_query_is_struct_v(field_source_type);
         for field in fields {
@@ -798,7 +785,10 @@ impl Cg<'_, '_, '_> {
             };
             let var = self.builder.declare_var(converted.ty);
             self.builder.def_var(var, converted.value);
-            arm_variables.insert(field.binding_name, (var, field_type_id));
+            arm_variables.insert(
+                field.binding_name,
+                (var, self.vir_lookup_or_compat(field_type_id)),
+            );
         }
         Ok(())
     }

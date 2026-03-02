@@ -66,10 +66,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Check if it's a closure variable
-        if let Some((var, type_id)) = self.vars.get(&callee_sym)
-            && self.vir_query_is_function(*type_id)
+        if let Some((var, vir_ty)) = self.vars.get(&callee_sym)
+            && self.vir_query_is_function_v(*vir_ty)
         {
-            return self.call_closure(*var, *type_id, arg_source, call_expr_id);
+            return self.call_closure(*var, *vir_ty, arg_source, call_expr_id);
         }
 
         // Check if it's a captured closure (e.g., recursive lambda or captured function)
@@ -88,13 +88,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Check if it's a functional interface variable
-        if let Some((var, type_id)) = self.vars.get(&callee_sym) {
+        if let Some((var, vir_ty)) = self.vars.get(&callee_sym) {
             let value = self.builder.use_var(*var);
-            let obj = CompiledValue::new(
-                value,
-                self.cranelift_type(*type_id),
-                self.vir_lookup(*type_id),
-            );
+            let obj = CompiledValue::new(value, self.cranelift_type_v(*vir_ty), *vir_ty);
             if let Some(result) = self.try_call_functional_interface(&obj, arg_source)? {
                 return Ok(result);
             }

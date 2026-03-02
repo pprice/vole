@@ -137,7 +137,11 @@ impl<'a> FunctionCompileConfig<'a> {
 pub(crate) fn setup_function_entry<'a>(
     builder: &mut FunctionBuilder,
     config: &FunctionCompileConfig<'a>,
-) -> (FxHashMap<Symbol, (Variable, TypeId)>, Option<Captures<'a>>) {
+    vir_type_table: &vole_vir::type_table::VirTypeTable,
+) -> (
+    FxHashMap<Symbol, (Variable, VirTypeId)>,
+    Option<Captures<'a>>,
+) {
     // Create entry block and switch to it
     let entry_block = builder.create_block();
     builder.append_block_params_for_function_params(entry_block);
@@ -148,7 +152,14 @@ pub(crate) fn setup_function_entry<'a>(
     let mut param_offset = config.skip_block_params;
 
     // Build variables map
-    let mut variables: FxHashMap<Symbol, (Variable, TypeId)> = FxHashMap::default();
+    let mut variables: FxHashMap<Symbol, (Variable, VirTypeId)> = FxHashMap::default();
+
+    // Helper: bridge sema TypeId → VirTypeId using the type table with compat fallback.
+    let to_vir = |type_id: TypeId| -> VirTypeId {
+        vir_type_table
+            .lookup_type_id(type_id)
+            .unwrap_or_else(|| VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG))
+    };
 
     // Set up closure variable if this is a capturing lambda
     let captures = if let (Some(bindings), Some(closure_ptr_type)) =
@@ -168,7 +179,7 @@ pub(crate) fn setup_function_entry<'a>(
     if let Some((self_sym, self_type_id, self_cranelift_type)) = config.self_binding {
         let self_var = builder.declare_var(self_cranelift_type);
         builder.def_var(self_var, block_params[param_offset]);
-        variables.insert(self_sym, (self_var, self_type_id));
+        variables.insert(self_sym, (self_var, to_vir(self_type_id)));
         param_offset += 1;
     }
 
@@ -176,7 +187,7 @@ pub(crate) fn setup_function_entry<'a>(
     for (i, (name, type_id, cranelift_type)) in config.params.iter().enumerate() {
         let var = builder.declare_var(*cranelift_type);
         builder.def_var(var, block_params[param_offset + i]);
-        variables.insert(*name, (var, *type_id));
+        variables.insert(*name, (var, to_vir(*type_id)));
     }
 
     (variables, captures)
@@ -500,7 +511,8 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
         config
     };
 
-    let (variables, captures) = setup_function_entry(&mut builder, &config);
+    let vir_type_table = &env.analyzed.vir_program().type_table;
+    let (variables, captures) = setup_function_entry(&mut builder, &config, vir_type_table);
 
     let mut cg = Cg::new(&mut builder, codegen_ctx, env)
         .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
@@ -583,14 +595,13 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
         })
         .collect();
 
-    // Create Cg first, then use its bridge method for TypeId conversions.
+    // Create Cg first, then populate vars with VirTypeId directly.
     let mut cg = Cg::new(&mut builder, codegen_ctx, env)
         .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline);
 
-    // Populate vars using Cg's cv_type_id_from_vir bridge.
+    // Populate vars directly with VirTypeId (no bridge needed).
     for (name, var, vir_ty) in &param_info {
-        cg.vars
-            .insert(*name, (*var, cg.cv_type_id_from_vir(*vir_ty)));
+        cg.vars.insert(*name, (*var, *vir_ty));
     }
 
     // Set return type directly from VIR (already VirTypeId).

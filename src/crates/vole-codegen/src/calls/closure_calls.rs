@@ -27,12 +27,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub(super) fn call_closure(
         &mut self,
         func_var: Variable,
-        func_type_id: TypeId,
+        func_vir_type_id: VirTypeId,
         arg_source: &ArgSource<'_>,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let func_ptr_or_closure = self.builder.use_var(func_var);
-        let func_vir_type_id = self.vir_lookup(func_type_id);
         self.call_closure_value(
             func_ptr_or_closure,
             func_vir_type_id,

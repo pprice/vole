@@ -25,9 +25,15 @@ impl Cg<'_, '_, '_> {
         if !self.rc_scopes.has_active_scope() {
             return (None, None, None);
         }
-        let Some(&(var, type_id)) = self.vars.get(sym) else {
+        let Some(&(var, vir_ty)) = self.vars.get(sym) else {
             return (None, None, None);
         };
+
+        // Bridge to sema TypeId for RC state computation.
+        // `vir_compute_rc_state` cannot resolve nested struct field types
+        // (sema_to_vir_hint returns UNKNOWN for dynamic TypeIds), so we use
+        // the sema-based `rc_state()` which correctly walks TypeArena.
+        let type_id = self.cv_type_id_from_vir(vir_ty);
 
         let rc_old = if self.rc_state(type_id).needs_cleanup() {
             Some(self.builder.use_var(var))

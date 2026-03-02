@@ -9,7 +9,7 @@ use smallvec::smallvec;
 use crate::IntrinsicKey;
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_vir::stmt::{VirFor, VirIterKind};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
@@ -105,7 +105,7 @@ impl Cg<'_, '_, '_> {
 
         let var = self.builder.declare_var(types::I64);
         self.builder.def_var(var, start_val.value);
-        self.vars.insert(vir_for.var_name, (var, TypeId::I64));
+        self.vars.insert(vir_for.var_name, (var, VirTypeId::I64));
 
         let has_continue = vir_body_contains_continue(&vir_for.body);
         if has_continue {
@@ -266,7 +266,10 @@ impl Cg<'_, '_, '_> {
         let elem_var = self.builder.declare_var(elem_cr_type);
         let elem_zero = self.typed_zero(elem_cr_type);
         self.builder.def_var(elem_var, elem_zero);
-        self.vars.insert(vir_for.var_name, (elem_var, elem_type_id));
+        self.vars.insert(
+            vir_for.var_name,
+            (elem_var, self.vir_lookup_or_compat(elem_type_id)),
+        );
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -324,7 +327,10 @@ impl Cg<'_, '_, '_> {
         let elem_var = self.builder.declare_var(elem_cr_type);
         let elem_zero = self.typed_zero(elem_cr_type);
         self.builder.def_var(elem_var, elem_zero);
-        self.vars.insert(vir_for.var_name, (elem_var, elem_type_id));
+        self.vars.insert(
+            vir_for.var_name,
+            (elem_var, self.vir_lookup_or_compat(elem_type_id)),
+        );
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();

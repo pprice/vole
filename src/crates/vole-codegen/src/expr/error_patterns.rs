@@ -198,7 +198,7 @@ impl Cg<'_, '_, '_> {
         error_type_def_id: vole_identity::TypeDefId,
         scrutinee_value: Value,
         fields: &[RecordFieldPattern],
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
     ) -> CodegenResult<()> {
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self
@@ -261,7 +261,10 @@ impl Cg<'_, '_, '_> {
                 let converted = self.convert_field_value(payload, field_ty_id);
                 let var = self.builder.declare_var(converted.ty);
                 self.builder.def_var(var, converted.value);
-                arm_variables.insert(field_pattern.binding, (var, field_ty_id));
+                arm_variables.insert(
+                    field_pattern.binding,
+                    (var, self.vir_lookup_or_compat(field_ty_id)),
+                );
             } else if is_wide {
                 // Wide (i128/f128) field in multi-field or single-wide-field error.
                 let field_offset = field_byte_offsets[field_idx];
@@ -280,7 +283,10 @@ impl Cg<'_, '_, '_> {
                 let wide_ty = wide.cranelift_type();
                 let var = self.builder.declare_var(wide_ty);
                 self.builder.def_var(var, wide_val);
-                arm_variables.insert(field_pattern.binding, (var, field_ty_id));
+                arm_variables.insert(
+                    field_pattern.binding,
+                    (var, self.vir_lookup_or_compat(field_ty_id)),
+                );
             } else {
                 // Non-wide field in multi-field error, payload is a pointer to field data
                 let field_offset = field_byte_offsets[field_idx];
@@ -291,7 +297,10 @@ impl Cg<'_, '_, '_> {
                 let converted = self.convert_field_value(raw_value, field_ty_id);
                 let var = self.builder.declare_var(converted.ty);
                 self.builder.def_var(var, converted.value);
-                arm_variables.insert(field_pattern.binding, (var, field_ty_id));
+                arm_variables.insert(
+                    field_pattern.binding,
+                    (var, self.vir_lookup_or_compat(field_ty_id)),
+                );
             }
         }
 

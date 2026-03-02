@@ -447,9 +447,7 @@ impl Cg<'_, '_, '_> {
 
         // Insert into vars under the $oc symbol
         let oc_sym = self.interner().lookup("$oc").expect("$oc must be interned");
-        let saved_entry = self
-            .vars
-            .insert(oc_sym, (inner_var, self.cv_type_id_from_vir(inner.type_id)));
+        let saved_entry = self.vars.insert(oc_sym, (inner_var, inner.type_id));
 
         // Build a VIR-native MethodCallSource with $oc as the receiver.
         let inner_vir_ty = inner.type_id;

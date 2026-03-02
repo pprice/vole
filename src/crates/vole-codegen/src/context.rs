@@ -156,7 +156,7 @@ pub use crate::types::ModuleExportBinding;
 pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub builder: &'a mut FunctionBuilder<'b>,
     /// Variable bindings - owned, fresh per function
-    pub vars: FxHashMap<Symbol, (Variable, TypeId)>,
+    pub vars: FxHashMap<Symbol, (Variable, VirTypeId)>,
     pub cf: ControlFlow,
     pub captures: Option<Captures<'a>>,
     /// For recursive lambdas: the binding name that captures itself
@@ -361,7 +361,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Set pre-populated variables (for cases where params are bound before Cg creation).
-    pub fn with_vars(mut self, vars: FxHashMap<Symbol, (Variable, TypeId)>) -> Self {
+    pub fn with_vars(mut self, vars: FxHashMap<Symbol, (Variable, VirTypeId)>) -> Self {
         self.vars = vars;
         self
     }

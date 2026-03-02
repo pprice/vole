@@ -1081,7 +1081,8 @@ impl Cg<'_, '_, '_> {
             }
             let var = self.builder.declare_var(cranelift_ty);
             self.builder.def_var(var, final_value);
-            self.vars.insert(name, (var, final_type_id));
+            self.vars
+                .insert(name, (var, self.vir_lookup_or_compat(final_type_id)));
             var
         };
 
@@ -1211,7 +1212,7 @@ impl Cg<'_, '_, '_> {
         let cr_type = self.cranelift_type(ty);
         let var = self.builder.declare_var(cr_type);
         self.builder.def_var(var, value);
-        self.vars.insert(name, (var, ty));
+        self.vars.insert(name, (var, self.vir_lookup_or_compat(ty)));
 
         // Extracted elements borrow from the parent composite.
         // RC_inc + register so scope-exit dec balances the borrow.
@@ -1281,7 +1282,8 @@ impl Cg<'_, '_, '_> {
         is_struct: bool,
     ) -> CodegenResult<()> {
         for field in fields {
-            let field_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(field.ty));
+            let field_vir_ty = self.try_substitute_type_v(field.ty);
+            let field_ty = self.cv_type_id_from_vir(field_vir_ty);
             let converted = if is_struct {
                 // Structs are stack-allocated: load field directly from pointer + offset
                 self.struct_field_load(value, field.slot as usize, field_ty, source_ty)?
@@ -1292,7 +1294,7 @@ impl Cg<'_, '_, '_> {
 
             let var = self.builder.declare_var(converted.ty);
             self.builder.def_var(var, converted.value);
-            self.vars.insert(field.binding, (var, field_ty));
+            self.vars.insert(field.binding, (var, field_vir_ty));
         }
         Ok(())
     }
@@ -1338,9 +1340,8 @@ impl Cg<'_, '_, '_> {
             }
             let vir_ty = self.try_substitute_type_v(*ty);
             let cranelift_ty = self.cranelift_type_v(vir_ty);
-            let sema_ty = self.cv_type_id_from_vir(vir_ty);
             let var = self.builder.declare_var(cranelift_ty);
-            self.vars.insert(name, (var, sema_ty));
+            self.vars.insert(name, (var, vir_ty));
             return Some(var);
         }
         None

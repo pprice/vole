@@ -1070,11 +1070,13 @@ impl Cg<'_, '_, '_> {
     fn compile_local_var_load(
         &mut self,
         var: Variable,
-        var_type_id: TypeId,
+        var_vir_ty: VirTypeId,
         narrowed_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let val = self.builder.use_var(var);
         let cl_ty = self.builder.func.dfg.value_type(val);
+        // Bridge to sema TypeId for downstream helpers that still require it.
+        let var_type_id = self.cv_type_id_from_vir(var_vir_ty);
 
         // Union narrowing: if VIR type differs from declared type, extract
         // the payload from the tagged union.
@@ -1107,10 +1109,11 @@ impl Cg<'_, '_, '_> {
         }
 
         // Simple local: no narrowing needed.
-        let mut cv = CompiledValue::new(val, cl_ty, self.vir_lookup(var_type_id));
+        let resolved_vir_ty = self.try_substitute_type_v(var_vir_ty);
+        let mut cv = CompiledValue::new(val, cl_ty, resolved_vir_ty);
         self.mark_borrowed_if_rc(&mut cv);
         if cv.rc_lifecycle == RcLifecycle::Untracked
-            && self.rc_state(var_type_id).union_variants().is_some()
+            && self.rc_state_v(resolved_vir_ty).union_variants().is_some()
         {
             cv.mark_borrowed();
         }
@@ -1233,22 +1236,22 @@ impl Cg<'_, '_, '_> {
             return self.store_capture(&binding, value);
         }
 
-        let (var, var_type_id) = self
+        let (var, var_vir_ty) = self
             .vars
             .get(&sym)
             .ok_or_else(|| CodegenError::not_found("variable", self.interner().resolve(sym)))?;
         let var = *var;
-        let var_type_id = *var_type_id;
+        let var_vir_ty = *var_vir_ty;
 
-        value = self.coerce_to_type(value, self.vir_lookup_or_compat(var_type_id))?;
+        value = self.coerce_to_type(value, var_vir_ty)?;
 
         // RC bookkeeping: inc new if borrowed, store, dec old.
         if rc_old.is_some() && value.is_borrowed() {
-            self.emit_rc_inc_for_type(value.value, var_type_id)?;
+            self.emit_rc_inc_for_type_v(value.value, var_vir_ty)?;
         }
         self.builder.def_var(var, value.value);
         if let Some(old_val) = rc_old {
-            self.emit_rc_dec_for_type(old_val, var_type_id)?;
+            self.emit_rc_dec_for_type_v(old_val, var_vir_ty)?;
         }
 
         // Composite RC: dec each RC field of the old struct.
@@ -1336,11 +1339,11 @@ impl Cg<'_, '_, '_> {
     fn resolve_vir_static_meta_type_def(&self, object: Option<&VirExpr>) -> Option<TypeDefId> {
         let object = object?;
         #[allow(clippy::wildcard_enum_match_arm)] // predicate query, not dispatch
-        let object_type_id = match object {
+        let object_vir_ty = match object {
             VirExpr::LocalLoad { name, .. } => self.vars.get(name).map(|(_, ty)| *ty)?,
             _ => return None,
         };
-        let type_def_id = self.vir_query_unwrap_nominal(object_type_id)?;
+        let type_def_id = self.vir_query_unwrap_nominal_v(object_vir_ty)?;
         Some(type_def_id)
     }
 
