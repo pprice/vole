@@ -4,9 +4,7 @@
 // Handles lowered VIR `VirStmt::For` nodes.
 
 use cranelift::prelude::*;
-use smallvec::smallvec;
 
-use crate::IntrinsicKey;
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use vole_identity::{TypeId, VirTypeId};
@@ -213,14 +211,14 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR for-loop over an array using direct index-based access.
     fn compile_vir_for_array(&mut self, vir_for: &VirFor) -> CodegenResult<bool> {
         let VirIterKind::Array {
-            elem_type: elem_type_id,
+            elem_type,
             union_storage,
             ..
         } = &vir_for.kind
         else {
             unreachable!("compile_vir_for_array called with non-Array kind");
         };
-        let mut elem_type_id = self.sema_type_id(self.try_substitute_type_v(*elem_type_id));
+        let mut elem_vir = self.try_substitute_type_v(*elem_type);
         let mut union_storage = *union_storage;
 
         let arr = self.compile_vir_expr(&vir_for.iterable)?;
@@ -228,8 +226,7 @@ impl Cg<'_, '_, '_> {
         // TEMP(N279-C): if VIR iterator metadata degraded to `unknown`, recover
         // element typing/storage from the compiled iterable value.
         if let Some(arr_elem_vir) = self.vir_query_unwrap_array_v(arr.type_id) {
-            let arr_elem_sema = self.sema_type_id(arr_elem_vir);
-            elem_type_id = arr_elem_sema;
+            elem_vir = arr_elem_vir;
             if union_storage.is_none() && self.vir_query_is_union_v(arr_elem_vir) {
                 union_storage = Some(if self.union_array_prefers_inline_storage_v(arr_elem_vir) {
                     vole_sema::UnionStorageKind::Inline
@@ -241,9 +238,8 @@ impl Cg<'_, '_, '_> {
 
         // Track owned iterable in a dedicated RC scope.
         self.push_rc_scope();
-        let arr_sema_ty = self.sema_type_id(arr.type_id);
-        if arr.is_owned() && self.rc_state(arr_sema_ty).needs_cleanup() {
-            let tracked_var = self.builder.declare_var(self.cranelift_type(arr_sema_ty));
+        if arr.is_owned() && self.rc_state_v(arr.type_id).needs_cleanup() {
+            let tracked_var = self.builder.declare_var(self.cranelift_type_v(arr.type_id));
             self.builder.def_var(tracked_var, arr.value);
             let drop_flag = self.register_rc_local(tracked_var, arr.type_id);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
@@ -251,7 +247,7 @@ impl Cg<'_, '_, '_> {
 
         let len_val = self
             .call_compiler_intrinsic_key_with_line(
-                IntrinsicKey::ArrayLen,
+                crate::IntrinsicKey::ArrayLen,
                 &[arr.value],
                 TypeId::I64,
                 0,
@@ -262,11 +258,11 @@ impl Cg<'_, '_, '_> {
         let zero = self.iconst_cached(types::I64, 0);
         self.builder.def_var(idx_var, zero);
 
-        let elem_cr_type = self.cranelift_type(elem_type_id);
+        let elem_cr_type = self.cranelift_type_v(elem_vir);
         let elem_var = self.builder.declare_var(elem_cr_type);
         let elem_zero = self.typed_zero(elem_cr_type);
         self.builder.def_var(elem_var, elem_zero);
-        self.bind_var(vir_for.var_name, elem_var, elem_type_id);
+        self.bind_var_v(vir_for.var_name, elem_var, elem_vir);
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -292,7 +288,7 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), elem_ptr, value_offset);
-        let elem_val = self.decode_array_elem(elem_val, elem_ptr, elem_type_id, union_storage)?;
+        let elem_val = self.decode_array_elem_v(elem_val, elem_ptr, elem_vir, union_storage)?;
         self.builder.def_var(elem_var, elem_val);
 
         self.compile_vir_loop_body(&vir_for.body, exit_block, continue_block)?;
@@ -314,17 +310,17 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR for-loop over a runtime iterator (string, interface,
     /// custom iterator, or custom iterable).
     fn compile_vir_for_runtime_iter(&mut self, vir_for: &VirFor) -> CodegenResult<bool> {
-        let (iter_val, elem_type_id, needs_elem_rc_dec) = self.setup_vir_runtime_iter(vir_for)?;
+        let (iter_val, elem_vir, needs_elem_rc_dec) = self.setup_vir_runtime_iter(vir_for)?;
 
         let slot_data = self.alloc_stack(8);
         let ptr_type = self.ptr_type();
         let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
 
-        let elem_cr_type = self.cranelift_type(elem_type_id);
+        let elem_cr_type = self.cranelift_type_v(elem_vir);
         let elem_var = self.builder.declare_var(elem_cr_type);
         let elem_zero = self.typed_zero(elem_cr_type);
         self.builder.def_var(elem_var, elem_zero);
-        self.bind_var(vir_for.var_name, elem_var, elem_type_id);
+        self.bind_var_v(vir_for.var_name, elem_var, elem_vir);
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -342,7 +338,7 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), slot_addr, 0);
-        let elem_val = self.convert_iter_elem(raw_val, elem_type_id, elem_cr_type)?;
+        let elem_val = self.convert_iter_elem_v(raw_val, elem_vir, elem_cr_type)?;
         self.builder.def_var(elem_var, elem_val);
 
         self.compile_vir_loop_body(&vir_for.body, exit_block, continue_block)?;
@@ -362,70 +358,28 @@ impl Cg<'_, '_, '_> {
 
     /// Evaluate the VIR iterable and convert it to a RuntimeIterator.
     ///
-    /// Returns `(iter_value, elem_type_id, needs_elem_rc_dec)`.
-    fn setup_vir_runtime_iter(&mut self, vir_for: &VirFor) -> CodegenResult<(Value, TypeId, bool)> {
+    /// Returns `(iter_value, elem_vir_type, needs_elem_rc_dec)`.
+    fn setup_vir_runtime_iter(
+        &mut self,
+        vir_for: &VirFor,
+    ) -> CodegenResult<(Value, VirTypeId, bool)> {
         match &vir_for.kind {
             VirIterKind::String => {
                 let string_val = self.compile_vir_expr(&vir_for.iterable)?;
                 let iter_val =
                     self.call_runtime(RuntimeKey::StringCharsIter, &[string_val.value])?;
-                let iter = self.make_runtime_iter_value(iter_val, TypeId::STRING);
+                let iter = self.make_runtime_iter_value_v(iter_val, VirTypeId::STRING);
                 self.enter_iter_rc_scope(&iter, Some(&string_val));
-                Ok((iter_val, TypeId::STRING, true))
+                Ok((iter_val, VirTypeId::STRING, true))
             }
             VirIterKind::IteratorInterface { elem_type, .. } => {
-                let hint = self.sema_type_id(self.try_substitute_type_v(*elem_type));
-                let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
-                let (elem_type_id, is_interface_iter) = if let Some(elem_vir) =
-                    self.vir_query_unwrap_runtime_iterator_v(iter.type_id)
-                {
-                    (self.sema_type_id(elem_vir), false)
-                } else if let Some((_, type_args)) = self.vir_query_unwrap_interface_v(iter.type_id)
-                {
-                    (
-                        type_args
-                            .first()
-                            .map(|&v| self.sema_type_id(v))
-                            .unwrap_or(hint),
-                        true,
-                    )
-                } else {
-                    (hint, false)
-                };
-                if is_interface_iter {
-                    iter = self.wrap_interface_iter(iter, elem_type_id)?;
-                }
-                self.enter_iter_rc_scope(&iter, None);
-                Ok((iter.value, elem_type_id, false))
+                self.setup_iterator_interface_iter(vir_for, *elem_type)
             }
             VirIterKind::CustomIterator { elem_type, .. } => {
-                let elem_type_id = self.sema_type_id(self.try_substitute_type_v(*elem_type));
-                let iterable = self.compile_vir_expr(&vir_for.iterable)?;
-                let iterator_type_def = self
-                    .name_table()
-                    .well_known
-                    .iterator_type_def
-                    .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
-                let interface_type_id = self
-                    .vir_query_lookup_interface(iterator_type_def, smallvec![elem_type_id])
-                    .ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "Iterator<T> interface type not pre-interned by sema",
-                            format!("elem_type_id={elem_type_id:?}"),
-                        )
-                    })?;
-                let boxed = self.box_interface_value(iterable, interface_type_id)?;
-                let iter = self.wrap_interface_iter(boxed, elem_type_id)?;
-                self.enter_iter_rc_scope(&iter, None);
-                Ok((iter.value, elem_type_id, false))
+                self.setup_custom_iterator_iter(vir_for, *elem_type)
             }
             VirIterKind::CustomIterable { elem_type, .. } => {
-                let elem_type_id = self.sema_type_id(self.try_substitute_type_v(*elem_type));
-                let iterable = self.compile_vir_expr(&vir_for.iterable)?;
-                let iter_value = self.call_iterable_iter_method(&iterable, elem_type_id)?;
-                let iter = self.wrap_interface_iter(iter_value, elem_type_id)?;
-                self.enter_iter_rc_scope(&iter, None);
-                Ok((iter.value, elem_type_id, false))
+                self.setup_custom_iterable_iter(vir_for, *elem_type)
             }
             VirIterKind::Range | VirIterKind::Array { .. } => {
                 unreachable!("Range/Array handled before setup_vir_runtime_iter")
@@ -434,6 +388,70 @@ impl Cg<'_, '_, '_> {
                 unreachable!("VirIterKind::Generic should be resolved before codegen")
             }
         }
+    }
+
+    /// Set up a for-loop over an Iterator interface value.
+    fn setup_iterator_interface_iter(
+        &mut self,
+        vir_for: &VirFor,
+        hint_elem_type: VirTypeId,
+    ) -> CodegenResult<(Value, VirTypeId, bool)> {
+        let hint = self.try_substitute_type_v(hint_elem_type);
+        let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
+        let (elem_vir, is_interface_iter) =
+            if let Some(elem_vir) = self.vir_query_unwrap_runtime_iterator_v(iter.type_id) {
+                (elem_vir, false)
+            } else if let Some((_, type_args)) = self.vir_query_unwrap_interface_v(iter.type_id) {
+                (type_args.first().copied().unwrap_or(hint), true)
+            } else {
+                (hint, false)
+            };
+        if is_interface_iter {
+            iter = self.wrap_interface_iter_v(iter, elem_vir)?;
+        }
+        self.enter_iter_rc_scope(&iter, None);
+        Ok((iter.value, elem_vir, false))
+    }
+
+    /// Set up a for-loop over a custom Iterator implementor.
+    fn setup_custom_iterator_iter(
+        &mut self,
+        vir_for: &VirFor,
+        elem_type: VirTypeId,
+    ) -> CodegenResult<(Value, VirTypeId, bool)> {
+        let elem_vir = self.try_substitute_type_v(elem_type);
+        let iterable = self.compile_vir_expr(&vir_for.iterable)?;
+        let iterator_type_def = self
+            .name_table()
+            .well_known
+            .iterator_type_def
+            .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
+        let interface_vir = self
+            .vir_query_lookup_interface_v(iterator_type_def, vec![elem_vir])
+            .ok_or_else(|| {
+                CodegenError::internal_with_context(
+                    "Iterator<T> interface type not pre-interned by sema",
+                    format!("elem_vir={elem_vir:?}"),
+                )
+            })?;
+        let boxed = self.box_interface_value_v(iterable, interface_vir)?;
+        let iter = self.wrap_interface_iter_v(boxed, elem_vir)?;
+        self.enter_iter_rc_scope(&iter, None);
+        Ok((iter.value, elem_vir, false))
+    }
+
+    /// Set up a for-loop over a custom Iterable implementor.
+    fn setup_custom_iterable_iter(
+        &mut self,
+        vir_for: &VirFor,
+        elem_type: VirTypeId,
+    ) -> CodegenResult<(Value, VirTypeId, bool)> {
+        let elem_vir = self.try_substitute_type_v(elem_type);
+        let iterable = self.compile_vir_expr(&vir_for.iterable)?;
+        let iter_value = self.call_iterable_iter_method(&iterable)?;
+        let iter = self.wrap_interface_iter_v(iter_value, elem_vir)?;
+        self.enter_iter_rc_scope(&iter, None);
+        Ok((iter.value, elem_vir, false))
     }
 
     // =========================================================================
@@ -446,6 +464,7 @@ impl Cg<'_, '_, '_> {
     /// the specific element type (e.g. propagated class method monomorphs).
     /// All RuntimeIterator types share the same physical layout (RC pointer),
     /// so the fallback is layout-safe; only VIR type metadata differs.
+    #[allow(dead_code)]
     pub(crate) fn make_runtime_iter_value(
         &self,
         raw: Value,
@@ -458,15 +477,25 @@ impl Cg<'_, '_, '_> {
         self.compiled_owned_with_ty(raw, types::I64, runtime_iter_type_id)
     }
 
+    /// VirTypeId-native variant of [`make_runtime_iter_value`](Self::make_runtime_iter_value).
+    pub(crate) fn make_runtime_iter_value_v(
+        &self,
+        raw: Value,
+        elem_vir: VirTypeId,
+    ) -> super::types::CompiledValue {
+        let runtime_iter_vir = self
+            .vir_query_lookup_runtime_iterator_v(elem_vir)
+            .or_else(|| self.vir_query_lookup_runtime_iterator_v(VirTypeId::I64))
+            .expect("RuntimeIterator<i64> must always be pre-interned");
+        super::types::CompiledValue::owned(raw, types::I64, runtime_iter_vir)
+    }
+
     /// Track an owned iterator in the current RC scope for cleanup.
     pub(crate) fn track_iter_in_rc_scope(&mut self, iter: &super::types::CompiledValue) {
-        // For RC bookkeeping in iterator contexts, bridge via sema_type_id
-        // for the needs_cleanup check — rc_state_v can disagree for iterator types.
-        // register_rc_local takes VirTypeId (the stored type_id is dead_code;
-        // is_interface/is_unknown are computed from the VirTypeId at registration).
-        let iter_sema_ty = self.sema_type_id(iter.type_id);
-        if iter.is_owned() && self.rc_state(iter_sema_ty).needs_cleanup() {
-            let tracked_var = self.builder.declare_var(self.cranelift_type(iter_sema_ty));
+        if iter.is_owned() && self.rc_state_v(iter.type_id).needs_cleanup() {
+            let tracked_var = self
+                .builder
+                .declare_var(self.cranelift_type_v(iter.type_id));
             self.builder.def_var(tracked_var, iter.value);
             let drop_flag = self.register_rc_local(tracked_var, iter.type_id);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
@@ -489,6 +518,7 @@ impl Cg<'_, '_, '_> {
 
     /// Wrap an interface value via `InterfaceIter`, consuming the old value and
     /// returning a `RuntimeIterator` `CompiledValue`.
+    #[allow(dead_code)]
     pub(crate) fn wrap_interface_iter(
         &mut self,
         mut iface: super::types::CompiledValue,
@@ -499,7 +529,19 @@ impl Cg<'_, '_, '_> {
         Ok(self.make_runtime_iter_value(wrapped, elem_type_id))
     }
 
+    /// VirTypeId-native variant of [`wrap_interface_iter`](Self::wrap_interface_iter).
+    pub(crate) fn wrap_interface_iter_v(
+        &mut self,
+        mut iface: super::types::CompiledValue,
+        elem_vir: VirTypeId,
+    ) -> CodegenResult<super::types::CompiledValue> {
+        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iface.value])?;
+        self.consume_rc_value(&mut iface)?;
+        Ok(self.make_runtime_iter_value_v(wrapped, elem_vir))
+    }
+
     /// Convert a raw i64 value from iter_next to the element's Cranelift type.
+    #[allow(dead_code)]
     pub(crate) fn convert_iter_elem(
         &mut self,
         raw_val: Value,
@@ -527,11 +569,38 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// VirTypeId-native variant of [`convert_iter_elem`](Self::convert_iter_elem).
+    pub(crate) fn convert_iter_elem_v(
+        &mut self,
+        raw_val: Value,
+        elem_vir: VirTypeId,
+        elem_cr_type: Type,
+    ) -> CodegenResult<Value> {
+        if let Some(wide) = self.vir_query_wide_type_v(elem_vir) {
+            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
+            Ok(wide.reinterpret_i128(self.builder, wide_bits))
+        } else if elem_cr_type == types::F64 {
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F64, MemFlags::new(), raw_val))
+        } else if elem_cr_type == types::F32 {
+            let i32_val = self.builder.ins().ireduce(types::I32, raw_val);
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F32, MemFlags::new(), i32_val))
+        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            Ok(self.builder.ins().ireduce(elem_cr_type, raw_val))
+        } else {
+            Ok(raw_val)
+        }
+    }
+
     /// Call the `.iter()` method on an Iterable value, returning the Iterator<T> interface.
     pub(crate) fn call_iterable_iter_method(
         &mut self,
         iterable: &super::types::CompiledValue,
-        _elem_type_id: TypeId,
     ) -> CodegenResult<super::types::CompiledValue> {
         let type_def_id = self
             .vir_query_unwrap_nominal_v(iterable.type_id)
@@ -566,6 +635,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// Handles union storage (inline/heap), wide types (i128), narrow
     /// integers, and float reinterpretation.
+    #[allow(dead_code)]
     pub(crate) fn decode_array_elem(
         &mut self,
         elem_val: Value,
@@ -573,7 +643,23 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
         union_storage: Option<vole_sema::UnionStorageKind>,
     ) -> CodegenResult<Value> {
-        if elem_type_id.is_unknown() {
+        self.decode_array_elem_v(
+            elem_val,
+            elem_ptr,
+            self.vir_lookup(elem_type_id),
+            union_storage,
+        )
+    }
+
+    /// VirTypeId-native variant of [`decode_array_elem`](Self::decode_array_elem).
+    pub(crate) fn decode_array_elem_v(
+        &mut self,
+        elem_val: Value,
+        elem_ptr: Value,
+        elem_vir: VirTypeId,
+        union_storage: Option<vole_sema::UnionStorageKind>,
+    ) -> CodegenResult<Value> {
+        if self.vir_query_is_unknown_v(elem_vir) {
             let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
             let elem_tag =
                 self.builder
@@ -593,8 +679,8 @@ impl Cg<'_, '_, '_> {
                 .select(is_unknown_heap, elem_val, elem_ptr));
         }
 
-        let elem_cr_type = self.cranelift_type(elem_type_id);
-        let elem_wide = self.vir_query_wide_type(elem_type_id);
+        let elem_cr_type = self.cranelift_type_v(elem_vir);
+        let elem_wide = self.vir_query_wide_type_v(elem_vir);
         if let Some(storage) = union_storage {
             use vole_identity::UnionStorageKind;
             match storage {
@@ -606,11 +692,11 @@ impl Cg<'_, '_, '_> {
                             .ins()
                             .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
                     Ok(self
-                        .decode_dynamic_array_union_element(elem_tag, elem_val, elem_type_id)
+                        .decode_dynamic_array_union_element_v(elem_tag, elem_val, elem_vir)
                         .value)
                 }
                 UnionStorageKind::Heap => {
-                    Ok(self.copy_union_heap_to_stack(elem_val, elem_type_id).value)
+                    Ok(self.copy_union_heap_to_stack_v(elem_val, elem_vir).value)
                 }
             }
         } else if let Some(wide) = elem_wide {

@@ -25,6 +25,13 @@ impl Cg<'_, '_, '_> {
     /// Compute total byte size of a struct type (None if type is not a struct).
     pub(crate) fn struct_total_byte_size(&self, type_id: TypeId) -> Option<u32> {
         let vir_ty = self.vir_lookup(type_id);
+        self.struct_total_byte_size_v(vir_ty)
+    }
+
+    /// VirTypeId-native variant of [`struct_total_byte_size`].
+    ///
+    /// Returns None if `vir_ty` is not a struct.
+    pub(crate) fn struct_total_byte_size_v(&self, vir_ty: VirTypeId) -> Option<u32> {
         crate::types::vir_struct_helpers::vir_struct_total_byte_size(
             vir_ty,
             self.vir_type_table(),

@@ -344,8 +344,17 @@ impl Cg<'_, '_, '_> {
         expr: &VirExpr,
         expected_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let expected_vir = self.to_vir_type(expected_type_id);
-        if (self.vir_query_is_array(expected_type_id)
+        self.compile_vir_expr_with_expected_type_v(expr, self.to_vir_type(expected_type_id))
+    }
+
+    /// VirTypeId-native variant of
+    /// [`compile_vir_expr_with_expected_type`](Self::compile_vir_expr_with_expected_type).
+    pub(crate) fn compile_vir_expr_with_expected_type_v(
+        &mut self,
+        expr: &VirExpr,
+        expected_vir: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        if (self.vir_query_is_array_v(expected_vir)
             || self.vir_query_unwrap_tuple_v(expected_vir).is_some()
             || self.vir_query_unwrap_fixed_array_v(expected_vir).is_some())
             && let VirExpr::ArrayLiteral { elements, .. } = expr

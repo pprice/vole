@@ -706,6 +706,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get the field byte size for a type via VirTypeTable.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_field_byte_size(&self, type_id: TypeId) -> u32 {
         self.vir_query_field_byte_size_v(self.vir_lookup(type_id))
@@ -1080,6 +1081,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_type_table().lookup_array_sema(elem)
     }
 
+    /// Look up an existing array type by element `VirTypeId` via VirTypeTable.
+    #[inline]
+    pub fn vir_query_lookup_array_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
+        self.vir_type_table().lookup_array_v(elem)
+    }
+
     /// Look up an existing union type by variant `TypeId`s via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
@@ -1109,6 +1116,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_lookup_runtime_iterator(&self, elem: TypeId) -> Option<TypeId> {
         self.vir_type_table().lookup_runtime_iterator_sema(elem)
+    }
+
+    /// Look up an existing runtime iterator type by element `VirTypeId` via VirTypeTable.
+    #[inline]
+    pub fn vir_query_lookup_runtime_iterator_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
+        self.vir_type_table().lookup_runtime_iterator_v(elem)
     }
 
     /// Substitute type parameters in a type, panicking on failure.
@@ -1190,6 +1203,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<TypeId> {
         self.vir_type_table()
             .lookup_interface_sema(type_def_id, &type_args)
+    }
+
+    /// Look up an existing interface type by `TypeDefId` and VIR type arguments
+    /// via VirTypeTable.
+    #[inline]
+    pub fn vir_query_lookup_interface_v(
+        &self,
+        type_def_id: vole_identity::TypeDefId,
+        type_args: Vec<VirTypeId>,
+    ) -> Option<VirTypeId> {
+        self.vir_type_table()
+            .lookup_interface_v(type_def_id, type_args)
     }
 
     /// Access the pre-interned primitive types.
@@ -1308,6 +1333,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_lookup_fixed_array(&self, element: TypeId, size: usize) -> Option<TypeId> {
         self.vir_type_table().lookup_fixed_array_sema(element, size)
+    }
+
+    /// Look up an existing fixed-array type by element `VirTypeId` and size
+    /// via VirTypeTable.
+    #[inline]
+    pub fn vir_query_lookup_fixed_array_v(
+        &self,
+        element: VirTypeId,
+        size: usize,
+    ) -> Option<VirTypeId> {
+        self.vir_type_table()
+            .lookup_fixed_array_v(element, size as u32)
     }
 
     /// Unwrap a module type, returning the module ID and exported (name, type) pairs.
@@ -1840,6 +1877,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok((tag_val, payload_bits, value))
     }
 
+    /// VirTypeId-native variant of
+    /// [`prepare_dynamic_array_store_with_hint`](Self::prepare_dynamic_array_store_with_hint).
+    ///
+    /// Bridges to the TypeId variant via `sema_type_id`.
+    pub fn prepare_dynamic_array_store_with_hint_v(
+        &mut self,
+        value: CompiledValue,
+        elem_vir: VirTypeId,
+        union_storage_hint: Option<vole_sema::UnionStorageKind>,
+    ) -> CodegenResult<(Value, Value, CompiledValue)> {
+        let elem_sema = self.sema_type_id(elem_vir);
+        self.prepare_dynamic_array_store_with_hint(value, elem_sema, union_storage_hint)
+    }
+
     /// Convert a value to dynamic array storage representation, with an
     /// optional sema-provided union storage hint.
     pub fn prepare_dynamic_array_store_with_hint(
@@ -1961,15 +2012,27 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         union_type_id: TypeId,
     ) -> CompiledValue {
         let resolved_union_id = self.try_substitute_type(union_type_id);
-        if !self.union_array_prefers_inline_storage(resolved_union_id) {
-            return self.copy_union_heap_to_stack(raw_value, resolved_union_id);
+        let resolved_vir = self.vir_lookup(resolved_union_id);
+        self.decode_dynamic_array_union_element_v(raw_tag, raw_value, resolved_vir)
+    }
+
+    /// VirTypeId-native variant of
+    /// [`decode_dynamic_array_union_element`](Self::decode_dynamic_array_union_element).
+    pub fn decode_dynamic_array_union_element_v(
+        &mut self,
+        raw_tag: Value,
+        raw_value: Value,
+        union_vir_ty: VirTypeId,
+    ) -> CompiledValue {
+        if !self.union_array_prefers_inline_storage_v(union_vir_ty) {
+            return self.copy_union_heap_to_stack_v(raw_value, union_vir_ty);
         }
 
         let vir_variants: Vec<VirTypeId> = self
-            .vir_query_unwrap_union(resolved_union_id)
+            .vir_query_unwrap_union_v(union_vir_ty)
             .expect("INTERNAL: expected union type for array decode");
 
-        let union_size = self.type_size(resolved_union_id);
+        let union_size = self.type_size_v(union_vir_ty);
         let slot = self.alloc_stack(union_size);
         let variant_idx = self.array_tag_to_union_variant_index_v(raw_tag, &vir_variants);
         self.builder.ins().stack_store(variant_idx, slot, 0);
@@ -1980,7 +2043,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        let mut cv = CompiledValue::new(ptr, ptr_type, self.vir_lookup(resolved_union_id));
+        let mut cv = CompiledValue::new(ptr, ptr_type, union_vir_ty);
         cv.mark_borrowed();
         cv
     }

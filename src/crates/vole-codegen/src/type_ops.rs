@@ -139,6 +139,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Compute the memory layout for a tuple type.
     ///
     /// Returns (total_size_bytes, per_element_byte_offsets).
+    #[allow(dead_code)]
     pub fn tuple_layout(&self, elem_type_ids: &[TypeId]) -> (u32, Vec<i32>) {
         let vir_elems: Vec<VirTypeId> = elem_type_ids
             .iter()

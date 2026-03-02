@@ -442,7 +442,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         heap_ptr: Value,
         union_type_id: TypeId,
     ) -> CompiledValue {
-        let union_size = self.type_size(union_type_id);
+        self.copy_union_heap_to_stack_v(heap_ptr, self.vir_lookup(union_type_id))
+    }
+
+    /// VirTypeId-native variant of [`copy_union_heap_to_stack`](Self::copy_union_heap_to_stack).
+    pub fn copy_union_heap_to_stack_v(
+        &mut self,
+        heap_ptr: Value,
+        union_vir_ty: VirTypeId,
+    ) -> CompiledValue {
+        let union_size = self.type_size_v(union_vir_ty);
         let slot = self.alloc_stack(union_size);
         let tag = self
             .builder
@@ -460,7 +469,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        let mut cv = self.compiled_with_ty(ptr, ptr_type, union_type_id);
+        let mut cv = CompiledValue::new(ptr, ptr_type, union_vir_ty);
         cv.mark_borrowed();
         cv
     }
