@@ -366,13 +366,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(&name, &vir_ty)| {
                 let type_id = table
                     .lookup_vir_type_id(vir_ty)
-                    .or_else(|| {
-                        // For reserved/compat IDs, direct index mapping is safe.
-                        Some(crate::types::vir_conversions::vir_to_sema_type_id_lossy(
-                            vir_ty,
-                        ))
-                    })
-                    .unwrap_or(TypeId::UNKNOWN);
+                    .unwrap_or_else(|| vir_ty.to_type_id_lossy());
                 (name, type_id)
             })
             .collect();
@@ -1128,7 +1122,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Substitute type parameters in a type, panicking on failure.
     ///
-    /// Uses VirTypeTable exclusively.
+    /// Tries VirTypeTable first, falls back to sema TypeArena for compound
+    /// types not yet interned in VIR.
     #[allow(dead_code)]
     #[track_caller]
     #[inline]
@@ -1219,18 +1214,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .lookup_interface_v(type_def_id, type_args)
     }
 
-    /// Access the pre-interned primitive types.
-    ///
-    /// Primitive `TypeId`s are compile-time constants — no arena query needed.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_primitives(&self) -> vole_sema::type_arena::PrimitiveTypes {
-        vole_sema::type_arena::PrimitiveTypes::CONST
-    }
+    // vir_query_primitives() deleted — use TypeId constants directly
+    // (e.g. TypeId::STRING, TypeId::I64)
 
     /// Check if a `VirTypeId` is a class type via VirTypeTable.
     #[allow(dead_code)]
-    #[inline]
     pub fn vir_query_is_class_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_class(vir_ty, self.vir_type_table())
     }
@@ -1320,12 +1308,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|&p| {
                 table
                     .lookup_vir_type_id(p)
-                    .unwrap_or_else(|| crate::types::vir_conversions::vir_to_sema_type_id_lossy(p))
+                    .unwrap_or_else(|| p.to_type_id_lossy())
             })
             .collect();
         let ret = table
             .lookup_vir_type_id(vir_ret)
-            .unwrap_or_else(|| crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ret));
+            .unwrap_or_else(|| vir_ret.to_type_id_lossy());
         Some((params, ret))
     }
 
@@ -1450,7 +1438,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let type_id = self
             .vir_type_table()
             .lookup_vir_type_id(vir_ty)
-            .unwrap_or_else(|| crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty));
+            .unwrap_or_else(|| vir_ty.to_type_id_lossy());
         crate::structs::helpers::get_field_slot_and_type_id_cg(type_id, field_name, self)
     }
 
@@ -1468,7 +1456,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .vir_type_table()
             .lookup_vir_type_id(vir_ty)
             .or_else(|| {
-                let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
+                let lossy = vir_ty.to_type_id_lossy();
                 if lossy != TypeId::UNKNOWN {
                     Some(lossy)
                 } else {
@@ -1882,14 +1870,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// VirTypeId-native variant of
     /// [`prepare_dynamic_array_store_with_hint`](Self::prepare_dynamic_array_store_with_hint).
     ///
-    /// Bridges to the TypeId variant via `sema_type_id`.
+    /// Bridges to the TypeId variant via VirTypeTable reverse lookup.
     pub fn prepare_dynamic_array_store_with_hint_v(
         &mut self,
         value: CompiledValue,
         elem_vir: VirTypeId,
         union_storage_hint: Option<vole_sema::UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
-        let elem_sema = self.sema_type_id(elem_vir);
+        let table = &self.env.analyzed.vir_program().type_table;
+        let elem_sema = table
+            .lookup_vir_type_id(elem_vir)
+            .unwrap_or_else(|| elem_vir.to_type_id_lossy());
         self.prepare_dynamic_array_store_with_hint(value, elem_sema, union_storage_hint)
     }
 

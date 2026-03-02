@@ -9,7 +9,7 @@ use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{NameId, VirTypeId};
+use vole_identity::{NameId, TypeId, VirTypeId};
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use vole_vir::func::VirBody;
@@ -215,7 +215,7 @@ impl Compiler<'_> {
         // matching the order used during compilation in compile_all_tests.
         if !self.skip_tests {
             let num_tests = self.analyzed.vir_program().tests.len();
-            let i64_type_id = self.vir_query_primitives().i64;
+            let i64_type_id = TypeId::I64;
             for test_index in 0..num_tests {
                 let func_key = self.test_function_key(test_index);
                 let func_name = self.test_display_name(func_key);

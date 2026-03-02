@@ -63,42 +63,33 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let variants: Vec<TypeId> = self
-            .vir_query_unwrap_union(union_type_id)
-            .ok_or_else(|| {
-                CodegenError::type_mismatch("union construction", "union type", "non-union")
-            })?
-            .iter()
-            .map(|&v| self.sema_type_id(v))
-            .collect();
+        let union_vir = self.vir_lookup_or_compat(union_type_id);
+        let vir_variants = self.vir_query_unwrap_union_v(union_vir).ok_or_else(|| {
+            CodegenError::type_mismatch("union construction", "union type", "non-union")
+        })?;
 
         // If the value is already the same union type, just return it
-        if value.type_id == self.to_vir_type(union_type_id) {
+        if value.type_id == union_vir {
             return Ok(value);
         }
 
-        let (tag, actual_value, actual_type_id) =
-            self.find_union_variant_tag(&value, union_type_id, &variants)?;
+        let (tag, actual_value, actual_vir) =
+            self.find_union_variant_tag_with_hint_v(&value, union_vir, &vir_variants, None)?;
 
-        // Get heap_alloc function ref
         let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
 
-        // Allocate union storage on the heap
         let ptr_type = self.ptr_type();
-        let union_size = self.type_size(union_type_id);
+        let union_size = self.type_size_v(union_vir);
         let size_val = self.iconst_cached(ptr_type, union_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
 
-        // Store tag at offset 0
         let tag_val = self.iconst_cached(types::I8, tag as i64);
         self.builder
             .ins()
             .store(MemFlags::new(), tag_val, heap_ptr, 0);
 
-        // Store is_rc flag at offset 1: 1 if the variant is RC-managed, 0 otherwise.
-        // This flag is used by union_heap_cleanup to know whether to rc_dec the payload.
-        let is_rc = self.rc_state(actual_type_id).needs_cleanup();
+        let is_rc = self.rc_state_v(actual_vir).needs_cleanup();
         let is_rc_val = self.iconst_cached(types::I8, is_rc as i64);
         self.builder.ins().store(
             MemFlags::new(),
@@ -107,8 +98,7 @@ impl Cg<'_, '_, '_> {
             union_layout::IS_RC_OFFSET,
         );
 
-        // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
-        if !self.vir_query_is_sentinel(actual_type_id) {
+        if !self.vir_query_is_sentinel_v(actual_vir) {
             self.builder.ins().store(
                 MemFlags::new(),
                 actual_value,

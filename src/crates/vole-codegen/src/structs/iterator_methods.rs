@@ -432,8 +432,10 @@ impl Cg<'_, '_, '_> {
             && type_def_id == iterator_type_id
             && let Some(&elem_vir) = vir_type_args.first()
         {
-            // Convert element VirTypeId back to sema TypeId
-            let elem_type_id = self.sema_type_id(elem_vir);
+            let table = self.vir_type_table();
+            let elem_type_id = table
+                .lookup_vir_type_id(elem_vir)
+                .unwrap_or_else(|| elem_vir.to_type_id_lossy());
             // Look up existing RuntimeIterator type if sema created one.
             // If not found, this is a user-defined Iterator (e.g., pure Vole
             // MapKeyIterator/SetIterator) — keep the original Interface type

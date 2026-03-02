@@ -9,8 +9,9 @@ use vole_frontend::{Interner, Program, Symbol};
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId, VirTypeId,
 };
+use vole_sema::AnalysisOutput;
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
-use vole_sema::{AnalysisOutput, TypeArena};
+use vole_sema::type_arena::TypeArena;
 use vole_vir::types::VirType;
 use vole_vir::{VirEntityMetadata, VirFunction, VirProgram};
 
@@ -18,8 +19,6 @@ use vole_vir::{VirEntityMetadata, VirFunction, VirProgram};
 pub struct AnalyzedProgram {
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
     tests_virtual_modules: FxHashMap<Span, ModuleId>,
-    /// Type arena (Rc-shared, immutable during codegen).
-    types: Rc<TypeArena>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
     module_id: ModuleId,
     /// Module paths that had sema errors. Codegen should skip compiling
@@ -30,6 +29,10 @@ pub struct AnalyzedProgram {
     /// This is the single entry point for all VIR data produced during lowering.
     /// Codegen accesses VIR through this struct rather than individual fields.
     vir_program: VirProgram,
+    /// Sema type arena — retained as a substitution fallback for compound types
+    /// that exist in the arena but were not interned in the VirTypeTable.
+    /// Will be removed once VirTypeTable supports intern-on-substitute.
+    types: Rc<TypeArena>,
 }
 
 /// Codegen-local external binding payload from implement-registry lookups.
@@ -119,11 +122,20 @@ impl AnalyzedProgram {
         vir_program.name_table = Rc::clone(&db.names);
         Self {
             tests_virtual_modules,
-            types: db.types,
             module_id,
             modules_with_errors,
             vir_program,
+            types: Rc::clone(&db.types),
         }
+    }
+
+    /// Get read-only access to the sema type arena (substitution fallback).
+    ///
+    /// Used only by `vir_query_lookup_substitute` / `vir_query_expect_substitute`
+    /// when the VirTypeTable cannot resolve a substituted compound type.
+    /// Will be removed once VirTypeTable supports intern-on-substitute.
+    pub(crate) fn type_arena(&self) -> &TypeArena {
+        &self.types
     }
 
     /// Get read-only access to the name table.
@@ -167,11 +179,6 @@ impl AnalyzedProgram {
     /// Clone the name table Rc for APIs that need shared ownership.
     pub(crate) fn name_table_rc(&self) -> Rc<NameTable> {
         self.vir_program.name_table_rc()
-    }
-
-    /// Get read-only access to the type arena
-    pub(crate) fn type_arena(&self) -> &TypeArena {
-        &self.types
     }
 
     /// Resolve the EntityRegistry NameId used for all array implement dispatch.
@@ -673,7 +680,7 @@ impl AnalyzedProgram {
             }
             _ => {
                 // Primitives, Range, Handle: try the pre-computed map keyed by sema TypeId.
-                let sema_id = crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
+                let sema_id = vir_ty.to_type_id_lossy();
                 entity_metadata.impl_type_name(sema_id)
             }
         }

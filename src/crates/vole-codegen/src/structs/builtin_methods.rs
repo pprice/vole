@@ -49,7 +49,6 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Option<CompiledValue>> {
         // Array methods
         if let Some(elem_vir_type_id) = self.vir_query_unwrap_array_v(obj.type_id) {
-            let elem_type_id = self.sema_type_id(elem_vir_type_id);
             return match method_name {
                 "length" => {
                     let result = self.call_compiler_intrinsic_key_with_line(
@@ -62,17 +61,16 @@ impl Cg<'_, '_, '_> {
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeKey::ArrayIter, &[obj.value])?;
-                    // Use sema's pre-computed RuntimeIterator type, or look it up from
-                    // the element type (needed for monomorphized generic functions where
-                    // sema resolution is skipped).
                     let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                        self.vir_query_lookup_runtime_iterator(elem_type_id).expect(
+                        let table = self.vir_type_table();
+                        let elem_sema = table
+                            .lookup_vir_type_id(elem_vir_type_id)
+                            .unwrap_or_else(|| elem_vir_type_id.to_type_id_lossy());
+                        self.vir_query_lookup_runtime_iterator(elem_sema).expect(
                             "INTERNAL: array iterator: RuntimeIterator type not pre-created",
                         )
                     });
-                    // Set elem_tag on the array iterator so pipeline operations
-                    // can properly manage RC values
-                    let tag = self.vir_query_unknown_type_tag(elem_type_id);
+                    let tag = self.vir_query_unknown_type_tag_v(elem_vir_type_id);
                     if tag != 0 {
                         let tag_val = self.iconst_cached(types::I64, tag as i64);
                         self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
@@ -174,11 +172,9 @@ impl Cg<'_, '_, '_> {
         // Compile the argument
         let value = self.compile_arg_from_source(arg_source, 0)?;
 
-        let elem_type = self
-            .vir_query_unwrap_array_v(arr_obj.type_id)
-            .map(|v| self.sema_type_id(v));
-        let (tag_val, value_bits, _value) = if let Some(elem_id) = elem_type {
-            self.prepare_dynamic_array_store(value, elem_id)?
+        let elem_vir = self.vir_query_unwrap_array_v(arr_obj.type_id);
+        let (tag_val, value_bits, _value) = if let Some(elem_vir) = elem_vir {
+            self.prepare_dynamic_array_store_with_hint_v(value, elem_vir, None)?
         } else {
             self.prepare_dynamic_array_store_untyped(value)?
         };

@@ -91,8 +91,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
                         vir_table
                             .lookup_vir_type_id(a)
                             .or_else(|| {
-                                let lossy =
-                                    crate::types::vir_conversions::vir_to_sema_type_id_lossy(a);
+                                let lossy = a.to_type_id_lossy();
                                 (lossy != TypeId::UNKNOWN).then_some(lossy)
                             })
                             .unwrap_or(TypeId::UNKNOWN)

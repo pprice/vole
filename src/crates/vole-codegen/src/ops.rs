@@ -8,7 +8,7 @@ use cranelift_codegen::ir::{BlockArg, Function, InstructionData};
 use crate::RuntimeKey;
 use crate::context::ExternalMethodRef;
 use vole_frontend::BinaryOp;
-use vole_identity::VirTypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_vir::numeric_model::numeric_result_type_v;
 
 use super::context::Cg;
@@ -163,7 +163,7 @@ impl Cg<'_, '_, '_> {
         // Check if it's an external (native) method
         if let Some(ref external_info) = method_impl.external_info {
             // Call the external function directly
-            let string_type_id = self.vir_query_primitives().string;
+            let string_type_id = TypeId::STRING;
             let ext = ExternalMethodRef::from(*external_info);
             let result = self.call_external_id(&ext, &[val.value], string_type_id)?;
             return Ok(result.value);

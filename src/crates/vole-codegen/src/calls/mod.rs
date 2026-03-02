@@ -287,9 +287,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
 
         if let Some(declared_vir_ty) = global_vir_ty {
-            let declared_type_id = self.sema_type_id(declared_vir_ty);
             // If declared as functional interface, call via vtable dispatch
-            let iface_info = self.interface_type_def_id(declared_type_id);
+            let iface_info = self.interface_type_def_id_v(declared_vir_ty);
             if let Some(type_def_id) = iface_info
                 && let Some(method_id) = self.analyzed().is_functional_interface(type_def_id)
             {
@@ -297,7 +296,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let func_type_id = method.signature_id;
                 let method_name_id = method.name_id;
                 // Box the lambda value to create the interface representation
-                let boxed = self.box_interface_value(lambda_val, declared_type_id)?;
+                let boxed = self.box_interface_value_v(lambda_val, declared_vir_ty)?;
                 let result = self.interface_dispatch_call_args_by_type_def_id(
                     &boxed,
                     arg_source,

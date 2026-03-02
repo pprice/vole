@@ -95,24 +95,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_query_type_to_cranelift_v(vir_ty)
     }
 
-    /// Convert a `VirTypeId` to sema `TypeId` without substitution.
-    ///
-    /// Boundary helper for codegen call-sites that still need a sema `TypeId`
-    /// (e.g. function-call signatures, sema-based struct layout, interface
-    /// boxing).  New code should prefer VirTypeId-native APIs (`_v` variants).
-    ///
-    /// Uses the VirTypeTable reverse mapping — no arena access.
-    #[inline]
-    pub fn sema_type_id(&self, vir_ty: VirTypeId) -> TypeId {
-        let lossy = super::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
-        if lossy != TypeId::UNKNOWN || vir_ty == VirTypeId::UNKNOWN {
-            return lossy;
-        }
-        self.vir_type_table()
-            .lookup_vir_type_id(vir_ty)
-            .unwrap_or(TypeId::UNKNOWN)
-    }
-
     /// Convert a slice of TypeIds to Cranelift types
     pub fn cranelift_types(&self, type_ids: &[TypeId]) -> Vec<Type> {
         type_ids
@@ -229,15 +211,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
 
-        // Fallback to sema TypeId path (lossy + reverse lookup, no arena)
-        let lossy = super::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
-        let sema_ty = if lossy != TypeId::UNKNOWN || vir_ty == VirTypeId::UNKNOWN {
-            lossy
-        } else {
-            self.vir_type_table()
-                .lookup_vir_type_id(vir_ty)
-                .unwrap_or(TypeId::UNKNOWN)
-        };
+        // Fallback to sema TypeId path (reverse lookup, no arena)
+        let sema_ty = self
+            .vir_type_table()
+            .lookup_vir_type_id(vir_ty)
+            .unwrap_or_else(|| vir_ty.to_type_id_lossy());
         self.find_nil_variant(sema_ty)
     }
 
@@ -251,6 +229,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
+    #[allow(dead_code)]
     pub fn interface_type_def_id(&self, ty: TypeId) -> Option<TypeDefId> {
         self.vir_query_unwrap_interface(ty).map(|(id, _)| id)
     }

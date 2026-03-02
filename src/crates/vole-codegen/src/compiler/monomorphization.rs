@@ -1105,7 +1105,14 @@ impl Compiler<'_> {
                 // (only key construction uses VirTypeId natively).
                 let concrete_subs: FxHashMap<NameId, TypeId> = abstract_type_param_positions
                     .iter()
-                    .map(|&(i, param_name)| (param_name, self.sema_type_id(concrete_type_args[i])))
+                    .map(|&(i, param_name)| {
+                        let vir = concrete_type_args[i];
+                        let type_id = self
+                            .vir_type_table()
+                            .lookup_vir_type_id(vir)
+                            .unwrap_or_else(|| vir.to_type_id_lossy());
+                        (param_name, type_id)
+                    })
                     .collect();
 
                 // Build concrete substitutions for the class method (key_name -> concrete_ty)

@@ -152,32 +152,36 @@ impl Cg<'_, '_, '_> {
     }
 
     fn resolved_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
-        self.sema_type_id(self.try_substitute_type_v(resolved.0.func_type_id()))
+        let v = self.try_substitute_type_v(resolved.0.func_type_id());
+        let table = self.vir_type_table();
+        table
+            .lookup_vir_type_id(v)
+            .unwrap_or_else(|| v.to_type_id_lossy())
     }
 
     fn resolved_return_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
-        self.sema_type_id(self.try_substitute_type_v(resolved.0.return_type_id()))
+        let v = self.try_substitute_type_v(resolved.0.return_type_id());
+        let table = self.vir_type_table();
+        table
+            .lookup_vir_type_id(v)
+            .unwrap_or_else(|| v.to_type_id_lossy())
     }
 
     fn resolved_dispatch_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
         if let Some(method_id) = resolved.method_id() {
             return self.analyzed().method_signature_id(method_id);
         }
-
-        let resolved_signature_id = self.resolved_func_type_id(resolved);
-        if self.signature_has_self_placeholder_param(resolved_signature_id)
-            && let Some(signature_id) = self.resolved_interface_signature_id(resolved)
-        {
-            return signature_id;
-        }
-        resolved_signature_id
+        self.resolved_func_type_id(resolved)
     }
 
     fn resolved_concrete_return_hint(&self, resolved: MethodResolutionRef<'_>) -> Option<TypeId> {
-        resolved
-            .0
-            .concrete_return_hint()
-            .map(|ty| self.sema_type_id(self.try_substitute_type_v(ty)))
+        resolved.0.concrete_return_hint().map(|ty| {
+            let v = self.try_substitute_type_v(ty);
+            let table = self.vir_type_table();
+            table
+                .lookup_vir_type_id(v)
+                .unwrap_or_else(|| v.to_type_id_lossy())
+        })
     }
 
     /// Resolve canonical interface method signature from `(interface, slot)`.
@@ -185,6 +189,7 @@ impl Cg<'_, '_, '_> {
     /// Some VIR-carried interface func_type_ids still reference placeholder-
     /// based signatures; this recovers the canonical signature from the
     /// EntityRegistry method table.
+    #[allow(dead_code)]
     fn resolved_interface_signature_id(&self, resolved: MethodResolutionRef<'_>) -> Option<TypeId> {
         if !resolved.is_interface_method() {
             return None;
@@ -197,15 +202,6 @@ impl Cg<'_, '_, '_> {
             .get(slot)
             .copied()?;
         Some(self.analyzed().method_signature_id(method_id))
-    }
-
-    fn signature_has_self_placeholder_param(&self, signature_id: TypeId) -> bool {
-        // Uses the arena directly to preserve Self placeholder TypeIds that
-        // would be lost in the VIR roundtrip (VIR maps Placeholder -> Unknown).
-        self.analyzed()
-            .type_arena()
-            .unwrap_function(signature_id)
-            .is_some_and(|(params, _, _)| params.iter().any(|&p| self.vir_query_is_self_type(p)))
     }
 
     /// Resolve method parameter types for argument coercion.
@@ -230,13 +226,6 @@ impl Cg<'_, '_, '_> {
         }
 
         let resolved_signature_id = self.resolved_func_type_id(resolved);
-        if self.signature_has_self_placeholder_param(resolved_signature_id)
-            && let Some(signature_id) = self.resolved_interface_signature_id(resolved)
-            && let Some((params, _, _)) = self.analyzed().type_arena().unwrap_function(signature_id)
-        {
-            return Some(params.to_vec());
-        }
-
         if let Some((params, _, _)) = self
             .analyzed()
             .type_arena()
@@ -244,13 +233,21 @@ impl Cg<'_, '_, '_> {
         {
             return Some(params.to_vec());
         }
+
+        // Fall back to VIR type directly
         if let VirType::Function { params, .. } =
             self.vir_type_table().get(resolved.0.func_type_id())
         {
+            let table = self.vir_type_table();
             return Some(
                 params
                     .iter()
-                    .map(|&ty| self.sema_type_id(self.try_substitute_type_v(ty)))
+                    .map(|&ty| {
+                        let v = self.try_substitute_type_v(ty);
+                        table
+                            .lookup_vir_type_id(v)
+                            .unwrap_or_else(|| v.to_type_id_lossy())
+                    })
                     .collect(),
             );
         }
@@ -261,19 +258,15 @@ impl Cg<'_, '_, '_> {
     /// implicit receiver (`self`) parameter. Call sites pass the receiver
     /// separately, so drop that leading slot only when the call shape shows an
     /// extra parameter beyond provided args.
+    /// TEMP(N279-C): VIR resolves SelfType during lowering, so post-VIR
+    /// signatures never contain Self placeholder parameters.  This is now
+    /// a simple passthrough but callers still need the Vec allocation.
     fn normalize_method_param_type_ids_for_call(
         &self,
         param_type_ids: &[TypeId],
-        provided_arg_count: usize,
+        _provided_arg_count: usize,
     ) -> Vec<TypeId> {
-        let has_self_placeholder = param_type_ids
-            .first()
-            .is_some_and(|&first| self.vir_query_is_self_type(first));
-        if has_self_placeholder && param_type_ids.len() >= provided_arg_count.saturating_add(1) {
-            param_type_ids[1..].to_vec()
-        } else {
-            param_type_ids.to_vec()
-        }
+        param_type_ids.to_vec()
     }
 
     /// Resolve method parameter TypeIds to concrete call-site types.
@@ -298,7 +291,15 @@ impl Cg<'_, '_, '_> {
             .vir_query_unwrap_class_v(resolved_receiver_vir)
             .or_else(|| self.vir_query_unwrap_interface_v(resolved_receiver_vir))
             .map(|(def_id, vir_args)| {
-                let args: Vec<TypeId> = vir_args.iter().map(|&v| self.sema_type_id(v)).collect();
+                let table = self.vir_type_table();
+                let args: Vec<TypeId> = vir_args
+                    .iter()
+                    .map(|&v| {
+                        table
+                            .lookup_vir_type_id(v)
+                            .unwrap_or_else(|| v.to_type_id_lossy())
+                    })
+                    .collect();
                 (def_id, args)
             });
 
@@ -320,8 +321,14 @@ impl Cg<'_, '_, '_> {
             .map(|(&param, &arg)| (param, arg))
             .collect();
         if let Some(func_subs) = self.substitutions {
+            let table = self.vir_type_table();
             for (&k, &v) in func_subs {
-                subs.insert(k, self.sema_type_id(v));
+                subs.insert(
+                    k,
+                    table
+                        .lookup_vir_type_id(v)
+                        .unwrap_or_else(|| v.to_type_id_lossy()),
+                );
             }
         }
 
@@ -342,7 +349,10 @@ impl Cg<'_, '_, '_> {
         receiver_vir_type_id: VirTypeId,
         param_type_ids: &[TypeId],
     ) -> Vec<TypeId> {
-        let receiver_type_id = self.sema_type_id(receiver_vir_type_id);
+        let table = self.vir_type_table();
+        let receiver_type_id = table
+            .lookup_vir_type_id(receiver_vir_type_id)
+            .unwrap_or_else(|| receiver_vir_type_id.to_type_id_lossy());
         self.concretize_method_param_type_ids_for_receiver(receiver_type_id, param_type_ids)
     }
 
@@ -391,7 +401,13 @@ impl Cg<'_, '_, '_> {
             return self.static_method_call(StaticMethodCallArgs {
                 type_def_id: *type_def_id,
                 method_id: *method_id,
-                func_type_id: self.sema_type_id(self.try_substitute_type_v(*func_type_id)),
+                func_type_id: {
+                    let v = self.try_substitute_type_v(*func_type_id);
+                    let table = self.vir_type_table();
+                    table
+                        .lookup_vir_type_id(v)
+                        .unwrap_or_else(|| v.to_type_id_lossy())
+                },
                 arg_source: &mc.arg_source(),
                 method_sym: mc_method,
                 expr_id,
@@ -485,10 +501,18 @@ impl Cg<'_, '_, '_> {
         // (not sema annotation) because the Iterator<T> → RuntimeIterator<T>
         // conversion happens in codegen only.
         if let Some(elem_vir_type_id) = self.vir_query_unwrap_runtime_iterator_v(obj.type_id) {
-            let elem_type_id = self.sema_type_id(elem_vir_type_id);
+            let table = self.vir_type_table();
+            let elem_type_id = table
+                .lookup_vir_type_id(elem_vir_type_id)
+                .unwrap_or_else(|| elem_vir_type_id.to_type_id_lossy());
             let return_type_hint = dispatch
                 .substituted_return_type
-                .map(|ty| self.sema_type_id(self.try_substitute_type_v(ty)))
+                .map(|ty| {
+                    let v = self.try_substitute_type_v(ty);
+                    table
+                        .lookup_vir_type_id(v)
+                        .unwrap_or_else(|| v.to_type_id_lossy())
+                })
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &obj,
@@ -505,14 +529,24 @@ impl Cg<'_, '_, '_> {
         // Driven by sema's CoercionKind annotation — no type re-detection needed.
         let iterator_wrap_elem_type = dispatch.receiver_coercion.map(|coercion| match coercion {
             VirMethodReceiverCoercion::IteratorWrap { elem_type, .. } => {
-                self.sema_type_id(self.try_substitute_type_v(elem_type))
+                let v = self.try_substitute_type_v(elem_type);
+                let table = self.vir_type_table();
+                table
+                    .lookup_vir_type_id(v)
+                    .unwrap_or_else(|| v.to_type_id_lossy())
             }
         });
         if let Some(elem_type) = iterator_wrap_elem_type {
             let runtime_iter = self.box_custom_iterator_to_runtime(&obj, elem_type)?;
+            let table = self.vir_type_table();
             let return_type_hint = dispatch
                 .substituted_return_type
-                .map(|ty| self.sema_type_id(self.try_substitute_type_v(ty)))
+                .map(|ty| {
+                    let v = self.try_substitute_type_v(ty);
+                    table
+                        .lookup_vir_type_id(v)
+                        .unwrap_or_else(|| v.to_type_id_lossy())
+                })
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &runtime_iter,
@@ -588,7 +622,13 @@ impl Cg<'_, '_, '_> {
             // Functional interface calls
             let functional_func_type_id =
                 if let VirResolvedMethod::FunctionalInterface { func_type_id, .. } = resolved.0 {
-                    Some(self.sema_type_id(self.try_substitute_type_v(*func_type_id)))
+                    let v = self.try_substitute_type_v(*func_type_id);
+                    let table = self.vir_type_table();
+                    Some(
+                        table
+                            .lookup_vir_type_id(v)
+                            .unwrap_or_else(|| v.to_type_id_lossy()),
+                    )
                 } else {
                     None
                 };
@@ -767,9 +807,13 @@ impl Cg<'_, '_, '_> {
                     // Fallback: check array_iterable_func_keys for Iterable default methods on
                     // arrays and primitives (range, string). Each concrete self-type (e.g. [i64],
                     // range) has its own compiled function keyed by (method_name_id, self_type_id).
+                    let table = self.vir_type_table();
+                    let obj_sema = table
+                        .lookup_vir_type_id(obj.type_id)
+                        .unwrap_or_else(|| obj.type_id.to_type_id_lossy());
                     let key = self
                         .array_iterable_func_keys()
-                        .get(&(method_name_id, self.sema_type_id(obj.type_id)))
+                        .get(&(method_name_id, obj_sema))
                         .copied();
                     if key.is_some() {
                         used_array_iterable_path = true;
@@ -813,7 +857,12 @@ impl Cg<'_, '_, '_> {
                 return Ok(result);
             }
 
-            let resolved_obj_type_id = self.sema_type_id(resolved_obj_vir);
+            let resolved_obj_type_id = {
+                let table = self.vir_type_table();
+                table
+                    .lookup_vir_type_id(resolved_obj_vir)
+                    .unwrap_or_else(|| resolved_obj_vir.to_type_id_lossy())
+            };
             let vir_obj = self.vir_lookup(resolved_obj_type_id);
             let type_def_id = crate::method_resolution::get_type_def_id_from_vir_type_id(
                 vir_obj,
@@ -897,14 +946,14 @@ impl Cg<'_, '_, '_> {
                                     let sema_params: SmallVec<[TypeId; 4]> = params
                                         .iter()
                                         .map(|&p| {
-                                            vir_table.lookup_vir_type_id(p).unwrap_or_else(|| {
-                                                crate::types::vir_conversions::vir_to_sema_type_id_lossy(p)
-                                            })
+                                            vir_table
+                                                .lookup_vir_type_id(p)
+                                                .unwrap_or_else(|| p.to_type_id_lossy())
                                         })
                                         .collect();
-                                    let sema_ret = vir_table.lookup_vir_type_id(ret).unwrap_or_else(|| {
-                                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret)
-                                    });
+                                    let sema_ret = vir_table
+                                        .lookup_vir_type_id(ret)
+                                        .unwrap_or_else(|| ret.to_type_id_lossy());
                                     (Some(sema_params), sema_ret)
                                 })
                                 .unwrap_or((None, TypeId::VOID));
@@ -931,7 +980,13 @@ impl Cg<'_, '_, '_> {
         } else {
             dispatch
                 .substituted_return_type
-                .map(|ty| self.sema_type_id(self.try_substitute_type_v(ty)))
+                .map(|ty| {
+                    let v = self.try_substitute_type_v(ty);
+                    let table = self.vir_type_table();
+                    table
+                        .lookup_vir_type_id(v)
+                        .unwrap_or_else(|| v.to_type_id_lossy())
+                })
                 .unwrap_or(return_type_id)
         };
 

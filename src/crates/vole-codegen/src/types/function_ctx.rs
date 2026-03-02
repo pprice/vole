@@ -71,12 +71,7 @@ impl<'a> FunctionCtx<'a> {
     /// Uses VirTypeTable for structural type walking instead of the arena.
     /// Converts VirTypeId substitutions to TypeId before delegating.
     /// Uses a cache to avoid repeated lookups.
-    pub fn substitute_type_id(
-        &self,
-        ty: TypeId,
-        vir_table: &VirTypeTable,
-        arena: &vole_sema::TypeArena,
-    ) -> TypeId {
+    pub fn substitute_type_id(&self, ty: TypeId, vir_table: &VirTypeTable) -> TypeId {
         if let Some(vir_subs) = self.substitutions {
             // Check cache first
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
@@ -86,9 +81,9 @@ impl<'a> FunctionCtx<'a> {
             let sema_subs: FxHashMap<NameId, TypeId> = vir_subs
                 .iter()
                 .map(|(&name, &vir_ty)| {
-                    let tid = crate::types::vir_conversions::vir_to_sema_type_id(
-                        vir_ty, vir_table, arena,
-                    );
+                    let tid = vir_table
+                        .lookup_vir_type_id(vir_ty)
+                        .unwrap_or_else(|| vir_ty.to_type_id_lossy());
                     (name, tid)
                 })
                 .collect();

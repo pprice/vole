@@ -530,6 +530,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(Some(self.builder.ins().stack_addr(ptr_type, slot, 0)))
     }
 
+    /// VirTypeId variant of [`alloc_sret_ptr`](Self::alloc_sret_ptr).
+    #[allow(dead_code)]
+    pub fn alloc_sret_ptr_v(&mut self, return_vir: VirTypeId) -> CodegenResult<Option<Value>> {
+        if !self.is_sret_struct_return_v(return_vir) {
+            return Ok(None);
+        }
+        let ptr_type = self.ptr_type();
+        let flat_count = self
+            .vir_struct_flat_slot_count(return_vir)
+            .ok_or_else(|| CodegenError::internal("sret call: missing flat slot count"))?;
+        let total_size = (flat_count as u32) * 8;
+        let slot = self.alloc_stack(total_size);
+        Ok(Some(self.builder.ins().stack_addr(ptr_type, slot, 0)))
+    }
+
     /// Emit a return for a small struct (1-2 flat slots) via register passing.
     /// Loads flat slots into registers, pads to 2, and emits the return instruction.
     #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
@@ -662,6 +677,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
         Ok(self.compiled_with_ty(ptr, ptr_type, type_id))
+    }
+
+    /// VirTypeId variant of [`reconstruct_struct_from_regs`](Self::reconstruct_struct_from_regs).
+    #[allow(dead_code)]
+    pub fn reconstruct_struct_from_regs_v(
+        &mut self,
+        values: &[Value],
+        vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let flat_count = self.vir_struct_flat_slot_count(vir_ty).ok_or_else(|| {
+            CodegenError::internal("reconstruct_struct_from_regs_v: expected struct type")
+        })?;
+        let total_size = (flat_count as u32) * 8;
+        let slot = self.alloc_stack(total_size);
+
+        for (i, &val) in values.iter().enumerate().take(flat_count) {
+            let offset = (i as i32) * 8;
+            self.builder.ins().stack_store(val, slot, offset);
+        }
+
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+        Ok(CompiledValue::new(ptr, ptr_type, vir_ty))
     }
 
     /// Copy a struct value to a new stack slot (value semantics).
@@ -814,6 +853,76 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(self.compiled(results[0], return_type_id))
     }
 
+    /// VirTypeId variant of [`call_result`](Self::call_result).
+    #[allow(dead_code)]
+    pub fn call_result_v(
+        &mut self,
+        call: cranelift_codegen::ir::Inst,
+        return_vir: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let results = self.builder.inst_results(call);
+        if results.is_empty() {
+            return Ok(self.void_value());
+        }
+
+        // Check for wide fallible multi-value return (3 results: tag, low, high)
+        if results.len() == 3 && self.vir_query_is_wide_fallible_v(return_vir) {
+            let tag = results[0];
+            let low = results[1];
+            let high = results[2];
+
+            let slot_size = 24u32;
+            let slot = self.alloc_stack(slot_size);
+
+            self.builder.ins().stack_store(tag, slot, 0);
+            let i128_val = super::structs::reconstruct_i128(self.builder, low, high);
+            super::structs::helpers::store_i128_to_stack(
+                self.builder,
+                i128_val,
+                slot,
+                union_layout::PAYLOAD_OFFSET,
+            );
+
+            let ptr_type = self.ptr_type();
+            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+            return Ok(CompiledValue::new(ptr, ptr_type, return_vir));
+        }
+
+        // Check for fallible multi-value return (2 results: tag, payload)
+        if results.len() == 2 && self.vir_query_unwrap_fallible_v(return_vir).is_some() {
+            let tag = results[0];
+            let payload = results[1];
+
+            let slot_size = union_layout::STANDARD_SIZE;
+            let slot = self.alloc_stack(slot_size);
+
+            self.builder.ins().stack_store(tag, slot, 0);
+            self.builder
+                .ins()
+                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+
+            let ptr_type = self.ptr_type();
+            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+            return Ok(CompiledValue::new(ptr, ptr_type, return_vir));
+        }
+
+        // Check for small struct multi-value return (2 results: field0, field1)
+        if results.len() == 2 && self.is_small_struct_return_v(return_vir) {
+            let results_vec: Vec<Value> = results.to_vec();
+            return self.reconstruct_struct_from_regs_v(&results_vec, return_vir);
+        }
+
+        // If the return type is a union, the returned value is a pointer to the callee's stack.
+        if self.vir_query_is_union_v(return_vir) {
+            let src_ptr = results[0];
+            return Ok(self.copy_union_ptr_to_local_v(src_ptr, return_vir));
+        }
+
+        Ok(self.compiled_v(results[0], return_vir))
+    }
+
     /// Copy a union value from a pointer (typically callee's stack) to a local stack slot.
     ///
     /// This prevents the returned union from being clobbered when the callee's
@@ -851,6 +960,43 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
         let mut value = self.compiled(ptr, union_type_id);
         if self.rc_state(union_type_id).union_variants().is_some() {
+            value.rc_lifecycle = RcLifecycle::Owned;
+        }
+        value
+    }
+
+    /// VirTypeId variant of [`copy_union_ptr_to_local`](Self::copy_union_ptr_to_local).
+    #[allow(dead_code)]
+    pub fn copy_union_ptr_to_local_v(
+        &mut self,
+        src_ptr: Value,
+        union_vir: VirTypeId,
+    ) -> CompiledValue {
+        let union_size = self.type_size_v(union_vir);
+        let slot = self.alloc_stack(union_size);
+
+        let tag_and_rc = self
+            .builder
+            .ins()
+            .load(types::I16, MemFlags::new(), src_ptr, 0);
+        self.builder.ins().stack_store(tag_and_rc, slot, 0);
+
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            let payload = self.builder.ins().load(
+                types::I64,
+                MemFlags::new(),
+                src_ptr,
+                union_layout::PAYLOAD_OFFSET,
+            );
+            self.builder
+                .ins()
+                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+        }
+
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        let mut value = self.compiled_v(ptr, union_vir);
+        if self.rc_state_v(union_vir).union_variants().is_some() {
             value.rc_lifecycle = RcLifecycle::Owned;
         }
         value

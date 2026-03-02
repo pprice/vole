@@ -52,15 +52,11 @@ impl Cg<'_, '_, '_> {
                 }
                 LetStorageHint::Union { tag_hint } if !self.vir_query_is_union_v(init.type_id) => {
                     let wrapped = if let Some(hint) = tag_hint {
-                        // Bridge to TypeId for construct_union_from_hint.
-                        let declared_sema = self.sema_type_id(declared_vir);
-                        self.construct_union_from_hint(*init, declared_sema, &hint)?
+                        self.construct_union_from_hint_v(*init, declared_vir, &hint)?
                     } else {
-                        // Bridge to TypeId for construct_union_id_with_hint.
-                        let declared_sema = self.sema_type_id(declared_vir);
-                        self.construct_union_id_with_hint(
+                        self.construct_union_id_with_hint_v(
                             *init,
-                            declared_sema,
+                            declared_vir,
                             sentinel_hint_type_id,
                         )?
                     };
@@ -108,6 +104,7 @@ impl Cg<'_, '_, '_> {
 
     /// Find the union variant tag for a value's type, with integer widening/narrowing fallback.
     /// Returns (tag_index, possibly_coerced_value, actual_type_id).
+    #[allow(dead_code)]
     pub(crate) fn find_union_variant_tag(
         &mut self,
         value: &CompiledValue,
@@ -117,6 +114,138 @@ impl Cg<'_, '_, '_> {
         self.find_union_variant_tag_with_hint(value, union_type_id, variants, None)
     }
 
+    pub(crate) fn find_union_variant_tag_with_hint_v(
+        &mut self,
+        value: &CompiledValue,
+        union_vir: VirTypeId,
+        variants: &[VirTypeId],
+        sentinel_hint_type_id: Option<TypeId>,
+    ) -> CodegenResult<(usize, Value, VirTypeId)> {
+        let resolved_value_vir = self.try_substitute_type_v(value.type_id);
+
+        // Direct type match
+        if let Some(pos) = variants.iter().position(|&v| v == resolved_value_vir) {
+            return Ok((pos, value.value, resolved_value_vir));
+        }
+
+        // Sentinel hint match
+        if let Some(hint_type_id) = sentinel_hint_type_id
+            && self.vir_query_is_sentinel_v(resolved_value_vir)
+        {
+            let hint_vir = self.vir_lookup_or_compat(hint_type_id);
+            if let Some(pos) = variants.iter().position(|&v| v == hint_vir) {
+                return Ok((pos, value.value, hint_vir));
+            }
+        }
+
+        // Try to find a compatible integer type for widening/narrowing
+        let value_is_integer = self.vir_query_is_integer_v(resolved_value_vir);
+
+        let compatible = if value_is_integer {
+            variants
+                .iter()
+                .enumerate()
+                .find(|&(_, v)| self.vir_query_is_integer_v(*v))
+                .map(|(pos, &v)| (pos, v))
+        } else {
+            None
+        };
+
+        match compatible {
+            Some((pos, variant_vir)) => {
+                let target_ty = self.cranelift_type_v(variant_vir);
+                let actual = if target_ty.bytes() < value.ty.bytes() {
+                    self.builder.ins().ireduce(target_ty, value.value)
+                } else if target_ty.bytes() > value.ty.bytes() {
+                    sextend_const(self.builder, target_ty, value.value)
+                } else {
+                    value.value
+                };
+                Ok((pos, actual, variant_vir))
+            }
+            None if self.vir_query_is_sentinel_v(resolved_value_vir) => {
+                let sentinel_variants: Vec<(usize, VirTypeId)> = variants
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, &ty)| self.vir_query_is_sentinel_v(ty).then_some((idx, ty)))
+                    .collect();
+                if sentinel_variants.len() == 1 {
+                    let (pos, ty) = sentinel_variants[0];
+                    Ok((pos, value.value, ty))
+                } else {
+                    let expected = variants
+                        .iter()
+                        .map(|&variant| self.vir_query_display_basic_v(variant))
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    let found = self.vir_query_display_basic_v(resolved_value_vir);
+                    let subs = self
+                        .substitutions
+                        .map(|m| {
+                            m.iter()
+                                .map(|(k, v)| {
+                                    format!(
+                                        "{} ({:?}) -> {}",
+                                        self.name_table().display(*k),
+                                        k,
+                                        self.vir_query_display_basic_v(*v)
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_else(|| "<none>".to_string());
+                    Err(CodegenError::type_mismatch(
+                        "union sentinel variant",
+                        format!("compatible sentinel type ({expected})"),
+                        format!(
+                            "{found} (union={}, substitutions={subs})",
+                            self.vir_query_display_basic_v(union_vir)
+                        ),
+                    ))
+                }
+            }
+            None => {
+                let expected = variants
+                    .iter()
+                    .map(|&variant| self.vir_query_display_basic_v(variant))
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                let found = if let Some(name_id) = self.vir_query_unwrap_type_param_v(value.type_id)
+                {
+                    format!("{} ({:?})", self.name_table().display(name_id), name_id)
+                } else {
+                    self.vir_query_display_basic_v(resolved_value_vir)
+                };
+                let subs = self
+                    .substitutions
+                    .map(|m| {
+                        m.iter()
+                            .map(|(k, v)| {
+                                format!(
+                                    "{} ({:?}) -> {}",
+                                    self.name_table().display(*k),
+                                    k,
+                                    self.vir_query_display_basic_v(*v)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "<none>".to_string());
+                Err(CodegenError::type_mismatch(
+                    "union variant",
+                    format!("compatible type ({expected})"),
+                    format!(
+                        "{found} (union={}, substitutions={subs})",
+                        self.vir_query_display_basic_v(union_vir)
+                    ),
+                ))
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     fn find_union_variant_tag_with_hint(
         &mut self,
         value: &CompiledValue,
@@ -124,7 +253,13 @@ impl Cg<'_, '_, '_> {
         variants: &[TypeId],
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<(usize, Value, TypeId)> {
-        let resolved_value_type_id = self.sema_type_id(self.try_substitute_type_v(value.type_id));
+        let resolved_value_type_id = {
+            let v = self.try_substitute_type_v(value.type_id);
+            let table = self.vir_type_table();
+            table
+                .lookup_vir_type_id(v)
+                .unwrap_or_else(|| v.to_type_id_lossy())
+        };
 
         // Direct type match
         if let Some(pos) = variants.iter().position(|&v| v == resolved_value_type_id) {
@@ -262,14 +397,10 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(union_vir_ty);
-        let union_type_id = if lossy != TypeId::UNKNOWN || union_vir_ty == VirTypeId::UNKNOWN {
-            lossy
-        } else {
-            self.vir_type_table()
-                .lookup_vir_type_id(union_vir_ty)
-                .unwrap_or(TypeId::UNKNOWN)
-        };
+        let table = self.vir_type_table();
+        let union_type_id = table
+            .lookup_vir_type_id(union_vir_ty)
+            .unwrap_or_else(|| union_vir_ty.to_type_id_lossy());
         self.construct_union_id(value, union_type_id)
     }
 
@@ -278,6 +409,60 @@ impl Cg<'_, '_, '_> {
     /// This is the fast path for let-binding union coercion when VIR lowering
     /// has pre-computed the variant tag, RC state, and coercion target.  Skips
     /// the `unwrap_union` + `find_union_variant_tag` arena queries.
+    /// VirTypeId variant of [`construct_union_from_hint`](Self::construct_union_from_hint).
+    fn construct_union_from_hint_v(
+        &mut self,
+        value: CompiledValue,
+        union_vir: VirTypeId,
+        hint: &vole_vir::stmt::UnionTagHint,
+    ) -> CodegenResult<CompiledValue> {
+        let value = if self.vir_query_is_struct_v(value.type_id) {
+            self.copy_struct_to_heap(value)?
+        } else {
+            value
+        };
+
+        let variant_vir_ty = self.try_substitute_type_v(hint.variant_type);
+        let target_ty = self.cranelift_type_v(variant_vir_ty);
+        let actual_value = if target_ty != value.ty && target_ty.is_int() && value.ty.is_int() {
+            if target_ty.bytes() < value.ty.bytes() {
+                self.builder.ins().ireduce(target_ty, value.value)
+            } else {
+                sextend_const(self.builder, target_ty, value.value)
+            }
+        } else {
+            value.value
+        };
+
+        let union_size = self.type_size_v(union_vir);
+        let slot = self.alloc_stack(union_size);
+
+        let tag_val = self.iconst_cached(types::I8, hint.tag as i64);
+        self.builder.ins().stack_store(tag_val, slot, 0);
+
+        let is_rc_val = self.iconst_cached(types::I8, hint.is_rc as i64);
+        self.builder
+            .ins()
+            .stack_store(is_rc_val, slot, union_layout::IS_RC_OFFSET);
+
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            let is_sentinel = self.vir_query_is_sentinel_v(variant_vir_ty);
+            let payload = if is_sentinel {
+                self.iconst_cached(types::I64, 0)
+            } else {
+                actual_value
+            };
+            self.builder
+                .ins()
+                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+        }
+
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        Ok(CompiledValue::new(ptr, ptr_type, union_vir))
+    }
+
+    #[allow(dead_code)]
     fn construct_union_from_hint(
         &mut self,
         value: CompiledValue,
@@ -336,65 +521,51 @@ impl Cg<'_, '_, '_> {
         Ok(self.compiled_with_ty(ptr, ptr_type, union_type_id))
     }
 
-    pub fn construct_union_id_with_hint(
+    /// VirTypeId variant of [`construct_union_id_with_hint`](Self::construct_union_id_with_hint).
+    pub fn construct_union_id_with_hint_v(
         &mut self,
         value: CompiledValue,
-        union_type_id: TypeId,
+        union_vir: VirTypeId,
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
-        let variants: Vec<TypeId> = self
-            .vir_query_unwrap_union(union_type_id)
-            .ok_or_else(|| {
+        let vir_variants: Vec<VirTypeId> =
+            self.vir_query_unwrap_union_v(union_vir).ok_or_else(|| {
                 CodegenError::type_mismatch("union construction", "union type", "non-union")
-            })?
-            .iter()
-            .map(|&v| self.sema_type_id(v))
-            .collect();
+            })?;
 
         // If the value is already the same union type, just return it.
-        // Also check the substituted type, since generic code may produce values
-        // whose raw type_id is e.g. `T | nil` but after substitution matches the
-        // concrete union type `i64 | nil`.
-        let resolved_type_id = self.sema_type_id(self.try_substitute_type_v(value.type_id));
-        if self.sema_type_id(value.type_id) == union_type_id || resolved_type_id == union_type_id {
+        let resolved_vir = self.try_substitute_type_v(value.type_id);
+        if value.type_id == union_vir || resolved_vir == union_vir {
             return Ok(value);
         }
 
-        // If the value is a struct, box it first (auto-boxing for union storage)
         let value = if self.vir_query_is_struct_v(value.type_id) {
             self.copy_struct_to_heap(value)?
         } else {
             value
         };
 
-        // Find the position of value's type in variants
-        let (tag, actual_value, actual_type_id) = self.find_union_variant_tag_with_hint(
+        let (tag, actual_value, actual_vir) = self.find_union_variant_tag_with_hint_v(
             &value,
-            union_type_id,
-            &variants,
+            union_vir,
+            &vir_variants,
             sentinel_hint_type_id,
         )?;
 
-        let union_size = self.type_size(union_type_id);
+        let union_size = self.type_size_v(union_vir);
         let slot = self.alloc_stack(union_size);
 
         let tag_val = self.iconst_cached(types::I8, tag as i64);
         self.builder.ins().stack_store(tag_val, slot, 0);
 
-        // Store is_rc flag at offset 1 (matches heap union layout used by
-        // construct_union_heap_id). copy_union_to_heap reads this byte to
-        // decide whether to rc_inc the payload when promoting to the heap.
-        let is_rc = self.rc_state(actual_type_id).needs_cleanup();
+        let is_rc = self.rc_state_v(actual_vir).needs_cleanup();
         let is_rc_val = self.iconst_cached(types::I8, is_rc as i64);
         self.builder
             .ins()
             .stack_store(is_rc_val, slot, union_layout::IS_RC_OFFSET);
 
         if union_size > union_layout::TAG_ONLY_SIZE {
-            // Initialize payload bytes for payload-carrying unions. Sentinel variants
-            // don't carry data, but zeroing avoids undefined behavior when generic
-            // cleanup/copy paths read the payload word.
-            let payload = if self.vir_query_is_sentinel(actual_type_id) {
+            let payload = if self.vir_query_is_sentinel_v(actual_vir) {
                 self.iconst_cached(types::I64, 0)
             } else {
                 actual_value
@@ -406,7 +577,21 @@ impl Cg<'_, '_, '_> {
 
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(self.compiled_with_ty(ptr, ptr_type, union_type_id))
+        Ok(CompiledValue::new(ptr, ptr_type, union_vir))
+    }
+
+    pub fn construct_union_id_with_hint(
+        &mut self,
+        value: CompiledValue,
+        union_type_id: TypeId,
+        sentinel_hint_type_id: Option<TypeId>,
+    ) -> CodegenResult<CompiledValue> {
+        // Bridge: convert union_type_id to VirTypeId and delegate to _v variant.
+        let union_vir = self.vir_lookup_or_compat(union_type_id);
+        let result =
+            self.construct_union_id_with_hint_v(value, union_vir, sentinel_hint_type_id)?;
+        // Re-wrap with original TypeId to preserve caller semantics.
+        Ok(self.compiled_with_ty(result.value, result.ty, union_type_id))
     }
 
     /// VirTypeId variant: resolve the TypeDefId for the named error type from a
@@ -674,16 +859,12 @@ impl Cg<'_, '_, '_> {
         if it.next().is_some() {
             None
         } else {
-            let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(first);
-            if lossy != TypeId::UNKNOWN || first == VirTypeId::UNKNOWN {
-                Some(lossy)
-            } else {
-                Some(
-                    self.vir_type_table()
-                        .lookup_vir_type_id(first)
-                        .unwrap_or(TypeId::UNKNOWN),
-                )
-            }
+            let table = self.vir_type_table();
+            Some(
+                table
+                    .lookup_vir_type_id(first)
+                    .unwrap_or_else(|| first.to_type_id_lossy()),
+            )
         }
     }
 

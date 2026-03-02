@@ -138,6 +138,23 @@ impl VirTypeId {
         TypeId::from_raw(self.compat_raw())
     }
 
+    /// Best-effort conversion to sema `TypeId` without table lookup.
+    ///
+    /// Returns the corresponding `TypeId` for compat-encoded IDs and for
+    /// builtin IDs whose raw value is below `TypeId::FIRST_DYNAMIC`.
+    /// Returns `TypeId::UNKNOWN` for dynamic VirTypeIds that require a
+    /// `VirTypeTable` reverse lookup.
+    #[inline]
+    pub fn to_type_id_lossy(self) -> TypeId {
+        if self.is_compat() {
+            TypeId::from_raw(self.compat_raw())
+        } else if self.0 < TypeId::FIRST_DYNAMIC {
+            TypeId::from_raw(self.0)
+        } else {
+            TypeId::UNKNOWN
+        }
+    }
+
     /// Check if this is the UNKNOWN type.
     #[inline]
     pub fn is_unknown(self) -> bool {

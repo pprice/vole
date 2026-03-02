@@ -42,9 +42,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if vir_type_args.is_empty() {
             return base_type_id;
         }
+        let table = self.vir_type_table();
         let type_args: Vec<TypeId> = vir_type_args
             .iter()
-            .map(|&v| self.sema_type_id(v))
+            .map(|&v| {
+                table
+                    .lookup_vir_type_id(v)
+                    .unwrap_or_else(|| v.to_type_id_lossy())
+            })
             .collect();
         self.mono_instance_type_id_with_args(base_type_id, type_def_id, type_args)
     }

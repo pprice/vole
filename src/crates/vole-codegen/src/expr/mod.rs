@@ -249,12 +249,11 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a reference to a named function, wrapping it in a closure struct.
     /// Creates a wrapper function that adapts the function to the closure calling convention.
-    fn function_reference(
+    fn function_reference_v(
         &mut self,
         sym: Symbol,
-        func_type_id: TypeId,
+        func_vir: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        // Look up the original function's FuncId using the name table
         let module_id = self
             .current_module_id()
             .unwrap_or(self.env.analyzed.module_id());
@@ -265,9 +264,8 @@ impl Cg<'_, '_, '_> {
             CodegenError::not_found("function id for", self.interner().resolve(sym))
         })?;
 
-        // Unwrap function type to get params and return type
         let (param_ids, return_type_id) = self
-            .vir_query_unwrap_function_sema_v(self.vir_lookup(func_type_id))
+            .vir_query_unwrap_function_sema_v(func_vir)
             .ok_or_else(|| {
                 CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
             })?;
@@ -275,7 +273,6 @@ impl Cg<'_, '_, '_> {
         let wrapper_func_id =
             self.create_closure_wrapper(orig_func_id, &param_ids, return_type_id)?;
 
-        // Get the wrapper function address
         let wrapper_func_ref = self
             .codegen_ctx
             .jit_module()
@@ -283,7 +280,6 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let wrapper_func_addr = self.builder.ins().func_addr(ptr_type, wrapper_func_ref);
 
-        // Wrap in a closure struct with zero captures
         let alloc_ref = self.runtime_func_ref(RuntimeKey::ClosureAlloc)?;
         let zero_captures = self.iconst_cached(types::I64, 0);
         let alloc_call = self
@@ -292,10 +288,7 @@ impl Cg<'_, '_, '_> {
             .call(alloc_ref, &[wrapper_func_addr, zero_captures]);
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
-        // Use closure type from sema (already has is_closure: true).
-        // Mark as Owned: the closure allocation is a fresh +1 reference that
-        // must be rc_dec'd when it goes out of scope or is consumed as an arg.
-        let cv = self.compiled_with_ty(closure_ptr, self.ptr_type(), func_type_id);
+        let cv = CompiledValue::new(closure_ptr, self.ptr_type(), func_vir);
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -1159,10 +1152,9 @@ impl Cg<'_, '_, '_> {
             ));
         }
 
-        // Function reference — bridge to sema TypeId for function_reference.
-        let sema_ty = self.sema_type_id(vir_ty);
+        // Function reference
         if self.vir_query_is_function_v(vir_ty) {
-            return self.function_reference(sym, sema_ty);
+            return self.function_reference_v(sym, vir_ty);
         }
 
         // Sentinel fallback (name-based resolution)

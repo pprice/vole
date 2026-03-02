@@ -145,21 +145,6 @@ impl<'a> Compiler<'a> {
         self.analyzed.module_id()
     }
 
-    /// Convert a `VirTypeId` to sema `TypeId` (boundary helper).
-    ///
-    /// Uses the VirTypeTable reverse mapping — no arena access.
-    #[allow(dead_code)]
-    #[inline]
-    fn sema_type_id(&self, vir_ty: VirTypeId) -> TypeId {
-        let lossy = crate::types::vir_conversions::vir_to_sema_type_id_lossy(vir_ty);
-        if lossy != TypeId::UNKNOWN || vir_ty == VirTypeId::UNKNOWN {
-            return lossy;
-        }
-        self.vir_type_table()
-            .lookup_vir_type_id(vir_ty)
-            .unwrap_or(TypeId::UNKNOWN)
-    }
-
     /// Get the "self" keyword symbol (panics if not interned - should never happen)
     fn self_symbol(&self) -> Symbol {
         self.analyzed
@@ -363,13 +348,8 @@ impl<'a> Compiler<'a> {
             .or_else(|| self.analyzed.type_arena().lookup_substitute(ty, subs))
     }
 
-    /// Access the pre-interned primitive types.
-    ///
-    /// Primitive `TypeId`s are compile-time constants — no arena query needed.
-    #[inline]
-    fn vir_query_primitives(&self) -> vole_sema::type_arena::PrimitiveTypes {
-        vole_sema::type_arena::PrimitiveTypes::CONST
-    }
+    // vir_query_primitives() deleted — use TypeId constants directly
+    // (e.g. TypeId::STRING, TypeId::I64)
 
     /// Look up an existing runtime iterator type by element `TypeId` via VirTypeTable.
     #[inline]

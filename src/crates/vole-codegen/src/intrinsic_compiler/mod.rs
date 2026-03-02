@@ -492,10 +492,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             {
                 self.emit_rc_inc_for_type_v(payload.value, payload.type_id)?;
             }
-            // Bridge to sema TypeId for prepare_dynamic_array_store (no _v variant yet).
-            let elem_sema_id = self.sema_type_id(payload.type_id);
             let (tag_val, payload_bits, _) =
-                self.prepare_dynamic_array_store(payload, elem_sema_id)?;
+                self.prepare_dynamic_array_store_with_hint_v(payload, payload.type_id, None)?;
             (tag_val, payload_bits)
         } else {
             let tag = self.vir_query_array_element_tag_id_v(payload.type_id);
@@ -543,15 +541,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Err(CodegenError::arg_count("task_channel_try_recv", 1, 0));
         }
 
-        let elem_type_id = self
+        let elem_vir = self
             .vir_query_unwrap_union(return_type_id)
-            .and_then(|variants| {
-                variants
-                    .iter()
-                    .copied()
-                    .find(|&ty| ty != VirTypeId::DONE)
-                    .map(|vir| self.sema_type_id(vir))
-            })
+            .and_then(|variants| variants.iter().copied().find(|&ty| ty != VirTypeId::DONE))
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "task_channel_try_recv return type",
@@ -584,10 +576,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.seal_block(done_block);
 
         self.switch_to_block(value_block);
-        let typed_value = if self.vir_query_is_union(elem_type_id) {
-            self.decode_dynamic_array_union_element(tag, raw_value, elem_type_id)
+        let typed_value = if self.vir_query_is_union_v(elem_vir) {
+            self.decode_dynamic_array_union_element_v(tag, raw_value, elem_vir)
         } else {
-            self.convert_field_value(raw_value, elem_type_id)
+            self.convert_field_value_v(raw_value, elem_vir)
         };
         let value_union = self.construct_union_id(typed_value, return_type_id)?;
         self.builder
