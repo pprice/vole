@@ -1535,7 +1535,10 @@ fn vir_is_capture_rc_type(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
 }
 
 /// Compute which union variant tags correspond to RC types (VIR version).
-fn vir_compute_union_rc_variants(variants: &[VirTypeId], table: &VirTypeTable) -> Vec<(u8, bool)> {
+pub(crate) fn vir_compute_union_rc_variants(
+    variants: &[VirTypeId],
+    table: &VirTypeTable,
+) -> Vec<(u8, bool)> {
     variants
         .iter()
         .enumerate()

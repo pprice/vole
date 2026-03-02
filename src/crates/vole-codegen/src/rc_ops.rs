@@ -17,7 +17,7 @@ use crate::union_layout;
 
 use super::context::Cg;
 use super::rc_state::{RcState, compute_rc_state_with_vir};
-use super::types::vir_conversions::vir_compute_rc_state;
+use super::types::vir_conversions::{vir_compute_rc_state, vir_compute_union_rc_variants};
 use super::types::{CompiledValue, RcLifecycle};
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
@@ -544,9 +544,27 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Uses VirTypeTable directly — no TypeArena or sema TypeId involved.
     /// Callers migrating away from TypeId should use this instead of `rc_state()`.
+    ///
+    /// For Optional types, resolves the runtime variant ordering via
+    /// `vir_query_unwrap_union_v` (which uses sema's canonical order) to
+    /// ensure RC variant tags match the runtime layout.
     pub fn rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
         if vir_ty.is_compat() {
             return self.rc_state(self.cv_type_id_from_vir(vir_ty));
+        }
+        // Optional variant ordering may differ between VIR convention
+        // (tag 0 = inner, tag 1 = nil) and sema's canonical sort order.
+        // Resolve via vir_query_unwrap_union_v which uses the authoritative
+        // sema ordering to avoid tag mismatches at runtime.
+        if let vole_vir::VirType::Optional { .. } = self.vir_type_table().get(vir_ty)
+            && let Some(effective_variants) = self.vir_query_unwrap_union_v(vir_ty)
+        {
+            let rc_variants =
+                vir_compute_union_rc_variants(&effective_variants, self.vir_type_table());
+            if !rc_variants.is_empty() {
+                return RcState::Union { rc_variants };
+            }
+            return RcState::None;
         }
         vir_compute_rc_state(vir_ty, self.vir_type_table(), self.analyzed())
     }
@@ -566,10 +584,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             FieldTypeTag::Rc
         } else if let Some(vir_variants) = self.vir_query_unwrap_union_v(self.vir_lookup(type_id)) {
             for &vir_variant in &vir_variants {
-                if self
-                    .rc_state(self.cv_type_id_from_vir(vir_variant))
-                    .needs_cleanup()
-                {
+                if self.rc_state_v(vir_variant).needs_cleanup() {
                     return FieldTypeTag::UnionHeap;
                 }
             }

@@ -610,18 +610,9 @@ impl Cg<'_, '_, '_> {
             // RC bookkeeping: detect RC skip-var from VIR LocalLoad.
             let skip_var = self.extract_vir_return_skip_var(value_expr);
             if skip_var.is_none() && compiled.is_borrowed() {
-                if self
-                    .rc_state(self.cv_type_id_from_vir(compiled.type_id))
-                    .needs_cleanup()
-                {
-                    self.emit_rc_inc_for_type(
-                        compiled.value,
-                        self.cv_type_id_from_vir(compiled.type_id),
-                    )?;
-                } else if let Some(rc_tags) = self
-                    .rc_state(self.cv_type_id_from_vir(compiled.type_id))
-                    .union_variants()
-                {
+                if self.rc_state_v(compiled.type_id).needs_cleanup() {
+                    self.emit_rc_inc_for_type_v(compiled.value, compiled.type_id)?;
+                } else if let Some(rc_tags) = self.rc_state_v(compiled.type_id).union_variants() {
                     self.emit_union_rc_inc(compiled.value, rc_tags)?;
                 }
             }
@@ -967,15 +958,8 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
 
             let mut field_value = self.compile_vir_expr(&field_init.1)?;
-            if self
-                .rc_state(self.cv_type_id_from_vir(field_value.type_id))
-                .needs_cleanup()
-                && field_value.is_borrowed()
-            {
-                self.emit_rc_inc_for_type(
-                    field_value.value,
-                    self.cv_type_id_from_vir(field_value.type_id),
-                )?;
+            if self.rc_state_v(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
+                self.emit_rc_inc_for_type_v(field_value.value, field_value.type_id)?;
             }
             field_value.mark_consumed();
             field_value.debug_assert_rc_handled("VirStmt::Raise (single field)");
@@ -1001,15 +985,8 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
 
             let mut field_value = self.compile_vir_expr(&field_init.1)?;
-            if self
-                .rc_state(self.cv_type_id_from_vir(field_value.type_id))
-                .needs_cleanup()
-                && field_value.is_borrowed()
-            {
-                self.emit_rc_inc_for_type(
-                    field_value.value,
-                    self.cv_type_id_from_vir(field_value.type_id),
-                )?;
+            if self.rc_state_v(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
+                self.emit_rc_inc_for_type_v(field_value.value, field_value.type_id)?;
             }
             field_value.mark_consumed();
             field_value.debug_assert_rc_handled("VirStmt::Raise (multi field)");
@@ -1130,15 +1107,13 @@ impl Cg<'_, '_, '_> {
         // Register composite RC cleanup for owned temporaries.
         if self.rc_scopes.has_active_scope()
             && !is_borrow
-            && let Some(offsets) = self
-                .rc_state(self.cv_type_id_from_vir(init.type_id))
-                .shallow_offsets()
+            && let Some(offsets) = self.rc_state_v(init.type_id).shallow_offsets()
         {
-            let cr_type = self.cranelift_type(self.cv_type_id_from_vir(init.type_id));
+            let cr_type = self.cranelift_type_v(init.type_id);
             let temp_var = self.builder.declare_var(cr_type);
             self.builder.def_var(temp_var, init.value);
             let union_fields = self
-                .rc_state(self.cv_type_id_from_vir(init.type_id))
+                .rc_state_v(init.type_id)
                 .composite_union_fields()
                 .to_vec();
             let drop_flag =
