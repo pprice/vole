@@ -1276,8 +1276,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get the flat slot count for a VIR struct type.
+    ///
+    /// Falls back through `cv_type_id_from_vir` for compat-encoded VirTypeIds.
     #[inline]
     pub fn vir_struct_flat_slot_count(&self, vir_ty: VirTypeId) -> Option<usize> {
+        if vir_ty.is_compat() {
+            return super::structs::struct_flat_slot_count(
+                self.cv_type_id_from_vir(vir_ty),
+                self.arena(),
+                self.analyzed(),
+            );
+        }
         crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             vir_ty,
             self.vir_type_table(),
@@ -1287,9 +1296,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Compute the byte offset of field `slot` within a VIR struct type.
     ///
+    /// Falls back through `cv_type_id_from_vir` for compat-encoded VirTypeIds.
     /// Panics if the type is not a struct or the slot is out of range.
     #[inline]
     pub fn vir_struct_field_byte_offset(&self, vir_ty: VirTypeId, slot: usize) -> i32 {
+        if vir_ty.is_compat() {
+            return super::structs::helpers::struct_field_byte_offset(
+                self.cv_type_id_from_vir(vir_ty),
+                slot,
+                self.arena(),
+                self.analyzed(),
+            )
+            .expect("INTERNAL: struct field offset must be computable for valid struct type");
+        }
         crate::types::vir_struct_helpers::vir_struct_field_byte_offset(
             vir_ty,
             slot,

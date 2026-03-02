@@ -95,7 +95,7 @@ impl Cg<'_, '_, '_> {
         parent_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         // Compute byte offset accounting for nested struct sizes.
-        let offset = self.struct_field_byte_offset(self.cv_type_id_from_vir(parent_type_id), slot);
+        let offset = self.vir_struct_field_byte_offset(parent_type_id, slot);
 
         // If the field is itself a struct, return a pointer into the parent data
         let is_nested_struct = self.vir_query_is_struct(field_type_id);

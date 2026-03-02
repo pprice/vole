@@ -12,7 +12,7 @@ use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
-use vole_identity::{FieldId, NameId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{NameId, TypeDefId, TypeId, VirTypeId};
 use vole_vir::entity_metadata::VirTypeDef;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{VirPrimitiveKind, VirType};
@@ -24,8 +24,6 @@ use super::vir_conversions::{
 
 pub(crate) trait VirStructEntityLookup {
     fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool;
-    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId>;
-    fn field_type(&self, field_id: FieldId) -> TypeId;
 
     /// Resolve a NameId to its last segment string.
     ///
@@ -44,14 +42,6 @@ impl VirStructEntityLookup for crate::analyzed::AnalyzedProgram {
         self.entity_type_is_sentinel(type_def_id)
     }
 
-    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.entity_field_ids_on_type(type_def_id)
-    }
-
-    fn field_type(&self, field_id: FieldId) -> TypeId {
-        self.entity_field_type(field_id)
-    }
-
     fn last_segment(&self, name_id: NameId) -> Option<String> {
         crate::analyzed::AnalyzedProgram::last_segment(self, name_id)
     }
@@ -67,21 +57,13 @@ impl VirStructEntityLookup for vole_sema::entity_registry::EntityRegistry {
         self.get_type(type_def_id).kind.is_sentinel()
     }
 
-    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.fields_on_type(type_def_id).collect()
-    }
-
-    fn field_type(&self, field_id: FieldId) -> TypeId {
-        self.get_field(field_id).ty
-    }
-
     fn last_segment(&self, _name_id: NameId) -> Option<String> {
         // Tests use NameTable directly; not available here.
         None
     }
 
     fn vir_type_def(&self, _type_def_id: TypeDefId) -> Option<&VirTypeDef> {
-        // Tests don't have VirTypeDef; they use the FieldId-based trait methods.
+        // Tests don't have VirTypeDef; they use the TestStructRegistry wrapper.
         None
     }
 }
@@ -112,17 +94,25 @@ fn vir_field_types_for(
 ///
 /// Payload unions need 16 bytes (2 flat slots) when stored inline in structs.
 /// Tag-only unions (all Nil/Done/Void/sentinel-struct variants) need 8 bytes.
+///
+/// Also recognizes `VirType::Optional { inner }` (the `T?` sugar for `T | nil`),
+/// which always carries a payload when `inner` is non-sentinel and non-void.
 pub(crate) fn vir_is_payload_union(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
     entities: &impl VirStructEntityLookup,
 ) -> bool {
-    let Some(variants) = vir_unwrap_union(vir_ty, table) else {
-        return false;
-    };
-    variants
-        .iter()
-        .any(|&v| !vir_is_sentinel_or_void(v, table, entities))
+    // Check explicit Union variants.
+    if let Some(variants) = vir_unwrap_union(vir_ty, table) {
+        return variants
+            .iter()
+            .any(|&v| !vir_is_sentinel_or_void(v, table, entities));
+    }
+    // Optional<T> is sugar for T | nil — payload if inner is non-sentinel, non-void.
+    if let VirType::Optional { inner } = table.get(vir_ty) {
+        return !vir_is_sentinel_or_void(*inner, table, entities);
+    }
+    false
 }
 
 /// Check if a VIR type is a sentinel (zero-field struct like nil/Done) or void.
@@ -569,14 +559,6 @@ mod tests {
             self.registry.get_type(type_def_id).kind.is_sentinel()
         }
 
-        fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-            self.registry.fields_on_type(type_def_id).collect()
-        }
-
-        fn field_type(&self, field_id: FieldId) -> TypeId {
-            self.registry.get_field(field_id).ty
-        }
-
         fn last_segment(&self, _name_id: NameId) -> Option<String> {
             None
         }
@@ -868,14 +850,6 @@ mod tests {
     impl VirStructEntityLookup for TestVirEntities {
         fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
             self.registry.get_type(type_def_id).kind.is_sentinel()
-        }
-
-        fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-            self.registry.fields_on_type(type_def_id).collect()
-        }
-
-        fn field_type(&self, field_id: FieldId) -> TypeId {
-            self.registry.get_field(field_id).ty
         }
 
         fn last_segment(&self, name_id: NameId) -> Option<String> {

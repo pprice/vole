@@ -293,9 +293,13 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().call(rc_inc_ref, &[current_value]);
             }
 
-            // Size and struct-copy use sema helpers that need TypeId for compat IDs.
-            let sema_type_id = self.cv_type_id_from_vir(vole_vir_ty);
-            let size = self.type_size(sema_type_id);
+            // Prefer VIR-native size lookup; fall back through cv_type_id_from_vir
+            // for compat-encoded VirTypeIds that are not yet in the VirTypeTable.
+            let size = if vole_vir_ty.is_compat() {
+                self.type_size(self.cv_type_id_from_vir(vole_vir_ty))
+            } else {
+                self.type_size_v(vole_vir_ty)
+            };
             let size_val = self.iconst_cached(types::I64, size as i64);
 
             let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
@@ -304,7 +308,7 @@ impl Cg<'_, '_, '_> {
             // Structs are stack-allocated pointers -- we must copy the full struct
             // data into the heap allocation (not just store the stack pointer,
             // which would dangle after the creating function returns).
-            self.copy_value_to_heap(current_value, heap_ptr, sema_type_id);
+            self.copy_value_to_heap_v(current_value, heap_ptr, vole_vir_ty);
 
             let index_val = self.iconst_cached(types::I64, i as i64);
             self.builder
@@ -409,8 +413,10 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Copy a value into a heap allocation, handling structs with multiple slots.
-    fn copy_value_to_heap(&mut self, value: Value, heap_ptr: Value, type_id: TypeId) {
-        if let Some(flat_count) = self.struct_flat_slot_count(type_id) {
+    ///
+    /// Uses VirTypeId to determine struct layout via VirTypeDef.field_types.
+    fn copy_value_to_heap_v(&mut self, value: Value, heap_ptr: Value, vir_ty: VirTypeId) {
+        if let Some(flat_count) = self.vir_struct_flat_slot_count(vir_ty) {
             for slot in 0..flat_count {
                 let offset = (slot as i32) * 8;
                 let val = self

@@ -533,7 +533,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Copies all flat slots (8 bytes each), accounting for nested structs.
     pub fn copy_struct_value(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
         let flat_count = self
-            .struct_flat_slot_count(self.cv_type_id_from_vir(src.type_id))
+            .vir_struct_flat_slot_count(src.type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch("copy_struct_value", "struct type", "non-struct")
             })?;
@@ -561,7 +561,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Used when storing structs into arrays so the data survives the current stack frame.
     pub fn copy_struct_to_heap(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
         let flat_count = self
-            .struct_flat_slot_count(self.cv_type_id_from_vir(src.type_id))
+            .vir_struct_flat_slot_count(src.type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch("copy_struct_to_heap", "struct type", "non-struct")
             })?;
