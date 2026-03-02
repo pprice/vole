@@ -38,16 +38,16 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<()> {
         // Bridge to sema TypeId for downstream RC analysis (will be eliminated
         // when error_patterns.rs migrates to VirTypeId).
-        let scrutinee_type_id = self.cv_type_id_from_vir(scrutinee_vir_type_id);
+        let scrutinee_type_id = self.sema_type_id(scrutinee_vir_type_id);
         let fallible_types = self.vir_query_unwrap_fallible(scrutinee_type_id);
         let Some((success_vir, error_virs)) = fallible_types else {
             return Ok(());
         };
-        let success_type_id = self.cv_type_id_from_vir(success_vir);
+        let success_type_id = self.sema_type_id(success_vir);
         // Reconstruct single error TypeId: if one error, convert directly;
         // if multiple, the arena's fallible stores them as a union.
         let error_type_id = if error_virs.len() == 1 {
-            self.cv_type_id_from_vir(error_virs[0])
+            self.sema_type_id(error_virs[0])
         } else {
             // Multiple errors form a union in sema; get the original error TypeId
             // from the arena since it stores the error as a single (union) type.
@@ -121,10 +121,8 @@ impl Cg<'_, '_, '_> {
             return true;
         }
         if let Some(vir_variants) = self.vir_query_unwrap_union(error_type_id) {
-            let variants: Vec<TypeId> = vir_variants
-                .iter()
-                .map(|&v| self.cv_type_id_from_vir(v))
-                .collect();
+            let variants: Vec<TypeId> =
+                vir_variants.iter().map(|&v| self.sema_type_id(v)).collect();
             // All variants must be safe for unconditional rc_dec:
             // - 0 fields: payload is null (rc_dec is no-op)
             // - 1 RC field: payload is an RC pointer (rc_dec works)

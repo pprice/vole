@@ -31,7 +31,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         fields: &[(Symbol, vole_vir::VirRef)],
         vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
+        let result_type_id = self.sema_type_id(vir_result_type_id);
         // Sentinels are zero-field structs represented as i8(0).
         if self.analyzed().is_sentinel_type(type_def_id) {
             let value = self.iconst_cached(types::I8, 0);
@@ -120,7 +120,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         fields: &[(Symbol, vole_vir::VirRef)],
         vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
+        let result_type_id = self.sema_type_id(vir_result_type_id);
         // Sentinels are zero-field structs represented as i8(0).
         if self.analyzed().is_sentinel_type(type_def_id) {
             let value = self.iconst_cached(types::I8, 0);
@@ -291,7 +291,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let concrete_args: Vec<TypeId> = type_def
                     .type_params
                     .iter()
-                    .filter_map(|&tp| subs.get(&tp).copied().map(|v| self.cv_type_id_from_vir(v)))
+                    .filter_map(|&tp| subs.get(&tp).copied().map(|v| self.sema_type_id(v)))
                     .collect();
                 if concrete_args.len() == type_def.type_params.len() {
                     self.mono_instance_type_id_with_args(base_type_id, type_def_id, concrete_args)

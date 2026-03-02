@@ -56,12 +56,10 @@ impl Cg<'_, '_, '_> {
             .and_then(|dispatch| {
                 dispatch
                     .substituted_return_type
-                    .map(|ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
+                    .map(|ty| self.sema_type_id(self.try_substitute_type_v(ty)))
                     .or_else(|| {
                         dispatch.resolved_method.as_ref().map(|resolved| {
-                            self.cv_type_id_from_vir(
-                                self.try_substitute_type_v(resolved.return_type_id()),
-                            )
+                            self.sema_type_id(self.try_substitute_type_v(resolved.return_type_id()))
                         })
                     })
             })
@@ -262,11 +260,11 @@ impl Cg<'_, '_, '_> {
                 key.method_name,
                 key.class_type_keys
                     .iter()
-                    .map(|&ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
+                    .map(|&ty| self.sema_type_id(self.try_substitute_type_v(ty)))
                     .collect(),
                 key.method_type_keys
                     .iter()
-                    .map(|&ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
+                    .map(|&ty| self.sema_type_id(self.try_substitute_type_v(ty)))
                     .collect(),
             )
         });
@@ -289,7 +287,7 @@ impl Cg<'_, '_, '_> {
                             .map(|&type_id| {
                                 if let Some(name_id) = arena.unwrap_type_param(type_id) {
                                     subs.get(&name_id)
-                                        .map(|&v| self.cv_type_id_from_vir(v))
+                                        .map(|&v| self.sema_type_id(v))
                                         .unwrap_or(type_id)
                                 } else {
                                     type_id

@@ -151,10 +151,10 @@ impl<'a> Compiler<'a> {
         self.analyzed.module_id()
     }
 
-    /// Convert a `VirTypeId` to sema `TypeId`.
+    /// Convert a `VirTypeId` to sema `TypeId` (boundary helper).
     #[allow(dead_code)]
     #[inline]
-    fn cv_type_id_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
+    fn sema_type_id(&self, vir_ty: VirTypeId) -> TypeId {
         crate::types::vir_conversions::vir_to_sema_type_id(
             vir_ty,
             self.vir_type_table(),
@@ -469,7 +469,8 @@ impl<'a> Compiler<'a> {
             vole_vir::VirType::Union { variants } => Some(variants.to_vec()),
             vole_vir::VirType::Optional { inner } => {
                 // Look up the sema union to get the authoritative variant order.
-                let sema_id = self.cv_type_id_from_vir(vir_ty);
+                let sema_id =
+                    crate::types::vir_conversions::vir_to_sema_type_id(vir_ty, table, self.arena());
                 if let Some(sema_variants) = self.arena().unwrap_union(sema_id) {
                     let nil_id = self.arena().nil();
                     Some(

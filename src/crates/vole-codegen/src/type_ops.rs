@@ -67,7 +67,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if vir_ty.is_compat() {
                 // Compat-encoded: round-trip through TypeId substitution,
                 // then re-map to VirTypeId (with compat fallback for unmapped types).
-                let sema_ty = self.cv_type_id_from_vir(vir_ty);
+                let sema_ty = vir_ty.compat_type_id();
                 let substituted = self.try_substitute_type(sema_ty);
                 self.vir_lookup_or_compat(substituted)
             } else {
@@ -90,14 +90,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Convert a `VirTypeId` to a Cranelift type via the VIR type table.
     pub fn cranelift_type_v(&self, vir_ty: VirTypeId) -> Type {
         if vir_ty.is_compat() {
-            return self.cranelift_type(self.cv_type_id_from_vir(vir_ty));
+            return self.cranelift_type(vir_ty.compat_type_id());
         }
         self.vir_query_type_to_cranelift_v(vir_ty)
     }
 
     /// Convert a `VirTypeId` to sema `TypeId` without substitution.
+    ///
+    /// Boundary helper for codegen call-sites that still need a sema `TypeId`
+    /// (e.g. function-call signatures, sema-based struct layout, interface
+    /// boxing).  New code should prefer VirTypeId-native APIs (`_v` variants).
     #[inline]
-    pub fn cv_type_id_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
+    pub fn sema_type_id(&self, vir_ty: VirTypeId) -> TypeId {
         super::types::vir_conversions::vir_to_sema_type_id(
             vir_ty,
             self.vir_type_table(),
@@ -212,7 +216,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Fallback to arena-based lookup via sema TypeId
-        self.find_nil_variant(self.cv_type_id_from_vir(vir_ty))
+        let sema_ty = super::types::vir_conversions::vir_to_sema_type_id(
+            vir_ty,
+            self.vir_type_table(),
+            self.arena(),
+        );
+        self.find_nil_variant(sema_ty)
     }
 
     /// Find the nil variant index using a sema TypeId directly.
@@ -243,36 +252,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// inline storage cannot recover the original union variant on read, so we must
     /// fall back to heap-boxed union buffers.
     pub fn union_array_prefers_inline_storage(&self, union_type_id: TypeId) -> bool {
-        use rustc_hash::FxHashSet;
-        use vole_runtime::value::RuntimeTypeId;
-
         let resolved_union_id = self.try_substitute_type(union_type_id);
-        let Some(vir_variants) = self.vir_query_unwrap_union(resolved_union_id) else {
-            return false;
-        };
-        let variants: Vec<TypeId> = vir_variants
-            .iter()
-            .map(|&v| self.cv_type_id_from_vir(v))
-            .collect();
-
-        let mut seen_tags: FxHashSet<u64> = FxHashSet::default();
-        for &variant in &variants {
-            if !self.supports_inline_union_array_variant(variant) {
-                return false;
-            }
-
-            let tag = self.vir_query_unknown_type_tag(variant);
-            if tag == RuntimeTypeId::I64 as u64
-                && !self.vir_query_is_integer(variant)
-                && !self.vir_query_is_sentinel(variant)
-            {
-                return false;
-            }
-            if !seen_tags.insert(tag) {
-                return false;
-            }
-        }
-        true
+        let vir_ty = self.vir_lookup(resolved_union_id);
+        self.union_array_prefers_inline_storage_v(vir_ty)
     }
 
     /// VirTypeId version of [`union_array_prefers_inline_storage`](Self::union_array_prefers_inline_storage).
@@ -307,6 +289,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         true
     }
 
+    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
     fn supports_inline_union_array_variant(&self, variant: TypeId) -> bool {
         // Codegen/runtime layout policy: inline union array slots store only
         // (runtime_tag, payload_bits), so variants that need richer tagging or
@@ -333,6 +316,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             || self.vir_query_unwrap_type_param_v(variant).is_some())
     }
 
+    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
     pub(crate) fn union_variant_index_to_array_tag(
         &mut self,
         variant_idx: Value,
@@ -358,6 +342,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         runtime_tag
     }
 
+    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
     pub(crate) fn array_tag_to_union_variant_index(
         &mut self,
         array_tag: Value,
@@ -370,6 +355,62 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .map(|&variant| crate::types::array_element_tag_id(variant, arena))
                 .collect()
         };
+        let mut variant_idx = self.iconst_cached(types::I8, 0);
+        let first_match = self
+            .builder
+            .ins()
+            .icmp_imm(IntCC::Equal, array_tag, variant_tags[0]);
+        let mut matched_any = first_match;
+
+        for (idx, &runtime_tag) in variant_tags.iter().enumerate().skip(1) {
+            let is_match = self
+                .builder
+                .ins()
+                .icmp_imm(IntCC::Equal, array_tag, runtime_tag);
+            let idx_val = self.iconst_cached(types::I8, idx as i64);
+            variant_idx = self.builder.ins().select(is_match, idx_val, variant_idx);
+            matched_any = self.builder.ins().bor(matched_any, is_match);
+        }
+
+        // Strict contract: unknown tags are a hard runtime fault.
+        self.builder
+            .ins()
+            .trapz(matched_any, crate::trap_codes::PANIC);
+
+        variant_idx
+    }
+
+    pub(crate) fn union_variant_index_to_array_tag_v(
+        &mut self,
+        variant_idx: Value,
+        variants: &[VirTypeId],
+    ) -> Value {
+        let variant_tags: Vec<i64> = variants
+            .iter()
+            .map(|&v| self.vir_query_array_element_tag_id_v(v))
+            .collect();
+        let default_tag = variant_tags[0];
+        let mut runtime_tag = self.iconst_cached(types::I64, default_tag);
+
+        for (idx, &tag) in variant_tags.iter().enumerate().skip(1) {
+            let idx_val = self.iconst_cached(types::I8, idx as i64);
+            let is_match = self.builder.ins().icmp(IntCC::Equal, variant_idx, idx_val);
+            let tag_val = self.iconst_cached(types::I64, tag);
+            runtime_tag = self.builder.ins().select(is_match, tag_val, runtime_tag);
+        }
+
+        runtime_tag
+    }
+
+    pub(crate) fn array_tag_to_union_variant_index_v(
+        &mut self,
+        array_tag: Value,
+        variants: &[VirTypeId],
+    ) -> Value {
+        let variant_tags: Vec<i64> = variants
+            .iter()
+            .map(|&v| self.vir_query_array_element_tag_id_v(v))
+            .collect();
         let mut variant_idx = self.iconst_cached(types::I8, 0);
         let first_match = self
             .builder

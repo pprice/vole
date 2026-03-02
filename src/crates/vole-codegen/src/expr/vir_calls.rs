@@ -28,7 +28,7 @@ impl Cg<'_, '_, '_> {
         args: &[VirRef],
         vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let ty = self.cv_type_id_from_vir(vir_ty);
+        let ty = self.sema_type_id(vir_ty);
         match target {
             CallTarget::Direct { function_id } => {
                 self.compile_vir_direct_call(*function_id, args, ty)

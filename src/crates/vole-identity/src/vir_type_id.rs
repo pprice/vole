@@ -4,6 +4,8 @@
 
 use std::fmt;
 
+use crate::TypeId;
+
 /// Concrete type identity in the VIR type table.
 ///
 /// Unlike `TypeId` (which indexes into sema's `TypeArena`), `VirTypeId` indexes
@@ -98,6 +100,20 @@ impl VirTypeId {
     #[inline]
     pub fn compat_raw(self) -> u32 {
         self.0 & !Self::COMPAT_FLAG
+    }
+
+    /// Convert a compat-encoded VirTypeId directly to a sema `TypeId`.
+    ///
+    /// Only valid when `is_compat()` returns true.  This is a zero-cost
+    /// operation that strips the compat flag and wraps the raw value as
+    /// a `TypeId`, avoiding the full `vir_to_sema_type_id` table walk.
+    #[inline]
+    pub fn compat_type_id(self) -> TypeId {
+        debug_assert!(
+            self.is_compat(),
+            "compat_type_id called on non-compat VirTypeId"
+        );
+        TypeId::from_raw(self.compat_raw())
     }
 
     /// Check if this is the UNKNOWN type.

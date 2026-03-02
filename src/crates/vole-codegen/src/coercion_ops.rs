@@ -186,13 +186,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // RuntimeIterator is a concrete type that implements Iterator dispatch
         // directly via runtime_iterator_method; skip interface boxing.
         if is_target_interface && !is_value_interface && !is_value_runtime_iterator {
-            // Bridge to sema TypeId for box_interface_value (not yet migrated).
-            let target_type_id = self.cv_type_id_from_vir(resolved_target_vir);
-            self.box_interface_value(resolved_value, target_type_id)
+            self.box_interface_value_v(resolved_value, resolved_target_vir)
         } else if is_target_union && !is_value_union {
-            // Bridge to sema TypeId for construct_union_id (not yet migrated).
-            let target_type_id = self.cv_type_id_from_vir(resolved_target_vir);
-            self.construct_union_id(resolved_value, target_type_id)
+            self.construct_union_id_v(resolved_value, resolved_target_vir)
         } else if is_target_unknown && !is_value_unknown {
             self.box_to_unknown(resolved_value)
         } else {
@@ -449,6 +445,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             value,
             interface_type_id,
         )
+    }
+
+    /// Box a value as an interface type using a VirTypeId.
+    pub fn box_interface_value_v(
+        &mut self,
+        value: CompiledValue,
+        interface_vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let interface_type_id = crate::types::vir_conversions::vir_to_sema_type_id(
+            interface_vir_ty,
+            self.vir_type_table(),
+            self.arena(),
+        );
+        self.box_interface_value(value, interface_type_id)
     }
 
     // ========== Default parameter compilation ==========

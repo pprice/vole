@@ -103,7 +103,7 @@ impl Cg<'_, '_, '_> {
 
         // Structs: copy all flat slots from value (stack ptr) to heap slot.
         // Bridge to sema TypeId for struct_flat_slot_count (no compat handling).
-        let sema_type_id = self.cv_type_id_from_vir(binding.vole_type);
+        let sema_type_id = self.sema_type_id(binding.vole_type);
         if let Some(flat_count) = self.struct_flat_slot_count(sema_type_id) {
             for slot in 0..flat_count {
                 let offset = (slot as i32) * 8;
@@ -151,7 +151,7 @@ impl Cg<'_, '_, '_> {
         default_expr: &VirExpr,
         vir_inner_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let inner_type_id = self.cv_type_id_from_vir(vir_inner_type_id);
+        let inner_type_id = self.sema_type_id(vir_inner_type_id);
         let value = self.compile_vir_expr(value_expr)?;
         let nil_tag = self.find_nil_variant_vir(value.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
@@ -289,7 +289,7 @@ impl Cg<'_, '_, '_> {
         vir_inner_type_id: VirTypeId,
         vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let inner_type_id = self.cv_type_id_from_vir(vir_inner_type_id);
+        let inner_type_id = self.sema_type_id(vir_inner_type_id);
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self
             .find_nil_variant_vir(scrutinee.type_id)
@@ -301,7 +301,7 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
-        let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
+        let result_type_id = self.sema_type_id(vir_result_type_id);
         let result_type_id = self.try_substitute_type(result_type_id);
         let result_vir_ty = self.to_vir_type(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
@@ -364,7 +364,7 @@ impl Cg<'_, '_, '_> {
             result_type_id: vir_result_type_id,
         } = args;
 
-        let inner_type_id = self.cv_type_id_from_vir(vir_inner_type_id);
+        let inner_type_id = self.sema_type_id(vir_inner_type_id);
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self
             .find_nil_variant_vir(scrutinee.type_id)
@@ -376,7 +376,7 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
-        let result_type_id = self.try_substitute_type(self.cv_type_id_from_vir(vir_result_type_id));
+        let result_type_id = self.try_substitute_type(self.sema_type_id(vir_result_type_id));
         let result_vir_ty = self.to_vir_type(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
         let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
@@ -478,7 +478,7 @@ impl Cg<'_, '_, '_> {
         value_expr: &VirExpr,
         vir_success_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let success_type_id = self.cv_type_id_from_vir(vir_success_type_id);
+        let success_type_id = self.sema_type_id(vir_success_type_id);
         let fallible = self.compile_vir_expr(value_expr)?;
 
         // Load tag from fallible (offset 0)

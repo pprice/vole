@@ -30,7 +30,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Bridge to sema TypeId for RC state computation.
-        let type_id = self.cv_type_id_from_vir(vir_ty);
+        let type_id = self.sema_type_id(vir_ty);
 
         let rc_old = if self.rc_state(type_id).needs_cleanup() {
             Some(self.builder.use_var(var))

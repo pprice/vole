@@ -347,7 +347,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// VirTypeId-native `self.substitutions`.
     ///
     /// Returns `None` when no substitutions are active. The result is cached so
-    /// the conversion (VirTypeId → TypeId via `cv_type_id_from_vir`) is performed
+    /// the conversion (VirTypeId → TypeId via `vir_to_sema_type_id`) is performed
     /// at most once per `Cg` lifetime.
     pub fn sema_substitutions(&self) -> Option<std::cell::Ref<'_, FxHashMap<NameId, TypeId>>> {
         let subs = self.substitutions?;
@@ -360,9 +360,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
         // Build the TypeId map from VirTypeId substitutions.
+        let table = self.vir_type_table();
+        let arena = self.arena();
         let sema_map: FxHashMap<NameId, TypeId> = subs
             .iter()
-            .map(|(&name, &vir_ty)| (name, self.cv_type_id_from_vir(vir_ty)))
+            .map(|(&name, &vir_ty)| {
+                (
+                    name,
+                    crate::types::vir_conversions::vir_to_sema_type_id(vir_ty, table, arena),
+                )
+            })
             .collect();
         *self.sema_substitutions.borrow_mut() = Some(sema_map);
         Some(std::cell::Ref::map(
@@ -515,7 +522,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_struct_v(&self, vir_ty: VirTypeId) -> bool {
         if vir_ty.is_compat() {
-            return self.vir_query_is_struct(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_is_struct(vir_ty.compat_type_id());
         }
         crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
     }
@@ -533,7 +540,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_union_v(&self, vir_ty: VirTypeId) -> bool {
         if vir_ty.is_compat() {
-            return self.vir_query_is_union(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_is_union(vir_ty.compat_type_id());
         }
         crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
     }
@@ -548,7 +555,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_unknown_v(&self, vir_ty: VirTypeId) -> bool {
         if vir_ty.is_compat() {
-            return self.vir_query_is_unknown(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_is_unknown(vir_ty.compat_type_id());
         }
         crate::types::vir_conversions::vir_is_unknown(vir_ty, self.vir_type_table())
     }
@@ -648,7 +655,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_interface_v(&self, vir_ty: VirTypeId) -> bool {
         if vir_ty.is_compat() {
-            return self.vir_query_is_interface(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_is_interface(vir_ty.compat_type_id());
         }
         crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
     }
@@ -714,7 +721,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_type_to_cranelift_v(&self, vir_ty: VirTypeId) -> Type {
         if vir_ty.is_compat() {
-            return self.vir_query_type_to_cranelift(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_type_to_cranelift(vir_ty.compat_type_id());
         }
         // Sentinel types are always i8 (zero-field struct tag). VIR maps them
         // as Struct, which would incorrectly resolve to ptr_type.
@@ -750,7 +757,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_function_v(&self, vir_ty: VirTypeId) -> bool {
         if vir_ty.is_compat() {
-            return self.vir_query_is_function(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_is_function(vir_ty.compat_type_id());
         }
         crate::types::vir_conversions::vir_is_function(vir_ty, self.vir_type_table())
     }
@@ -855,7 +862,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_runtime_iterator_v(&self, vir_ty: VirTypeId) -> bool {
         if vir_ty.is_compat() {
-            return self.vir_query_is_runtime_iterator(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_is_runtime_iterator(vir_ty.compat_type_id());
         }
         crate::types::vir_conversions::vir_is_runtime_iterator(vir_ty, self.vir_type_table())
     }
@@ -903,7 +910,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // The sema arena sorts variants by union_sort_key (descending),
                 // so [inner, NIL] vs [NIL, inner] depends on the inner type's
                 // sort category relative to nil's (both may be category 50).
-                let sema_id = self.cv_type_id_from_vir(vir_ty);
+                let sema_id =
+                    crate::types::vir_conversions::vir_to_sema_type_id(vir_ty, table, self.arena());
                 if let Some(sema_variants) = self.arena().unwrap_union(sema_id) {
                     let nil_id = self.arena().nil();
                     Some(
@@ -999,7 +1007,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_unwrap_type_param_v(&self, vir_ty: VirTypeId) -> Option<NameId> {
         if vir_ty.is_compat() {
-            return self.vir_query_unwrap_type_param(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_unwrap_type_param(vir_ty.compat_type_id());
         }
         crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
     }
@@ -1161,7 +1169,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_numeric_v(&self, vir_ty: VirTypeId) -> bool {
         if vir_ty.is_compat() {
-            return self.vir_query_is_numeric(self.cv_type_id_from_vir(vir_ty));
+            return self.vir_query_is_numeric(vir_ty.compat_type_id());
         }
         crate::types::vir_conversions::vir_is_numeric(vir_ty, self.vir_type_table())
     }
@@ -1289,7 +1297,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         vir_ty: VirTypeId,
     ) -> Option<(Vec<TypeId>, TypeId)> {
-        let type_id = self.cv_type_id_from_vir(vir_ty);
+        let type_id = crate::types::vir_conversions::vir_to_sema_type_id(
+            vir_ty,
+            self.vir_type_table(),
+            self.arena(),
+        );
         let (arena_params, arena_ret, _) = self.arena().unwrap_function(type_id)?;
         Some((arena_params.to_vec(), arena_ret))
     }
@@ -1341,12 +1353,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get the flat slot count for a VIR struct type.
     ///
-    /// Falls back through `cv_type_id_from_vir` for compat-encoded VirTypeIds.
+    /// Falls back through compat_type_id() for compat-encoded VirTypeIds.
     #[inline]
     pub fn vir_struct_flat_slot_count(&self, vir_ty: VirTypeId) -> Option<usize> {
         if vir_ty.is_compat() {
             return super::structs::struct_flat_slot_count(
-                self.cv_type_id_from_vir(vir_ty),
+                vir_ty.compat_type_id(),
                 self.arena(),
                 self.analyzed(),
             );
@@ -1360,13 +1372,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Compute the byte offset of field `slot` within a VIR struct type.
     ///
-    /// Falls back through `cv_type_id_from_vir` for compat-encoded VirTypeIds.
+    /// Falls back through compat_type_id() for compat-encoded VirTypeIds.
     /// Panics if the type is not a struct or the slot is out of range.
     #[inline]
     pub fn vir_struct_field_byte_offset(&self, vir_ty: VirTypeId, slot: usize) -> i32 {
         if vir_ty.is_compat() {
             return super::structs::helpers::struct_field_byte_offset(
-                self.cv_type_id_from_vir(vir_ty),
+                vir_ty.compat_type_id(),
                 slot,
                 self.arena(),
                 self.analyzed(),
@@ -1399,7 +1411,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         vir_ty: VirTypeId,
         field_name: &str,
     ) -> CodegenResult<(usize, TypeId)> {
-        let type_id = self.cv_type_id_from_vir(vir_ty);
+        let type_id = crate::types::vir_conversions::vir_to_sema_type_id(
+            vir_ty,
+            self.vir_type_table(),
+            self.arena(),
+        );
         crate::structs::helpers::get_field_slot_and_type_id_cg(type_id, field_name, self)
     }
 
@@ -1413,7 +1429,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         vir_ty: VirTypeId,
     ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
-        let type_id = self.cv_type_id_from_vir(vir_ty);
+        let type_id = crate::types::vir_conversions::vir_to_sema_type_id(
+            vir_ty,
+            self.vir_type_table(),
+            self.arena(),
+        );
         self.vir_query_unwrap_module(type_id)
     }
 
@@ -1887,18 +1907,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     self.vir_query_display_basic_v(value.type_id),
                 ));
             }
-            let variants: Vec<TypeId> = self
+            let vir_variants: Vec<VirTypeId> = self
                 .vir_query_unwrap_union(resolved_elem_type)
-                .expect("INTERNAL: expected union element type")
-                .iter()
-                .map(|&v| self.cv_type_id_from_vir(v))
-                .collect();
+                .expect("INTERNAL: expected union element type");
 
             let variant_idx = self
                 .builder
                 .ins()
                 .load(types::I8, MemFlags::new(), value.value, 0);
-            let runtime_tag = self.union_variant_index_to_array_tag(variant_idx, &variants);
+            let runtime_tag = self.union_variant_index_to_array_tag_v(variant_idx, &vir_variants);
             let payload_bits = if self.type_size(resolved_elem_type) > union_layout::TAG_ONLY_SIZE {
                 self.builder.ins().load(
                     types::I64,
@@ -1952,16 +1969,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return self.copy_union_heap_to_stack(raw_value, resolved_union_id);
         }
 
-        let variants: Vec<TypeId> = self
+        let vir_variants: Vec<VirTypeId> = self
             .vir_query_unwrap_union(resolved_union_id)
-            .expect("INTERNAL: expected union type for array decode")
-            .iter()
-            .map(|&v| self.cv_type_id_from_vir(v))
-            .collect();
+            .expect("INTERNAL: expected union type for array decode");
 
         let union_size = self.type_size(resolved_union_id);
         let slot = self.alloc_stack(union_size);
-        let variant_idx = self.array_tag_to_union_variant_index(raw_tag, &variants);
+        let variant_idx = self.array_tag_to_union_variant_index_v(raw_tag, &vir_variants);
         self.builder.ins().stack_store(variant_idx, slot, 0);
         if union_size > union_layout::TAG_ONLY_SIZE {
             self.builder

@@ -44,7 +44,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let type_args: Vec<TypeId> = vir_type_args
             .iter()
-            .map(|&v| self.cv_type_id_from_vir(v))
+            .map(|&v| self.sema_type_id(v))
             .collect();
         self.mono_instance_type_id_with_args(base_type_id, type_def_id, type_args)
     }
@@ -555,7 +555,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// ensure RC variant tags match the runtime layout.
     pub fn rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
         if vir_ty.is_compat() {
-            return self.rc_state(self.cv_type_id_from_vir(vir_ty));
+            return self.rc_state(self.sema_type_id(vir_ty));
         }
         // Optional variant ordering may differ between VIR convention
         // (tag 0 = inner, tag 1 = nil) and sema's canonical sort order.

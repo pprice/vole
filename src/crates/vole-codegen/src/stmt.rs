@@ -50,7 +50,7 @@ impl Cg<'_, '_, '_> {
                 LetStorageHint::Unknown if !init.type_id.is_unknown() => {
                     // Box value to unknown type (TaggedValue)
                     let boxed = self.box_to_unknown(*init)?;
-                    (boxed.value, self.cv_type_id_from_vir(boxed.type_id))
+                    (boxed.value, self.sema_type_id(boxed.type_id))
                 }
                 LetStorageHint::Union { tag_hint } if !self.vir_query_is_union_v(init.type_id) => {
                     let wrapped = if let Some(hint) = tag_hint {
@@ -63,22 +63,22 @@ impl Cg<'_, '_, '_> {
                         )?
                     };
                     is_stack_union = true;
-                    (wrapped.value, self.cv_type_id_from_vir(wrapped.type_id))
+                    (wrapped.value, self.sema_type_id(wrapped.type_id))
                 }
                 LetStorageHint::Numeric if init.type_id.is_numeric() => {
                     let coerced = self.coerce_to_type_id(*init, declared_type_id)?;
-                    (coerced.value, self.cv_type_id_from_vir(coerced.type_id))
+                    (coerced.value, self.sema_type_id(coerced.type_id))
                 }
                 LetStorageHint::Interface => {
                     // For functional interfaces, keep the actual function type
                     // from the lambda. This preserves the is_closure flag for
                     // proper calling convention.
-                    (init.value, self.cv_type_id_from_vir(init.type_id))
+                    (init.value, self.sema_type_id(init.type_id))
                 }
                 _ => (init.value, declared_type_id),
             }
         } else {
-            (init.value, self.cv_type_id_from_vir(init.type_id))
+            (init.value, self.sema_type_id(init.type_id))
         };
 
         // Box value if assigning to interface type
@@ -97,7 +97,7 @@ impl Cg<'_, '_, '_> {
                     declared_type_id,
                 )?;
                 final_value = boxed.value;
-                final_type_id = self.cv_type_id_from_vir(boxed.type_id);
+                final_type_id = self.sema_type_id(boxed.type_id);
             }
         }
 
@@ -122,8 +122,7 @@ impl Cg<'_, '_, '_> {
         variants: &[TypeId],
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<(usize, Value, TypeId)> {
-        let resolved_value_type_id =
-            self.cv_type_id_from_vir(self.try_substitute_type_v(value.type_id));
+        let resolved_value_type_id = self.sema_type_id(self.try_substitute_type_v(value.type_id));
 
         // Direct type match
         if let Some(pos) = variants.iter().position(|&v| v == resolved_value_type_id) {
@@ -255,6 +254,20 @@ impl Cg<'_, '_, '_> {
         self.construct_union_id_with_hint(value, union_type_id, None)
     }
 
+    /// VirTypeId variant of `construct_union_id`.
+    pub fn construct_union_id_v(
+        &mut self,
+        value: CompiledValue,
+        union_vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let union_type_id = crate::types::vir_conversions::vir_to_sema_type_id(
+            union_vir_ty,
+            self.vir_type_table(),
+            self.arena(),
+        );
+        self.construct_union_id(value, union_type_id)
+    }
+
     /// Construct a stack-allocated union buffer using a pre-computed tag hint.
     ///
     /// This is the fast path for let-binding union coercion when VIR lowering
@@ -330,17 +343,15 @@ impl Cg<'_, '_, '_> {
                 CodegenError::type_mismatch("union construction", "union type", "non-union")
             })?
             .iter()
-            .map(|&v| self.cv_type_id_from_vir(v))
+            .map(|&v| self.sema_type_id(v))
             .collect();
 
         // If the value is already the same union type, just return it.
         // Also check the substituted type, since generic code may produce values
         // whose raw type_id is e.g. `T | nil` but after substitution matches the
         // concrete union type `i64 | nil`.
-        let resolved_type_id = self.cv_type_id_from_vir(self.try_substitute_type_v(value.type_id));
-        if self.cv_type_id_from_vir(value.type_id) == union_type_id
-            || resolved_type_id == union_type_id
-        {
+        let resolved_type_id = self.sema_type_id(self.try_substitute_type_v(value.type_id));
+        if self.sema_type_id(value.type_id) == union_type_id || resolved_type_id == union_type_id {
             return Ok(value);
         }
 
@@ -416,8 +427,7 @@ impl Cg<'_, '_, '_> {
         } else if let Some(vir_variants) = self.vir_query_unwrap_union(error_type_id) {
             // Union of error types
             vir_variants.iter().find_map(|&v| {
-                if let Some(type_def_id) = self.vir_query_unwrap_error(self.cv_type_id_from_vir(v))
-                {
+                if let Some(type_def_id) = self.vir_query_unwrap_error(self.sema_type_id(v)) {
                     let name = name_table
                         .last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
                     if name.as_deref() == Some(raise_error_name) {
@@ -534,12 +544,12 @@ impl Cg<'_, '_, '_> {
                 declared_type,
             } => {
                 let binding_ty = if *vir_ty != VirTypeId::UNKNOWN {
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*vir_ty))
+                    self.sema_type_id(self.try_substitute_type_v(*vir_ty))
                 } else {
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty))
+                    self.sema_type_id(self.try_substitute_type_v(*ty))
                 };
-                let declared = declared_type
-                    .map(|dt| self.cv_type_id_from_vir(self.try_substitute_type_v(dt)));
+                let declared =
+                    declared_type.map(|dt| self.sema_type_id(self.try_substitute_type_v(dt)));
                 self.compile_vir_let(*name, value, binding_ty, *storage, declared)
             }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
@@ -575,7 +585,7 @@ impl Cg<'_, '_, '_> {
                 && let Some(ret_vir_ty) = return_type_vir
                 && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
                 && let Some(expected_variant) =
-                    self.preferred_array_like_union_variant(self.cv_type_id_from_vir(ret_vir_ty))
+                    self.preferred_array_like_union_variant_v(ret_vir_ty)
             {
                 self.compile_vir_expr_with_expected_type(value_expr, expected_variant)?
             } else {
@@ -643,10 +653,17 @@ impl Cg<'_, '_, '_> {
         &self,
         union_type_id: TypeId,
     ) -> Option<TypeId> {
-        let vir_variants = self.vir_query_unwrap_union(union_type_id)?;
+        self.preferred_array_like_union_variant_v(self.vir_lookup(union_type_id))
+    }
+
+    /// VirTypeId variant: find the unique array-like variant in a union.
+    pub(crate) fn preferred_array_like_union_variant_v(
+        &self,
+        union_vir_ty: VirTypeId,
+    ) -> Option<TypeId> {
+        let vir_variants = self.vir_query_unwrap_union_v(union_vir_ty)?;
         let mut it = vir_variants.iter().copied().filter(|&variant| {
-            let variant_tid = self.cv_type_id_from_vir(variant);
-            self.vir_query_is_array(variant_tid)
+            self.vir_query_is_array_v(variant)
                 || self.vir_query_unwrap_tuple_v(variant).is_some()
                 || self.vir_query_unwrap_fixed_array_v(variant).is_some()
         });
@@ -654,7 +671,11 @@ impl Cg<'_, '_, '_> {
         if it.next().is_some() {
             None
         } else {
-            Some(self.cv_type_id_from_vir(first))
+            let table = self.vir_type_table();
+            let arena = self.arena();
+            Some(crate::types::vir_conversions::vir_to_sema_type_id(
+                first, table, arena,
+            ))
         }
     }
 
@@ -715,8 +736,7 @@ impl Cg<'_, '_, '_> {
                 if !self.vir_query_is_interface_v(compiled.type_id)
                     && !self.vir_query_is_runtime_iterator_v(compiled.type_id)
                 {
-                    let boxed =
-                        self.box_interface_value(compiled, self.cv_type_id_from_vir(ret_vir_ty))?;
+                    let boxed = self.box_interface_value_v(compiled, ret_vir_ty)?;
                     self.builder.ins().return_(&[boxed.value]);
                 } else {
                     // Already an interface value — return directly.
@@ -743,20 +763,16 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().return_(&[tag_val, low, high]);
             }
             ReturnConvention::Struct => {
-                let ret_type_id = self.cv_type_id_from_vir(
-                    return_vir_ty.expect("Struct convention requires return type"),
-                );
-                if self.is_small_struct_return(ret_type_id) {
-                    self.emit_small_struct_return(compiled.value, ret_type_id)?;
+                let ret_vir = return_vir_ty.expect("Struct convention requires return type");
+                if self.is_small_struct_return_v(ret_vir) {
+                    self.emit_small_struct_return_v(compiled.value, ret_vir)?;
                 } else {
-                    self.emit_sret_struct_return(compiled.value, ret_type_id)?;
+                    self.emit_sret_struct_return_v(compiled.value, ret_vir)?;
                 }
             }
             ReturnConvention::Union => {
-                let ret_type_id = self.cv_type_id_from_vir(
-                    return_vir_ty.expect("Union convention requires return type"),
-                );
-                let wrapped = self.construct_union_id(compiled, ret_type_id)?;
+                let ret_vir = return_vir_ty.expect("Union convention requires return type");
+                let wrapped = self.construct_union_id_v(compiled, ret_vir)?;
                 self.builder.ins().return_(&[wrapped.value]);
             }
             ReturnConvention::Scalar => {
@@ -858,7 +874,7 @@ impl Cg<'_, '_, '_> {
                 "raise statement used outside of a function with declared return type",
             )
         })?;
-        let return_type_id = self.cv_type_id_from_vir(return_vir_ty);
+        let return_type_id = self.sema_type_id(return_vir_ty);
 
         let (_success_vir, error_virs) = self
             .vir_query_unwrap_fallible_v(return_vir_ty)
@@ -872,7 +888,7 @@ impl Cg<'_, '_, '_> {
         // Reconstruct single error TypeId: if one error, convert directly;
         // if multiple, the arena's fallible stores them as a union.
         let error_type_id = if error_virs.len() == 1 {
-            self.cv_type_id_from_vir(error_virs[0])
+            self.sema_type_id(error_virs[0])
         } else {
             self.arena()
                 .unwrap_fallible(return_type_id)
@@ -1132,7 +1148,7 @@ impl Cg<'_, '_, '_> {
             VirDestructurePattern::Bind { name, ty, .. } => {
                 self.compile_vir_destructure_bind(
                     *name,
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                    self.sema_type_id(self.try_substitute_type_v(*ty)),
                     value,
                 )?;
             }
@@ -1246,7 +1262,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<()> {
         for field in fields {
             let field_vir_ty = self.try_substitute_type_v(field.ty);
-            let field_ty = self.cv_type_id_from_vir(field_vir_ty);
+            let field_ty = self.sema_type_id(field_vir_ty);
             let converted = if is_struct {
                 // Structs are stack-allocated: load field directly from pointer + offset
                 self.struct_field_load(value, field.slot as usize, field_ty, source_ty)?
@@ -1371,10 +1387,10 @@ impl Cg<'_, '_, '_> {
         is_stack_union: bool,
     ) -> CodegenResult<()> {
         // Detect whether coerce_let_init called box_to_unknown (new TaggedValue).
-        // Use cv_type_id_from_vir for the init check — vir_query_is_unknown_v would
+        // Use sema_type_id for the init check — vir_query_is_unknown_v would
         // miss array/function types that exist in VirTypeTable but can't be resolved
-        // back to sema TypeId (cv_type_id_from_vir returns TypeId::UNKNOWN for those).
-        let init_sema_ty = self.cv_type_id_from_vir(init.type_id);
+        // back to sema TypeId (sema_type_id returns TypeId::UNKNOWN for those).
+        let init_sema_ty = self.sema_type_id(init.type_id);
         let created_tagged_value =
             self.vir_query_is_unknown(final_type_id) && !self.vir_query_is_unknown(init_sema_ty);
 

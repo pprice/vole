@@ -489,6 +489,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .is_some_and(|count| count > crate::MAX_SMALL_STRUCT_FIELDS)
     }
 
+    /// Check if a VIR struct type uses small return convention (1-2 flat slots).
+    pub fn is_small_struct_return_v(&self, vir_ty: VirTypeId) -> bool {
+        self.vir_struct_flat_slot_count(vir_ty)
+            .is_some_and(|count| count <= crate::MAX_SMALL_STRUCT_FIELDS)
+    }
+
+    /// Check if a VIR struct type uses sret convention (3+ flat slots).
+    pub fn is_sret_struct_return_v(&self, vir_ty: VirTypeId) -> bool {
+        self.vir_struct_flat_slot_count(vir_ty)
+            .is_some_and(|count| count > crate::MAX_SMALL_STRUCT_FIELDS)
+    }
+
     /// If the return type uses sret convention (large struct), allocate a stack
     /// buffer for the return value and return a pointer to it. The caller should
     /// prepend this pointer to the call arguments.
@@ -507,6 +519,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit a return for a small struct (1-2 flat slots) via register passing.
     /// Loads flat slots into registers, pads to 2, and emits the return instruction.
+    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
     pub fn emit_small_struct_return(
         &mut self,
         struct_ptr: Value,
@@ -531,8 +544,34 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(())
     }
 
+    /// Emit a return for a small struct (VIR variant).
+    pub fn emit_small_struct_return_v(
+        &mut self,
+        struct_ptr: Value,
+        ret_vir_ty: VirTypeId,
+    ) -> CodegenResult<()> {
+        let flat_count = self
+            .vir_struct_flat_slot_count(ret_vir_ty)
+            .ok_or_else(|| CodegenError::internal("struct return: missing flat slot count"))?;
+        let mut return_vals = Vec::with_capacity(crate::MAX_SMALL_STRUCT_FIELDS);
+        for i in 0..flat_count {
+            let offset = (i as i32) * 8;
+            let val = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), struct_ptr, offset);
+            return_vals.push(val);
+        }
+        while return_vals.len() < crate::MAX_SMALL_STRUCT_FIELDS {
+            return_vals.push(self.iconst_cached(types::I64, 0));
+        }
+        self.builder.ins().return_(&return_vals);
+        Ok(())
+    }
+
     /// Emit a return for a large struct (3+ flat slots) via sret convention.
     /// Copies flat slots into the sret buffer (first parameter) and returns the pointer.
+    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
     pub fn emit_sret_struct_return(
         &mut self,
         struct_ptr: Value,
@@ -545,6 +584,34 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let sret_ptr = self.builder.block_params(entry_block)[0];
         let flat_count = self
             .struct_flat_slot_count(ret_type_id)
+            .ok_or_else(|| CodegenError::internal("sret return: missing flat slot count"))?;
+        for i in 0..flat_count {
+            let offset = (i as i32) * 8;
+            let val = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), struct_ptr, offset);
+            self.builder
+                .ins()
+                .store(MemFlags::new(), val, sret_ptr, offset);
+        }
+        self.builder.ins().return_(&[sret_ptr]);
+        Ok(())
+    }
+
+    /// Emit a return for a large struct via sret convention (VIR variant).
+    pub fn emit_sret_struct_return_v(
+        &mut self,
+        struct_ptr: Value,
+        ret_vir_ty: VirTypeId,
+    ) -> CodegenResult<()> {
+        let entry_block =
+            self.builder.func.layout.entry_block().ok_or_else(|| {
+                CodegenError::internal("sret return: function has no entry block")
+            })?;
+        let sret_ptr = self.builder.block_params(entry_block)[0];
+        let flat_count = self
+            .vir_struct_flat_slot_count(ret_vir_ty)
             .ok_or_else(|| CodegenError::internal("sret return: missing flat slot count"))?;
         for i in 0..flat_count {
             let offset = (i as i32) * 8;

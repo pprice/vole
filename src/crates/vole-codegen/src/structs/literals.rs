@@ -69,7 +69,7 @@ impl Cg<'_, '_, '_> {
                 CodegenError::type_mismatch("union construction", "union type", "non-union")
             })?
             .iter()
-            .map(|&v| self.cv_type_id_from_vir(v))
+            .map(|&v| self.sema_type_id(v))
             .collect();
 
         // If the value is already the same union type, just return it

@@ -30,7 +30,7 @@ impl Cg<'_, '_, '_> {
         tested_vir: VirTypeId,
     ) -> IsCheckResult {
         if value_vir == VirTypeId::UNKNOWN {
-            let tested_type_id = self.cv_type_id_from_vir(tested_vir);
+            let tested_type_id = self.sema_type_id(tested_vir);
             IsCheckResult::CheckUnknown(tested_type_id)
         } else if let Some(variants) = self.vir_query_unwrap_union_v(value_vir) {
             if let Some(index) = variants.iter().position(|&v| v == tested_vir) {
@@ -208,7 +208,7 @@ impl Cg<'_, '_, '_> {
         arms: &[vole_vir::VirMatchArm],
         vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
+        let result_type_id = self.sema_type_id(vir_result_type_id);
         let scrutinee = self.compile_vir_expr(scrutinee_expr)?;
         let scrutinee_type_id = scrutinee.type_id;
 
@@ -218,7 +218,7 @@ impl Cg<'_, '_, '_> {
         // types when they provide a consistent concrete shape.
         let mut arm_types: Vec<TypeId> = Vec::new();
         for arm in arms {
-            let arm_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(arm.ty));
+            let arm_ty = self.sema_type_id(self.try_substitute_type_v(arm.ty));
             if arm_ty != TypeId::UNKNOWN && !arm_types.contains(&arm_ty) {
                 arm_types.push(arm_ty);
             }
@@ -241,14 +241,12 @@ impl Cg<'_, '_, '_> {
         if !self.vir_query_is_union(effective_result_type) {
             let has_nil_arm = arms.iter().any(|arm| {
                 arm.ty != VirTypeId::UNKNOWN
-                    && self.vir_query_is_nil(
-                        self.cv_type_id_from_vir(self.try_substitute_type_v(arm.ty)),
-                    )
+                    && self.vir_query_is_nil(self.sema_type_id(self.try_substitute_type_v(arm.ty)))
             });
             if has_nil_arm && let Some(ret_vir_ty) = self.return_type {
                 let ret_vir_ty = self.try_substitute_type_v(ret_vir_ty);
                 if self.vir_query_is_union_v(ret_vir_ty) {
-                    effective_result_type = self.cv_type_id_from_vir(ret_vir_ty);
+                    effective_result_type = self.sema_type_id(ret_vir_ty);
                 }
             }
         }
@@ -468,7 +466,7 @@ impl Cg<'_, '_, '_> {
 
                 let coerced_lit = self.convert_for_select(lit_val.value, scrutinee.ty);
                 let cmp = self.compile_equality_check(
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(*scrutinee_ty)),
+                    self.sema_type_id(self.try_substitute_type_v(*scrutinee_ty)),
                     scrutinee.value,
                     coerced_lit,
                 )?;
@@ -478,15 +476,12 @@ impl Cg<'_, '_, '_> {
             vole_vir::VirPattern::Val { name } => {
                 let (var_val, var_type_id) =
                     if let Some(&(var, var_vir_ty)) = arm_variables.get(name) {
-                        (
-                            self.builder.use_var(var),
-                            self.cv_type_id_from_vir(var_vir_ty),
-                        )
+                        (self.builder.use_var(var), self.sema_type_id(var_vir_ty))
                     } else if let Some(binding) = self.get_capture(name).copied() {
                         let captured = self.load_capture(&binding)?;
                         (
                             captured.value,
-                            self.cv_type_id_from_vir(self.try_substitute_type_v(captured.type_id)),
+                            self.sema_type_id(self.try_substitute_type_v(captured.type_id)),
                         )
                     } else {
                         return Err(CodegenError::internal("undefined variable in val pattern"));
@@ -503,7 +498,7 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_success_pattern(
                 inner,
                 scrutinee,
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*success_type)),
+                self.sema_type_id(self.try_substitute_type_v(*success_type)),
                 arm_variables,
             ),
 
@@ -593,7 +588,7 @@ impl Cg<'_, '_, '_> {
                         .ins()
                         .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
                 let error_vir_ty = self.try_substitute_type_v(*error_ty);
-                let error_type_id = self.cv_type_id_from_vir(error_vir_ty);
+                let error_type_id = self.sema_type_id(error_vir_ty);
                 let payload_ty = self.cranelift_type(error_type_id);
                 let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
                 let var = self.builder.declare_var(payload_ty);

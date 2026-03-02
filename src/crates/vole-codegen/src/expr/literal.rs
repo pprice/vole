@@ -57,14 +57,12 @@ impl Cg<'_, '_, '_> {
         elements: &[vole_vir::VirRef],
         vir_array_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let array_type_id = self.cv_type_id_from_vir(vir_array_type_id);
+        let array_type_id = self.sema_type_id(vir_array_type_id);
         // If sema inferred a tuple type, use stack allocation.
         let elem_type_ids = self.vir_query_unwrap_tuple_v(vir_array_type_id);
         if let Some(vir_elems) = elem_type_ids {
-            let elem_type_ids: Vec<TypeId> = vir_elems
-                .iter()
-                .map(|&v| self.cv_type_id_from_vir(v))
-                .collect();
+            let elem_type_ids: Vec<TypeId> =
+                vir_elems.iter().map(|&v| self.sema_type_id(v)).collect();
             return self.compile_vir_tuple_literal(elements, &elem_type_ids, array_type_id);
         }
 
@@ -73,13 +71,13 @@ impl Cg<'_, '_, '_> {
         let array_push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
         let mut elem_type = self
             .vir_query_unwrap_array_v(vir_array_type_id)
-            .map(|v| self.cv_type_id_from_vir(v));
+            .map(|v| self.sema_type_id(v));
         let mut result_array_type = array_type_id;
         let mut first_compiled: Option<CompiledValue> = None;
 
         if elem_type.is_none() && !elements.is_empty() {
             let first = self.compile_vir_expr(&elements[0])?;
-            let inferred_elem = self.cv_type_id_from_vir(self.try_substitute_type_v(first.type_id));
+            let inferred_elem = self.sema_type_id(self.try_substitute_type_v(first.type_id));
             if inferred_elem != TypeId::UNKNOWN
                 && let Some(inferred_array_type) = self.vir_query_lookup_array(inferred_elem)
             {
@@ -134,11 +132,11 @@ impl Cg<'_, '_, '_> {
         count: usize,
         vir_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let type_id = self.cv_type_id_from_vir(vir_type_id);
+        let type_id = self.sema_type_id(vir_type_id);
         let mut elem_value = self.compile_vir_expr(element)?;
         let (elem_type_id, result_type_id) =
             if let Some((elem_vir, _)) = self.vir_query_unwrap_fixed_array_v(vir_type_id) {
-                let elem_type_id = self.cv_type_id_from_vir(elem_vir);
+                let elem_type_id = self.sema_type_id(elem_vir);
                 (elem_type_id, type_id)
             } else {
                 // TEMP(N279-C): During mixed VIR/sema migration, some repeat literals
@@ -146,7 +144,7 @@ impl Cg<'_, '_, '_> {
                 // vir F64) even though element VIR is concrete. Keep codegen robust by
                 // deriving element layout from the compiled element value.
                 let fallback_elem_type_id =
-                    self.cv_type_id_from_vir(self.try_substitute_type_v(elem_value.type_id));
+                    self.sema_type_id(self.try_substitute_type_v(elem_value.type_id));
                 let fallback_result_type_id = self
                     .vir_query_lookup_fixed_array(fallback_elem_type_id, count)
                     .unwrap_or(type_id);

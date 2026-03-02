@@ -90,7 +90,7 @@ impl Compiler<'_> {
                         if vir_ty == VirTypeId::UNKNOWN {
                             self_type_id
                         } else {
-                            let tid = self.cv_type_id_from_vir(vir_ty);
+                            let tid = self.sema_type_id(vir_ty);
                             self.vir_query_lookup_substitute(tid, &type_param_subs)
                                 .unwrap_or(tid)
                         }
@@ -99,7 +99,7 @@ impl Compiler<'_> {
                 let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
                     self_type_id
                 } else {
-                    let tid = self.cv_type_id_from_vir(method_def.return_type);
+                    let tid = self.sema_type_id(method_def.return_type);
                     self.vir_query_lookup_substitute(tid, &type_param_subs)
                         .unwrap_or(tid)
                 };
@@ -194,7 +194,7 @@ impl Compiler<'_> {
                         if vir_ty == VirTypeId::UNKNOWN {
                             self_type_id
                         } else {
-                            let tid = self.cv_type_id_from_vir(vir_ty);
+                            let tid = self.sema_type_id(vir_ty);
                             self.vir_query_lookup_substitute(tid, &type_param_subs)
                                 .unwrap_or(tid)
                         }
@@ -203,7 +203,7 @@ impl Compiler<'_> {
                 let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
                     self_type_id
                 } else {
-                    let tid = self.cv_type_id_from_vir(method_def.return_type);
+                    let tid = self.sema_type_id(method_def.return_type);
                     self.vir_query_lookup_substitute(tid, &type_param_subs)
                         .unwrap_or(tid)
                 };
@@ -355,7 +355,7 @@ impl Compiler<'_> {
 
         let method_return_type_id = {
             let method_def = self.analyzed.get_method(method_id);
-            Some(self.cv_type_id_from_vir(method_def.return_type))
+            Some(self.sema_type_id(method_def.return_type))
         };
 
         // Get the VIR function (must be available — implement block methods are always lowered)
@@ -419,7 +419,7 @@ impl Compiler<'_> {
             let return_vir_type = method_def.return_type;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
             let return_type_id = {
-                let tid = self.cv_type_id_from_vir(return_vir_type);
+                let tid = self.sema_type_id(return_vir_type);
                 Some(tid).filter(|r| !r.is_void())
             };
             self.jit.ctx.func.signature = sig;
@@ -440,7 +440,7 @@ impl Compiler<'_> {
                             .unwrap_or_else(|| panic!("param name '{}' not interned", name_str))
                     });
                     let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                    let type_id = self.cv_type_id_from_vir(vir_ty);
+                    let type_id = self.sema_type_id(vir_ty);
                     (sym, type_id, cranelift_type)
                 })
                 .collect();
@@ -527,7 +527,7 @@ impl Compiler<'_> {
         // Get the method's return type from VIR method definition
         let method_return_type_id = {
             let method_def = self.analyzed.get_method(method_id);
-            Some(self.cv_type_id_from_vir(method_def.return_type))
+            Some(self.sema_type_id(method_def.return_type))
         };
 
         // Create function builder and compile
@@ -643,7 +643,7 @@ impl Compiler<'_> {
                         )
                     });
                 let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                let type_id = self.cv_type_id_from_vir(vir_ty);
+                let type_id = self.sema_type_id(vir_ty);
                 (sym, type_id, cranelift_type)
             })
             .collect();
@@ -810,7 +810,7 @@ impl Compiler<'_> {
                         if vir_ty == VirTypeId::UNKNOWN {
                             self_type_id
                         } else {
-                            let tid = self.cv_type_id_from_vir(vir_ty);
+                            let tid = self.sema_type_id(vir_ty);
                             self.vir_query_lookup_substitute(tid, &type_param_subs)
                                 .unwrap_or(tid)
                         }
@@ -819,7 +819,7 @@ impl Compiler<'_> {
                 let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
                     self_type_id
                 } else {
-                    let tid = self.cv_type_id_from_vir(method_def.return_type);
+                    let tid = self.sema_type_id(method_def.return_type);
                     self.vir_query_lookup_substitute(tid, &type_param_subs)
                         .unwrap_or(tid)
                 };
@@ -1048,7 +1048,7 @@ impl Compiler<'_> {
                             if vir_ty == VirTypeId::UNKNOWN {
                                 self_type_id
                             } else {
-                                let tid = self.cv_type_id_from_vir(vir_ty);
+                                let tid = self.sema_type_id(vir_ty);
                                 self.vir_query_lookup_substitute(tid, &concrete_subs)
                                     .unwrap_or(tid)
                             }
@@ -1057,7 +1057,7 @@ impl Compiler<'_> {
                     let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
                         Some(self_type_id)
                     } else {
-                        let tid = self.cv_type_id_from_vir(method_def.return_type);
+                        let tid = self.sema_type_id(method_def.return_type);
                         self.vir_query_lookup_substitute(tid, &concrete_subs)
                     };
                     subst_ret.map(|ret| (subst_params, ret))
@@ -1251,7 +1251,7 @@ impl Compiler<'_> {
                             if vir_ty == VirTypeId::UNKNOWN {
                                 self_type_id
                             } else {
-                                let tid = self.cv_type_id_from_vir(vir_ty);
+                                let tid = self.sema_type_id(vir_ty);
                                 self.vir_query_lookup_substitute(tid, &concrete_subs)
                                     .unwrap_or(tid)
                             }
@@ -1260,7 +1260,7 @@ impl Compiler<'_> {
                     let subst_ret = if method_def.return_type == VirTypeId::UNKNOWN {
                         Some(self_type_id)
                     } else {
-                        let tid = self.cv_type_id_from_vir(method_def.return_type);
+                        let tid = self.sema_type_id(method_def.return_type);
                         self.vir_query_lookup_substitute(tid, &concrete_subs)
                     };
                     subst_ret.map(|ret| (subst_params, ret))

@@ -276,11 +276,8 @@ impl Cg<'_, '_, '_> {
                             "non-function",
                         )
                     })?;
-            let params: Vec<TypeId> = vir_params
-                .iter()
-                .map(|&v| self.cv_type_id_from_vir(v))
-                .collect();
-            (params, self.cv_type_id_from_vir(vir_ret))
+            let params: Vec<TypeId> = vir_params.iter().map(|&v| self.sema_type_id(v)).collect();
+            (params, self.sema_type_id(vir_ret))
         };
 
         let wrapper_func_id =
@@ -924,7 +921,7 @@ impl Cg<'_, '_, '_> {
                 interface_type_def,
                 interface_type_args,
             } => {
-                let to_id = self.cv_type_id_from_vir(to);
+                let to_id = self.sema_type_id(to);
                 self.compile_coerce_interface_box(
                     value,
                     to_id,
@@ -933,11 +930,11 @@ impl Cg<'_, '_, '_> {
                 )
             }
             CoerceKind::Unbox => {
-                let to_id = self.cv_type_id_from_vir(to);
+                let to_id = self.sema_type_id(to);
                 self.compile_coerce_unbox(value, to_id)
             }
             CoerceKind::IteratorWrap { interface_type, .. } => {
-                let to_id = self.cv_type_id_from_vir(to);
+                let to_id = self.sema_type_id(to);
                 self.compile_coerce_iterator_wrap_enriched(value, to_id, *interface_type)
             }
         }
@@ -957,7 +954,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let type_args_ids: Vec<TypeId> = interface_type_args
             .iter()
-            .map(|vir| self.cv_type_id_from_vir(self.try_substitute_type_v(*vir)))
+            .map(|vir| self.sema_type_id(self.try_substitute_type_v(*vir)))
             .collect();
         crate::interfaces::box_interface_value_decomposed(
             self.builder,
@@ -1004,8 +1001,7 @@ impl Cg<'_, '_, '_> {
         runtime_iter_type_id: TypeId,
         interface_type: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let interface_type_id =
-            self.cv_type_id_from_vir(self.try_substitute_type_v(interface_type));
+        let interface_type_id = self.sema_type_id(self.try_substitute_type_v(interface_type));
 
         // Box as Iterator<elem> interface
         let mut boxed = self.box_interface_value(value, interface_type_id)?;
@@ -1046,7 +1042,7 @@ impl Cg<'_, '_, '_> {
             return self.load_capture(&binding);
         }
 
-        let ty = self.cv_type_id_from_vir(vir_ty);
+        let ty = self.sema_type_id(vir_ty);
 
         // 3. Local variable — vars map lookup with narrowing.
         if let Some((var, var_type_id)) = self.vars.get(&sym) {
@@ -1068,7 +1064,7 @@ impl Cg<'_, '_, '_> {
         let val = self.builder.use_var(var);
         let cl_ty = self.builder.func.dfg.value_type(val);
         // Bridge to sema TypeId for downstream helpers that still require it.
-        let var_type_id = self.cv_type_id_from_vir(var_vir_ty);
+        let var_type_id = self.sema_type_id(var_vir_ty);
 
         // Union narrowing: if VIR type differs from declared type, extract
         // the payload from the tagged union.
@@ -1130,12 +1126,12 @@ impl Cg<'_, '_, '_> {
                             variants
                                 .iter()
                                 .copied()
-                                .find(|&v| self.vir_query_is_integer(self.cv_type_id_from_vir(v)))
+                                .find(|&v| self.vir_query_is_integer(self.sema_type_id(v)))
                         } else {
                             None
                         }
                     })
-                    .map(|v| self.cv_type_id_from_vir(v))
+                    .map(|v| self.sema_type_id(v))
             })
     }
 
@@ -1287,7 +1283,7 @@ impl Cg<'_, '_, '_> {
             resolve_reflection_types,
         };
 
-        let ty = self.cv_type_id_from_vir(vir_ty);
+        let ty = self.sema_type_id(vir_ty);
         let result_ty = if ty == TypeId::UNKNOWN {
             resolve_reflection_types(self)
                 .ok()
@@ -1361,7 +1357,7 @@ impl Cg<'_, '_, '_> {
                 param_name,
             )
         })?;
-        let concrete_type_id = self.cv_type_id_from_vir(concrete_vir_ty);
+        let concrete_type_id = self.sema_type_id(concrete_vir_ty);
 
         // Interface types require dynamic dispatch via vtable.
         if self.vir_query_is_interface(concrete_type_id) {
@@ -1463,7 +1459,7 @@ impl Cg<'_, '_, '_> {
         kind: AsCastKind,
         result: IsCheckResult,
     ) -> CodegenResult<CompiledValue> {
-        let target_ty = self.cv_type_id_from_vir(vir_target_ty);
+        let target_ty = self.sema_type_id(vir_target_ty);
         let value = self.compile_vir_expr(value_expr)?;
         match result {
             IsCheckResult::AlwaysTrue => self.vir_as_cast_always_true(kind, value, target_ty),
@@ -1473,12 +1469,11 @@ impl Cg<'_, '_, '_> {
             }
             IsCheckResult::CheckUnknown(_tested_compat, tested_vir_type_id) => {
                 let concrete_tested = self.try_substitute_type_v(tested_vir_type_id);
-                let tested_sema =
-                    self.cv_type_id_from_vir(if concrete_tested != VirTypeId::UNKNOWN {
-                        concrete_tested
-                    } else {
-                        tested_vir_type_id
-                    });
+                let tested_sema = self.sema_type_id(if concrete_tested != VirTypeId::UNKNOWN {
+                    concrete_tested
+                } else {
+                    tested_vir_type_id
+                });
                 self.vir_as_cast_check_unknown(kind, value, tested_sema, target_ty)
             }
         }
@@ -1541,7 +1536,7 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| {
                 CodegenError::internal("as cast CheckTag: cannot derive tested type from union")
             })?;
-        let tested_type_id = self.cv_type_id_from_vir(tested_vir_ty);
+        let tested_type_id = self.sema_type_id(tested_vir_ty);
         let is_match = self.tag_eq(value.value, tag_index as i64);
         match kind {
             AsCastKind::Checked => {

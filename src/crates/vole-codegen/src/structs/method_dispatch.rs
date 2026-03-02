@@ -43,7 +43,7 @@ impl Cg<'_, '_, '_> {
                 ..
             } => (
                 external_info.map(ExternalMethodRef::from),
-                self.cv_type_id_from_vir(self.try_substitute_type_v(*func_type_id)),
+                self.sema_type_id(self.try_substitute_type_v(*func_type_id)),
             ),
             _ => {
                 return Err(CodegenError::not_found(
@@ -58,7 +58,7 @@ impl Cg<'_, '_, '_> {
             let (_, ret) = self
                 .vir_query_unwrap_function(func_type_id)
                 .expect("INTERNAL: module method: missing function type");
-            self.cv_type_id_from_vir(ret)
+            self.sema_type_id(ret)
         };
 
         // Compile arguments, tracking owned RC temps for cleanup
@@ -77,13 +77,12 @@ impl Cg<'_, '_, '_> {
                 .type_keys
                 .iter()
                 .map(|&type_id| {
-                    let sema_type_id =
-                        self.cv_type_id_from_vir(self.try_substitute_type_v(type_id));
+                    let sema_type_id = self.sema_type_id(self.try_substitute_type_v(type_id));
                     if let Some(subs) = self.substitutions
                         && let Some(name_id) = self.vir_query_unwrap_type_param(sema_type_id)
                     {
                         subs.get(&name_id)
-                            .map(|&v| self.cv_type_id_from_vir(v))
+                            .map(|&v| self.sema_type_id(v))
                             .unwrap_or(sema_type_id)
                     } else {
                         sema_type_id
@@ -209,11 +208,8 @@ impl Cg<'_, '_, '_> {
                             "other",
                         )
                     })?;
-            let params: Vec<TypeId> = vir_params
-                .iter()
-                .map(|&v| self.cv_type_id_from_vir(v))
-                .collect();
-            (params, self.cv_type_id_from_vir(vir_ret))
+            let params: Vec<TypeId> = vir_params.iter().map(|&v| self.sema_type_id(v)).collect();
+            (params, self.sema_type_id(vir_ret))
         };
 
         // Check if this is actually a closure or a pure function
@@ -342,11 +338,8 @@ impl Cg<'_, '_, '_> {
                         "non-function",
                     )
                 })?;
-            let params: Vec<TypeId> = vir_params
-                .iter()
-                .map(|&v| self.cv_type_id_from_vir(v))
-                .collect();
-            let ret_id = self.cv_type_id_from_vir(vir_ret);
+            let params: Vec<TypeId> = vir_params.iter().map(|&v| self.sema_type_id(v)).collect();
+            let ret_id = self.sema_type_id(vir_ret);
             let is_void = self.vir_query_is_void(ret_id);
             (params.len(), params, ret_id, is_void)
         };

@@ -54,7 +54,7 @@ impl Cg<'_, '_, '_> {
         vir_ty: VirTypeId,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
-        let ty = self.cv_type_id_from_vir(vir_ty);
+        let ty = self.sema_type_id(vir_ty);
         let obj = self.compile_vir_expr(object)?;
 
         if let Some(elem_type_ids) = self.vir_query_unwrap_tuple_v(obj.type_id) {
@@ -228,7 +228,7 @@ impl Cg<'_, '_, '_> {
         let idx = self.compile_vir_expr(index)?;
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[obj.value, idx.value])?;
         let expected_element_id = self.try_substitute_type(expected_element_id);
-        let element_sema_id = self.cv_type_id_from_vir(element_id);
+        let element_sema_id = self.sema_type_id(element_id);
         let mut resolved_element_id = self.try_substitute_type(element_sema_id);
         let resolved_is_abstract = resolved_element_id == TypeId::UNKNOWN
             || self.vir_query_contains_type_param(resolved_element_id)
@@ -340,7 +340,7 @@ impl Cg<'_, '_, '_> {
         let elem_vir_ty = self.vir_query_unwrap_array_v(arr.type_id);
         let (tag_val, value_bits, val) = if let Some(vir_ty) = elem_vir_ty {
             // Bridge to sema TypeId for prepare_dynamic_array_store (no _v variant yet).
-            let elem_sema_id = self.cv_type_id_from_vir(vir_ty);
+            let elem_sema_id = self.sema_type_id(vir_ty);
             self.prepare_dynamic_array_store(val, elem_sema_id)?
         } else {
             self.prepare_dynamic_array_store_untyped(val)?

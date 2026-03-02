@@ -214,7 +214,7 @@ impl Compiler<'_> {
                 .zip(param_vir_types.iter())
                 .map(|(&(sym, _, _), &vir_ty)| {
                     let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                    let type_id = self.cv_type_id_from_vir(vir_ty);
+                    let type_id = self.sema_type_id(vir_ty);
                     (sym, type_id, cranelift_type)
                 })
                 .collect()
@@ -226,7 +226,7 @@ impl Compiler<'_> {
         // by using the method's defining type module.
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
-        let method_return_type_id = Some(self.cv_type_id_from_vir(return_vir_type));
+        let method_return_type_id = Some(self.sema_type_id(return_vir_type));
 
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -313,7 +313,7 @@ impl Compiler<'_> {
                     .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
                             vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                        let type_id = self.cv_type_id_from_vir(vir_ty);
+                        let type_id = self.sema_type_id(vir_ty);
                         (sym, type_id, cranelift_type)
                     })
                     .collect()
@@ -321,7 +321,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let return_type_id = self.cv_type_id_from_vir(return_vir_type);
+            let return_type_id = self.sema_type_id(return_vir_type);
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -507,7 +507,7 @@ impl Compiler<'_> {
                     .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
                             vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                        let type_id = self.cv_type_id_from_vir(vir_ty);
+                        let type_id = self.sema_type_id(vir_ty);
                         (sym, type_id, cranelift_type)
                     })
                     .collect()
@@ -516,7 +516,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let return_type_id = Some(self.cv_type_id_from_vir(return_vir_type));
+            let return_type_id = Some(self.sema_type_id(return_vir_type));
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -600,7 +600,7 @@ impl Compiler<'_> {
                     .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
                             vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                        let type_id = self.cv_type_id_from_vir(vir_ty);
+                        let type_id = self.sema_type_id(vir_ty);
                         (sym, type_id, cranelift_type)
                     })
                     .collect()
@@ -608,7 +608,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let return_type_id = Some(self.cv_type_id_from_vir(return_vir_type));
+            let return_type_id = Some(self.sema_type_id(return_vir_type));
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);

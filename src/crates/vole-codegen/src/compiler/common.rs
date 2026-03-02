@@ -261,18 +261,18 @@ fn emit_implicit_return(
                 cg.builder.ins().return_(&[tag, payload]);
             }
         } else if let Some(ret_vir_ty) = cg.return_type
-            && cg.is_small_struct_return(cg.cv_type_id_from_vir(ret_vir_ty))
+            && cg.is_small_struct_return_v(ret_vir_ty)
         {
-            cg.emit_small_struct_return(value.value, cg.cv_type_id_from_vir(ret_vir_ty))?;
+            cg.emit_small_struct_return_v(value.value, ret_vir_ty)?;
         } else if let Some(ret_vir_ty) = cg.return_type
-            && cg.is_sret_struct_return(cg.cv_type_id_from_vir(ret_vir_ty))
+            && cg.is_sret_struct_return_v(ret_vir_ty)
         {
-            cg.emit_sret_struct_return(value.value, cg.cv_type_id_from_vir(ret_vir_ty))?;
+            cg.emit_sret_struct_return_v(value.value, ret_vir_ty)?;
         } else if let Some(ret_vir_ty) = cg.return_type
             && cg.vir_query_is_union_v(ret_vir_ty)
         {
             // For union return types, wrap the value in a union
-            let wrapped = cg.construct_union_id(value, cg.cv_type_id_from_vir(ret_vir_ty))?;
+            let wrapped = cg.construct_union_id_v(value, ret_vir_ty)?;
             cg.builder.ins().return_(&[wrapped.value]);
         } else {
             // Coerce the value to match the function return type if needed.

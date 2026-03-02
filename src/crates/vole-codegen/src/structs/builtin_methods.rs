@@ -49,7 +49,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Option<CompiledValue>> {
         // Array methods
         if let Some(elem_vir_type_id) = self.vir_query_unwrap_array_v(obj.type_id) {
-            let elem_type_id = self.cv_type_id_from_vir(elem_vir_type_id);
+            let elem_type_id = self.sema_type_id(elem_vir_type_id);
             return match method_name {
                 "length" => {
                     let result = self.call_compiler_intrinsic_key_with_line(
@@ -176,7 +176,7 @@ impl Cg<'_, '_, '_> {
 
         let elem_type = self
             .vir_query_unwrap_array_v(arr_obj.type_id)
-            .map(|v| self.cv_type_id_from_vir(v));
+            .map(|v| self.sema_type_id(v));
         let (tag_val, value_bits, _value) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(value, elem_id)?
         } else {

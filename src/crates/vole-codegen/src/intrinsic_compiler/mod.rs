@@ -493,7 +493,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.emit_rc_inc_for_type_v(payload.value, payload.type_id)?;
             }
             // Bridge to sema TypeId for prepare_dynamic_array_store (no _v variant yet).
-            let elem_sema_id = self.cv_type_id_from_vir(payload.type_id);
+            let elem_sema_id = self.sema_type_id(payload.type_id);
             let (tag_val, payload_bits, _) =
                 self.prepare_dynamic_array_store(payload, elem_sema_id)?;
             (tag_val, payload_bits)
@@ -550,7 +550,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     .iter()
                     .copied()
                     .find(|&ty| ty != VirTypeId::DONE)
-                    .map(|vir| self.cv_type_id_from_vir(vir))
+                    .map(|vir| self.sema_type_id(vir))
             })
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
