@@ -271,12 +271,16 @@ impl Cg<'_, '_, '_> {
 
         // Unwrap function type to get params and return type
         let (param_ids, return_type_id) = {
-            let (params, ret) = self
-                .vir_query_unwrap_function_sema(func_type_id)
+            let (vir_params, vir_ret) = self
+                .vir_query_unwrap_function_v(self.vir_lookup(func_type_id))
                 .ok_or_else(|| {
                     CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
                 })?;
-            (params, ret)
+            let params: Vec<TypeId> = vir_params
+                .iter()
+                .map(|&v| self.cv_type_id_from_vir(v))
+                .collect();
+            (params, self.cv_type_id_from_vir(vir_ret))
         };
 
         let wrapper_func_id =
@@ -343,24 +347,19 @@ impl Cg<'_, '_, '_> {
         expr: &VirExpr,
         expected_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
+        let expected_vir = self.vir_lookup(expected_type_id);
         if (self.vir_query_is_array(expected_type_id)
-            || self.vir_query_unwrap_tuple_sema(expected_type_id).is_some()
-            || self
-                .vir_query_unwrap_fixed_array_sema(expected_type_id)
-                .is_some())
+            || self.vir_query_unwrap_tuple_v(expected_vir).is_some()
+            || self.vir_query_unwrap_fixed_array_v(expected_vir).is_some())
             && let VirExpr::ArrayLiteral { elements, .. } = expr
         {
-            let vir_ty = self.vir_lookup(expected_type_id);
-            let result = self.compile_vir_array_literal(elements, vir_ty)?;
+            let result = self.compile_vir_array_literal(elements, expected_vir)?;
             return Ok(self.mark_rc_owned(result));
         }
-        if self
-            .vir_query_unwrap_fixed_array_sema(expected_type_id)
-            .is_some()
+        if self.vir_query_unwrap_fixed_array_v(expected_vir).is_some()
             && let VirExpr::RepeatLiteral { element, count, .. } = expr
         {
-            let vir_ty = self.vir_lookup(expected_type_id);
-            let result = self.compile_vir_repeat_literal(element, *count, vir_ty)?;
+            let result = self.compile_vir_repeat_literal(element, *count, expected_vir)?;
             return Ok(self.mark_rc_owned(result));
         }
         self.compile_vir_expr(expr)
@@ -1124,22 +1123,24 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
         narrowed_type_id: TypeId,
     ) -> Option<TypeId> {
-        self.vir_query_unwrap_union_sema(union_type_id)
+        let narrowed_vir = self.vir_lookup(narrowed_type_id);
+        self.vir_query_unwrap_union_v(self.vir_lookup(union_type_id))
             .and_then(|variants| {
                 variants
                     .iter()
                     .copied()
-                    .find(|&v| v == narrowed_type_id)
+                    .find(|&v| v == narrowed_vir)
                     .or_else(|| {
                         if self.vir_query_is_integer(narrowed_type_id) {
                             variants
                                 .iter()
                                 .copied()
-                                .find(|&v| self.vir_query_is_integer(v))
+                                .find(|&v| self.vir_query_is_integer(self.cv_type_id_from_vir(v)))
                         } else {
                             None
                         }
                     })
+                    .map(|v| self.cv_type_id_from_vir(v))
             })
     }
 

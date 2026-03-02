@@ -31,8 +31,10 @@ impl Cg<'_, '_, '_> {
     ) -> IsCheckResult {
         if value_type_id.is_unknown() {
             IsCheckResult::CheckUnknown(tested_type_id)
-        } else if let Some(variants) = self.vir_query_unwrap_union_sema(value_type_id) {
-            if let Some(index) = variants.iter().position(|&v| v == tested_type_id) {
+        } else if let Some(variants) = self.vir_query_unwrap_union_v(self.vir_lookup(value_type_id))
+        {
+            let tested_vir = self.vir_lookup(tested_type_id);
+            if let Some(index) = variants.iter().position(|&v| v == tested_vir) {
                 IsCheckResult::CheckTag(index as u32)
             } else {
                 IsCheckResult::AlwaysFalse

@@ -201,8 +201,11 @@ impl Cg<'_, '_, '_> {
     }
 
     fn signature_has_self_placeholder_param(&self, signature_id: TypeId) -> bool {
-        self.vir_query_unwrap_function_sema(signature_id)
-            .is_some_and(|(params, _)| params.iter().any(|&p| self.vir_query_is_self_type(p)))
+        // Uses the arena directly to preserve Self placeholder TypeIds that
+        // would be lost in the VIR roundtrip (VIR maps Placeholder -> Unknown).
+        self.arena()
+            .unwrap_function(signature_id)
+            .is_some_and(|(params, _, _)| params.iter().any(|&p| self.vir_query_is_self_type(p)))
     }
 
     /// Resolve method parameter types for argument coercion.
@@ -213,23 +216,25 @@ impl Cg<'_, '_, '_> {
         &self,
         resolved: MethodResolutionRef<'_>,
     ) -> Option<Vec<TypeId>> {
+        // Uses the arena directly to preserve Self placeholder TypeIds that
+        // would be lost in the VIR roundtrip (VIR maps Placeholder -> Unknown).
         if let Some(method_id) = resolved.method_id() {
             let signature_id = self.analyzed().method_signature_id(method_id);
-            if let Some((params, _)) = self.vir_query_unwrap_function_sema(signature_id) {
-                return Some(params);
+            if let Some((params, _, _)) = self.arena().unwrap_function(signature_id) {
+                return Some(params.to_vec());
             }
         }
 
         let resolved_signature_id = self.resolved_func_type_id(resolved);
         if self.signature_has_self_placeholder_param(resolved_signature_id)
             && let Some(signature_id) = self.resolved_interface_signature_id(resolved)
-            && let Some((params, _)) = self.vir_query_unwrap_function_sema(signature_id)
+            && let Some((params, _, _)) = self.arena().unwrap_function(signature_id)
         {
-            return Some(params);
+            return Some(params.to_vec());
         }
 
-        if let Some((params, _)) = self.vir_query_unwrap_function_sema(resolved_signature_id) {
-            return Some(params);
+        if let Some((params, _, _)) = self.arena().unwrap_function(resolved_signature_id) {
+            return Some(params.to_vec());
         }
         if let VirType::Function { params, .. } =
             self.vir_type_table().get(resolved.0.func_type_id())
@@ -280,9 +285,17 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         let resolved_receiver = self.try_substitute_type(receiver_type_id);
+        let resolved_receiver_vir = self.vir_lookup(resolved_receiver);
         let receiver_generic = self
-            .vir_query_unwrap_class_sema(resolved_receiver)
-            .or_else(|| self.vir_query_unwrap_interface_sema(resolved_receiver));
+            .vir_query_unwrap_class_v(resolved_receiver_vir)
+            .or_else(|| self.vir_query_unwrap_interface_v(resolved_receiver_vir))
+            .map(|(def_id, vir_args)| {
+                let args: Vec<TypeId> = vir_args
+                    .iter()
+                    .map(|&v| self.cv_type_id_from_vir(v))
+                    .collect();
+                (def_id, args)
+            });
 
         let Some((type_def_id, type_args)) = receiver_generic else {
             return resolved;
@@ -765,7 +778,7 @@ impl Cg<'_, '_, '_> {
             // paths above (lines 264-310) are skipped. Check here if the object is an
             // interface type and dispatch via vtable.
             let interface_type_def_id = self
-                .vir_query_unwrap_interface_sema(resolved_obj_type_id)
+                .vir_query_unwrap_interface_v(self.vir_lookup(resolved_obj_type_id))
                 .map(|(id, _)| id);
             if let Some(interface_type_def_id) = interface_type_def_id {
                 let func_type_id = self

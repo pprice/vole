@@ -245,7 +245,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Find the nil variant index using a sema TypeId directly.
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
-        if let Some(variants) = self.vir_query_unwrap_union_sema(ty) {
+        if let Some(variants) = self.vir_query_unwrap_union_v(self.vir_lookup(ty)) {
             variants.iter().position(|&id| id.is_nil())
         } else {
             None
@@ -254,7 +254,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
     pub fn interface_type_def_id(&self, ty: TypeId) -> Option<TypeDefId> {
-        self.vir_query_unwrap_interface_sema(ty).map(|(id, _)| id)
+        self.vir_query_unwrap_interface_v(self.vir_lookup(ty))
+            .map(|(id, _)| id)
     }
 
     /// Unwrap an interface `VirTypeId`, returning the `TypeDefId` if it is one.
@@ -275,9 +276,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         use vole_runtime::value::RuntimeTypeId;
 
         let resolved_union_id = self.try_substitute_type(union_type_id);
-        let Some(variants) = self.vir_query_unwrap_union_sema(resolved_union_id) else {
+        let Some(vir_variants) = self.vir_query_unwrap_union_v(self.vir_lookup(resolved_union_id))
+        else {
             return false;
         };
+        let variants: Vec<TypeId> = vir_variants
+            .iter()
+            .map(|&v| self.cv_type_id_from_vir(v))
+            .collect();
 
         let mut seen_tags: FxHashSet<u64> = FxHashSet::default();
         for &variant in &variants {
@@ -335,13 +341,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Codegen/runtime layout policy: inline union array slots store only
         // (runtime_tag, payload_bits), so variants that need richer tagging or
         // heap-backed payload wrappers must use boxed union storage.
+        let vir_variant = self.vir_lookup(variant);
         !(self.vir_query_is_union(variant)
             || self.vir_query_is_interface(variant)
             || self.vir_query_is_class(variant)
             || self.vir_query_is_struct(variant)
             || self.vir_query_is_unknown(variant)
-            || self.vir_query_unwrap_tuple_sema(variant).is_some()
-            || self.vir_query_unwrap_fallible_sema(variant).is_some()
+            || self.vir_query_unwrap_tuple_v(vir_variant).is_some()
+            || self.vir_query_unwrap_fallible_v(vir_variant).is_some()
             || self.vir_query_unwrap_type_param(variant).is_some())
     }
 

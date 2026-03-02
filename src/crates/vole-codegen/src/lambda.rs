@@ -81,7 +81,7 @@ impl Cg<'_, '_, '_> {
             sig.returns.push(AbiParam::new(types::I64)); // low
             sig.returns.push(AbiParam::new(types::I64)); // high
         } else if self
-            .vir_query_unwrap_fallible_sema(return_type_id)
+            .vir_query_unwrap_fallible_v(self.vir_lookup(return_type_id))
             .is_some()
         {
             sig.returns.push(AbiParam::new(types::I64)); // tag

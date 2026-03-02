@@ -7,7 +7,7 @@ use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
-use vole_identity::{ModuleId, MonomorphInstanceTrait, NameId, TypeId};
+use vole_identity::{ModuleId, MonomorphInstanceTrait, NameId, TypeId, VirTypeId};
 use vole_vir::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
 };
@@ -332,15 +332,15 @@ impl Compiler<'_> {
     /// program (or a tests virtual module), not from imported module programs.
     fn type_depends_on_program_definitions(&self, type_id: TypeId) -> bool {
         let mut visited = FxHashSet::default();
-        self.type_depends_on_program_definitions_inner(type_id, &mut visited)
+        self.type_depends_on_program_definitions_inner(self.vir_lookup(type_id), &mut visited)
     }
 
     fn type_depends_on_program_definitions_inner(
         &self,
-        type_id: TypeId,
-        visited: &mut FxHashSet<TypeId>,
+        vir_ty: VirTypeId,
+        visited: &mut FxHashSet<VirTypeId>,
     ) -> bool {
-        if !visited.insert(type_id) {
+        if !visited.insert(vir_ty) {
             return false; // cycle — treat as not program-owned
         }
 
@@ -355,50 +355,53 @@ impl Compiler<'_> {
             !self.analyzed.vir_program().has_module(&module_path)
         };
 
-        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_class_sema(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_class_v(vir_ty) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_struct_sema(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_struct_v(vir_ty) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_interface_sema(type_id) {
+        if let Some((type_def_id, type_args)) = self.vir_query_unwrap_interface_v(vir_ty) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
                     .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some(elem) = self.vir_query_unwrap_array_sema(type_id) {
+        if let Some(elem) = self.vir_query_unwrap_array_v(vir_ty) {
             return self.type_depends_on_program_definitions_inner(elem, visited);
         }
-        if let Some((elem, _)) = self.vir_query_unwrap_fixed_array_sema(type_id) {
+        if let Some((elem, _)) = self.vir_query_unwrap_fixed_array_v(vir_ty) {
             return self.type_depends_on_program_definitions_inner(elem, visited);
         }
-        if let Some(elements) = self.vir_query_unwrap_tuple_sema(type_id) {
+        if let Some(elements) = self.vir_query_unwrap_tuple_v(vir_ty) {
             return elements
                 .iter()
                 .copied()
                 .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some(variants) = self.vir_query_unwrap_union_sema(type_id) {
+        if let Some(variants) = self.vir_query_unwrap_union_v(vir_ty) {
             return variants
                 .iter()
                 .copied()
                 .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((ok_type, err_type)) = self.vir_query_unwrap_fallible_sema(type_id) {
+        if let Some((ok_type, error_types)) = self.vir_query_unwrap_fallible_v(vir_ty) {
             return self.type_depends_on_program_definitions_inner(ok_type, visited)
-                || self.type_depends_on_program_definitions_inner(err_type, visited);
+                || error_types
+                    .iter()
+                    .copied()
+                    .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
-        if let Some((params, ret)) = self.vir_query_unwrap_function_sema(type_id) {
+        if let Some((params, ret)) = self.vir_query_unwrap_function_v(vir_ty) {
             return params
                 .iter()
                 .copied()

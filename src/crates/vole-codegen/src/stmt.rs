@@ -329,11 +329,14 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
-        let variants = self
-            .vir_query_unwrap_union_sema(union_type_id)
+        let variants: Vec<TypeId> = self
+            .vir_query_unwrap_union_v(self.vir_lookup(union_type_id))
             .ok_or_else(|| {
                 CodegenError::type_mismatch("union construction", "union type", "non-union")
-            })?;
+            })?
+            .iter()
+            .map(|&v| self.cv_type_id_from_vir(v))
+            .collect();
 
         // If the value is already the same union type, just return it.
         // Also check the substituted type, since generic code may produce values
@@ -419,10 +422,13 @@ impl Cg<'_, '_, '_> {
             } else {
                 None
             }
-        } else if let Some(variants) = self.vir_query_unwrap_union_sema(error_type_id) {
+        } else if let Some(vir_variants) =
+            self.vir_query_unwrap_union_v(self.vir_lookup(error_type_id))
+        {
             // Union of error types
-            variants.iter().find_map(|&v| {
-                if let Some(type_def_id) = self.vir_query_unwrap_error(v) {
+            vir_variants.iter().find_map(|&v| {
+                if let Some(type_def_id) = self.vir_query_unwrap_error(self.cv_type_id_from_vir(v))
+                {
                     let name = name_table
                         .last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
                     if name.as_deref() == Some(raise_error_name) {
@@ -657,17 +663,18 @@ impl Cg<'_, '_, '_> {
         &self,
         union_type_id: TypeId,
     ) -> Option<TypeId> {
-        let variants = self.vir_query_unwrap_union_sema(union_type_id)?;
-        let mut it = variants.iter().copied().filter(|&variant| {
-            self.vir_query_is_array(variant)
-                || self.vir_query_unwrap_tuple_sema(variant).is_some()
-                || self.vir_query_unwrap_fixed_array_sema(variant).is_some()
+        let vir_variants = self.vir_query_unwrap_union_v(self.vir_lookup(union_type_id))?;
+        let mut it = vir_variants.iter().copied().filter(|&variant| {
+            let variant_tid = self.cv_type_id_from_vir(variant);
+            self.vir_query_is_array(variant_tid)
+                || self.vir_query_unwrap_tuple_v(variant).is_some()
+                || self.vir_query_unwrap_fixed_array_v(variant).is_some()
         });
         let first = it.next()?;
         if it.next().is_some() {
             None
         } else {
-            Some(first)
+            Some(self.cv_type_id_from_vir(first))
         }
     }
 
@@ -873,8 +880,8 @@ impl Cg<'_, '_, '_> {
         })?;
         let return_type_id = self.cv_type_id_from_vir(return_vir_ty);
 
-        let (_success_type_id, error_type_id) = self
-            .vir_query_unwrap_fallible_sema(return_type_id)
+        let (_success_vir, error_virs) = self
+            .vir_query_unwrap_fallible_v(return_vir_ty)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "raise statement",
@@ -882,6 +889,16 @@ impl Cg<'_, '_, '_> {
                     "non-fallible type",
                 )
             })?;
+        // Reconstruct single error TypeId: if one error, convert directly;
+        // if multiple, the arena's fallible stores them as a union.
+        let error_type_id = if error_virs.len() == 1 {
+            self.cv_type_id_from_vir(error_virs[0])
+        } else {
+            self.arena()
+                .unwrap_fallible(return_type_id)
+                .map(|(_, err)| err)
+                .unwrap_or(TypeId::UNKNOWN)
+        };
 
         let error_tag = self
             .error_tag_for(error_type_id, error_name)

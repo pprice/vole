@@ -56,9 +56,9 @@ impl Cg<'_, '_, '_> {
         // Get return type from function type
         let return_type_id = {
             let (_, ret) = self
-                .vir_query_unwrap_function_sema(func_type_id)
+                .vir_query_unwrap_function_v(self.vir_lookup(func_type_id))
                 .expect("INTERNAL: module method: missing function type");
-            ret
+            self.cv_type_id_from_vir(ret)
         };
 
         // Compile arguments, tracking owned RC temps for cleanup
@@ -198,8 +198,8 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         // Extract function type components
         let (param_ids, return_type_id) = {
-            let (params, ret) = self
-                .vir_query_unwrap_function_sema(func_type_id)
+            let (vir_params, vir_ret) = self
+                .vir_query_unwrap_function_v(self.vir_lookup(func_type_id))
                 .ok_or_else(|| {
                     CodegenError::type_mismatch(
                         "functional interface call",
@@ -207,7 +207,11 @@ impl Cg<'_, '_, '_> {
                         "other",
                     )
                 })?;
-            (params, ret)
+            let params: Vec<TypeId> = vir_params
+                .iter()
+                .map(|&v| self.cv_type_id_from_vir(v))
+                .collect();
+            (params, self.cv_type_id_from_vir(vir_ret))
         };
 
         // Check if this is actually a closure or a pure function
@@ -327,8 +331,8 @@ impl Cg<'_, '_, '_> {
 
         // Unwrap function type to get params and return type
         let (param_count, param_type_ids, return_type_id, is_void_return) = {
-            let (params, ret_id) = self
-                .vir_query_unwrap_function_sema(dispatch_func_type_id)
+            let (vir_params, vir_ret) = self
+                .vir_query_unwrap_function_v(self.vir_lookup(dispatch_func_type_id))
                 .ok_or_else(|| {
                     CodegenError::type_mismatch(
                         "interface dispatch",
@@ -336,6 +340,11 @@ impl Cg<'_, '_, '_> {
                         "non-function",
                     )
                 })?;
+            let params: Vec<TypeId> = vir_params
+                .iter()
+                .map(|&v| self.cv_type_id_from_vir(v))
+                .collect();
+            let ret_id = self.cv_type_id_from_vir(vir_ret);
             let is_void = self.vir_query_is_void(ret_id);
             (params.len(), params, ret_id, is_void)
         };

@@ -552,8 +552,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         let elem_type_id = self
-            .vir_query_unwrap_union_sema(return_type_id)
-            .and_then(|variants| variants.iter().copied().find(|&ty| ty != TypeId::DONE))
+            .vir_query_unwrap_union_v(self.vir_lookup(return_type_id))
+            .and_then(|variants| {
+                variants
+                    .iter()
+                    .copied()
+                    .find(|&ty| ty != VirTypeId::DONE)
+                    .map(|vir| self.cv_type_id_from_vir(vir))
+            })
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "task_channel_try_recv return type",

@@ -91,7 +91,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // low
                 sig.returns.push(AbiParam::new(types::I64)); // high
-            } else if self.vir_query_unwrap_fallible_sema(ret).is_some() {
+            } else if self
+                .vir_query_unwrap_fallible_v(self.vir_lookup(ret))
+                .is_some()
+            {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // payload
             } else {
@@ -186,7 +189,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         if results.is_empty() {
             Ok(self.void_value())
-        } else if results.len() == 2 && self.vir_query_unwrap_fallible_sema(ret).is_some() {
+        } else if results.len() == 2
+            && self
+                .vir_query_unwrap_fallible_v(self.vir_lookup(ret))
+                .is_some()
+        {
             // Fallible multi-value return: pack (tag, payload) into stack slot
             let tag = results[0];
             let payload = results[1];

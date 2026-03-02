@@ -63,11 +63,14 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let variants = self
-            .vir_query_unwrap_union_sema(union_type_id)
+        let variants: Vec<TypeId> = self
+            .vir_query_unwrap_union_v(self.vir_lookup(union_type_id))
             .ok_or_else(|| {
                 CodegenError::type_mismatch("union construction", "union type", "non-union")
-            })?;
+            })?
+            .iter()
+            .map(|&v| self.cv_type_id_from_vir(v))
+            .collect();
 
         // If the value is already the same union type, just return it
         if value.type_id == self.vir_lookup(union_type_id) {

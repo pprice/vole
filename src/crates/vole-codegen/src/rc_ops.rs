@@ -36,14 +36,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - The class has no type args (non-generic)
     /// - None of the field types involve type parameters
     pub fn mono_instance_type_id(&self, base_type_id: u32, result_type_id: TypeId) -> u32 {
-        let Some((type_def_id, type_args)) = self.vir_query_unwrap_class_sema(result_type_id)
+        let Some((type_def_id, vir_type_args)) =
+            self.vir_query_unwrap_class_v(self.vir_lookup(result_type_id))
         else {
             return base_type_id;
         };
-        if type_args.is_empty() {
+        if vir_type_args.is_empty() {
             return base_type_id;
         }
-        self.mono_instance_type_id_with_args(base_type_id, type_def_id, type_args.to_vec())
+        let type_args: Vec<TypeId> = vir_type_args
+            .iter()
+            .map(|&v| self.cv_type_id_from_vir(v))
+            .collect();
+        self.mono_instance_type_id_with_args(base_type_id, type_def_id, type_args)
     }
 
     /// Resolve a monomorphized runtime type_id for a generic class instance
@@ -613,9 +618,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             FieldTypeTag::Interface
         } else if self.rc_state(type_id).needs_cleanup() {
             FieldTypeTag::Rc
-        } else if let Some(variants) = self.vir_query_unwrap_union_sema(type_id) {
-            for &variant in &variants {
-                if self.rc_state(variant).needs_cleanup() {
+        } else if let Some(vir_variants) = self.vir_query_unwrap_union_v(self.vir_lookup(type_id)) {
+            for &vir_variant in &vir_variants {
+                if self
+                    .rc_state(self.cv_type_id_from_vir(vir_variant))
+                    .needs_cleanup()
+                {
                     return FieldTypeTag::UnionHeap;
                 }
             }
