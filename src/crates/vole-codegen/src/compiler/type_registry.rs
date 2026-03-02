@@ -193,18 +193,22 @@ impl Compiler<'_> {
             // Structs use ordinal indices (struct_field_byte_offset iterates field_types).
             let slot_key = if is_class { physical_slot } else { ordinal };
             field_slots.insert(field_name, slot_key);
+            // Use sema TypeId to look up the VirTypeId in the main type table.
+            // Entity metadata's `vir_ty` may be out-of-sync for generic type
+            // parameters due to the clone-based translation in lowering.
+            let sema_ty = self.analyzed.entity_field_sema_type(*field_id);
             let vir_field_ty = table
-                .lookup_type_id(field_def.sema_type_id)
+                .lookup_type_id(sema_ty)
                 .expect("field type must be in VIR table after recursive sweep");
             if is_class {
                 let tag = vir_type_id_to_field_tag(vir_field_ty, table);
                 field_type_tags.push(tag);
                 // i128 uses 2 physical slots; add a Value tag for the high half
-                if matches!(field_def.sema_type_id, TypeId::I128 | TypeId::F128) {
+                if matches!(sema_ty, TypeId::I128 | TypeId::F128) {
                     field_type_tags.push(FieldTypeTag::Value);
                 }
             }
-            physical_slot += if matches!(field_def.sema_type_id, TypeId::I128 | TypeId::F128) {
+            physical_slot += if matches!(sema_ty, TypeId::I128 | TypeId::F128) {
                 2
             } else {
                 1

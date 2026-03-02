@@ -217,8 +217,8 @@ fn populate_field_defs(
             name_id: fd.name_id,
             full_name_id: fd.full_name_id,
             defining_type: fd.defining_type,
-            sema_type_id: fd.ty,
             vir_ty,
+            sema_type_id: fd.ty,
             slot: fd.slot,
             symbol,
         });
@@ -343,8 +343,8 @@ fn populate_global_defs(
             id: gd.id,
             name_id: gd.name_id,
             vir_ty,
-            module_id: gd.module_id,
             sema_type_id: gd.type_id,
+            module_id: gd.module_id,
         });
     }
 }

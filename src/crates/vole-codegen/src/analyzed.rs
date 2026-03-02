@@ -488,14 +488,14 @@ impl AnalyzedProgram {
         self.function_def(func_id).sema_param_types.clone()
     }
 
-    /// Return global declared TypeId by NameId.
-    pub(crate) fn global_type_id(&self, name_id: NameId) -> Option<vole_sema::type_arena::TypeId> {
+    /// Return global declared VirTypeId by NameId.
+    pub(crate) fn global_vir_type(&self, name_id: NameId) -> Option<VirTypeId> {
         let global_id = self.entity_metadata().global_by_name(name_id)?;
         Some(
             self.entity_metadata()
                 .get_global_def(global_id)
-                .expect("global_type_id: global ID not in VirEntityMetadata")
-                .sema_type_id,
+                .expect("global_vir_type: global ID not in VirEntityMetadata")
+                .vir_ty,
         )
     }
 
@@ -555,8 +555,22 @@ impl AnalyzedProgram {
             .unwrap_or_default()
     }
 
-    /// Return the semantic field type for a field ID.
-    pub(crate) fn entity_field_type(&self, field_id: FieldId) -> vole_identity::TypeId {
+    /// Return the VIR field type for a field ID.
+    #[allow(dead_code)]
+    pub(crate) fn entity_field_vir_type(&self, field_id: FieldId) -> VirTypeId {
+        self.field_def(field_id).vir_ty
+    }
+
+    /// Return the sema field type for a field ID.
+    ///
+    /// Legacy bridge: returns the sema `TypeId` stored alongside
+    /// `vir_ty` in `VirFieldDef`.  Used by `collect_field_types` for
+    /// arena-based operations (union construction) that cannot yet
+    /// consume `VirTypeId` directly.
+    pub(crate) fn entity_field_sema_type(
+        &self,
+        field_id: FieldId,
+    ) -> vole_sema::type_arena::TypeId {
         self.field_def(field_id).sema_type_id
     }
 

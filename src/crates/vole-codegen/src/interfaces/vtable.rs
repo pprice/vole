@@ -1014,9 +1014,7 @@ fn collect_concrete_field_info<C: VtableCtx>(
             let name = name_table
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
-            let field_vir = vir_table
-                .lookup_type_id(field.sema_type_id)
-                .unwrap_or(VirTypeId::UNKNOWN);
+            let field_vir = field.vir_ty;
             let type_name = crate::types::vir_conversions::vir_display_basic(field_vir, vir_table);
             let runtime_tag =
                 crate::types::vir_conversions::vir_unknown_type_tag(field_vir, vir_table) as i64;

@@ -595,6 +595,31 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// VirTypeId overload of [`field_type_tag`].
+    #[allow(dead_code)]
+    pub fn field_type_tag_v(&self, vir_ty: VirTypeId) -> vole_runtime::type_registry::FieldTypeTag {
+        use vole_runtime::type_registry::FieldTypeTag;
+        if vir_ty.is_compat() {
+            return self.field_type_tag(vir_ty.compat_type_id());
+        }
+        if vir_ty == VirTypeId::UNKNOWN {
+            FieldTypeTag::UnknownHeap
+        } else if self.vir_query_is_interface_v(vir_ty) {
+            FieldTypeTag::Interface
+        } else if self.rc_state_v(vir_ty).needs_cleanup() {
+            FieldTypeTag::Rc
+        } else if let Some(vir_variants) = self.vir_query_unwrap_union_v(vir_ty) {
+            for &vir_variant in &vir_variants {
+                if self.rc_state_v(vir_variant).needs_cleanup() {
+                    return FieldTypeTag::UnionHeap;
+                }
+            }
+            FieldTypeTag::Value
+        } else {
+            FieldTypeTag::Value
+        }
+    }
+
     /// Mark a CompiledValue as owned if its type needs RC cleanup.
     /// Use this for fresh allocations (function returns, operator results) — NOT for
     /// borrowed values (variable reads, field access, index operations).

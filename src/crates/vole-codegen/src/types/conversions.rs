@@ -31,7 +31,7 @@ impl TypeEntityLookup for AnalyzedProgram {
     }
 
     fn field_type(&self, field_id: FieldId) -> TypeId {
-        self.entity_field_type(field_id)
+        self.entity_field_sema_type(field_id)
     }
 
     fn type_name_id(&self, type_def_id: TypeDefId) -> NameId {

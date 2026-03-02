@@ -30,7 +30,7 @@ struct FieldInfo {
     name: String,
     type_name: String,
     slot: usize,
-    type_id: TypeId,
+    vir_ty: VirTypeId,
     annotations: Vec<VirAnnotation>,
 }
 
@@ -55,7 +55,7 @@ pub(super) fn build_field_meta_array(
             &fi.type_name,
             type_def_id,
             fi.slot,
-            fi.type_id,
+            fi.vir_ty,
             &fi.annotations,
         )?;
 
@@ -92,7 +92,7 @@ fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
                 .name_table()
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
-            let type_name = cg.vir_query_display_basic(field.sema_type_id);
+            let type_name = cg.vir_query_display_basic_v(field.vir_ty);
             let annotations = vir_program
                 .get_field_annotations(field_id)
                 .map(|anns| anns.to_vec())
@@ -101,7 +101,7 @@ fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
                 name,
                 type_name,
                 slot: field.slot,
-                type_id: field.sema_type_id,
+                vir_ty: field.vir_ty,
                 annotations,
             }
         })
@@ -126,11 +126,11 @@ fn build_single_field_meta(
     type_name: &str,
     target_type_def_id: TypeDefId,
     field_slot: usize,
-    field_type_id: TypeId,
+    field_vir_ty: VirTypeId,
     annotations: &[VirAnnotation],
 ) -> CodegenResult<Value> {
     // Compute the RuntimeTypeId tag for this field's type (used by getter boxing).
-    let runtime_tag = cg.vir_query_unknown_type_tag(field_type_id) as i64;
+    let runtime_tag = cg.vir_query_unknown_type_tag_v(field_vir_ty) as i64;
 
     let instance_ptr = super::allocate_class_instance(cg, info.field_meta_def_id)?;
     let set_func_ref = cg.runtime_func_ref(RuntimeKey::InstanceSetField)?;
@@ -358,10 +358,7 @@ fn collect_annotation_field_type_tags(
 ) -> Vec<vole_runtime::type_registry::FieldTypeTag> {
     cg.analyzed()
         .fields_on_type(ann_type_def_id)
-        .map(|field_id| {
-            let field = cg.analyzed().field_def(field_id);
-            cg.field_type_tag(field.sema_type_id)
-        })
+        .map(|field_id| cg.field_type_tag(cg.analyzed().entity_field_sema_type(field_id)))
         .collect()
 }
 

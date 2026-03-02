@@ -154,7 +154,7 @@ impl Cg<'_, '_, '_> {
             0 => true, // null payload, rc_dec is no-op
             1 => {
                 let field = self.analyzed().field_def(fields[0]);
-                self.rc_state(field.sema_type_id).needs_cleanup()
+                self.rc_state_v(field.vir_ty).needs_cleanup()
             }
             _ => false, // 2+ fields = stack pointer, NOT safe for rc_dec
         }
@@ -170,7 +170,7 @@ impl Cg<'_, '_, '_> {
             return false;
         }
         let field = self.analyzed().field_def(fields[0]);
-        self.rc_state(field.sema_type_id).needs_cleanup()
+        self.rc_state_v(field.vir_ty).needs_cleanup()
     }
 
     // =========================================================================
@@ -250,7 +250,7 @@ impl Cg<'_, '_, '_> {
         // For single wide (i128) field or multi-field errors, payload is a pointer to field data
         let has_any_wide = error_fields
             .iter()
-            .any(|f| self.vir_query_is_wide(f.sema_type_id));
+            .any(|f| self.vir_query_is_wide_v(f.vir_ty));
         let inline_single_field = error_fields.len() == 1 && !has_any_wide;
 
         // Precompute field byte offsets (i128 fields use 16 bytes, others 8)
@@ -260,7 +260,7 @@ impl Cg<'_, '_, '_> {
                 .iter()
                 .map(|f| {
                     let current = offset;
-                    offset += self.vir_query_field_byte_size(f.sema_type_id) as i32;
+                    offset += self.vir_query_field_byte_size_v(f.vir_ty) as i32;
                     current
                 })
                 .collect()
@@ -276,16 +276,16 @@ impl Cg<'_, '_, '_> {
                 continue;
             };
 
-            let field_ty_id = field_def.sema_type_id;
-            let is_wide = self.vir_query_is_wide(field_ty_id);
+            let field_vir_ty = field_def.vir_ty;
+            let is_wide = self.vir_query_is_wide_v(field_vir_ty);
 
             // Load the field value
             if inline_single_field {
                 // For single non-wide field errors, the payload is the value directly
-                let converted = self.convert_field_value(payload, field_ty_id);
+                let converted = self.convert_field_value_v(payload, field_vir_ty);
                 let var = self.builder.declare_var(converted.ty);
                 self.builder.def_var(var, converted.value);
-                arm_variables.insert(field_pattern.binding, (var, self.to_vir_type(field_ty_id)));
+                arm_variables.insert(field_pattern.binding, (var, field_vir_ty));
             } else if is_wide {
                 // Wide (i128/f128) field in multi-field or single-wide-field error.
                 let field_offset = field_byte_offsets[field_idx];
@@ -299,12 +299,12 @@ impl Cg<'_, '_, '_> {
                         .load(types::I64, MemFlags::new(), payload, field_offset + 8);
                 let wide_i128 = super::super::structs::reconstruct_i128(self.builder, low, high);
                 // `is_wide` guard above guarantees this is Some.
-                let wide = self.vir_query_wide_type(field_ty_id).unwrap();
+                let wide = self.vir_query_wide_type_v(field_vir_ty).unwrap();
                 let wide_val = wide.reinterpret_i128(self.builder, wide_i128);
                 let wide_ty = wide.cranelift_type();
                 let var = self.builder.declare_var(wide_ty);
                 self.builder.def_var(var, wide_val);
-                arm_variables.insert(field_pattern.binding, (var, self.to_vir_type(field_ty_id)));
+                arm_variables.insert(field_pattern.binding, (var, field_vir_ty));
             } else {
                 // Non-wide field in multi-field error, payload is a pointer to field data
                 let field_offset = field_byte_offsets[field_idx];
@@ -312,10 +312,10 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .load(types::I64, MemFlags::new(), payload, field_offset);
-                let converted = self.convert_field_value(raw_value, field_ty_id);
+                let converted = self.convert_field_value_v(raw_value, field_vir_ty);
                 let var = self.builder.declare_var(converted.ty);
                 self.builder.def_var(var, converted.value);
-                arm_variables.insert(field_pattern.binding, (var, self.to_vir_type(field_ty_id)));
+                arm_variables.insert(field_pattern.binding, (var, field_vir_ty));
             }
         }
 

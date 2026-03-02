@@ -276,17 +276,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Get declared type from GlobalDef (uses sema-resolved type, not TypeExpr)
         // Scope the name_table borrow to avoid conflicts with later mutable borrows
-        let global_type_id = {
+        let global_vir_ty = {
             let name_table = self.name_table();
             let module_id = self
                 .current_module()
                 .unwrap_or(self.env.analyzed.module_id());
             name_table
                 .name_id(module_id, &[callee_sym], self.interner())
-                .and_then(|name_id| self.analyzed().global_type_id(name_id))
+                .and_then(|name_id| self.analyzed().global_vir_type(name_id))
         };
 
-        if let Some(declared_type_id) = global_type_id {
+        if let Some(declared_vir_ty) = global_vir_ty {
+            let declared_type_id = self.sema_type_id(declared_vir_ty);
             // If declared as functional interface, call via vtable dispatch
             let iface_info = self.interface_type_def_id(declared_type_id);
             if let Some(type_def_id) = iface_info

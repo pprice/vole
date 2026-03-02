@@ -1193,9 +1193,9 @@ impl Cg<'_, '_, '_> {
             .current_module()
             .unwrap_or(self.env.analyzed.module_id());
         if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
-            && let Some(global_type_id) = self.analyzed().global_type_id(name_id)
+            && let Some(global_vir_ty) = self.analyzed().global_vir_type(name_id)
         {
-            *value = self.coerce_to_type_id(*value, global_type_id)?;
+            *value = self.coerce_to_type_id(*value, self.sema_type_id(global_vir_ty))?;
         }
         Ok(())
     }

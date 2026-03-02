@@ -172,10 +172,17 @@ pub struct VirFieldDef {
     pub full_name_id: NameId,
     /// The type that owns this field.
     pub defining_type: TypeDefId,
-    /// The sema type ID for this field (used by codegen for type-level queries).
-    pub sema_type_id: TypeId,
     /// The field's VIR type.
     pub vir_ty: VirTypeId,
+    /// The field's sema type (kept alongside `vir_ty` as a legacy bridge for
+    /// arena-based operations that cannot yet use VirTypeId).
+    ///
+    /// NOTE: `vir_ty` from entity metadata may be out-of-sync with the main
+    /// VirTypeTable for generic type parameter types due to the clone-based
+    /// translation in `build_entity_metadata`.  This sema TypeId remains the
+    /// authoritative field type for sema-domain substitution until that sync
+    /// issue is resolved.
+    pub sema_type_id: TypeId,
     /// The field's slot index in the type's storage layout.
     pub slot: usize,
     /// Interned symbol for the field name (for name matching during
@@ -344,14 +351,10 @@ pub struct VirGlobalDef {
     pub name_id: NameId,
     /// The global's VIR type (translated from sema `TypeId` during lowering).
     pub vir_ty: VirTypeId,
+    /// The global's sema type (kept alongside `vir_ty` as a legacy bridge).
+    pub sema_type_id: TypeId,
     /// The module this global is declared in.
     pub module_id: ModuleId,
-    /// The original sema `TypeId` for this global.
-    ///
-    /// Temporary — kept so codegen callers that call `interface_type_def_id`
-    /// can continue to work with sema TypeIds.
-    /// Will be removed once Phase 3 converts all codegen callers to VirTypeId.
-    pub sema_type_id: TypeId,
 }
 
 // ---------------------------------------------------------------------------
@@ -1300,8 +1303,8 @@ mod tests {
             name_id: make_name_id(50),
             full_name_id: make_name_id(51),
             defining_type: make_type_def_id(1),
-            sema_type_id: TypeId::I64,
             vir_ty: VirTypeId::I64,
+            sema_type_id: TypeId::I64,
             slot: 3,
             symbol: None,
         });
@@ -1533,8 +1536,8 @@ mod tests {
             id,
             name_id: name,
             vir_ty: VirTypeId::I64,
+            sema_type_id: TypeId::I64,
             module_id: make_module_id(0),
-            sema_type_id: TypeId::VOID,
         });
 
         assert_eq!(meta.global_def_count(), 1);

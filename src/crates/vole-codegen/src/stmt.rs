@@ -19,7 +19,7 @@ use crate::ops::sextend_const;
 #[derive(Clone, Copy)]
 struct RaiseFieldLayout {
     name_id: NameId,
-    ty: TypeId,
+    vir_ty: VirTypeId,
 }
 
 impl Cg<'_, '_, '_> {
@@ -940,7 +940,7 @@ impl Cg<'_, '_, '_> {
                 let field = self.analyzed().field_def(field_id);
                 RaiseFieldLayout {
                     name_id: field.name_id,
-                    ty: field.sema_type_id,
+                    vir_ty: field.vir_ty,
                 }
             })
             .collect();
@@ -980,7 +980,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.iconst_cached(types::I64, 0));
         }
 
-        if error_fields.len() == 1 && !self.vir_query_is_wide(error_fields[0].ty) {
+        if error_fields.len() == 1 && !self.vir_query_is_wide_v(error_fields[0].vir_ty) {
             let field_def = &error_fields[0];
             let field_name = self
                 .name_table()
@@ -1003,7 +1003,7 @@ impl Cg<'_, '_, '_> {
         // Multiple fields (or single i128 field) — heap-allocate payload.
         let error_payload_size: u32 = error_fields
             .iter()
-            .map(|f| self.vir_query_field_byte_size(f.ty))
+            .map(|f| self.vir_query_field_byte_size_v(f.vir_ty))
             .sum();
         let slot = self.alloc_stack(error_payload_size);
 

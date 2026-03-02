@@ -631,6 +631,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a sema `TypeId` is a wide type (i128/f128) via VirTypeTable.
     #[inline]
+    #[allow(dead_code)]
     pub fn vir_query_is_wide(&self, type_id: TypeId) -> bool {
         self.vir_query_is_wide_v(self.vir_lookup(type_id))
     }
@@ -1518,10 +1519,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_type_tags: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .map(|field_id| {
-                let field = self.analyzed().field_def(field_id);
-                self.field_type_tag(field.sema_type_id)
-            })
+            .map(|field_id| self.field_type_tag(self.analyzed().entity_field_sema_type(field_id)))
             .collect();
         vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
 
@@ -1567,10 +1565,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_type_tags: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .map(|field_id| {
-                let field = self.analyzed().field_def(field_id);
-                self.field_type_tag(field.sema_type_id)
-            })
+            .map(|field_id| self.field_type_tag(self.analyzed().entity_field_sema_type(field_id)))
             .collect();
         vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
 
