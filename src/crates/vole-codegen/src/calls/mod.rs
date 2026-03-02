@@ -541,8 +541,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);
-            let mut result =
-                CompiledValue::new(results[0], ptr_type, self.vir_lookup(callee_return_type_id));
+            let mut result = self.compiled_with_ty(results[0], ptr_type, callee_return_type_id);
             if return_type_id != callee_return_type_id {
                 result = self.coerce_to_type(result, return_vir_ty)?;
             }
@@ -586,7 +585,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     rc_temp_args.push(compiled);
                 }
                 if let Some(&param_type_id) = param_type_ids.get(slot) {
-                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?
+                    self.coerce_to_type_id(compiled, param_type_id)?
                 } else {
                     compiled
                 }
@@ -646,7 +645,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             // Coerce argument to parameter type if needed (e.g., string -> string?)
             let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
-                self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?
+                self.coerce_to_type_id(compiled, param_type_id)?
             } else {
                 compiled
             };

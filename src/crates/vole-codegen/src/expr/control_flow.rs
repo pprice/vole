@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
 
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::VirTypeId;
 
 use crate::ops::sextend_const;
 
@@ -25,7 +25,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             self.iconst_cached(types::I64, 0),
             types::I64,
-            self.vir_lookup(TypeId::NEVER),
+            VirTypeId::NEVER,
         ))
     }
 

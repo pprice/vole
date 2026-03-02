@@ -176,18 +176,14 @@ impl Cg<'_, '_, '_> {
                     if compiled.is_owned() {
                         rc_temps.push(compiled);
                     }
-                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_id))?
+                    self.coerce_to_type_id(compiled, param_id)?
                 } else {
                     // slot uses its default value
                     let (default_vals, rc_owned) =
                         self.compile_method_default_args(method_id, slot, &[param_id], false)?;
                     rc_temps.extend(rc_owned);
                     if let Some(&val) = default_vals.first() {
-                        CompiledValue::new(
-                            val,
-                            self.cranelift_type(param_id),
-                            self.vir_lookup(param_id),
-                        )
+                        self.compiled_with_ty(val, self.cranelift_type(param_id), param_id)
                     } else {
                         continue;
                     }
@@ -200,8 +196,7 @@ impl Cg<'_, '_, '_> {
                 if compiled.is_owned() {
                     rc_temps.push(compiled);
                 }
-                let compiled =
-                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(*param_id))?;
+                let compiled = self.coerce_to_type_id(compiled, *param_id)?;
                 args.push(compiled.value);
             }
 
@@ -233,7 +228,7 @@ impl Cg<'_, '_, '_> {
         // For sret, result[0] is the sret pointer we passed in
         let mut result = if is_sret {
             let results = self.builder.inst_results(call);
-            CompiledValue::new(results[0], self.ptr_type(), self.vir_lookup(return_type_id))
+            self.compiled_with_ty(results[0], self.ptr_type(), return_type_id)
         } else {
             // call_result must run before consume_rc_args to copy union data
             // from callee's stack before rc_dec calls can clobber it
@@ -404,8 +399,7 @@ impl Cg<'_, '_, '_> {
             if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
-            let compiled =
-                self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
+            let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
             args.push(compiled.value);
         }
 
@@ -426,7 +420,7 @@ impl Cg<'_, '_, '_> {
         // For sret, result[0] is the sret pointer we passed in
         let mut result = if is_sret {
             let results = self.builder.inst_results(call);
-            CompiledValue::new(results[0], self.ptr_type(), self.vir_lookup(return_type_id))
+            self.compiled_with_ty(results[0], self.ptr_type(), return_type_id)
         } else {
             // call_result must run before consume_rc_args to copy union data
             // from callee's stack before rc_dec calls can clobber it
@@ -580,8 +574,7 @@ impl Cg<'_, '_, '_> {
             self.consume_rc_value(&mut stored_value)?;
         }
 
-        let mut result =
-            CompiledValue::new(result_val, self.ptr_type(), self.vir_lookup(return_type_id));
+        let mut result = self.compiled_with_ty(result_val, self.ptr_type(), return_type_id);
         result.rc_lifecycle = RcLifecycle::Owned;
 
         Ok(Some(result))

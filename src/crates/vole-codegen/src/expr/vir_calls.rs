@@ -241,11 +241,7 @@ impl Cg<'_, '_, '_> {
                 .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-            Ok(CompiledValue::new(
-                ptr,
-                ptr_type,
-                self.vir_lookup(return_ty),
-            ))
+            Ok(self.compiled_with_ty(ptr, ptr_type, return_ty))
         } else if self.vir_query_is_union(return_ty) {
             let src_ptr = results[0];
             Ok(self.copy_union_ptr_to_local(src_ptr, return_ty))

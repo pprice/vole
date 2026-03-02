@@ -406,6 +406,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.captures.is_some()
     }
 
+    /// Register a variable binding with a sema `TypeId`, converting to `VirTypeId`.
+    ///
+    /// Boundary method: converts `TypeId` → `VirTypeId` via `vir_lookup_or_compat`
+    /// and stores the binding in `self.vars`.
+    pub fn bind_var(&mut self, name: Symbol, var: Variable, type_id: TypeId) {
+        self.vars
+            .insert(name, (var, self.vir_lookup_or_compat(type_id)));
+    }
+
     // ========== Context accessors ==========
 
     /// Get current module (as ModuleId)
@@ -484,6 +493,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             None if type_id == TypeId::UNKNOWN => VirTypeId::UNKNOWN,
             None => VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG),
         }
+    }
+
+    /// Convert a sema `TypeId` to a `VirTypeId` for interior codegen use.
+    ///
+    /// Boundary bridge: interior codegen should call this instead of
+    /// `vir_lookup` or `vir_lookup_or_compat` directly. Returns
+    /// `VirTypeId::UNKNOWN` for unmapped types (safe for all `_v` query
+    /// methods). Callers that need compat-encoded round-tripping (variable
+    /// registration, substitution) should use the dedicated bridges
+    /// (`bind_var`, `register_rc_local_id`, `coerce_to_type_id`) instead.
+    #[inline]
+    pub fn to_vir_type(&self, type_id: TypeId) -> VirTypeId {
+        self.vir_lookup(type_id)
     }
 
     /// Check if a `VirTypeId` is a struct type via VirTypeTable.
@@ -856,6 +878,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(success, errors)| (success, errors.to_vec()))
     }
 
+    /// Unwrap a fallible sema `TypeId` to `(success, errors)` via VirTypeTable.
+    #[inline]
+    pub fn vir_query_unwrap_fallible(
+        &self,
+        type_id: TypeId,
+    ) -> Option<(VirTypeId, Vec<VirTypeId>)> {
+        self.vir_query_unwrap_fallible_v(self.vir_lookup(type_id))
+    }
+
     /// Unwrap a union `VirTypeId` to its variant `VirTypeId`s via VirTypeTable.
     ///
     /// Also handles `VirType::Optional { inner }`, expanding it to a two-element
@@ -888,6 +919,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             _ => None,
         }
+    }
+
+    /// Unwrap a union sema `TypeId` to its variant `VirTypeId`s via VirTypeTable.
+    #[inline]
+    pub fn vir_query_unwrap_union(&self, type_id: TypeId) -> Option<Vec<VirTypeId>> {
+        self.vir_query_unwrap_union_v(self.vir_lookup(type_id))
     }
 
     /// Unwrap a tuple `VirTypeId` to its element `VirTypeId`s via VirTypeTable.
@@ -948,6 +985,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(params, ret)| (params.to_vec(), ret))
     }
 
+    /// Unwrap a function sema `TypeId` to `(params, return_type)` via VirTypeTable.
+    #[inline]
+    pub fn vir_query_unwrap_function(
+        &self,
+        type_id: TypeId,
+    ) -> Option<(Vec<VirTypeId>, VirTypeId)> {
+        self.vir_query_unwrap_function_v(self.vir_lookup(type_id))
+    }
+
     /// Unwrap a type parameter `VirTypeId` to its `NameId` via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
@@ -981,6 +1027,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<(vole_identity::TypeDefId, Vec<VirTypeId>)> {
         crate::types::vir_conversions::vir_unwrap_interface(vir_ty, self.vir_type_table())
             .map(|(def, args)| (def, args.to_vec()))
+    }
+
+    /// Unwrap an interface sema `TypeId` to `(TypeDefId, type_args)` via VirTypeTable.
+    #[inline]
+    pub fn vir_query_unwrap_interface(
+        &self,
+        type_id: TypeId,
+    ) -> Option<(vole_identity::TypeDefId, Vec<VirTypeId>)> {
+        self.vir_query_unwrap_interface_v(self.vir_lookup(type_id))
     }
 
     /// Unwrap an error `VirTypeId` to its `TypeDefId` via VirTypeTable.
@@ -1172,6 +1227,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<(vole_identity::TypeDefId, Vec<VirTypeId>)> {
         crate::types::vir_conversions::vir_unwrap_class(vir_ty, self.vir_type_table())
             .map(|(def, args)| (def, args.to_vec()))
+    }
+
+    /// Unwrap a class sema `TypeId` to `(TypeDefId, type_args)` via VirTypeTable.
+    #[inline]
+    pub fn vir_query_unwrap_class(
+        &self,
+        type_id: TypeId,
+    ) -> Option<(vole_identity::TypeDefId, Vec<VirTypeId>)> {
+        self.vir_query_unwrap_class_v(self.vir_lookup(type_id))
     }
 
     /// Unwrap an optional `VirTypeId` to its inner `VirTypeId` via VirTypeTable.
@@ -1824,7 +1888,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 ));
             }
             let variants: Vec<TypeId> = self
-                .vir_query_unwrap_union_v(self.vir_lookup(resolved_elem_type))
+                .vir_query_unwrap_union(resolved_elem_type)
                 .expect("INTERNAL: expected union element type")
                 .iter()
                 .map(|&v| self.cv_type_id_from_vir(v))
@@ -1889,7 +1953,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         let variants: Vec<TypeId> = self
-            .vir_query_unwrap_union_v(self.vir_lookup(resolved_union_id))
+            .vir_query_unwrap_union(resolved_union_id)
             .expect("INTERNAL: expected union type for array decode")
             .iter()
             .map(|&v| self.cv_type_id_from_vir(v))

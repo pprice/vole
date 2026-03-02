@@ -66,8 +66,7 @@ impl Cg<'_, '_, '_> {
                     (wrapped.value, self.cv_type_id_from_vir(wrapped.type_id))
                 }
                 LetStorageHint::Numeric if init.type_id.is_numeric() => {
-                    let coerced =
-                        self.coerce_to_type(*init, self.vir_lookup_or_compat(declared_type_id))?;
+                    let coerced = self.coerce_to_type_id(*init, declared_type_id)?;
                     (coerced.value, self.cv_type_id_from_vir(coerced.type_id))
                 }
                 LetStorageHint::Interface => {
@@ -94,7 +93,7 @@ impl Cg<'_, '_, '_> {
             if !is_final_interface && !is_runtime_iterator {
                 let cranelift_ty = self.cranelift_type(final_type_id);
                 let boxed = self.box_interface_value(
-                    CompiledValue::new(final_value, cranelift_ty, self.vir_lookup(final_type_id)),
+                    self.compiled_with_ty(final_value, cranelift_ty, final_type_id),
                     declared_type_id,
                 )?;
                 final_value = boxed.value;
@@ -316,11 +315,7 @@ impl Cg<'_, '_, '_> {
 
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(CompiledValue::new(
-            ptr,
-            ptr_type,
-            self.vir_lookup(union_type_id),
-        ))
+        Ok(self.compiled_with_ty(ptr, ptr_type, union_type_id))
     }
 
     pub fn construct_union_id_with_hint(
@@ -330,7 +325,7 @@ impl Cg<'_, '_, '_> {
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
         let variants: Vec<TypeId> = self
-            .vir_query_unwrap_union_v(self.vir_lookup(union_type_id))
+            .vir_query_unwrap_union(union_type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch("union construction", "union type", "non-union")
             })?
@@ -395,11 +390,7 @@ impl Cg<'_, '_, '_> {
 
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(CompiledValue::new(
-            ptr,
-            ptr_type,
-            self.vir_lookup(union_type_id),
-        ))
+        Ok(self.compiled_with_ty(ptr, ptr_type, union_type_id))
     }
 
     /// Resolve the TypeDefId for the named error type from a fallible error type.
@@ -422,9 +413,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 None
             }
-        } else if let Some(vir_variants) =
-            self.vir_query_unwrap_union_v(self.vir_lookup(error_type_id))
-        {
+        } else if let Some(vir_variants) = self.vir_query_unwrap_union(error_type_id) {
             // Union of error types
             vir_variants.iter().find_map(|&v| {
                 if let Some(type_def_id) = self.vir_query_unwrap_error(self.cv_type_id_from_vir(v))
@@ -654,7 +643,7 @@ impl Cg<'_, '_, '_> {
         &self,
         union_type_id: TypeId,
     ) -> Option<TypeId> {
-        let vir_variants = self.vir_query_unwrap_union_v(self.vir_lookup(union_type_id))?;
+        let vir_variants = self.vir_query_unwrap_union(union_type_id)?;
         let mut it = vir_variants.iter().copied().filter(|&variant| {
             let variant_tid = self.cv_type_id_from_vir(variant);
             self.vir_query_is_array(variant_tid)
@@ -1058,8 +1047,7 @@ impl Cg<'_, '_, '_> {
             }
             let var = self.builder.declare_var(cranelift_ty);
             self.builder.def_var(var, final_value);
-            self.vars
-                .insert(name, (var, self.vir_lookup_or_compat(final_type_id)));
+            self.bind_var(name, var, final_type_id);
             var
         };
 
@@ -1187,13 +1175,13 @@ impl Cg<'_, '_, '_> {
         let cr_type = self.cranelift_type(ty);
         let var = self.builder.declare_var(cr_type);
         self.builder.def_var(var, value);
-        self.vars.insert(name, (var, self.vir_lookup_or_compat(ty)));
+        self.bind_var(name, var, ty);
 
         // Extracted elements borrow from the parent composite.
         // RC_inc + register so scope-exit dec balances the borrow.
         if self.rc_scopes.has_active_scope() && self.rc_state(ty).needs_cleanup() {
             self.emit_rc_inc_for_type(value, ty)?;
-            let drop_flag = self.register_rc_local(var, self.vir_lookup_or_compat(ty));
+            let drop_flag = self.register_rc_local_id(var, ty);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
         Ok(())
@@ -1382,8 +1370,6 @@ impl Cg<'_, '_, '_> {
         final_type_id: TypeId,
         is_stack_union: bool,
     ) -> CodegenResult<()> {
-        let final_vir_ty = self.vir_lookup_or_compat(final_type_id);
-
         // Detect whether coerce_let_init called box_to_unknown (new TaggedValue).
         // Use cv_type_id_from_vir for the init check — vir_query_is_unknown_v would
         // miss array/function types that exist in VirTypeTable but can't be resolved
@@ -1393,7 +1379,7 @@ impl Cg<'_, '_, '_> {
             self.vir_query_is_unknown(final_type_id) && !self.vir_query_is_unknown(init_sema_ty);
 
         if self.rc_scopes.has_active_scope() && created_tagged_value {
-            let drop_flag = self.register_rc_local(var, final_vir_ty);
+            let drop_flag = self.register_rc_local_id(var, final_type_id);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         } else if self.rc_scopes.has_active_scope()
             && final_type_id == TypeId::UNKNOWN
@@ -1415,7 +1401,7 @@ impl Cg<'_, '_, '_> {
                 if is_borrow {
                     self.emit_rc_inc_for_type(final_value, final_type_id)?;
                 }
-                let drop_flag = self.register_rc_local(var, final_vir_ty);
+                let drop_flag = self.register_rc_local_id(var, final_type_id);
                 crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
             }
         } else if self.rc_scopes.has_active_scope() {

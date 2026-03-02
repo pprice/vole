@@ -111,7 +111,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             self.iconst_cached(ty, n)
         };
-        CompiledValue::new(value, ty, self.vir_lookup(type_id))
+        self.compiled_with_ty(value, ty, type_id)
     }
 
     /// Create an integer constant using a VIR type ID.
@@ -201,7 +201,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 type_id
             ),
         };
-        CompiledValue::new(value, ty, self.vir_lookup(type_id))
+        self.compiled_with_ty(value, ty, type_id)
     }
 
     /// Create a float constant using a VIR type ID.
@@ -267,8 +267,38 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(
             value,
             self.cranelift_type(type_id),
-            self.vir_lookup(type_id),
+            self.to_vir_type(type_id),
         )
+    }
+
+    /// Create a CompiledValue from a value, pre-computed Cranelift type, and sema TypeId.
+    ///
+    /// Boundary bridge: converts TypeId to VirTypeId via `to_vir_type`.
+    pub fn compiled_with_ty(
+        &self,
+        value: Value,
+        cranelift_ty: cranelift::prelude::Type,
+        type_id: TypeId,
+    ) -> CompiledValue {
+        CompiledValue::new(value, cranelift_ty, self.to_vir_type(type_id))
+    }
+
+    /// Create an RC-owned CompiledValue from a value, Cranelift type, and sema TypeId.
+    ///
+    /// Boundary bridge: converts TypeId to VirTypeId via `to_vir_type`.
+    pub fn compiled_owned_with_ty(
+        &self,
+        value: Value,
+        cranelift_ty: cranelift::prelude::Type,
+        type_id: TypeId,
+    ) -> CompiledValue {
+        CompiledValue::owned(value, cranelift_ty, self.to_vir_type(type_id))
+    }
+
+    /// Create a CompiledValue from a value and VirTypeId, computing the Cranelift type via VIR.
+    #[allow(dead_code)] // VIR-native helper for future VIR codegen migration
+    pub fn compiled_v(&self, value: Value, vir_ty: VirTypeId) -> CompiledValue {
+        CompiledValue::new(value, self.cranelift_type_v(vir_ty), vir_ty)
     }
 
     /// Convert a raw i64 field value to a CompiledValue with the proper type.
@@ -278,7 +308,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.env.analyzed.type_arena();
         let (value, ty) =
             super::structs::convert_field_value_id(self.builder, raw_value, type_id, arena);
-        CompiledValue::new(value, ty, self.vir_lookup(type_id))
+        self.compiled_with_ty(value, ty, type_id)
+    }
+
+    /// Convert a raw i64 field value to a CompiledValue with the proper type (VirTypeId variant).
+    /// Handles type narrowing for primitives (f64 bitcast, bool/int reduction).
+    #[allow(dead_code)] // VIR-native helper for future VIR codegen migration
+    pub fn convert_field_value_v(&mut self, raw_value: Value, vir_ty: VirTypeId) -> CompiledValue {
+        // Use env path to avoid borrow conflict with self.builder
+        let table = &self.env.analyzed.vir_program().type_table;
+        let (value, ty) = crate::types::vir_struct_helpers::vir_convert_field_value(
+            self.builder,
+            raw_value,
+            vir_ty,
+            table,
+        );
+        CompiledValue::new(value, ty, vir_ty)
     }
 
     /// Extract a value from a TaggedValue (unknown type) after type narrowing.
@@ -286,6 +331,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// This converts it to the appropriate Cranelift type based on the narrowed type.
     pub fn extract_unknown_value(&mut self, raw_value: Value, type_id: TypeId) -> CompiledValue {
         self.convert_field_value(raw_value, type_id)
+    }
+
+    /// Extract a value from a TaggedValue (VirTypeId variant).
+    #[allow(dead_code)] // VIR-native helper for future VIR codegen migration
+    pub fn extract_unknown_value_v(
+        &mut self,
+        raw_value: Value,
+        vir_ty: VirTypeId,
+    ) -> CompiledValue {
+        self.convert_field_value_v(raw_value, vir_ty)
     }
 
     // ========== Control flow helpers ==========
@@ -408,7 +463,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        let mut cv = CompiledValue::new(ptr, ptr_type, self.vir_lookup(union_type_id));
+        let mut cv = self.compiled_with_ty(ptr, ptr_type, union_type_id);
         cv.mark_borrowed();
         cv
     }
@@ -526,7 +581,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue::new(ptr, ptr_type, self.vir_lookup(type_id)))
+        Ok(self.compiled_with_ty(ptr, ptr_type, type_id))
     }
 
     /// Copy a struct value to a new stack slot (value semantics).
@@ -632,19 +687,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            return Ok(CompiledValue::new(
-                ptr,
-                ptr_type,
-                self.vir_lookup(return_type_id),
-            ));
+            return Ok(self.compiled_with_ty(ptr, ptr_type, return_type_id));
         }
 
         // Check for fallible multi-value return (2 results: tag, payload)
-        if results.len() == 2
-            && self
-                .vir_query_unwrap_fallible_v(self.vir_lookup(return_type_id))
-                .is_some()
-        {
+        if results.len() == 2 && self.vir_query_unwrap_fallible(return_type_id).is_some() {
             let tag = results[0];
             let payload = results[1];
 
@@ -663,11 +710,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            return Ok(CompiledValue::new(
-                ptr,
-                ptr_type,
-                self.vir_lookup(return_type_id),
-            ));
+            return Ok(self.compiled_with_ty(ptr, ptr_type, return_type_id));
         }
 
         // Check for small struct multi-value return (2 results: field0, field1)

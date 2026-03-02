@@ -262,11 +262,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Return pointer to the stack slot
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(CompiledValue::new(
-            ptr,
-            ptr_type,
-            self.vir_lookup(return_type_id),
-        ))
+        Ok(self.compiled_with_ty(ptr, ptr_type, return_type_id))
     }
 
     /// Checked signed division: returns nil on div-by-zero or MIN/-1 overflow.

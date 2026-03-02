@@ -36,9 +36,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - The class has no type args (non-generic)
     /// - None of the field types involve type parameters
     pub fn mono_instance_type_id(&self, base_type_id: u32, result_type_id: TypeId) -> u32 {
-        let Some((type_def_id, vir_type_args)) =
-            self.vir_query_unwrap_class_v(self.vir_lookup(result_type_id))
-        else {
+        let Some((type_def_id, vir_type_args)) = self.vir_query_unwrap_class(result_type_id) else {
             return base_type_id;
         };
         if vir_type_args.is_empty() {
@@ -242,9 +240,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// data word at offset 0 before incrementing.
     ///
     /// Delegates to [`emit_rc_inc_for_type_v`](Self::emit_rc_inc_for_type_v)
-    /// via `vir_lookup`.
+    /// via `to_vir_type`.
     pub fn emit_rc_inc_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
-        self.emit_rc_inc_for_type_v(value, self.vir_lookup(type_id))
+        self.emit_rc_inc_for_type_v(value, self.to_vir_type(type_id))
     }
 
     /// Emit rc_inc for a value using VirTypeId (VirTypeId-native).
@@ -384,9 +382,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// data word at offset 0 before decrementing.
     ///
     /// Delegates to [`emit_rc_dec_for_type_v`](Self::emit_rc_dec_for_type_v)
-    /// via `vir_lookup`.
+    /// via `to_vir_type`.
     pub fn emit_rc_dec_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
-        self.emit_rc_dec_for_type_v(value, self.vir_lookup(type_id))
+        self.emit_rc_dec_for_type_v(value, self.to_vir_type(type_id))
     }
 
     /// Emit rc_dec for a value using VirTypeId (VirTypeId-native).
@@ -486,6 +484,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         drop_flag
     }
 
+    /// Register a RC local using a sema `TypeId`, converting to `VirTypeId`.
+    ///
+    /// Boundary bridge for callers that have `TypeId` from sema APIs.
+    pub fn register_rc_local_id(&mut self, variable: Variable, type_id: TypeId) -> Variable {
+        self.register_rc_local(variable, self.vir_lookup_or_compat(type_id))
+    }
+
     /// Register a composite RC local (struct/fixed-array/tuple with RC fields)
     /// in the current scope. Returns the drop flag Variable.
     pub fn register_composite_rc_local(
@@ -582,7 +587,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             FieldTypeTag::Interface
         } else if self.rc_state(type_id).needs_cleanup() {
             FieldTypeTag::Rc
-        } else if let Some(vir_variants) = self.vir_query_unwrap_union_v(self.vir_lookup(type_id)) {
+        } else if let Some(vir_variants) = self.vir_query_unwrap_union(type_id) {
             for &vir_variant in &vir_variants {
                 if self.rc_state_v(vir_variant).needs_cleanup() {
                     return FieldTypeTag::UnionHeap;

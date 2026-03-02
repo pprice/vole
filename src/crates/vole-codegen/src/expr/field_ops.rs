@@ -129,10 +129,10 @@ impl Cg<'_, '_, '_> {
             }
             if self.vir_query_is_sentinel(export_type_id) {
                 let value = self.iconst_cached(types::I8, 0);
-                return Ok(Some(CompiledValue::new(
+                return Ok(Some(self.compiled_with_ty(
                     value,
                     types::I8,
-                    self.vir_lookup(export_type_id),
+                    export_type_id,
                 )));
             }
             return Err(CodegenError::unsupported_with_context(

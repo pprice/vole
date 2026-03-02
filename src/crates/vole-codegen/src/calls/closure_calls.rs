@@ -90,10 +90,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // low
                 sig.returns.push(AbiParam::new(types::I64)); // high
-            } else if self
-                .vir_query_unwrap_fallible_v(self.vir_lookup(ret))
-                .is_some()
-            {
+            } else if self.vir_query_unwrap_fallible(ret).is_some() {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // payload
             } else {
@@ -188,11 +185,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         if results.is_empty() {
             Ok(self.void_value())
-        } else if results.len() == 2
-            && self
-                .vir_query_unwrap_fallible_v(self.vir_lookup(ret))
-                .is_some()
-        {
+        } else if results.len() == 2 && self.vir_query_unwrap_fallible(ret).is_some() {
             // Fallible multi-value return: pack (tag, payload) into stack slot
             let tag = results[0];
             let payload = results[1];
@@ -208,7 +201,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            Ok(CompiledValue::new(ptr, ptr_type, self.vir_lookup(ret)))
+            Ok(self.compiled_with_ty(ptr, ptr_type, ret))
         } else {
             // If the return type is a union, the returned value is a pointer to callee's stack.
             // We need to copy the union data to our own stack to prevent it from being
@@ -247,8 +240,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 if compiled.is_owned() {
                     rc_temp_args.push(compiled);
                 }
-                let compiled =
-                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
+                let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
                 compiled.value
             } else if let Some(lambda_node_id) = lambda_node_id {
                 let (default_vals, rc_owned) =
@@ -283,8 +275,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
-            let compiled =
-                self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
+            let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
             args.push(compiled.value);
         }
 

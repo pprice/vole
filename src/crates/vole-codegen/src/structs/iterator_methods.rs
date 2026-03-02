@@ -192,11 +192,7 @@ impl Cg<'_, '_, '_> {
             .lookup_runtime_iterator(elem_type_id)
             .or_else(|| self.arena().lookup_runtime_iterator(TypeId::I64))
             .expect("RuntimeIterator<i64> must always be pre-interned");
-        Ok(CompiledValue::owned(
-            wrapped,
-            types::I64,
-            self.vir_lookup(runtime_iter_type_id),
-        ))
+        Ok(self.compiled_owned_with_ty(wrapped, types::I64, runtime_iter_type_id))
     }
 
     /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
@@ -335,7 +331,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 result_val
             };
-            CompiledValue::new(converted, expected_cty, self.vir_lookup(return_type_id))
+            self.compiled_with_ty(converted, expected_cty, return_type_id)
         } else if method_name == "sum" {
             // sum() -> T: the runtime always returns i64 (raw word). When the
             // element type is a float, the runtime does float addition and returns
@@ -358,11 +354,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 result_val
             };
-            CompiledValue::new(
-                converted,
-                expected_cty,
-                self.vir_lookup(effective_return_type),
-            )
+            self.compiled_with_ty(converted, expected_cty, effective_return_type)
         } else {
             self.call_external_id(&external_info, &args, return_type_id)?
         };

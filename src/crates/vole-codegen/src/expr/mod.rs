@@ -267,11 +267,15 @@ impl Cg<'_, '_, '_> {
 
         // Unwrap function type to get params and return type
         let (param_ids, return_type_id) = {
-            let (vir_params, vir_ret) = self
-                .vir_query_unwrap_function_v(self.vir_lookup(func_type_id))
-                .ok_or_else(|| {
-                    CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
-                })?;
+            let (vir_params, vir_ret) =
+                self.vir_query_unwrap_function(func_type_id)
+                    .ok_or_else(|| {
+                        CodegenError::type_mismatch(
+                            "closure wrapper",
+                            "function type",
+                            "non-function",
+                        )
+                    })?;
             let params: Vec<TypeId> = vir_params
                 .iter()
                 .map(|&v| self.cv_type_id_from_vir(v))
@@ -302,7 +306,7 @@ impl Cg<'_, '_, '_> {
         // Use closure type from sema (already has is_closure: true).
         // Mark as Owned: the closure allocation is a fresh +1 reference that
         // must be rc_dec'd when it goes out of scope or is consumed as an arg.
-        let cv = CompiledValue::new(closure_ptr, self.ptr_type(), self.vir_lookup(func_type_id));
+        let cv = self.compiled_with_ty(closure_ptr, self.ptr_type(), func_type_id);
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -343,7 +347,7 @@ impl Cg<'_, '_, '_> {
         expr: &VirExpr,
         expected_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let expected_vir = self.vir_lookup(expected_type_id);
+        let expected_vir = self.to_vir_type(expected_type_id);
         if (self.vir_query_is_array(expected_type_id)
             || self.vir_query_unwrap_tuple_v(expected_vir).is_some()
             || self.vir_query_unwrap_fixed_array_v(expected_vir).is_some())
@@ -982,11 +986,7 @@ impl Cg<'_, '_, '_> {
             .load(ptr_ty, MemFlags::new(), value.value, 0);
         let concrete_val = self.convert_from_i64_storage(data_word, concrete_type_id);
         let concrete_ty = self.cranelift_type(concrete_type_id);
-        Ok(CompiledValue::new(
-            concrete_val,
-            concrete_ty,
-            self.vir_lookup(concrete_type_id),
-        ))
+        Ok(self.compiled_with_ty(concrete_val, concrete_ty, concrete_type_id))
     }
 
     /// Wrap a concrete iterator as a `RuntimeIterator` (enriched path).
@@ -1016,11 +1016,7 @@ impl Cg<'_, '_, '_> {
         // Release the intermediate boxed interface (InterfaceIter took its own ref)
         self.consume_rc_value(&mut boxed)?;
 
-        Ok(CompiledValue::owned(
-            wrapped,
-            types::I64,
-            self.vir_lookup(runtime_iter_type_id),
-        ))
+        Ok(self.compiled_owned_with_ty(wrapped, types::I64, runtime_iter_type_id))
     }
 
     /// Compile a VIR `LocalLoad` — variable/identifier lookup.
@@ -1086,7 +1082,7 @@ impl Cg<'_, '_, '_> {
         {
             let payload_ty = self.cranelift_type(narrowed_variant);
             let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
-            let mut cv = CompiledValue::new(payload, payload_ty, self.vir_lookup(narrowed_variant));
+            let mut cv = self.compiled_with_ty(payload, payload_ty, narrowed_variant);
             self.mark_borrowed_if_rc(&mut cv);
             return Ok(cv);
         }
@@ -1122,8 +1118,8 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
         narrowed_type_id: TypeId,
     ) -> Option<TypeId> {
-        let narrowed_vir = self.vir_lookup(narrowed_type_id);
-        self.vir_query_unwrap_union_v(self.vir_lookup(union_type_id))
+        let narrowed_vir = self.to_vir_type(narrowed_type_id);
+        self.vir_query_unwrap_union(union_type_id)
             .and_then(|variants| {
                 variants
                     .iter()
@@ -1177,11 +1173,7 @@ impl Cg<'_, '_, '_> {
             && let Some(sentinel_type_id) = self.analyzed().sentinel_base_type(type_def_id)
         {
             let value = self.iconst_cached(types::I8, 0);
-            return Ok(CompiledValue::new(
-                value,
-                types::I8,
-                self.vir_lookup(sentinel_type_id),
-            ));
+            return Ok(self.compiled_with_ty(value, types::I8, sentinel_type_id));
         }
 
         Err(CodegenError::not_found(
@@ -1207,7 +1199,7 @@ impl Cg<'_, '_, '_> {
         if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
             && let Some(global_type_id) = self.analyzed().global_type_id(name_id)
         {
-            *value = self.coerce_to_type(*value, self.vir_lookup_or_compat(global_type_id))?;
+            *value = self.coerce_to_type_id(*value, global_type_id)?;
         }
         Ok(())
     }
@@ -1502,7 +1494,7 @@ impl Cg<'_, '_, '_> {
         match kind {
             AsCastKind::Checked => {
                 // target_ty is T | nil — wrap the value.
-                self.coerce_to_type(value, self.vir_lookup_or_compat(target_ty))
+                self.coerce_to_type_id(value, target_ty)
             }
             AsCastKind::Unchecked => {
                 // Value is already T — pass through.
@@ -1528,7 +1520,7 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue::new(
                     self.iconst_cached(types::I64, 0),
                     types::I64,
-                    self.vir_lookup(TypeId::NEVER),
+                    VirTypeId::NEVER,
                 ))
             }
         }

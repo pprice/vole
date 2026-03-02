@@ -44,11 +44,7 @@ impl Cg<'_, '_, '_> {
         let range_type_id = self.vir_query_range();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue::new(
-            ptr,
-            ptr_type,
-            self.vir_lookup(range_type_id),
-        ))
+        Ok(self.compiled_with_ty(ptr, ptr_type, range_type_id))
     }
 
     /// Compile a VIR array literal.
@@ -125,11 +121,7 @@ impl Cg<'_, '_, '_> {
             compiled.mark_consumed();
         }
 
-        Ok(CompiledValue::new(
-            arr_ptr,
-            self.ptr_type(),
-            self.vir_lookup(result_array_type),
-        ))
+        Ok(self.compiled_with_ty(arr_ptr, self.ptr_type(), result_array_type))
     }
 
     /// Compile a VIR repeat literal `[value; count]` to a fixed-size array.
@@ -192,11 +184,7 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue::new(
-            ptr,
-            ptr_type,
-            self.vir_lookup(result_type_id),
-        ))
+        Ok(self.compiled_with_ty(ptr, ptr_type, result_type_id))
     }
 
     /// Compile a VIR tuple literal to stack-allocated memory.
@@ -225,10 +213,6 @@ impl Cg<'_, '_, '_> {
 
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(CompiledValue::new(
-            ptr,
-            ptr_type,
-            self.vir_lookup(tuple_type_id),
-        ))
+        Ok(self.compiled_with_ty(ptr, ptr_type, tuple_type_id))
     }
 }

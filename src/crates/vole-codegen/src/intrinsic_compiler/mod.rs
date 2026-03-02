@@ -132,11 +132,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             } else {
                 self.coerce_cranelift_value(results[0], actual_ty, cranelift_ty)
             };
-            Ok(CompiledValue::new(
-                result_val,
-                cranelift_ty,
-                self.vir_lookup(return_type_id),
-            ))
+            Ok(self.compiled_with_ty(result_val, cranelift_ty, return_type_id))
         }
     }
 
@@ -200,11 +196,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 } else {
                     let value = self.call_runtime(runtime, &args)?;
                     let ty = self.cranelift_type(return_type_id);
-                    Ok(CompiledValue::new(
-                        value,
-                        ty,
-                        self.vir_lookup(return_type_id),
-                    ))
+                    Ok(self.compiled_with_ty(value, ty, return_type_id))
                 }
             }
         }
@@ -287,7 +279,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue::new(value, ty, self.vir_lookup(type_id)))
+                Ok(self.compiled_with_ty(value, ty, type_id))
             }
             IntrinsicHandler::UnaryFloatOp(op) => {
                 if args.is_empty() {
@@ -344,7 +336,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue::new(value, ty, self.vir_lookup(type_id)))
+                Ok(self.compiled_with_ty(value, ty, type_id))
             }
             IntrinsicHandler::BinaryFloatOp(op) => {
                 use crate::intrinsics::BinaryFloatOp;
@@ -371,21 +363,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue::new(value, ty, self.vir_lookup(type_id)))
+                Ok(self.compiled_with_ty(value, ty, type_id))
             }
             IntrinsicHandler::UnaryIntOp(op) => {
                 if args.is_empty() {
                     return Err(CodegenError::arg_count(key_display, 1, args.len()));
                 }
                 let (value, ty, type_id) = self.compile_unary_int_op(*op, args[0]);
-                Ok(CompiledValue::new(value, ty, self.vir_lookup(type_id)))
+                Ok(self.compiled_with_ty(value, ty, type_id))
             }
             IntrinsicHandler::BinaryIntOp(op) => {
                 if args.len() < 2 {
                     return Err(CodegenError::arg_count(key_display, 2, args.len()));
                 }
                 let (value, ty, type_id) = self.compile_binary_int_op(*op, args[0], args[1]);
-                Ok(CompiledValue::new(value, ty, self.vir_lookup(type_id)))
+                Ok(self.compiled_with_ty(value, ty, type_id))
             }
             IntrinsicHandler::UnaryIntWrappingOp(op) => {
                 use crate::intrinsics::UnaryIntWrappingOp;
@@ -412,7 +404,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::I64, TypeId::I64)
                     }
                 };
-                Ok(CompiledValue::new(value, ty, self.vir_lookup(type_id)))
+                Ok(self.compiled_with_ty(value, ty, type_id))
             }
             IntrinsicHandler::CheckedIntOp(op) => {
                 if args.len() < 2 {
@@ -552,7 +544,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         let elem_type_id = self
-            .vir_query_unwrap_union_v(self.vir_lookup(return_type_id))
+            .vir_query_unwrap_union(return_type_id)
             .and_then(|variants| {
                 variants
                     .iter()
@@ -583,11 +575,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.emit_brif(cond, done_block, value_block);
 
         self.switch_to_block(done_block);
-        let done_value = CompiledValue::new(
-            self.iconst_cached(types::I8, 0),
-            types::I8,
-            self.vir_lookup(TypeId::DONE),
-        );
+        let done_value =
+            CompiledValue::new(self.iconst_cached(types::I8, 0), types::I8, VirTypeId::DONE);
         let done_union = self.construct_union_id(done_value, return_type_id)?;
         self.builder
             .ins()
@@ -609,11 +598,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
         let union_ptr = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::new(
-            union_ptr,
-            self.ptr_type(),
-            self.vir_lookup(return_type_id),
-        ))
+        Ok(self.compiled_with_ty(union_ptr, self.ptr_type(), return_type_id))
     }
 
     fn emit_task_join_intrinsic(
@@ -658,7 +643,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(CompiledValue::new(
             handle,
             self.ptr_type(),
-            self.vir_lookup(TypeId::HANDLE),
+            VirTypeId::HANDLE,
         ))
     }
 

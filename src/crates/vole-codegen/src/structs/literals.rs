@@ -64,7 +64,7 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let variants: Vec<TypeId> = self
-            .vir_query_unwrap_union_v(self.vir_lookup(union_type_id))
+            .vir_query_unwrap_union(union_type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch("union construction", "union type", "non-union")
             })?
@@ -73,7 +73,7 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         // If the value is already the same union type, just return it
-        if value.type_id == self.vir_lookup(union_type_id) {
+        if value.type_id == self.to_vir_type(union_type_id) {
             return Ok(value);
         }
 
@@ -117,11 +117,7 @@ impl Cg<'_, '_, '_> {
             );
         }
 
-        Ok(CompiledValue::new(
-            heap_ptr,
-            self.ptr_type(),
-            self.vir_lookup(union_type_id),
-        ))
+        Ok(self.compiled_with_ty(heap_ptr, self.ptr_type(), union_type_id))
     }
 
     /// Copy a union value (possibly stack-allocated) to a heap-allocated buffer.

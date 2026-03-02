@@ -204,8 +204,7 @@ impl Cg<'_, '_, '_> {
             self.iconst_cached(inner_cr_type, 0)
         };
 
-        let inner_compiled =
-            CompiledValue::new(inner_val, inner_cr_type, self.vir_lookup(inner_type_id));
+        let inner_compiled = self.compiled_with_ty(inner_val, inner_cr_type, inner_type_id);
         let some_str = self.apply_string_conversion(inner_compiled, inner_conversion)?;
         self.builder.ins().jump(merge_block, &[some_str.into()]);
 
@@ -263,8 +262,7 @@ impl Cg<'_, '_, '_> {
                 self.iconst_cached(inner_cr_type, 0)
             };
 
-            let inner_compiled =
-                CompiledValue::new(inner_val, inner_cr_type, self.vir_lookup(variant_type_id));
+            let inner_compiled = self.compiled_with_ty(inner_val, inner_cr_type, variant_type_id);
             let str_val = self.apply_string_conversion(inner_compiled, conv)?;
             self.builder.ins().jump(merge_block, &[str_val.into()]);
         }

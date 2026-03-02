@@ -266,10 +266,7 @@ impl Cg<'_, '_, '_> {
         let elem_var = self.builder.declare_var(elem_cr_type);
         let elem_zero = self.typed_zero(elem_cr_type);
         self.builder.def_var(elem_var, elem_zero);
-        self.vars.insert(
-            vir_for.var_name,
-            (elem_var, self.vir_lookup_or_compat(elem_type_id)),
-        );
+        self.bind_var(vir_for.var_name, elem_var, elem_type_id);
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -327,10 +324,7 @@ impl Cg<'_, '_, '_> {
         let elem_var = self.builder.declare_var(elem_cr_type);
         let elem_zero = self.typed_zero(elem_cr_type);
         self.builder.def_var(elem_var, elem_zero);
-        self.vars.insert(
-            vir_for.var_name,
-            (elem_var, self.vir_lookup_or_compat(elem_type_id)),
-        );
+        self.bind_var(vir_for.var_name, elem_var, elem_type_id);
 
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
@@ -461,7 +455,7 @@ impl Cg<'_, '_, '_> {
             .vir_query_lookup_runtime_iterator(elem_type_id)
             .or_else(|| self.vir_query_lookup_runtime_iterator(TypeId::I64))
             .expect("RuntimeIterator<i64> must always be pre-interned");
-        super::types::CompiledValue::owned(raw, types::I64, self.vir_lookup(runtime_iter_type_id))
+        self.compiled_owned_with_ty(raw, types::I64, runtime_iter_type_id)
     }
 
     /// Track an owned iterator in the current RC scope for cleanup.

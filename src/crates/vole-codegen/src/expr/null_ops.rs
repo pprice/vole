@@ -44,12 +44,9 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let nil_type_id = self.vir_query_nil();
-        let nil_val = CompiledValue::new(
-            self.iconst_cached(types::I8, 0),
-            types::I8,
-            self.vir_lookup(nil_type_id),
-        );
-        self.coerce_to_type(nil_val, self.vir_lookup_or_compat(result_type_id))
+        let zero = self.iconst_cached(types::I8, 0);
+        let nil_val = self.compiled_with_ty(zero, types::I8, nil_type_id);
+        self.coerce_to_type_id(nil_val, result_type_id)
     }
 
     /// Load a captured variable from closure
@@ -306,7 +303,7 @@ impl Cg<'_, '_, '_> {
 
         let result_type_id = self.cv_type_id_from_vir(vir_result_type_id);
         let result_type_id = self.try_substitute_type(result_type_id);
-        let result_vir_ty = self.vir_lookup_or_compat(result_type_id);
+        let result_vir_ty = self.to_vir_type(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
         let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
 
@@ -380,7 +377,7 @@ impl Cg<'_, '_, '_> {
             })?;
 
         let result_type_id = self.try_substitute_type(self.cv_type_id_from_vir(vir_result_type_id));
-        let result_vir_ty = self.vir_lookup_or_compat(result_type_id);
+        let result_vir_ty = self.to_vir_type(result_type_id);
         let result_cranelift_type = self.cranelift_type(result_type_id);
         let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
 
@@ -537,10 +534,10 @@ impl Cg<'_, '_, '_> {
                 scrutinee.value,
                 union_layout::PAYLOAD_OFFSET,
             );
-            CompiledValue::new(loaded, inner_cranelift_type, self.vir_lookup(inner_type_id))
+            self.compiled_with_ty(loaded, inner_cranelift_type, inner_type_id)
         } else {
             let zero = self.iconst_cached(inner_cranelift_type, 0);
-            CompiledValue::new(zero, inner_cranelift_type, self.vir_lookup(inner_type_id))
+            self.compiled_with_ty(zero, inner_cranelift_type, inner_type_id)
         }
     }
 

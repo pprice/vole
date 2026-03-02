@@ -65,9 +65,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn try_substitute_type_v(&self, vir_ty: VirTypeId) -> VirTypeId {
         if let Some(substitutions) = self.substitutions {
             if vir_ty.is_compat() {
-                // Compat-encoded: round-trip through TypeId substitution.
-                // Use vir_lookup_or_compat so unmapped cross-module types stay
-                // compat-encoded instead of collapsing to VirTypeId::UNKNOWN.
+                // Compat-encoded: round-trip through TypeId substitution,
+                // then re-map to VirTypeId (with compat fallback for unmapped types).
                 let sema_ty = self.cv_type_id_from_vir(vir_ty);
                 let substituted = self.try_substitute_type(sema_ty);
                 self.vir_lookup_or_compat(substituted)
@@ -218,7 +217,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Find the nil variant index using a sema TypeId directly.
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
-        if let Some(variants) = self.vir_query_unwrap_union_v(self.vir_lookup(ty)) {
+        if let Some(variants) = self.vir_query_unwrap_union(ty) {
             variants.iter().position(|&id| id.is_nil())
         } else {
             None
@@ -227,8 +226,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
     pub fn interface_type_def_id(&self, ty: TypeId) -> Option<TypeDefId> {
-        self.vir_query_unwrap_interface_v(self.vir_lookup(ty))
-            .map(|(id, _)| id)
+        self.vir_query_unwrap_interface(ty).map(|(id, _)| id)
     }
 
     /// Unwrap an interface `VirTypeId`, returning the `TypeDefId` if it is one.
@@ -249,8 +247,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         use vole_runtime::value::RuntimeTypeId;
 
         let resolved_union_id = self.try_substitute_type(union_type_id);
-        let Some(vir_variants) = self.vir_query_unwrap_union_v(self.vir_lookup(resolved_union_id))
-        else {
+        let Some(vir_variants) = self.vir_query_unwrap_union(resolved_union_id) else {
             return false;
         };
         let variants: Vec<TypeId> = vir_variants
@@ -314,7 +311,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Codegen/runtime layout policy: inline union array slots store only
         // (runtime_tag, payload_bits), so variants that need richer tagging or
         // heap-backed payload wrappers must use boxed union storage.
-        let vir_variant = self.vir_lookup(variant);
+        let vir_variant = self.to_vir_type(variant);
         !(self.vir_query_is_union(variant)
             || self.vir_query_is_interface(variant)
             || self.vir_query_is_class(variant)

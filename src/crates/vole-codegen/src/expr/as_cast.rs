@@ -34,8 +34,7 @@ impl Cg<'_, '_, '_> {
         // Match block: extract value, wrap as nullable
         self.switch_and_seal(match_block);
         let extracted = extract(self)?;
-        let wrapped =
-            self.coerce_to_type(extracted, self.vir_lookup_or_compat(nullable_type_id))?;
+        let wrapped = self.coerce_to_type_id(extracted, nullable_type_id)?;
         if result_needs_rc && wrapped.is_borrowed() {
             self.emit_rc_inc_for_type(wrapped.value, nullable_type_id)?;
         }
@@ -50,11 +49,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        let cv = CompiledValue::new(
-            result,
-            result_cranelift_type,
-            self.vir_lookup(nullable_type_id),
-        );
+        let cv = self.compiled_with_ty(result, result_cranelift_type, nullable_type_id);
         Ok(self.mark_rc_owned(cv))
     }
 
@@ -91,11 +86,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::new(
-            result,
-            result_cranelift_type,
-            self.vir_lookup(tested_type_id),
-        ))
+        Ok(self.compiled_with_ty(result, result_cranelift_type, tested_type_id))
     }
 
     /// Extract a union payload with a known target type.
@@ -106,10 +97,6 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let payload_ty = self.cranelift_type(target_type_id);
         let payload = self.load_union_payload_v(union_value.value, union_value.type_id, payload_ty);
-        Ok(CompiledValue::new(
-            payload,
-            payload_ty,
-            self.vir_lookup(target_type_id),
-        ))
+        Ok(self.compiled_with_ty(payload, payload_ty, target_type_id))
     }
 }

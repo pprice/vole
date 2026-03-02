@@ -39,7 +39,7 @@ impl Cg<'_, '_, '_> {
         // Bridge to sema TypeId for downstream RC analysis (will be eliminated
         // when error_patterns.rs migrates to VirTypeId).
         let scrutinee_type_id = self.cv_type_id_from_vir(scrutinee_vir_type_id);
-        let fallible_types = self.vir_query_unwrap_fallible_v(self.vir_lookup(scrutinee_type_id));
+        let fallible_types = self.vir_query_unwrap_fallible(scrutinee_type_id);
         let Some((success_vir, error_virs)) = fallible_types else {
             return Ok(());
         };
@@ -120,7 +120,7 @@ impl Cg<'_, '_, '_> {
         if self.error_type_single_field_is_rc(error_type_id) {
             return true;
         }
-        if let Some(vir_variants) = self.vir_query_unwrap_union_v(self.vir_lookup(error_type_id)) {
+        if let Some(vir_variants) = self.vir_query_unwrap_union(error_type_id) {
             let variants: Vec<TypeId> = vir_variants
                 .iter()
                 .map(|&v| self.cv_type_id_from_vir(v))
@@ -261,10 +261,7 @@ impl Cg<'_, '_, '_> {
                 let converted = self.convert_field_value(payload, field_ty_id);
                 let var = self.builder.declare_var(converted.ty);
                 self.builder.def_var(var, converted.value);
-                arm_variables.insert(
-                    field_pattern.binding,
-                    (var, self.vir_lookup_or_compat(field_ty_id)),
-                );
+                arm_variables.insert(field_pattern.binding, (var, self.to_vir_type(field_ty_id)));
             } else if is_wide {
                 // Wide (i128/f128) field in multi-field or single-wide-field error.
                 let field_offset = field_byte_offsets[field_idx];
@@ -283,10 +280,7 @@ impl Cg<'_, '_, '_> {
                 let wide_ty = wide.cranelift_type();
                 let var = self.builder.declare_var(wide_ty);
                 self.builder.def_var(var, wide_val);
-                arm_variables.insert(
-                    field_pattern.binding,
-                    (var, self.vir_lookup_or_compat(field_ty_id)),
-                );
+                arm_variables.insert(field_pattern.binding, (var, self.to_vir_type(field_ty_id)));
             } else {
                 // Non-wide field in multi-field error, payload is a pointer to field data
                 let field_offset = field_byte_offsets[field_idx];
@@ -297,10 +291,7 @@ impl Cg<'_, '_, '_> {
                 let converted = self.convert_field_value(raw_value, field_ty_id);
                 let var = self.builder.declare_var(converted.ty);
                 self.builder.def_var(var, converted.value);
-                arm_variables.insert(
-                    field_pattern.binding,
-                    (var, self.vir_lookup_or_compat(field_ty_id)),
-                );
+                arm_variables.insert(field_pattern.binding, (var, self.to_vir_type(field_ty_id)));
             }
         }
 

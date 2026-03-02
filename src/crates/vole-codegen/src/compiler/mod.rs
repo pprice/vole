@@ -390,6 +390,12 @@ impl<'a> Compiler<'a> {
             .map(|(success, errors)| (success, errors.to_vec()))
     }
 
+    /// Unwrap a fallible sema `TypeId` to `(success, errors)` via VirTypeTable.
+    #[inline]
+    fn vir_query_unwrap_fallible(&self, type_id: TypeId) -> Option<(VirTypeId, Vec<VirTypeId>)> {
+        self.vir_query_unwrap_fallible_v(self.vir_lookup(type_id))
+    }
+
     /// Unwrap a class `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
     #[allow(dead_code)]
     #[inline]

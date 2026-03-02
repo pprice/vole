@@ -35,11 +35,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Sentinels are zero-field structs represented as i8(0).
         if self.analyzed().is_sentinel_type(type_def_id) {
             let value = self.iconst_cached(types::I8, 0);
-            return Ok(CompiledValue::new(
-                value,
-                types::I8,
-                self.vir_lookup(result_type_id),
-            ));
+            return Ok(self.compiled_with_ty(value, types::I8, result_type_id));
         }
 
         let metadata = self.type_metadata().get(&type_def_id).ok_or_else(|| {
@@ -111,11 +107,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(CompiledValue::new(
-            ptr,
-            ptr_type,
-            self.vir_lookup(layout_type_id),
-        ))
+        Ok(self.compiled_with_ty(ptr, ptr_type, layout_type_id))
     }
 
     /// Compile a VIR class instance (heap-allocated reference type).
@@ -132,11 +124,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Sentinels are zero-field structs represented as i8(0).
         if self.analyzed().is_sentinel_type(type_def_id) {
             let value = self.iconst_cached(types::I8, 0);
-            return Ok(CompiledValue::new(
-                value,
-                types::I8,
-                self.vir_lookup(result_type_id),
-            ));
+            return Ok(self.compiled_with_ty(value, types::I8, result_type_id));
         }
 
         let metadata = self.type_metadata().get(&type_def_id).ok_or_else(|| {
@@ -178,11 +166,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             instance_ptr,
         )?;
 
-        Ok(CompiledValue::new(
-            instance_ptr,
-            self.ptr_type(),
-            self.vir_lookup(result_type_id),
-        ))
+        Ok(self.compiled_with_ty(instance_ptr, self.ptr_type(), result_type_id))
     }
 
     /// Collect field name -> TypeId mapping for a type definition.

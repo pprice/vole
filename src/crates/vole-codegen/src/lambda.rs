@@ -64,7 +64,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         param_types: &[Type],
         return_type: Type,
-        return_type_id: TypeId,
+        return_vir_ty: VirTypeId,
     ) -> Signature {
         let mut sig = self.jit_module().make_signature();
         sig.params.push(AbiParam::new(self.ptr_type())); // closure ptr
@@ -73,14 +73,11 @@ impl Cg<'_, '_, '_> {
         }
         // For fallible returns, use multi-value return (tag: i64, payload: i64)
         // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
-        if self.vir_query_is_wide_fallible(return_type_id) {
+        if self.vir_query_is_wide_fallible_v(return_vir_ty) {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // low
             sig.returns.push(AbiParam::new(types::I64)); // high
-        } else if self
-            .vir_query_unwrap_fallible_v(self.vir_lookup(return_type_id))
-            .is_some()
-        {
+        } else if self.vir_query_unwrap_fallible_v(return_vir_ty).is_some() {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // payload
         } else {
@@ -168,7 +165,8 @@ impl Cg<'_, '_, '_> {
         let return_type = self.cranelift_type(return_type_id);
         let ptr_type = self.ptr_type();
 
-        let sig = self.build_lambda_signature(&cr_param_types, return_type, return_type_id);
+        let return_vir_ty = self.to_vir_type(return_type_id);
+        let sig = self.build_lambda_signature(&cr_param_types, return_type, return_vir_ty);
 
         let func_key = self.funcs().intern_lambda(lambda_id);
         let lambda_name = self.funcs().display(func_key);

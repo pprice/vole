@@ -56,7 +56,7 @@ impl Cg<'_, '_, '_> {
         // Get return type from function type
         let return_type_id = {
             let (_, ret) = self
-                .vir_query_unwrap_function_v(self.vir_lookup(func_type_id))
+                .vir_query_unwrap_function(func_type_id)
                 .expect("INTERNAL: module method: missing function type");
             self.cv_type_id_from_vir(ret)
         };
@@ -182,7 +182,7 @@ impl Cg<'_, '_, '_> {
         // For sret, result[0] is the sret pointer we passed in
         let result = if is_sret {
             let results = self.builder.inst_results(call_inst);
-            CompiledValue::new(results[0], self.ptr_type(), self.vir_lookup(return_type_id))
+            self.compiled_with_ty(results[0], self.ptr_type(), return_type_id)
         } else {
             self.call_result(call_inst, return_type_id)?
         };
@@ -200,15 +200,15 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         // Extract function type components
         let (param_ids, return_type_id) = {
-            let (vir_params, vir_ret) = self
-                .vir_query_unwrap_function_v(self.vir_lookup(func_type_id))
-                .ok_or_else(|| {
-                    CodegenError::type_mismatch(
-                        "functional interface call",
-                        "function type",
-                        "other",
-                    )
-                })?;
+            let (vir_params, vir_ret) =
+                self.vir_query_unwrap_function(func_type_id)
+                    .ok_or_else(|| {
+                        CodegenError::type_mismatch(
+                            "functional interface call",
+                            "function type",
+                            "other",
+                        )
+                    })?;
             let params: Vec<TypeId> = vir_params
                 .iter()
                 .map(|&v| self.cv_type_id_from_vir(v))
@@ -334,7 +334,7 @@ impl Cg<'_, '_, '_> {
         // Unwrap function type to get params and return type
         let (param_count, param_type_ids, return_type_id, is_void_return) = {
             let (vir_params, vir_ret) = self
-                .vir_query_unwrap_function_v(self.vir_lookup(dispatch_func_type_id))
+                .vir_query_unwrap_function(dispatch_func_type_id)
                 .ok_or_else(|| {
                     CodegenError::type_mismatch(
                         "interface dispatch",
@@ -403,7 +403,7 @@ impl Cg<'_, '_, '_> {
             // passed as their concrete variant (e.g. i16) rather than as a tagged
             // union pointer, causing the callee's `is` checks to segfault.
             let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {
-                self.coerce_to_type(compiled, self.vir_lookup_or_compat(expected_type_id))?
+                self.coerce_to_type_id(compiled, expected_type_id)?
             } else {
                 compiled
             };

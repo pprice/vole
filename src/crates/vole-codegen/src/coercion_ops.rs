@@ -140,6 +140,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - If target is unknown, boxes the value with a type tag (TaggedValue)
     ///
     /// Returns the value unchanged if no coercion is needed.
+    /// Coerce a value to the target type specified by a sema `TypeId`.
+    ///
+    /// Boundary bridge: converts `TypeId` to `VirTypeId` via `vir_lookup_or_compat`
+    /// and delegates to [`coerce_to_type`](Self::coerce_to_type).
+    /// Uses compat encoding so unmapped cross-module types survive round-tripping.
+    pub fn coerce_to_type_id(
+        &mut self,
+        value: CompiledValue,
+        target_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        self.coerce_to_type(value, self.vir_lookup_or_compat(target_type_id))
+    }
+
     pub fn coerce_to_type(
         &mut self,
         value: CompiledValue,
@@ -157,7 +170,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let is_value_interface = self.vir_query_is_interface_v(resolved_value_vir);
         let is_target_union = self.vir_query_is_union_v(resolved_target_vir);
         let is_value_union = self.vir_query_is_union_v(resolved_value_vir);
-        // Safe: callers use vir_lookup_or_compat, which produces compat-encoded
+        // Safe: callers use to_vir_type, which produces compat-encoded
         // VirTypeIds for unmapped types instead of VirTypeId::UNKNOWN. Only
         // genuinely unknown targets will have VirTypeId::UNKNOWN here.
         let is_target_unknown = self.vir_query_is_unknown_v(resolved_target_vir);

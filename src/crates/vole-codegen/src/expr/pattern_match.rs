@@ -26,20 +26,19 @@ impl Cg<'_, '_, '_> {
     /// pre-computed result. This uses the substituted value type to compute it.
     pub(super) fn compute_is_check_result(
         &self,
-        value_type_id: TypeId,
-        tested_type_id: TypeId,
+        value_vir: VirTypeId,
+        tested_vir: VirTypeId,
     ) -> IsCheckResult {
-        if value_type_id.is_unknown() {
+        if value_vir == VirTypeId::UNKNOWN {
+            let tested_type_id = self.cv_type_id_from_vir(tested_vir);
             IsCheckResult::CheckUnknown(tested_type_id)
-        } else if let Some(variants) = self.vir_query_unwrap_union_v(self.vir_lookup(value_type_id))
-        {
-            let tested_vir = self.vir_lookup(tested_type_id);
+        } else if let Some(variants) = self.vir_query_unwrap_union_v(value_vir) {
             if let Some(index) = variants.iter().position(|&v| v == tested_vir) {
                 IsCheckResult::CheckTag(index as u32)
             } else {
                 IsCheckResult::AlwaysFalse
             }
-        } else if value_type_id == tested_type_id {
+        } else if value_vir == tested_vir {
             IsCheckResult::AlwaysTrue
         } else {
             IsCheckResult::AlwaysFalse
@@ -256,7 +255,7 @@ impl Cg<'_, '_, '_> {
 
         let result_cranelift_type = self.cranelift_type(effective_result_type);
         let is_void = effective_result_type.is_void();
-        let result_vir_ty = self.vir_lookup(effective_result_type);
+        let result_vir_ty = self.to_vir_type(effective_result_type);
 
         // Try switch optimization for dense integer literal arms.
         if let Some(analysis) = match_switch::analyze_vir_switch(arms, scrutinee_type_id) {
@@ -438,10 +437,8 @@ impl Cg<'_, '_, '_> {
                 // For monomorphized generics, recompute the IsCheckResult
                 // using substituted types.
                 let cond = if self.substitutions.is_some() {
-                    let sub_tested =
-                        self.cv_type_id_from_vir(self.try_substitute_type_v(*tested_type));
-                    let sub_scrutinee =
-                        self.cv_type_id_from_vir(self.try_substitute_type_v(scrutinee.type_id));
+                    let sub_tested = self.try_substitute_type_v(*tested_type);
+                    let sub_scrutinee = self.try_substitute_type_v(scrutinee.type_id);
                     let effective_result = self.compute_is_check_result(sub_scrutinee, sub_tested);
                     self.compile_is_check_result(&effective_result, scrutinee)?
                 } else {
@@ -567,7 +564,7 @@ impl Cg<'_, '_, '_> {
             if let vole_vir::VirPattern::Binding { name, .. } = inner_pat.as_ref() {
                 let var = self.builder.declare_var(payload_ty);
                 self.builder.def_var(var, payload);
-                arm_variables.insert(*name, (var, self.vir_lookup_or_compat(success_type_id)));
+                arm_variables.insert(*name, (var, self.to_vir_type(success_type_id)));
             }
         }
         Ok(Some(is_success))
@@ -705,9 +702,8 @@ impl Cg<'_, '_, '_> {
         let pattern_check = if let Some(vir_result) = type_check {
             if self.substitutions.is_some() {
                 if let Some(tested) = tested_type {
-                    let sub_tested = self.cv_type_id_from_vir(self.try_substitute_type_v(*tested));
-                    let sub_scrutinee =
-                        self.cv_type_id_from_vir(self.try_substitute_type_v(scrutinee.type_id));
+                    let sub_tested = self.try_substitute_type_v(*tested);
+                    let sub_scrutinee = self.try_substitute_type_v(scrutinee.type_id);
                     let effective_result = self.compute_is_check_result(sub_scrutinee, sub_tested);
                     self.compile_is_check_result(&effective_result, scrutinee)?
                 } else {
@@ -785,10 +781,7 @@ impl Cg<'_, '_, '_> {
             };
             let var = self.builder.declare_var(converted.ty);
             self.builder.def_var(var, converted.value);
-            arm_variables.insert(
-                field.binding_name,
-                (var, self.vir_lookup_or_compat(field_type_id)),
-            );
+            arm_variables.insert(field.binding_name, (var, self.to_vir_type(field_type_id)));
         }
         Ok(())
     }
@@ -874,7 +867,7 @@ impl Cg<'_, '_, '_> {
         if body_result.type_id == VirTypeId::NEVER {
             return Ok(body_result);
         }
-        self.coerce_to_type(body_result, self.vir_lookup_or_compat(result_type_id))
+        self.coerce_to_type_id(body_result, result_type_id)
     }
 
     /// Emit the exit jump for a match arm body to the merge block.

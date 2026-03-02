@@ -36,11 +36,7 @@ impl Cg<'_, '_, '_> {
             self.vir_query_lookup_runtime_iterator(TypeId::I64)
                 .expect("INTERNAL: range iterator: RuntimeIterator<i64> type not pre-created")
         });
-        Ok(CompiledValue::owned(
-            result,
-            self.ptr_type(),
-            self.vir_lookup(iter_type_id),
-        ))
+        Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
     }
 
     /// Handle built-in methods on arrays, strings, and ranges.
@@ -81,10 +77,10 @@ impl Cg<'_, '_, '_> {
                         let tag_val = self.iconst_cached(types::I64, tag as i64);
                         self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
                     }
-                    Ok(Some(CompiledValue::owned(
+                    Ok(Some(self.compiled_owned_with_ty(
                         result,
                         self.ptr_type(),
-                        self.vir_lookup(iter_type_id),
+                        iter_type_id,
                     )))
                 }
                 _ => Ok(None),
@@ -121,10 +117,10 @@ impl Cg<'_, '_, '_> {
                         let tag_val = self.iconst_cached(types::I64, string_tag as i64);
                         self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
                     }
-                    Ok(Some(CompiledValue::owned(
+                    Ok(Some(self.compiled_owned_with_ty(
                         result,
                         self.ptr_type(),
-                        self.vir_lookup(iter_type_id),
+                        iter_type_id,
                     )))
                 }
                 _ => Ok(None),
@@ -151,10 +147,10 @@ impl Cg<'_, '_, '_> {
                     self.vir_query_lookup_runtime_iterator(TypeId::I64)
                         .expect("INTERNAL: range.iter(): RuntimeIterator<i64> type not pre-created")
                 });
-                return Ok(Some(CompiledValue::owned(
+                return Ok(Some(self.compiled_owned_with_ty(
                     result,
                     self.ptr_type(),
-                    self.vir_lookup(iter_type_id),
+                    iter_type_id,
                 )));
             }
             return Ok(None);
@@ -194,11 +190,6 @@ impl Cg<'_, '_, '_> {
         self.emit_call(push_ref, &[arr_obj.value, tag_val, value_bits]);
 
         // Return void
-        let void_type_id = self.vir_query_void();
-        Ok(CompiledValue::new(
-            self.iconst_cached(types::I64, 0),
-            types::I64,
-            self.vir_lookup(void_type_id),
-        ))
+        Ok(self.void_value())
     }
 }

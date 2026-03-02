@@ -91,9 +91,7 @@ impl Compiler<'_> {
 
         // Check if this is a fallible return type - use multi-value returns
         if let Some(ret_type_id) = return_type_id
-            && self
-                .vir_query_unwrap_fallible_v(self.vir_lookup(ret_type_id))
-                .is_some()
+            && self.vir_query_unwrap_fallible(ret_type_id).is_some()
         {
             if is_wide_fallible(ret_type_id, arena_ref) {
                 // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)

@@ -107,11 +107,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 self.builder.ins().iadd_imm(struct_ptr, offset as i64)
             };
-            return Ok(CompiledValue::new(
-                field_ptr,
-                ptr_type,
-                self.vir_lookup(field_type_id),
-            ));
+            return Ok(self.compiled_with_ty(field_ptr, ptr_type, field_type_id));
         }
 
         // Payload-carrying union fields are stored inline (16 bytes: tag + payload).
@@ -124,11 +120,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 self.builder.ins().iadd_imm(struct_ptr, offset as i64)
             };
-            return Ok(CompiledValue::new(
-                field_ptr,
-                ptr_type,
-                self.vir_lookup(field_type_id),
-            ));
+            return Ok(self.compiled_with_ty(field_ptr, ptr_type, field_type_id));
         }
 
         // i128 fields occupy 2 x 8-byte slots: load low and high halves, reconstruct

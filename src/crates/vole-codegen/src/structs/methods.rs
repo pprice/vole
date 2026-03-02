@@ -285,7 +285,7 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         let resolved_receiver = self.try_substitute_type(receiver_type_id);
-        let resolved_receiver_vir = self.vir_lookup(resolved_receiver);
+        let resolved_receiver_vir = self.to_vir_type(resolved_receiver);
         let receiver_generic = self
             .vir_query_unwrap_class_v(resolved_receiver_vir)
             .or_else(|| self.vir_query_unwrap_interface_v(resolved_receiver_vir))
@@ -634,8 +634,7 @@ impl Cg<'_, '_, '_> {
                         if compiled.is_owned() {
                             rc_temps.push(compiled);
                         }
-                        let compiled = self
-                            .coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
+                        let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
                         args.push(compiled.value);
                     }
                 } else {
@@ -785,7 +784,7 @@ impl Cg<'_, '_, '_> {
             // paths above (lines 264-310) are skipped. Check here if the object is an
             // interface type and dispatch via vtable.
             let interface_type_def_id = self
-                .vir_query_unwrap_interface_v(self.vir_lookup(resolved_obj_type_id))
+                .vir_query_unwrap_interface(resolved_obj_type_id)
                 .map(|(id, _)| id);
             if let Some(interface_type_def_id) = interface_type_def_id {
                 let func_type_id = self
@@ -836,8 +835,7 @@ impl Cg<'_, '_, '_> {
                     if compiled.is_owned() {
                         rc_temps.push(compiled);
                     }
-                    let compiled =
-                        self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
+                    let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
                     args.push(compiled.value);
                 }
                 let return_type_id =
@@ -1086,8 +1084,7 @@ impl Cg<'_, '_, '_> {
                         if compiled.is_owned() {
                             rc_temps.push(compiled);
                         }
-                        let compiled = self
-                            .coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
+                        let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
 
                         if is_generic_class && compiled.ty != types::I64 {
                             self.emit_word(&compiled, None)?
@@ -1123,8 +1120,7 @@ impl Cg<'_, '_, '_> {
                 }
                 // Coerce argument to parameter type if needed
                 // (e.g., concrete type -> interface box, concrete type -> union)
-                let compiled =
-                    self.coerce_to_type(compiled, self.vir_lookup_or_compat(param_type_id))?;
+                let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
 
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
@@ -1230,11 +1226,7 @@ impl Cg<'_, '_, '_> {
         if is_sret {
             // Sret: result[0] is the sret pointer we passed in
             let results = self.builder.inst_results(call);
-            return Ok(CompiledValue::new(
-                results[0],
-                self.ptr_type(),
-                self.vir_lookup(return_type_id),
-            ));
+            return Ok(self.compiled_with_ty(results[0], self.ptr_type(), return_type_id));
         }
 
         // Small struct multi-value return: reconstruct from registers
@@ -1270,11 +1262,7 @@ impl Cg<'_, '_, '_> {
                 return Ok(self.copy_union_ptr_to_local(result_value, return_type_id));
             }
 
-            Ok(CompiledValue::new(
-                result_value,
-                expected_ty,
-                self.vir_lookup(return_type_id),
-            ))
+            Ok(self.compiled_with_ty(result_value, expected_ty, return_type_id))
         }
     }
 

@@ -78,11 +78,7 @@ pub(super) fn build_field_meta_array(
                 info.field_meta_type_id,
             )
         });
-    Ok(CompiledValue::new(
-        arr_ptr,
-        cg.ptr_type(),
-        cg.vir_lookup(array_type_id),
-    ))
+    Ok(cg.compiled_with_ty(arr_ptr, cg.ptr_type(), array_type_id))
 }
 
 /// Collect field info tuples for all fields, including VIR-lowered annotations.
@@ -203,7 +199,7 @@ fn build_annotations_array(
         return Ok(CompiledValue::new(
             arr_ptr,
             cg.ptr_type(),
-            cg.vir_lookup(cg.vir_query_unknown()),
+            VirTypeId::UNKNOWN,
         ));
     }
 
@@ -218,7 +214,7 @@ fn build_annotations_array(
     Ok(CompiledValue::new(
         arr_ptr,
         cg.ptr_type(),
-        cg.vir_lookup(cg.vir_query_unknown()),
+        VirTypeId::UNKNOWN,
     ))
 }
 
