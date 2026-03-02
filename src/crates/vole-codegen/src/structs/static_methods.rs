@@ -56,12 +56,13 @@ impl Cg<'_, '_, '_> {
             .and_then(|dispatch| {
                 dispatch
                     .substituted_return_type
-                    .map(|ty| self.sema_type_from_vir(ty))
+                    .map(|ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
                     .or_else(|| {
-                        dispatch
-                            .resolved_method
-                            .as_ref()
-                            .map(|resolved| self.sema_type_from_vir(resolved.return_type_id()))
+                        dispatch.resolved_method.as_ref().map(|resolved| {
+                            self.cv_type_id_from_vir(
+                                self.try_substitute_type_v(resolved.return_type_id()),
+                            )
+                        })
                     })
             })
             .or_else(|| self.get_expr_type_substituted(&expr_id));
@@ -265,11 +266,11 @@ impl Cg<'_, '_, '_> {
                 key.method_name,
                 key.class_type_keys
                     .iter()
-                    .map(|&ty| self.sema_type_from_vir(ty))
+                    .map(|&ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
                     .collect(),
                 key.method_type_keys
                     .iter()
-                    .map(|&ty| self.sema_type_from_vir(ty))
+                    .map(|&ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
                     .collect(),
             )
         });

@@ -220,7 +220,7 @@ impl Cg<'_, '_, '_> {
         else {
             unreachable!("compile_vir_for_array called with non-Array kind");
         };
-        let mut elem_type_id = self.sema_type_from_vir(*elem_type_id);
+        let mut elem_type_id = self.cv_type_id_from_vir(self.try_substitute_type_v(*elem_type_id));
         let mut union_storage = *union_storage;
 
         let arr = self.compile_vir_expr(&vir_for.iterable)?;
@@ -374,7 +374,7 @@ impl Cg<'_, '_, '_> {
                 Ok((iter_val, TypeId::STRING, true))
             }
             VirIterKind::IteratorInterface { elem_type, .. } => {
-                let hint = self.sema_type_from_vir(*elem_type);
+                let hint = self.cv_type_id_from_vir(self.try_substitute_type_v(*elem_type));
                 let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
                 let (elem_type_id, is_interface_iter) = if let Some(elem_vir) =
                     self.vir_query_unwrap_runtime_iterator_v(iter.type_id)
@@ -399,7 +399,7 @@ impl Cg<'_, '_, '_> {
                 Ok((iter.value, elem_type_id, false))
             }
             VirIterKind::CustomIterator { elem_type, .. } => {
-                let elem_type_id = self.sema_type_from_vir(*elem_type);
+                let elem_type_id = self.cv_type_id_from_vir(self.try_substitute_type_v(*elem_type));
                 let iterable = self.compile_vir_expr(&vir_for.iterable)?;
                 let iterator_type_def = self
                     .name_table()
@@ -420,7 +420,7 @@ impl Cg<'_, '_, '_> {
                 Ok((iter.value, elem_type_id, false))
             }
             VirIterKind::CustomIterable { elem_type, .. } => {
-                let elem_type_id = self.sema_type_from_vir(*elem_type);
+                let elem_type_id = self.cv_type_id_from_vir(self.try_substitute_type_v(*elem_type));
                 let iterable = self.compile_vir_expr(&vir_for.iterable)?;
                 let iter_value = self.call_iterable_iter_method(&iterable, elem_type_id)?;
                 let iter = self.wrap_interface_iter(iter_value, elem_type_id)?;

@@ -274,7 +274,8 @@ impl Cg<'_, '_, '_> {
         };
 
         // Coerce the payload value to the variant's Cranelift type if needed.
-        let variant_type_id = self.sema_type_from_vir(hint.variant_type);
+        let variant_type_id =
+            self.cv_type_id_from_vir(self.try_substitute_type_v(hint.variant_type));
         let target_ty = self.cranelift_type(variant_type_id);
         let actual_value = if target_ty != value.ty && target_ty.is_int() && value.ty.is_int() {
             if target_ty.bytes() < value.ty.bytes() {
@@ -538,11 +539,12 @@ impl Cg<'_, '_, '_> {
                 declared_type,
             } => {
                 let binding_ty = if *vir_ty != VirTypeId::UNKNOWN {
-                    self.sema_type_from_vir(*vir_ty)
+                    self.cv_type_id_from_vir(self.try_substitute_type_v(*vir_ty))
                 } else {
-                    self.sema_type_from_vir(*ty)
+                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty))
                 };
-                let declared = declared_type.map(|dt| self.sema_type_from_vir(dt));
+                let declared = declared_type
+                    .map(|dt| self.cv_type_id_from_vir(self.try_substitute_type_v(dt)));
                 self.compile_vir_let(*name, value, binding_ty, *storage, declared)
             }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
@@ -1142,7 +1144,11 @@ impl Cg<'_, '_, '_> {
         use vole_vir::VirDestructurePattern;
         match pattern {
             VirDestructurePattern::Bind { name, ty, .. } => {
-                self.compile_vir_destructure_bind(*name, self.sema_type_from_vir(*ty), value)?;
+                self.compile_vir_destructure_bind(
+                    *name,
+                    self.cv_type_id_from_vir(self.try_substitute_type_v(*ty)),
+                    value,
+                )?;
             }
             VirDestructurePattern::Wildcard => {}
             VirDestructurePattern::Tuple { elements, kind } => {
@@ -1157,7 +1163,7 @@ impl Cg<'_, '_, '_> {
                 self.compile_vir_destructure_record(
                     fields,
                     value,
-                    self.sema_type_from_vir(*source_ty),
+                    self.cv_type_id_from_vir(self.try_substitute_type_v(*source_ty)),
                     *is_struct,
                 )?;
             }
@@ -1210,12 +1216,12 @@ impl Cg<'_, '_, '_> {
                 // True tuple: compute layout from element types.
                 let elem_type_ids: Vec<TypeId> = elements
                     .iter()
-                    .map(|e| self.sema_type_from_vir(e.ty))
+                    .map(|e| self.cv_type_id_from_vir(self.try_substitute_type_v(e.ty)))
                     .collect();
                 let (_, offsets) = self.tuple_layout(&elem_type_ids);
                 for (i, elem) in elements.iter().enumerate() {
                     let offset = offsets[i];
-                    let elem_ty = self.sema_type_from_vir(elem.ty);
+                    let elem_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(elem.ty));
                     let elem_cr_type = self.cranelift_type(elem_ty);
                     let elem_value =
                         self.builder
@@ -1226,7 +1232,7 @@ impl Cg<'_, '_, '_> {
             }
             vole_vir::DestructureTupleKind::FixedArray { elem_ty, .. } => {
                 // Fixed array: all elements have the same type and size.
-                let elem_ty = self.sema_type_from_vir(elem_ty);
+                let elem_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(elem_ty));
                 let elem_cr_type = self.cranelift_type(elem_ty);
                 let elem_size = self.type_size(elem_ty).div_ceil(8) * 8;
                 for (i, elem) in elements.iter().enumerate() {
@@ -1253,7 +1259,7 @@ impl Cg<'_, '_, '_> {
         is_struct: bool,
     ) -> CodegenResult<()> {
         for field in fields {
-            let field_ty = self.sema_type_from_vir(field.ty);
+            let field_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(field.ty));
             let converted = if is_struct {
                 // Structs are stack-allocated: load field directly from pointer + offset
                 self.struct_field_load(value, field.slot as usize, field_ty, source_ty)?
@@ -1285,7 +1291,7 @@ impl Cg<'_, '_, '_> {
                 (
                     module_id,
                     binding.export_name,
-                    self.sema_type_from_vir(binding.export_ty),
+                    self.cv_type_id_from_vir(self.try_substitute_type_v(binding.export_ty)),
                 ),
             );
         }
@@ -1308,7 +1314,7 @@ impl Cg<'_, '_, '_> {
             if !has_self_capture {
                 return None;
             }
-            let sema_ty = self.sema_type_from_vir(*ty);
+            let sema_ty = self.cv_type_id_from_vir(self.try_substitute_type_v(*ty));
             let cranelift_ty = self.cranelift_type(sema_ty);
             let var = self.builder.declare_var(cranelift_ty);
             self.vars.insert(name, (var, sema_ty));

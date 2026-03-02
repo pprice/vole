@@ -76,7 +76,7 @@ impl Cg<'_, '_, '_> {
 
         if elem_type.is_none() && !elements.is_empty() {
             let first = self.compile_vir_expr(&elements[0])?;
-            let inferred_elem = self.sema_type_from_vir(first.type_id);
+            let inferred_elem = self.cv_type_id_from_vir(self.try_substitute_type_v(first.type_id));
             if inferred_elem != TypeId::UNKNOWN
                 && let Some(inferred_array_type) = self.vir_query_lookup_array(inferred_elem)
             {
@@ -144,7 +144,8 @@ impl Cg<'_, '_, '_> {
                 // arrive with degraded compat type IDs (e.g. f128 paths mapping through
                 // vir F64) even though element VIR is concrete. Keep codegen robust by
                 // deriving element layout from the compiled element value.
-                let fallback_elem_type_id = self.sema_type_from_vir(elem_value.type_id);
+                let fallback_elem_type_id =
+                    self.cv_type_id_from_vir(self.try_substitute_type_v(elem_value.type_id));
                 let fallback_result_type_id = self
                     .vir_query_lookup_fixed_array(fallback_elem_type_id, count)
                     .unwrap_or(type_id);

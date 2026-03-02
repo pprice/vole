@@ -153,11 +153,11 @@ impl Cg<'_, '_, '_> {
     }
 
     fn resolved_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
-        self.sema_type_from_vir(resolved.0.func_type_id())
+        self.cv_type_id_from_vir(self.try_substitute_type_v(resolved.0.func_type_id()))
     }
 
     fn resolved_return_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
-        self.sema_type_from_vir(resolved.0.return_type_id())
+        self.cv_type_id_from_vir(self.try_substitute_type_v(resolved.0.return_type_id()))
     }
 
     fn resolved_dispatch_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
@@ -178,7 +178,7 @@ impl Cg<'_, '_, '_> {
         resolved
             .0
             .concrete_return_hint()
-            .map(|ty| self.sema_type_from_vir(ty))
+            .map(|ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
     }
 
     /// Resolve canonical interface method signature from `(interface, slot)`.
@@ -237,7 +237,7 @@ impl Cg<'_, '_, '_> {
             return Some(
                 params
                     .iter()
-                    .map(|&ty| self.sema_type_from_vir(ty))
+                    .map(|&ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
                     .collect(),
             );
         }
@@ -373,7 +373,7 @@ impl Cg<'_, '_, '_> {
             return self.static_method_call(StaticMethodCallArgs {
                 type_def_id: *type_def_id,
                 method_id: *method_id,
-                func_type_id: self.sema_type_from_vir(*func_type_id),
+                func_type_id: self.cv_type_id_from_vir(self.try_substitute_type_v(*func_type_id)),
                 arg_source: &mc.arg_source(),
                 method_sym: mc_method,
                 expr_id,
@@ -470,7 +470,7 @@ impl Cg<'_, '_, '_> {
             let elem_type_id = self.cv_type_id_from_vir(elem_vir_type_id);
             let return_type_hint = dispatch
                 .substituted_return_type
-                .map(|ty| self.sema_type_from_vir(ty))
+                .map(|ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &obj,
@@ -487,14 +487,14 @@ impl Cg<'_, '_, '_> {
         // Driven by sema's CoercionKind annotation — no type re-detection needed.
         let iterator_wrap_elem_type = dispatch.receiver_coercion.map(|coercion| match coercion {
             VirMethodReceiverCoercion::IteratorWrap { elem_type, .. } => {
-                self.sema_type_from_vir(elem_type)
+                self.cv_type_id_from_vir(self.try_substitute_type_v(elem_type))
             }
         });
         if let Some(elem_type) = iterator_wrap_elem_type {
             let runtime_iter = self.box_custom_iterator_to_runtime(&obj, elem_type)?;
             let return_type_hint = dispatch
                 .substituted_return_type
-                .map(|ty| self.sema_type_from_vir(ty))
+                .map(|ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &runtime_iter,
@@ -570,7 +570,7 @@ impl Cg<'_, '_, '_> {
             // Functional interface calls
             let functional_func_type_id =
                 if let VirResolvedMethod::FunctionalInterface { func_type_id, .. } = resolved.0 {
-                    Some(self.sema_type_from_vir(*func_type_id))
+                    Some(self.cv_type_id_from_vir(self.try_substitute_type_v(*func_type_id)))
                 } else {
                     None
                 };
@@ -757,7 +757,8 @@ impl Cg<'_, '_, '_> {
             // When inside a monomorphized method body, the object type may still be a type
             // parameter (e.g. T from class<T: Disposable>). Apply substitutions to get the
             // concrete type before looking up the TypeDefId.
-            let resolved_obj_type_id = self.sema_type_from_vir(obj.type_id);
+            let resolved_obj_type_id =
+                self.cv_type_id_from_vir(self.try_substitute_type_v(obj.type_id));
 
             // In monomorphized context, resolution is None so the interface dispatch
             // paths above (lines 264-310) are skipped. Check here if the object is an
@@ -888,7 +889,7 @@ impl Cg<'_, '_, '_> {
         } else {
             dispatch
                 .substituted_return_type
-                .map(|ty| self.sema_type_from_vir(ty))
+                .map(|ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
                 .unwrap_or(return_type_id)
         };
 
@@ -910,7 +911,7 @@ impl Cg<'_, '_, '_> {
                 key.method_name,
                 key.type_keys
                     .iter()
-                    .map(|&ty| self.sema_type_from_vir(ty))
+                    .map(|&ty| self.cv_type_id_from_vir(self.try_substitute_type_v(ty)))
                     .collect(),
             )
         });

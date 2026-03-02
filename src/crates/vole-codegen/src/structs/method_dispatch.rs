@@ -43,7 +43,7 @@ impl Cg<'_, '_, '_> {
                 ..
             } => (
                 external_info.map(ExternalMethodRef::from),
-                self.sema_type_from_vir(*func_type_id),
+                self.cv_type_id_from_vir(self.try_substitute_type_v(*func_type_id)),
             ),
             _ => {
                 return Err(CodegenError::not_found(
@@ -77,7 +77,8 @@ impl Cg<'_, '_, '_> {
                 .type_keys
                 .iter()
                 .map(|&type_id| {
-                    let sema_type_id = self.sema_type_from_vir(type_id);
+                    let sema_type_id =
+                        self.cv_type_id_from_vir(self.try_substitute_type_v(type_id));
                     if let Some(subs) = self.substitutions
                         && let Some(name_id) = self.vir_query_unwrap_type_param(sema_type_id)
                     {

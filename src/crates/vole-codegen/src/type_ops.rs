@@ -95,24 +95,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_query_type_to_cranelift_v(vir_ty)
     }
 
-    /// Temporary bridge from `VirTypeId` to sema `TypeId` for legacy code paths.
-    ///
-    /// **Includes** `try_substitute_type()` — use `cv_type_id()` when you need
-    /// the raw sema TypeId without substitution.
-    #[inline]
-    pub fn sema_type_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
-        let sema_ty = super::types::vir_conversions::vir_to_sema_type_id(
-            vir_ty,
-            self.vir_type_table(),
-            self.arena(),
-        );
-        self.try_substitute_type(sema_ty)
-    }
-
     /// Recover the raw sema `TypeId` from a `CompiledValue`'s `VirTypeId`.
     ///
-    /// Unlike `sema_type_from_vir()`, this does **not** call `try_substitute_type()`,
-    /// matching the old `CompiledValue::type_id: TypeId` semantics.
+    /// Does **not** call `try_substitute_type()`, matching the old
+    /// `CompiledValue::type_id: TypeId` semantics.
     #[allow(dead_code)] // Scheduled for removal in vol-bmeu.
     #[inline]
     pub fn cv_type_id(&self, cv: &CompiledValue) -> TypeId {
