@@ -1348,6 +1348,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().unwrap_fallible(type_id)
     }
 
+    /// Unwrap a function `VirTypeId` to `(params, return_type)` as sema `TypeId`s.
+    ///
+    /// VirTypeId-accepting overload — converts to sema TypeId, then delegates to
+    /// the arena to preserve Self placeholder TypeIds.
+    #[inline]
+    pub fn vir_query_unwrap_function_sema_v(
+        &self,
+        vir_ty: VirTypeId,
+    ) -> Option<(Vec<TypeId>, TypeId)> {
+        let type_id = self.cv_type_id_from_vir(vir_ty);
+        self.vir_query_unwrap_function_sema(type_id)
+    }
+
     /// Unwrap a function type to `(params, return_type)` as sema `TypeId`s.
     ///
     /// Uses the arena directly to preserve Self placeholder TypeIds that would

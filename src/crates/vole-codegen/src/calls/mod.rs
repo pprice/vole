@@ -78,9 +78,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             && self.vir_query_is_function(binding.vole_type)
         {
             let captured = self.load_capture(&binding)?;
+            let func_vir_type_id = self.vir_lookup(binding.vole_type);
             return self.call_closure_value(
                 captured.value,
-                binding.vole_type,
+                func_vir_type_id,
                 arg_source,
                 call_expr_id,
             );
@@ -320,7 +321,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if self.vir_query_is_function_v(lambda_val.type_id) {
             let result = self.call_closure_value(
                 lambda_val.value,
-                self.cv_type_id_from_vir(lambda_val.type_id),
+                lambda_val.type_id,
                 arg_source,
                 call_expr_id,
             )?;

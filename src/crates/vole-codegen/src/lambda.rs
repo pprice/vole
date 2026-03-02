@@ -105,8 +105,7 @@ impl Cg<'_, '_, '_> {
         vir_captures: &[VirCapture],
         vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let func_type_id = self.cv_type_id_from_vir(vir_ty);
-        let (param_type_ids, return_type_id) = self.unwrap_lambda_func_type(func_type_id)?;
+        let (param_type_ids, return_type_id) = self.unwrap_lambda_func_type(vir_ty)?;
 
         let captures: Vec<Capture> = vir_captures
             .iter()
@@ -125,25 +124,22 @@ impl Cg<'_, '_, '_> {
             body,
         )?;
 
-        self.alloc_closure(func_id, func_type_id, &captures)
+        self.alloc_closure(func_id, vir_ty, &captures)
     }
 
     /// Unwrap a function type into param types and return type, applying
     /// monomorphization substitutions.
     fn unwrap_lambda_func_type(
         &self,
-        func_type_id: TypeId,
+        func_vir_type_id: VirTypeId,
     ) -> CodegenResult<(Vec<TypeId>, TypeId)> {
         let (sema_params, ret_id) = self
-            .vir_query_unwrap_function_sema(func_type_id)
+            .vir_query_unwrap_function_sema_v(func_vir_type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "VIR lambda",
                     "function type",
-                    format!(
-                        "{func_type_id:?} ({})",
-                        self.vir_query_display_basic(func_type_id)
-                    ),
+                    format!("{func_vir_type_id:?}"),
                 )
             })?;
         let param_ids: Vec<TypeId> = sema_params
@@ -247,7 +243,7 @@ impl Cg<'_, '_, '_> {
     fn alloc_closure(
         &mut self,
         func_id: cranelift_module::FuncId,
-        func_type_id: TypeId,
+        func_vir_type_id: VirTypeId,
         captures: &[Capture],
     ) -> CodegenResult<CompiledValue> {
         let ptr_type = self.ptr_type();
@@ -269,11 +265,7 @@ impl Cg<'_, '_, '_> {
             self.setup_closure_captures(captures, closure_ptr)?;
         }
 
-        Ok(CompiledValue::new(
-            closure_ptr,
-            ptr_type,
-            self.vir_lookup(func_type_id),
-        ))
+        Ok(CompiledValue::new(closure_ptr, ptr_type, func_vir_type_id))
     }
 
     /// Set up the capture values in an allocated closure.
@@ -377,13 +369,11 @@ impl Cg<'_, '_, '_> {
             // Fallback for cross-interner symbol-id mismatches: match by symbol name.
             Ok((self.builder.use_var(var), ty, false))
         } else if let Some(binding) = self.get_capture(&capture.name).copied() {
-            // Transitive capture: load from parent closure's captures
+            // Transitive capture: load from parent closure's captures.
+            // Use binding.vole_type (TypeId) directly instead of round-tripping
+            // through VirTypeId conversion.
             let captured = self.load_capture(&binding)?;
-            Ok((
-                captured.value,
-                self.cv_type_id_from_vir(captured.type_id),
-                false,
-            ))
+            Ok((captured.value, binding.vole_type, false))
         } else if let Some(capture_name) = capture_name.as_deref()
             && let Some(binding) = self.captures.as_ref().and_then(|captures| {
                 captures.bindings.iter().find_map(|(sym, binding)| {
@@ -395,11 +385,7 @@ impl Cg<'_, '_, '_> {
         {
             // Same fallback for transitive captures when Symbol IDs differ by interner.
             let captured = self.load_capture(&binding)?;
-            Ok((
-                captured.value,
-                self.cv_type_id_from_vir(captured.type_id),
-                false,
-            ))
+            Ok((captured.value, binding.vole_type, false))
         } else {
             let format_sym = |sym: Symbol| {
                 resolve_symbol_text(sym)

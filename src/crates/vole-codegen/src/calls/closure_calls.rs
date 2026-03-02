@@ -32,7 +32,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let func_ptr_or_closure = self.builder.use_var(func_var);
-        self.call_closure_value(func_ptr_or_closure, func_type_id, arg_source, call_expr_id)
+        let func_vir_type_id = self.vir_lookup(func_type_id);
+        self.call_closure_value(
+            func_ptr_or_closure,
+            func_vir_type_id,
+            arg_source,
+            call_expr_id,
+        )
     }
 
     /// Call a function via value (always uses closure calling convention now that
@@ -40,39 +46,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub(super) fn call_closure_value(
         &mut self,
         func_ptr_or_closure: Value,
-        func_type_id: TypeId,
+        func_vir_type_id: VirTypeId,
         arg_source: &ArgSource<'_>,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         // Always use closure calling convention since all lambdas are now
         // wrapped in Closure structs for consistency with interface dispatch
-        self.call_actual_closure(func_ptr_or_closure, func_type_id, arg_source, call_expr_id)
-    }
-
-    /// VirTypeId-accepting overload of [`call_closure_value`](Self::call_closure_value).
-    ///
-    /// Bridge method — converts VirTypeId to sema TypeId, then delegates.
-    #[allow(dead_code)]
-    pub(super) fn call_closure_value_v(
-        &mut self,
-        func_ptr_or_closure: Value,
-        func_vir_type_id: VirTypeId,
-        arg_source: &ArgSource<'_>,
-        call_expr_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
-        let func_type_id = self.cv_type_id_from_vir(func_vir_type_id);
-        self.call_closure_value(func_ptr_or_closure, func_type_id, arg_source, call_expr_id)
+        self.call_actual_closure(
+            func_ptr_or_closure,
+            func_vir_type_id,
+            arg_source,
+            call_expr_id,
+        )
     }
 
     /// Build a Cranelift call signature for a closure call, returning the signature
     /// along with the parameter TypeIds and return TypeId.
     fn build_closure_call_signature(
         &mut self,
-        func_type_id: TypeId,
+        func_vir_type_id: VirTypeId,
     ) -> CodegenResult<(Signature, Vec<TypeId>, TypeId)> {
         // Get function components from VirTypeTable
         let (params, ret) = self
-            .vir_query_unwrap_function_sema(func_type_id)
+            .vir_query_unwrap_function_sema_v(func_vir_type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "call_actual_closure",
@@ -117,13 +113,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     fn call_actual_closure(
         &mut self,
         closure_ptr: Value,
-        func_type_id: TypeId,
+        func_vir_type_id: VirTypeId,
         arg_source: &ArgSource<'_>,
         _call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let func_ptr = self.call_runtime(RuntimeKey::ClosureGetFunc, &[closure_ptr])?;
 
-        let (sig, params, ret) = self.build_closure_call_signature(func_type_id)?;
+        let (sig, params, ret) = self.build_closure_call_signature(func_vir_type_id)?;
 
         let mut args: ArgVec = smallvec![closure_ptr];
 
