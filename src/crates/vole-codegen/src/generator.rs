@@ -21,8 +21,11 @@ use vole_vir::VirBody;
 use crate::compiler::common::{DefaultReturn, compile_vir_body_with_cg};
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::rc_state::compute_rc_state_with_vir;
-use crate::types::{CodegenCtx, CompileEnv, array_element_tag_id, type_id_size};
+use crate::types::vir_conversions::{
+    vir_array_element_tag_id, vir_compute_rc_state, vir_is_interface, vir_type_id_size,
+    vir_type_to_cranelift,
+};
+use crate::types::{CodegenCtx, CompileEnv};
 use crate::{FunctionKey, RuntimeKey};
 
 /// Parameters for compiling a generator function.
@@ -81,9 +84,9 @@ pub(crate) fn compile_generator_function<'ctx>(
     compile_generator_wrapper(params, body_func_id, has_captures, codegen_ctx, env)?;
 
     // Override the return type to RuntimeIterator(T) so callers use direct dispatch
-    let arena = env.analyzed.type_arena();
-    let runtime_iter_type_id = arena
-        .lookup_runtime_iterator(params.elem_type_id)
+    let vir_table = &env.analyzed.vir_program().type_table;
+    let runtime_iter_type_id = vir_table
+        .lookup_runtime_iterator_sema(params.elem_type_id)
         .ok_or_else(|| {
             CodegenError::internal(
                 "RuntimeIterator type not pre-created by sema for generator element type",
@@ -208,13 +211,16 @@ fn compile_generator_wrapper<'ctx>(
     let param_type_ids = params.param_type_ids;
     let elem_type_id = params.elem_type_id;
     let ptr_type = codegen_ctx.ptr_type();
-    let arena = env.analyzed.type_arena();
+    let vir_table = &env.analyzed.vir_program().type_table;
 
     let mut wrapper_ctx = codegen_ctx.jit_module().make_context();
 
     let mut wrapper_sig = codegen_ctx.jit_module().make_signature();
     for &param_type_id in param_type_ids {
-        let cr_type = crate::types::type_id_to_cranelift(param_type_id, arena, ptr_type);
+        let vir_ty = vir_table
+            .lookup_type_id(param_type_id)
+            .expect("generator param type must be in VIR table");
+        let cr_type = vir_type_to_cranelift(vir_ty, vir_table, ptr_type);
         wrapper_sig.params.push(AbiParam::new(cr_type));
     }
     wrapper_sig.returns.push(AbiParam::new(ptr_type));
@@ -251,7 +257,10 @@ fn compile_generator_wrapper<'ctx>(
 
         // Call vole_generator_new(body_fn, closure_ptr, elem_tag)
         let gen_new_ref = runtime_func_ref(RuntimeKey::GeneratorNew, codegen_ctx, builder.func)?;
-        let elem_tag = array_element_tag_id(elem_type_id, arena);
+        let elem_vir_ty = vir_table
+            .lookup_type_id(elem_type_id)
+            .expect("generator elem type must be in VIR table");
+        let elem_tag = vir_array_element_tag_id(elem_vir_ty, vir_table);
         let elem_tag_val = builder.ins().iconst(types::I64, elem_tag);
 
         let gen_call = builder
@@ -287,7 +296,7 @@ fn emit_capture_closure(
     builder: &mut FunctionBuilder<'_>,
 ) -> CodegenResult<Value> {
     let ptr_type = codegen_ctx.ptr_type();
-    let arena = env.analyzed.type_arena();
+    let vir_table = &env.analyzed.vir_program().type_table;
 
     // Resolve all needed runtime functions
     let alloc_ref = runtime_func_ref(RuntimeKey::ClosureAlloc, codegen_ctx, builder.func)?;
@@ -309,16 +318,17 @@ fn emit_capture_closure(
     for (i, (&param_val, &param_type_id)) in
         block_params.iter().zip(param_type_ids.iter()).enumerate()
     {
-        let is_interface = arena.is_interface(param_type_id);
-        let vir_table = &env.analyzed.vir_program().type_table;
-        let is_rc = compute_rc_state_with_vir(arena, env.analyzed, param_type_id, vir_table)
-            .needs_cleanup();
+        let vir_ty = vir_table
+            .lookup_type_id(param_type_id)
+            .expect("generator capture param type must be in VIR table");
+        let is_iface = vir_is_interface(vir_ty, vir_table);
+        let is_rc = vir_compute_rc_state(vir_ty, vir_table, env.analyzed).needs_cleanup();
 
         // RC captures need rc_inc so the closure owns its own reference.
         // For interfaces, rc_inc the data_ptr (offset 0 of fat pointer),
         // not the fat pointer itself (which has no RcHeader).
         if is_rc {
-            if is_interface {
+            if is_iface {
                 let data_word = builder
                     .ins()
                     .load(types::I64, MemFlags::new(), param_val, 0);
@@ -328,7 +338,7 @@ fn emit_capture_closure(
             }
         }
 
-        let size = type_id_size(param_type_id, ptr_type, env.analyzed, arena);
+        let size = vir_type_id_size(vir_ty, ptr_type, env.analyzed, vir_table);
         let size_val = builder.ins().iconst(types::I64, size as i64);
 
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
@@ -344,7 +354,7 @@ fn emit_capture_closure(
         // Set capture kind so closure_drop knows which captures need cleanup.
         // Interface captures use kind=2 so closure_drop loads the data_ptr
         // from the fat pointer before calling rc_dec.
-        let kind: i64 = if is_interface {
+        let kind: i64 = if is_iface {
             2 // CAPTURE_KIND_INTERFACE
         } else if is_rc {
             1 // CAPTURE_KIND_RC

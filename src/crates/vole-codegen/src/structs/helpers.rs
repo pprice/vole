@@ -68,11 +68,6 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         tracing::debug!(?type_id, ?func_subs, "field access: applying substitutions");
         vir_table
             .lookup_substitute(type_id, func_subs)
-            .or_else(|| {
-                cg.analyzed()
-                    .type_arena()
-                    .lookup_substitute(type_id, func_subs)
-            })
             .unwrap_or(type_id)
     } else {
         tracing::debug!(?type_id, "field access: no substitutions available");
@@ -188,11 +183,13 @@ pub(crate) fn get_field_slot_and_type_id_cg(
 }
 
 /// Convert a raw i64 field value to the appropriate Cranelift type.
+///
+/// Primitive types are narrowed (f64 bitcast, bool/int reduction); all other
+/// types (classes, arrays, etc.) are stored as i64.
 pub(crate) fn convert_field_value_id(
     builder: &mut FunctionBuilder,
     raw_value: Value,
     type_id: TypeId,
-    arena: &TypeArena,
 ) -> (Value, Type) {
     match type_id {
         TypeId::F64 => {
@@ -225,11 +222,7 @@ pub(crate) fn convert_field_value_id(
             let val = builder.ins().ireduce(types::I32, raw_value);
             (val, types::I32)
         }
-        TypeId::STRING => {
-            // Pointers stay as i64
-            (raw_value, types::I64)
-        }
-        _ if arena.is_array(type_id) || arena.is_class(type_id) => (raw_value, types::I64),
+        // All other types (String, classes, arrays, etc.) are pointers stored as i64
         _ => (raw_value, types::I64),
     }
 }

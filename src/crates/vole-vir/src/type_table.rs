@@ -43,6 +43,13 @@ pub struct VirTypeTable {
     /// and user-defined sentinels).  Populated during reserved slot init and
     /// type translation.
     sentinel_ids: FxHashSet<VirTypeId>,
+    /// VirTypeIds that represent closure types (as opposed to plain function types).
+    ///
+    /// This is side-band metadata: closures and functions with the same
+    /// signature share a single `VirType::Function` entry (same VirTypeId).
+    /// Whether the *original sema type* was a closure is tracked here so
+    /// codegen can distinguish them (e.g. for vtable keys and display names).
+    closure_ids: FxHashSet<VirTypeId>,
 }
 
 impl VirTypeTable {
@@ -59,6 +66,7 @@ impl VirTypeTable {
             type_id_to_vir: FxHashMap::default(),
             vir_to_type_id: FxHashMap::default(),
             sentinel_ids: FxHashSet::default(),
+            closure_ids: FxHashSet::default(),
         };
         table.populate_reserved();
         table.populate_reserved_type_id_map();
@@ -325,6 +333,19 @@ impl VirTypeTable {
     /// Whether this is a sentinel type (nil, Done, or user-defined).
     pub fn is_sentinel(&self, id: VirTypeId) -> bool {
         self.sentinel_ids.contains(&id)
+    }
+
+    /// Whether this function type originated from a closure (as opposed to a
+    /// plain function).  Returns `false` for non-function types.
+    pub fn is_closure(&self, id: VirTypeId) -> bool {
+        self.closure_ids.contains(&id)
+    }
+
+    /// Mark a function `VirTypeId` as representing a closure.
+    ///
+    /// Called during VIR lowering when translating `SemaType::Function { is_closure: true }`.
+    pub fn mark_closure(&mut self, id: VirTypeId) {
+        self.closure_ids.insert(id);
     }
 
     /// Whether this is the `Range` type.

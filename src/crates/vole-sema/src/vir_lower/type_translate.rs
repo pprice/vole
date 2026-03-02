@@ -46,6 +46,15 @@ pub fn translate_type_id(
     let layout = translate_layout(type_id, arena);
     let vir_id = table.intern(vir_type, layout);
     table.record_type_id(type_id, vir_id);
+
+    // Track closure flag as side-band metadata (does not affect type identity).
+    if let SemaType::Function {
+        is_closure: true, ..
+    } = arena.get(type_id)
+    {
+        table.mark_closure(vir_id);
+    }
+
     vir_id
 }
 

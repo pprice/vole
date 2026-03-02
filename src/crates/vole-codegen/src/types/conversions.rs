@@ -241,6 +241,7 @@ pub(crate) fn method_name_id_by_str(
 ///
 /// Panics if the TypeId is INVALID, which indicates a sema bug where an unknown
 /// type was not properly reported as an error.
+#[allow(dead_code)] // Legacy arena-based; VIR equivalent in vir_conversions.rs
 pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: Type) -> Type {
     // Defensive check: INVALID types should never reach codegen.
     // If they do, it means sema failed to report an error for an unknown type.
@@ -671,6 +672,7 @@ pub(crate) fn convert_to_type(
 }
 
 /// Convert a value to a uniform word representation for interface dispatch.
+#[allow(dead_code)] // Legacy arena-based; VIR equivalent in vir_conversions.rs
 pub(crate) fn value_to_word(
     builder: &mut FunctionBuilder,
     value: &CompiledValue,
@@ -749,6 +751,7 @@ pub(crate) fn value_to_word(
 
 /// Convert a uniform word representation back into a typed value using TypeId.
 /// Convert a word-sized value to its proper Cranelift type.
+#[allow(dead_code)] // Legacy arena-based; VIR equivalent in vir_conversions.rs
 pub(crate) fn word_to_value_type_id(
     builder: &mut FunctionBuilder,
     word: Value,
@@ -793,58 +796,13 @@ pub(crate) fn word_to_value_type_id(
     }
 }
 
-/// Get the runtime tag value for an array element type.
-/// These tags must match the `RuntimeTypeId` variants in `vole_runtime::value`
-/// so that `tag_needs_rc` correctly identifies RC-managed elements for cleanup
-/// in `array_drop`.
-pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
-    use vole_runtime::value::RuntimeTypeId;
-    use vole_sema::type_arena::SemaType as ArenaType;
-    // Handle type uses a special TypeId sentinel, check before SemaType match
-    if arena.is_handle(ty) {
-        return RuntimeTypeId::Rng as i64;
-    }
-    // Sentinel types (nil, Done, user-defined) are non-RC stack values
-    if arena.is_sentinel(ty) {
-        return RuntimeTypeId::I64 as i64;
-    }
-    if ty == TypeId::STRING {
-        return RuntimeTypeId::String as i64;
-    }
-    if matches!(ty, TypeId::I64 | TypeId::I32 | TypeId::I16 | TypeId::I8) {
-        return RuntimeTypeId::I64 as i64;
-    }
-    if matches!(ty, TypeId::I128 | TypeId::F128) {
-        return RuntimeTypeId::Wide128 as i64;
-    }
-    if matches!(ty, TypeId::F64 | TypeId::F32) {
-        return RuntimeTypeId::F64 as i64;
-    }
-    if ty == TypeId::BOOL {
-        return RuntimeTypeId::Bool as i64;
-    }
-    match arena.get(ty) {
-        ArenaType::Array(_) => RuntimeTypeId::Array as i64,
-        ArenaType::Function { .. } => RuntimeTypeId::Closure as i64,
-        ArenaType::Class { .. } => RuntimeTypeId::Instance as i64,
-        // Union values boxed by codegen use raw heap buffers (tag+payload), not
-        // RcHeader-prefixed allocations. Tagged as RuntimeTypeId::UnionHeap so array_drop
-        // calls union_heap_cleanup (which frees the buffer and conditionally
-        // rc_dec's the RC payload inside).
-        ArenaType::Union(_) => RuntimeTypeId::UnionHeap as i64,
-        // Unknown values are heap-allocated TaggedValues [tag: u64, value: u64].
-        // Tagged as UnknownHeap so array_drop calls unknown_heap_cleanup.
-        ArenaType::Unknown => RuntimeTypeId::UnknownHeap as i64,
-        _ => RuntimeTypeId::I64 as i64,
-    }
-}
-
 // ============================================================================
 // Unknown type (TaggedValue) helpers
 // ============================================================================
 
 /// Get the runtime tag for boxing a value into the unknown type (TaggedValue).
 /// Returns the tag that should be stored in the TaggedValue.tag field.
+#[allow(dead_code)] // Legacy arena-based; VIR equivalent in vir_conversions.rs
 pub(crate) fn unknown_type_tag(ty: TypeId, arena: &TypeArena) -> u64 {
     use vole_runtime::value::RuntimeTypeId;
     use vole_sema::type_arena::SemaType as ArenaType;

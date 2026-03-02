@@ -16,7 +16,7 @@ use crate::types::{CodegenCtx, TypeMetadata};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use rustc_hash::FxHashSet;
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{MethodId, ModuleId, TypeDefId, TypeId};
+use vole_identity::{MethodId, ModuleId, TypeDefId, VirTypeId};
 
 impl Compiler<'_> {
     /// Register a method in the JIT function registry if not already registered.
@@ -205,7 +205,7 @@ impl Compiler<'_> {
         // SelfParam::Pointer). If VIR has more params than the signature,
         // skip the leading `self` entry to keep the zip aligned.
         let vir_params_offset = vir_func.params.len().saturating_sub(param_vir_types.len());
-        let params: Vec<(Symbol, TypeId, types::Type)> = {
+        let params: Vec<(Symbol, VirTypeId, types::Type)> = {
             let table = self.vir_type_table();
             vir_func
                 .params
@@ -214,8 +214,7 @@ impl Compiler<'_> {
                 .zip(param_vir_types.iter())
                 .map(|(&(sym, _, _), &vir_ty)| {
                     let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                    let type_id = self.sema_type_id(vir_ty);
-                    (sym, type_id, cranelift_type)
+                    (sym, vir_ty, cranelift_type)
                 })
                 .collect()
         };
@@ -226,9 +225,10 @@ impl Compiler<'_> {
         // by using the method's defining type module.
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
-        let method_return_type_id = Some(self.sema_type_id(return_vir_type));
+        let method_return_vir_ty = Some(return_vir_type);
 
         // Create function builder and compile
+        let self_vir_ty = self.vir_lookup(self_type_id);
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -240,8 +240,8 @@ impl Compiler<'_> {
                 &mut self.func_registry,
                 &mut self.pending_monomorphs,
             );
-            let self_binding = (self_sym, self_type_id, self.pointer_type);
-            let config = FunctionCompileConfig::method(params, self_binding, method_return_type_id);
+            let self_binding = (self_sym, self_vir_ty, self.pointer_type);
+            let config = FunctionCompileConfig::method(params, self_binding, method_return_vir_ty);
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
@@ -313,15 +313,13 @@ impl Compiler<'_> {
                     .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
                             vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                        let type_id = self.sema_type_id(vir_ty);
-                        (sym, type_id, cranelift_type)
+                        (sym, vir_ty, cranelift_type)
                     })
                     .collect()
             };
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let return_type_id = self.sema_type_id(return_vir_type);
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -332,7 +330,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
+                let config = FunctionCompileConfig::top_level(params, Some(return_vir_type));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -507,16 +505,15 @@ impl Compiler<'_> {
                     .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
                             vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                        let type_id = self.sema_type_id(vir_ty);
-                        (sym, type_id, cranelift_type)
+                        (sym, vir_ty, cranelift_type)
                     })
                     .collect()
             };
-            let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
+            let self_vir_ty = self.vir_lookup(metadata.vole_type);
+            let self_binding = (self_sym, self_vir_ty, self.pointer_type);
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let return_type_id = Some(self.sema_type_id(return_vir_type));
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -527,7 +524,8 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::method(params, self_binding, return_type_id);
+                let config =
+                    FunctionCompileConfig::method(params, self_binding, Some(return_vir_type));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -600,15 +598,13 @@ impl Compiler<'_> {
                     .map(|(&(sym, _, _), &vir_ty)| {
                         let cranelift_type =
                             vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                        let type_id = self.sema_type_id(vir_ty);
-                        (sym, type_id, cranelift_type)
+                        (sym, vir_ty, cranelift_type)
                     })
                     .collect()
             };
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let return_type_id = Some(self.sema_type_id(return_vir_type));
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -619,7 +615,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(params, return_type_id);
+                let config = FunctionCompileConfig::top_level(params, Some(return_vir_type));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,

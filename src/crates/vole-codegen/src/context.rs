@@ -325,9 +325,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self
     }
 
-    /// Set the return type, converting from sema `TypeId` to `VirTypeId`.
-    pub fn with_return_type(mut self, return_type: Option<TypeId>) -> Self {
-        self.return_type = return_type.map(|ty| self.vir_lookup(ty));
+    /// Set the return type directly from a `VirTypeId`.
+    pub fn with_return_type_v(mut self, return_type: Option<VirTypeId>) -> Self {
+        self.return_type = return_type;
         self
     }
 

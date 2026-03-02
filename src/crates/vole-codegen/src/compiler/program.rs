@@ -9,7 +9,7 @@ use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{NameId, TypeId};
+use vole_identity::{NameId, VirTypeId};
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use vole_vir::func::VirBody;
@@ -799,18 +799,22 @@ impl Compiler<'_> {
 
         // Build params from VIR function param Symbols + pre-resolved TypeIds
         let vir = vir_func.expect("VIR must be available for module function");
-        let params: Vec<(Symbol, TypeId, types::Type)> = vir
+        let params: Vec<(Symbol, VirTypeId, types::Type)> = vir
             .params
             .iter()
             .zip(param_type_ids.iter())
             .map(|(&(sym, _, _), &type_id)| {
                 let cranelift_type = self.vir_query_type_to_cranelift(type_id);
-                (sym, type_id, cranelift_type)
+                (sym, self.vir_lookup(type_id), cranelift_type)
             })
             .collect();
 
         // Get function return type id from pre-resolved signature
-        let return_type_id = Some(return_type_id).filter(|id| !id.is_void());
+        let return_type_id_opt = if return_type_id.is_void() {
+            None
+        } else {
+            Some(self.vir_lookup(return_type_id))
+        };
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
@@ -826,7 +830,7 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let config = FunctionCompileConfig::top_level(params, return_type_id);
+            let config = FunctionCompileConfig::top_level(params, return_type_id_opt);
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
@@ -909,18 +913,21 @@ impl Compiler<'_> {
                 display_name,
             )
         });
-        let params: Vec<(Symbol, TypeId, types::Type)> = vir
+        let params: Vec<(Symbol, VirTypeId, types::Type)> = vir
             .params
             .iter()
             .zip(param_type_ids.iter())
             .map(|(&(sym, _, _), &type_id)| {
+                let vir_ty = self.vir_lookup(type_id);
                 let cranelift_type = self.vir_query_type_to_cranelift(type_id);
-                (sym, type_id, cranelift_type)
+                (sym, vir_ty, cranelift_type)
             })
             .collect();
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
+        let return_vir_ty = self.vir_lookup(return_type_id);
+        let return_type_opt = Some(return_vir_ty).filter(|&id| id != VirTypeId::VOID);
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -932,9 +939,6 @@ impl Compiler<'_> {
                 &mut self.func_registry,
                 &mut self.pending_monomorphs,
             );
-
-            // Use pre-resolved return type (None for void)
-            let return_type_opt = Some(return_type_id).filter(|id| !id.is_void());
             let config = FunctionCompileConfig::top_level(params, return_type_opt);
             compile_function_inner_with_vir(
                 builder,

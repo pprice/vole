@@ -353,9 +353,9 @@ impl Compiler<'_> {
         // Build params from VirMethodDef.param_names (excluding self).
         let params = self.build_method_params_from_vir(method_id, interner)?;
 
-        let method_return_type_id = {
+        let method_return_vir_ty = {
             let method_def = self.analyzed.get_method(method_id);
-            Some(self.sema_type_id(method_def.return_type))
+            Some(method_def.return_type)
         };
 
         // Get the VIR function (must be available — implement block methods are always lowered)
@@ -363,6 +363,7 @@ impl Compiler<'_> {
             panic!("VIR must be available for module implement method (MethodId={method_id:?})")
         });
 
+        let self_vir_ty = self.vir_lookup(self_type_id);
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -374,8 +375,8 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let self_binding = (self_sym, self_type_id, self_cranelift_type);
-            let config = FunctionCompileConfig::method(params, self_binding, method_return_type_id);
+            let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
+            let config = FunctionCompileConfig::method(params, self_binding, method_return_vir_ty);
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
@@ -418,9 +419,10 @@ impl Compiler<'_> {
             let param_vir_types = method_def.param_types.clone();
             let return_vir_type = method_def.return_type;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
-            let return_type_id = {
-                let tid = self.sema_type_id(return_vir_type);
-                Some(tid).filter(|r| !r.is_void())
+            let return_vir_ty_opt = if return_vir_type == VirTypeId::VOID {
+                None
+            } else {
+                Some(return_vir_type)
             };
             self.jit.ctx.func.signature = sig;
 
@@ -440,8 +442,7 @@ impl Compiler<'_> {
                             .unwrap_or_else(|| panic!("param name '{}' not interned", name_str))
                     });
                     let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                    let type_id = self.sema_type_id(vir_ty);
-                    (sym, type_id, cranelift_type)
+                    (sym, vir_ty, cranelift_type)
                 })
                 .collect();
 
@@ -464,7 +465,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(params, return_type_id);
+                let config = FunctionCompileConfig::top_level(params, return_vir_ty_opt);
 
                 // VIR path — all implement block statics are lowered
                 let vir_func = self
@@ -525,12 +526,13 @@ impl Compiler<'_> {
         let params = self.build_method_params_from_vir(method_id, interner)?;
 
         // Get the method's return type from VIR method definition
-        let method_return_type_id = {
+        let method_return_vir_ty = {
             let method_def = self.analyzed.get_method(method_id);
-            Some(self.sema_type_id(method_def.return_type))
+            Some(method_def.return_type)
         };
 
         // Create function builder and compile
+        let self_vir_ty = self.vir_lookup(self_type_id);
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -543,8 +545,8 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let self_binding = (self_sym, self_type_id, self_cranelift_type);
-            let config = FunctionCompileConfig::method(params, self_binding, method_return_type_id);
+            let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
+            let config = FunctionCompileConfig::method(params, self_binding, method_return_vir_ty);
 
             // VIR path — all implement block methods are lowered
             let vir_func = self
@@ -617,7 +619,7 @@ impl Compiler<'_> {
         }
     }
 
-    /// Build `(Symbol, TypeId, cranelift::Type)` param triples from VirMethodDef.
+    /// Build `(Symbol, VirTypeId, cranelift::Type)` param triples from VirMethodDef.
     ///
     /// Uses `VirMethodDef.param_names` to look up Symbols in the given interner.
     /// Excludes the `self` parameter (handled separately via self_binding).
@@ -625,7 +627,7 @@ impl Compiler<'_> {
         &self,
         method_id: MethodId,
         interner: &Interner,
-    ) -> CodegenResult<Vec<(Symbol, TypeId, types::Type)>> {
+    ) -> CodegenResult<Vec<(Symbol, VirTypeId, types::Type)>> {
         let method_def = self.analyzed.get_method(method_id);
         let table = self.vir_type_table();
         let params = method_def
@@ -643,8 +645,7 @@ impl Compiler<'_> {
                         )
                     });
                 let cranelift_type = vir_type_to_cranelift(vir_ty, table, self.pointer_type);
-                let type_id = self.sema_type_id(vir_ty);
-                (sym, type_id, cranelift_type)
+                (sym, vir_ty, cranelift_type)
             })
             .collect();
         Ok(params)
@@ -851,7 +852,7 @@ impl Compiler<'_> {
                                 name_str, semantic_method_id
                             )
                         });
-                    (sym, type_id, cranelift_type)
+                    (sym, self.vir_lookup(type_id), cranelift_type)
                 })
                 .collect();
 
@@ -861,7 +862,9 @@ impl Compiler<'_> {
 
             let source_file_ptr = self.source_file_ptr();
             let self_cranelift_type = self.vir_query_type_to_cranelift(self_type_id);
-            let self_binding = (self_sym, self_type_id, self_cranelift_type);
+            let self_vir_ty = self.vir_lookup(self_type_id);
+            let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
+            let return_vir_ty = self.vir_lookup(return_type_id);
 
             let mut builder_ctx = FunctionBuilderContext::new();
             {
@@ -873,7 +876,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
                 let mut config =
-                    FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
+                    FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty));
                 if self
                     .analyzed
                     .name_table()
@@ -1113,7 +1116,7 @@ impl Compiler<'_> {
                                     name_str
                                 )
                             });
-                        (sym, type_id, cranelift_type)
+                        (sym, self.vir_lookup(type_id), cranelift_type)
                     })
                     .collect();
 
@@ -1123,7 +1126,9 @@ impl Compiler<'_> {
 
                 let source_file_ptr = self.source_file_ptr();
                 let self_cranelift_type = self.vir_query_type_to_cranelift(self_type_id);
-                let self_binding = (self_sym, self_type_id, self_cranelift_type);
+                let self_vir_ty = self.vir_lookup(self_type_id);
+                let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
+                let return_vir_ty = self.vir_lookup(return_type_id);
 
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
@@ -1135,7 +1140,7 @@ impl Compiler<'_> {
                         &mut self.pending_monomorphs,
                     );
                     let config =
-                        FunctionCompileConfig::method(params, self_binding, Some(return_type_id))
+                        FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
                             .with_iterable_default_body();
                     let vir_func = self.analyzed.get_vir_method(*semantic_method_id)
                         .unwrap_or_else(|| {

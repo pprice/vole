@@ -189,10 +189,10 @@ impl Cg<'_, '_, '_> {
             None
         };
 
-        let params: Vec<(Symbol, TypeId, Type)> = param_names
+        let params: Vec<(Symbol, VirTypeId, Type)> = param_names
             .iter()
             .enumerate()
-            .map(|(i, &name)| (name, param_type_ids[i], cr_param_types[i]))
+            .map(|(i, &name)| (name, self.to_vir_type(param_type_ids[i]), cr_param_types[i]))
             .collect();
 
         // Compile the body in a new Cranelift function context.
@@ -205,9 +205,10 @@ impl Cg<'_, '_, '_> {
             let mut builder_ctx = FunctionBuilderContext::new();
             let builder = FunctionBuilder::new(&mut lambda_ctx.func, &mut builder_ctx);
 
+            let return_vir_ty = self.to_vir_type(return_type_id);
             let config = FunctionCompileConfig::lambda(
                 params,
-                return_type_id,
+                return_vir_ty,
                 capture_bindings.as_ref(),
                 ptr_type,
             );

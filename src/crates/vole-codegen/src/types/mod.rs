@@ -22,15 +22,15 @@ pub use compile_env::{CompileEnv, ModuleExportBinding};
 // Re-export conversion types and functions
 pub use conversions::{CompiledValue, RcLifecycle};
 pub(crate) use conversions::{
-    FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, MethodInfo, TypeMetadata, array_element_tag_id,
-    convert_to_type, field_slot_count, load_fallible_payload, load_fallible_tag,
-    method_name_id_by_str, module_name_id, native_type_to_cranelift, type_id_size,
-    type_id_to_cranelift, type_metadata_by_name_id, unknown_type_tag, value_to_word,
-    word_to_value_type_id,
+    FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, MethodInfo, TypeMetadata, convert_to_type,
+    field_slot_count, load_fallible_payload, load_fallible_tag, method_name_id_by_str,
+    module_name_id, native_type_to_cranelift, type_metadata_by_name_id,
 };
-// Re-exported for tests (rc_state.rs uses crate::types::tuple_layout_id)
+// Re-exported for tests (rc_state.rs uses crate::types::{tuple_layout_id, type_id_size})
 #[allow(unused_imports)]
 pub(crate) use conversions::tuple_layout_id;
+#[allow(unused_imports)]
+pub(crate) use conversions::type_id_size;
 
 // VirTypeTable-based conversion functions are in types::vir_conversions.
 // Callers import directly from the submodule as needed.

@@ -52,34 +52,6 @@ fn vir_type_id_to_field_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> FieldTyp
     }
 }
 
-/// Arena-based fallback for field tag computation.
-///
-/// Used when the field type is not in the VIR type table (e.g. generic class
-/// fields with unresolved type parameters like `T | Empty`).
-fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) -> FieldTypeTag {
-    if arena.is_unknown(ty) {
-        FieldTypeTag::UnknownHeap
-    } else if arena.is_interface(ty) {
-        FieldTypeTag::Interface
-    } else if arena.is_string(ty)
-        || arena.is_array(ty)
-        || arena.is_class(ty)
-        || arena.is_handle(ty)
-        || arena.is_function(ty)
-    {
-        FieldTypeTag::Rc
-    } else if let Some(variants) = arena.unwrap_union(ty) {
-        for &variant in variants {
-            if type_id_to_field_tag(variant, arena).needs_cleanup() {
-                return FieldTypeTag::UnionHeap;
-            }
-        }
-        FieldTypeTag::Value
-    } else {
-        FieldTypeTag::Value
-    }
-}
-
 impl Compiler<'_> {
     /// Register a method's func_key in the unified lookup map, keyed by type name + method name.
     fn register_method_func_key(
@@ -221,16 +193,11 @@ impl Compiler<'_> {
             // Structs use ordinal indices (struct_field_byte_offset iterates field_types).
             let slot_key = if is_class { physical_slot } else { ordinal };
             field_slots.insert(field_name, slot_key);
-            let vir_field_ty = table.lookup_type_id(field_def.sema_type_id);
+            let vir_field_ty = table
+                .lookup_type_id(field_def.sema_type_id)
+                .expect("field type must be in VIR table after recursive sweep");
             if is_class {
-                let tag = if let Some(vir_ty) = vir_field_ty {
-                    vir_type_id_to_field_tag(vir_ty, table)
-                } else {
-                    // Field type not in VIR table (e.g. `T | Empty` in a
-                    // generic class where T is still a type parameter).
-                    // Fall back to the arena-based tag computation.
-                    type_id_to_field_tag(field_def.sema_type_id, self.analyzed.type_arena())
-                };
+                let tag = vir_type_id_to_field_tag(vir_field_ty, table);
                 field_type_tags.push(tag);
                 // i128 uses 2 physical slots; add a Value tag for the high half
                 if matches!(field_def.sema_type_id, TypeId::I128 | TypeId::F128) {

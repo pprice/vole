@@ -11,14 +11,10 @@ use crate::calls::string_ops::{declare_string_data, reference_string_data};
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
-use crate::types::{
-    CompiledValue, MethodInfo, method_name_id_by_str, type_id_size, type_id_to_cranelift,
-    type_metadata_by_name_id, value_to_word, word_to_value_type_id,
-};
+use crate::types::{CompiledValue, MethodInfo, method_name_id_by_str, type_metadata_by_name_id};
 use crate::union_layout;
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId, TypeId, VirTypeId};
-use vole_sema::type_arena::SemaType;
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
 /// Method slots start at index 1.
@@ -123,25 +119,8 @@ impl InterfaceVtableRegistry {
         interface_type_arg_ids: &[TypeId],
         concrete_type_id: TypeId,
     ) -> CodegenResult<DataId> {
-        // Build key for lookup using arena unwraps
-        let concrete_key = {
-            if let Some((_, _, is_closure)) = ctx
-                .analyzed()
-                .type_arena()
-                .unwrap_function(concrete_type_id)
-            {
-                InterfaceConcreteType::Function { is_closure }
-            } else {
-                let type_name_id =
-                    impl_type_name_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "cannot build vtable for unsupported type",
-                            format!("{:?}", concrete_type_id),
-                        )
-                    })?;
-                InterfaceConcreteType::TypeNameId(type_name_id)
-            }
-        };
+        // Build key for lookup using VIR type table
+        let concrete_key = concrete_type_key(concrete_type_id, ctx)?;
         // Resolve interface name to string for key (Symbol is interner-specific)
         let interface_name_str = ctx.interner().resolve(interface_name).to_string();
         let key = InterfaceVtableKey {
@@ -176,11 +155,23 @@ impl InterfaceVtableRegistry {
         // an interface (e.g. class Foo<K, V> implements Iterator<K>), it substitutes
         // interface params with class params (T -> K), so stored signatures contain
         // class type params (K | Done). We need K -> concrete_arg in the map too.
-        let class_info = ctx
-            .analyzed()
-            .type_arena()
-            .unwrap_nominal(concrete_type_id)
-            .map(|(id, args, _)| (id, args.to_vec()));
+        let class_info = {
+            let vir_table = &ctx.analyzed().vir_program().type_table;
+            vir_table
+                .lookup_type_id(concrete_type_id)
+                .and_then(|vir_id| vir_table.unwrap_class(vir_id))
+                .map(|(id, args)| {
+                    let sema_args: Vec<TypeId> = args
+                        .iter()
+                        .map(|&a| {
+                            vir_table.lookup_vir_type_id(a).unwrap_or_else(|| {
+                                crate::types::vir_conversions::vir_to_sema_type_id_lossy(a)
+                            })
+                        })
+                        .collect();
+                    (id, sema_args)
+                })
+        };
         if let Some((class_def_id, class_type_args)) = class_info {
             let class_type_params = ctx.analyzed().entity_type_params(class_def_id);
             for (param_name, arg_id) in class_type_params.iter().zip(class_type_args.iter()) {
@@ -246,25 +237,8 @@ impl InterfaceVtableRegistry {
         interface_name: Symbol,
         concrete_type_id: TypeId,
     ) -> CodegenResult<DataId> {
-        // Build key for lookup using arena unwraps
-        let concrete_key = {
-            if let Some((_, _, is_closure)) = ctx
-                .analyzed()
-                .type_arena()
-                .unwrap_function(concrete_type_id)
-            {
-                InterfaceConcreteType::Function { is_closure }
-            } else {
-                let type_name_id =
-                    impl_type_name_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "cannot build vtable for unsupported type",
-                            format!("{:?}", concrete_type_id),
-                        )
-                    })?;
-                InterfaceConcreteType::TypeNameId(type_name_id)
-            }
-        };
+        // Build key for lookup using VIR type table
+        let concrete_key = concrete_type_key(concrete_type_id, ctx)?;
         // Resolve interface name to string for key (Symbol is interner-specific)
         let interface_name_str = ctx.interner().resolve(interface_name).to_string();
         let key = InterfaceVtableKey {
@@ -316,7 +290,11 @@ impl InterfaceVtableRegistry {
             .is_iterator_type_def(state.interface_type_def_id)
         {
             Some(state.substitutions.values().next().map(|&elem_type_id| {
-                crate::types::unknown_type_tag(elem_type_id, ctx.analyzed().type_arena())
+                let vir_table = &ctx.analyzed().vir_program().type_table;
+                let elem_vir = vir_table
+                    .lookup_type_id(elem_type_id)
+                    .expect("iterator elem type must be in VIR table");
+                crate::types::vir_conversions::vir_unknown_type_tag(elem_vir, vir_table)
             }))
         } else {
             None
@@ -466,7 +444,7 @@ impl InterfaceVtableRegistry {
                 // storage so the pointer survives after this wrapper returns.
                 // value_to_word's fast-path assumes pointer-typed values are already
                 // heap-boxed, so we handle union boxing explicitly here.
-                if ctx.analyzed().type_arena().is_union(method.return_type_id) {
+                if is_union_ctx(method.return_type_id, ctx) {
                     let ptr_type = ctx.ptr_type();
                     let union_size = type_size_ctx(method.return_type_id, ctx);
 
@@ -527,7 +505,6 @@ impl InterfaceVtableRegistry {
                 } else {
                     let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
                     let compiled = {
-                        let arena = ctx.analyzed().type_arena();
                         let vir_type_id = ctx
                             .analyzed()
                             .vir_program()
@@ -536,7 +513,7 @@ impl InterfaceVtableRegistry {
                             .unwrap_or(VirTypeId::UNKNOWN);
                         CompiledValue::new(
                             result,
-                            type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
+                            type_id_to_cranelift_ctx(method.return_type_id, ctx),
                             vir_type_id,
                         )
                     };
@@ -577,13 +554,7 @@ impl InterfaceVtableRegistry {
         let ptr_type = ctx.ptr_type();
 
         // Check if concrete type is a function/closure (functional interfaces)
-        let is_function_type = ctx
-            .analyzed()
-            .type_arena()
-            .unwrap_function(concrete_type_id)
-            .is_some();
-
-        if is_function_type {
+        if is_function_ctx(concrete_type_id, ctx) {
             return self.compile_meta_getter_function(ctx, interface_name, concrete_type_id);
         }
 
@@ -793,11 +764,7 @@ impl InterfaceVtableRegistry {
     ) -> CodegenResult<FuncId> {
         let ptr_type = ctx.ptr_type();
 
-        let (_, _, is_closure) = ctx
-            .analyzed()
-            .type_arena()
-            .unwrap_function(concrete_type_id)
-            .expect("INTERNAL: compile_meta_getter_function called for non-function type");
+        let is_closure = is_closure_ctx(concrete_type_id, ctx);
         let type_name = if is_closure { "closure" } else { "function" };
 
         let type_meta_info = resolve_reflection_meta(ctx)?;
@@ -966,12 +933,18 @@ fn resolve_concrete_type_name<C: VtableCtx>(
     ctx: &C,
     concrete_type_id: TypeId,
 ) -> CodegenResult<(TypeDefId, String)> {
-    let arena = ctx.analyzed().type_arena();
-    // Try class first, then struct/nominal
-    let type_def_id = arena
-        .unwrap_class(concrete_type_id)
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    let vir_id = vir_table.lookup_type_id(concrete_type_id).ok_or_else(|| {
+        CodegenError::internal_with_context(
+            "meta getter: type not in VIR table",
+            format!("{:?}", concrete_type_id),
+        )
+    })?;
+    // Try class first, then struct
+    let type_def_id = vir_table
+        .unwrap_class(vir_id)
         .map(|(id, _)| id)
-        .or_else(|| arena.unwrap_nominal(concrete_type_id).map(|(id, _, _)| id))
+        .or_else(|| vir_table.unwrap_struct(vir_id).map(|(id, _)| id))
         .ok_or_else(|| {
             CodegenError::internal_with_context(
                 "meta getter: cannot resolve concrete type",
@@ -1032,7 +1005,7 @@ fn collect_concrete_field_info<C: VtableCtx>(
     ctx: &C,
     type_def_id: TypeDefId,
 ) -> Vec<ConcreteFieldInfo> {
-    let arena = ctx.analyzed().type_arena();
+    let vir_table = &ctx.analyzed().vir_program().type_table;
     let name_table = ctx.analyzed().name_table();
     ctx.analyzed()
         .fields_on_type(type_def_id)
@@ -1041,8 +1014,12 @@ fn collect_concrete_field_info<C: VtableCtx>(
             let name = name_table
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
-            let type_name = arena.display_basic(field.sema_type_id);
-            let runtime_tag = crate::types::unknown_type_tag(field.sema_type_id, arena) as i64;
+            let field_vir = vir_table
+                .lookup_type_id(field.sema_type_id)
+                .unwrap_or(VirTypeId::UNKNOWN);
+            let type_name = crate::types::vir_conversions::vir_display_basic(field_vir, vir_table);
+            let runtime_tag =
+                crate::types::vir_conversions::vir_unknown_type_tag(field_vir, vir_table) as i64;
             ConcreteFieldInfo {
                 name,
                 type_name,
@@ -1657,9 +1634,8 @@ fn collect_interface_methods_ctx<C: VtableCtx>(
 
 /// Convert an i64 word back to its properly typed Cranelift value.
 ///
-/// Consolidates the repeated `word_to_value_type_id(builder, word, ty, ctx.ptr_type(),
-/// ctx.analyzed(), ctx.analyzed().type_arena())` call pattern used throughout
-/// vtable wrapper compilation.
+/// Consolidates the repeated word-to-value conversion call pattern used
+/// throughout vtable wrapper compilation.
 #[inline]
 fn word_to_value_ctx<C: VtableCtx>(
     builder: &mut FunctionBuilder,
@@ -1667,20 +1643,23 @@ fn word_to_value_ctx<C: VtableCtx>(
     type_id: TypeId,
     ctx: &C,
 ) -> Value {
-    word_to_value_type_id(
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    let vir_ty = vir_table
+        .lookup_type_id(type_id)
+        .expect("word_to_value_ctx: type must be in VIR table");
+    crate::types::vir_conversions::vir_word_to_value(
         builder,
         word,
-        type_id,
+        vir_ty,
         ctx.ptr_type(),
         ctx.analyzed(),
-        ctx.analyzed().type_arena(),
+        vir_table,
     )
 }
 
 /// Convert a typed value to an i64 word for vtable dispatch.
 ///
-/// Consolidates `value_to_word(builder, value, ctx.ptr_type(), heap_alloc_ref,
-/// ctx.analyzed().type_arena(), ctx.analyzed())` call sites.
+/// Consolidates `value_to_word` call sites using VIR type lookup.
 #[inline]
 fn value_to_word_ctx<C: VtableCtx>(
     builder: &mut FunctionBuilder,
@@ -1688,35 +1667,40 @@ fn value_to_word_ctx<C: VtableCtx>(
     heap_alloc_ref: Option<FuncRef>,
     ctx: &mut C,
 ) -> CodegenResult<Value> {
-    value_to_word(
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    crate::types::vir_conversions::vir_value_to_word(
         builder,
         value,
         ctx.ptr_type(),
         heap_alloc_ref,
-        ctx.analyzed().type_arena(),
         ctx.analyzed(),
+        vir_table,
     )
 }
 
 /// Convert a TypeId to an implement-registry type NameId using vtable context internals.
 ///
-/// Consolidates `analyzed().impl_type_name_id_from_type_id(ty)` call sites.
+/// Uses VirTypeTable to resolve the type (no arena fallback).
 #[inline]
 fn impl_type_name_id_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> Option<NameId> {
-    ctx.analyzed().impl_type_name_id_from_type_id(ty)
+    let vir_ty = ctx.analyzed().vir_program().type_table.lookup_type_id(ty)?;
+    ctx.analyzed().impl_type_name_id_from_vir_type_id(vir_ty)
 }
 
 /// Get the byte size of a TypeId using vtable context internals.
 ///
-/// Consolidates `type_id_size(ty, ctx.ptr_type(), ctx.analyzed(), ctx.analyzed().type_arena())`
-/// call sites.
+/// Uses VIR type table for type size computation.
 #[inline]
 fn type_size_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> u32 {
-    type_id_size(
-        ty,
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    let vir_ty = vir_table
+        .lookup_type_id(ty)
+        .expect("type_size_ctx: type must be in VIR table");
+    crate::types::vir_conversions::vir_type_id_size(
+        vir_ty,
         ctx.ptr_type(),
         ctx.analyzed(),
-        ctx.analyzed().type_arena(),
+        vir_table,
     )
 }
 
@@ -1733,11 +1717,13 @@ fn compile_function_wrapper<C: VtableCtx>(
     // Callables are represented as Closure objects in codegen paths, so
     // functional-interface wrappers should always go through ClosureGetFunc.
     let ret_type_id = {
-        let arena = ctx.analyzed().type_arena();
-        arena
-            .unwrap_function(concrete_type_id)
-            .map(|(_, ret, _is_closure)| ret)
-            .unwrap_or_else(|| arena.void())
+        let vir_table = &ctx.analyzed().vir_program().type_table;
+        let vir_ty = vir_table
+            .lookup_type_id(concrete_type_id)
+            .expect("function type must be in VIR table");
+        crate::types::vir_conversions::vir_unwrap_function_ret(vir_ty, vir_table)
+            .and_then(|ret_v| vir_table.lookup_vir_type_id(ret_v))
+            .unwrap_or(TypeId::VOID)
     };
 
     let self_val = word_to_value_ctx(builder, data_word, concrete_type_id, ctx);
@@ -1761,25 +1747,17 @@ fn compile_function_wrapper<C: VtableCtx>(
     let func_ptr = builder.inst_results(closure_call)[0];
 
     let mut sig = ctx.jit_module().make_signature();
-    let arena = ctx.analyzed().type_arena();
-    sig.params.push(AbiParam::new(type_id_to_cranelift(
+    sig.params.push(AbiParam::new(type_id_to_cranelift_ctx(
         concrete_type_id,
-        arena,
-        ctx.ptr_type(),
+        ctx,
     )));
     for &param_type_id in param_type_ids {
-        sig.params.push(AbiParam::new(type_id_to_cranelift(
-            param_type_id,
-            arena,
-            ctx.ptr_type(),
-        )));
+        sig.params
+            .push(AbiParam::new(type_id_to_cranelift_ctx(param_type_id, ctx)));
     }
-    if !ctx.analyzed().type_arena().is_void(ret_type_id) {
-        sig.returns.push(AbiParam::new(type_id_to_cranelift(
-            ret_type_id,
-            arena,
-            ctx.ptr_type(),
-        )));
+    if !is_void_ctx(ret_type_id, ctx) {
+        sig.returns
+            .push(AbiParam::new(type_id_to_cranelift_ctx(ret_type_id, ctx)));
     }
 
     let mut call_args = Vec::with_capacity(args.len() + 1);
@@ -1789,6 +1767,96 @@ fn compile_function_wrapper<C: VtableCtx>(
     let sig_ref = builder.import_signature(sig);
     let call = builder.ins().call_indirect(sig_ref, func_ptr, &call_args);
     Ok(builder.inst_results(call).to_vec())
+}
+
+/// Convert a TypeId to a Cranelift type using VIR type table.
+#[inline]
+fn type_id_to_cranelift_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> Type {
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    let vir_ty = vir_table
+        .lookup_type_id(ty)
+        .expect("type_id_to_cranelift_ctx: type must be in VIR table");
+    crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, vir_table, ctx.ptr_type())
+}
+
+/// Check if a TypeId is Void via VIR type table.
+#[inline]
+fn is_void_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> bool {
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    vir_table
+        .lookup_type_id(ty)
+        .is_some_and(|v| crate::types::vir_conversions::vir_is_void(v, vir_table))
+}
+
+/// Check if a TypeId is a union type via VIR type table.
+#[inline]
+fn is_union_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> bool {
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    vir_table
+        .lookup_type_id(ty)
+        .is_some_and(|v| crate::types::vir_conversions::vir_is_union(v, vir_table))
+}
+
+/// Unwrap a function signature TypeId into `(param_ids, return_id)` via VIR.
+///
+/// Panics if the signature is not in the VIR table or is not a function type.
+fn unwrap_sig_via_vir<C: VtableCtx>(signature_id: TypeId, ctx: &C) -> (Vec<TypeId>, TypeId) {
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    let sig_vir = vir_table
+        .lookup_type_id(signature_id)
+        .expect("INTERNAL: vtable: signature must be in VIR table");
+    let (params, ret) = vir_table
+        .unwrap_function(sig_vir)
+        .expect("INTERNAL: vtable: signature is not a function type");
+    let sema_params: Vec<TypeId> = params
+        .iter()
+        .map(|&p| {
+            vir_table
+                .lookup_vir_type_id(p)
+                .unwrap_or_else(|| crate::types::vir_conversions::vir_to_sema_type_id_lossy(p))
+        })
+        .collect();
+    let sema_ret = vir_table
+        .lookup_vir_type_id(ret)
+        .unwrap_or_else(|| crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret));
+    (sema_params, sema_ret)
+}
+
+/// Check if a TypeId is a function type via VIR type table.
+#[inline]
+fn is_function_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> bool {
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    vir_table
+        .lookup_type_id(ty)
+        .is_some_and(|v| vir_table.is_function(v))
+}
+
+/// Check if a TypeId is a closure (vs plain function) via VIR type table.
+#[inline]
+fn is_closure_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> bool {
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    vir_table
+        .lookup_type_id(ty)
+        .is_some_and(|v| vir_table.is_closure(v))
+}
+
+/// Build the `InterfaceConcreteType` key for a concrete type using VIR.
+fn concrete_type_key<C: VtableCtx>(
+    concrete_type_id: TypeId,
+    ctx: &C,
+) -> CodegenResult<InterfaceConcreteType> {
+    if is_function_ctx(concrete_type_id, ctx) {
+        let is_closure = is_closure_ctx(concrete_type_id, ctx);
+        Ok(InterfaceConcreteType::Function { is_closure })
+    } else {
+        let type_name_id = impl_type_name_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
+            CodegenError::internal_with_context(
+                "cannot build vtable for unsupported type",
+                format!("{:?}", concrete_type_id),
+            )
+        })?;
+        Ok(InterfaceConcreteType::TypeNameId(type_name_id))
+    }
 }
 
 /// Compile wrapper body for Direct/Implemented targets (direct method calls)
@@ -1936,28 +2004,22 @@ fn compile_external_wrapper<C: VtableCtx>(
 
     let mut native_sig = ctx.jit_module().make_signature();
     // For Iterator, the self param is now *mut RcIterator (pointer)
-    let arena = ctx.analyzed().type_arena();
     let self_param_type = if iterator_info.is_some() {
         ctx.ptr_type()
     } else {
-        type_id_to_cranelift(concrete_type_id, arena, ctx.ptr_type())
+        type_id_to_cranelift_ctx(concrete_type_id, ctx)
     };
     native_sig.params.push(AbiParam::new(self_param_type));
-    // Use type_id_to_cranelift for param types (handles Invalid gracefully via fallback)
     for &param_type_id in param_type_ids {
-        native_sig.params.push(AbiParam::new(type_id_to_cranelift(
-            param_type_id,
-            arena,
-            ctx.ptr_type(),
-        )));
+        native_sig
+            .params
+            .push(AbiParam::new(type_id_to_cranelift_ctx(param_type_id, ctx)));
     }
     // Add return type if not void
-    if !arena.is_void(return_type_id) {
-        native_sig.returns.push(AbiParam::new(type_id_to_cranelift(
-            return_type_id,
-            arena,
-            ctx.ptr_type(),
-        )));
+    if !is_void_ctx(return_type_id, ctx) {
+        native_sig
+            .returns
+            .push(AbiParam::new(type_id_to_cranelift_ctx(return_type_id, ctx)));
     }
 
     let call = if let Some(func_ref) =
@@ -2032,11 +2094,25 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     value: CompiledValue,
     interface_type_id: TypeId,
 ) -> CodegenResult<CompiledValue> {
-    // Extract interface info using arena
+    // Extract interface info using VIR type table
     let (type_def_id, type_args_ids) = {
-        let arena = env.analyzed.type_arena();
-        match arena.unwrap_interface(interface_type_id) {
-            Some((type_def_id, type_args)) => (type_def_id, type_args.to_vec()),
+        let vir_table = &env.analyzed.vir_program().type_table;
+        let vir_id = match vir_table.lookup_type_id(interface_type_id) {
+            Some(id) => id,
+            None => return Ok(value), // Not in VIR table
+        };
+        match vir_table.unwrap_interface(vir_id) {
+            Some((def_id, vir_args)) => {
+                let sema_args: Vec<TypeId> = vir_args
+                    .iter()
+                    .map(|&a| {
+                        vir_table.lookup_vir_type_id(a).unwrap_or_else(|| {
+                            crate::types::vir_conversions::vir_to_sema_type_id_lossy(a)
+                        })
+                    })
+                    .collect();
+                (def_id, sema_args)
+            }
             None => return Ok(value), // Not an interface type
         }
     };
@@ -2193,34 +2269,61 @@ fn resolve_vtable_target<C: VtableCtx>(
     // in the arena. In that case, we fall through to the direct method or implement
     // registry paths which provide their own concrete types.
     let substituted_types: Option<(Vec<TypeId>, TypeId)> = {
-        let arena = ctx.analyzed().type_arena();
         let vir_table = &ctx.analyzed().vir_program().type_table;
-        let (params, ret, _) = arena
-            .unwrap_function(interface_method.signature_id)
-            .expect("INTERNAL: vtable method: signature is not a function type");
-        let param_ids: Option<Vec<TypeId>> = params
-            .iter()
-            .map(|&p| {
-                vir_table
-                    .lookup_substitute(p, substitutions)
-                    .or_else(|| arena.lookup_substitute(p, substitutions))
-            })
-            .collect();
-        let ret_id = vir_table
-            .lookup_substitute(ret, substitutions)
-            .or_else(|| arena.lookup_substitute(ret, substitutions));
-        param_ids.zip(ret_id)
+        // Get function signature params/ret from VIR, falling back to arena
+        let sig_params_ret = vir_table
+            .lookup_type_id(interface_method.signature_id)
+            .and_then(|vir_id| {
+                let (params, ret) = vir_table.unwrap_function(vir_id)?;
+                // Convert VirTypeId params back to TypeId for lookup_substitute
+                let sema_params: Vec<TypeId> = params
+                    .iter()
+                    .map(|&p| {
+                        vir_table.lookup_vir_type_id(p).unwrap_or_else(|| {
+                            crate::types::vir_conversions::vir_to_sema_type_id_lossy(p)
+                        })
+                    })
+                    .collect();
+                let sema_ret = vir_table.lookup_vir_type_id(ret).unwrap_or_else(|| {
+                    crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret)
+                });
+                Some((sema_params, sema_ret))
+            });
+        if let Some((params, ret)) = sig_params_ret {
+            let param_ids: Option<Vec<TypeId>> = params
+                .iter()
+                .map(|&p| vir_table.lookup_substitute(p, substitutions))
+                .collect();
+            let ret_id = vir_table.lookup_substitute(ret, substitutions);
+            param_ids.zip(ret_id)
+        } else {
+            None
+        }
     };
 
     // Check if concrete type is a function/closure
-    let fn_info = ctx
-        .analyzed()
-        .type_arena()
-        .unwrap_function(concrete_type_id)
-        .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure));
-    if let Some((param_ids, return_id, _)) = fn_info {
-        let arena = ctx.analyzed().type_arena();
-        let returns_void = matches!(arena.get(return_id), SemaType::Void);
+    let fn_info = {
+        let vir_table = &ctx.analyzed().vir_program().type_table;
+        vir_table
+            .lookup_type_id(concrete_type_id)
+            .and_then(|vir_id| {
+                let (params, ret) = vir_table.unwrap_function(vir_id)?;
+                let sema_params: Vec<TypeId> = params
+                    .iter()
+                    .map(|&p| {
+                        vir_table.lookup_vir_type_id(p).unwrap_or_else(|| {
+                            crate::types::vir_conversions::vir_to_sema_type_id_lossy(p)
+                        })
+                    })
+                    .collect();
+                let sema_ret = vir_table.lookup_vir_type_id(ret).unwrap_or_else(|| {
+                    crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret)
+                });
+                Some((sema_params, sema_ret))
+            })
+    };
+    if let Some((param_ids, return_id)) = fn_info {
+        let returns_void = is_void_ctx(return_id, ctx);
         return Ok(VtableMethod {
             param_count: param_ids.len(),
             returns_void,
@@ -2252,17 +2355,14 @@ fn resolve_vtable_target<C: VtableCtx>(
         // types like `i64 | Done` for correct union tag ordering in vtable wrappers).
         let (param_type_ids, return_type_id) = substituted_types
             .unwrap_or_else(|| (impl_.func_sig.params.clone(), impl_.func_sig.return_type));
-        let returns_void = matches!(
-            ctx.analyzed().type_arena().get(return_type_id),
-            SemaType::Void
-        );
+        let returns_void = is_void_ctx(return_type_id, ctx);
         // Build a tag remapping table when the callee's return type (abstract, e.g. `Done | T`)
         // differs from the concrete return type (e.g. `i64 | Done`). The callee was compiled
         // with the abstract union's tag ordering, but the wrapper must produce the concrete
         // union's tag ordering.
         let callee_ret = impl_.func_sig.return_type;
         let union_tag_remap = build_union_tag_remap(
-            ctx.analyzed().type_arena(),
+            &ctx.analyzed().vir_program().type_table,
             callee_ret,
             return_type_id,
             substitutions,
@@ -2270,10 +2370,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         tracing::warn!(
             method = %method_name_str,
             callee_ret = ?callee_ret,
-            callee_ret_display = %ctx.analyzed().type_arena().display_basic(callee_ret),
             return_type = ?return_type_id,
-            return_type_display = %ctx.analyzed().type_arena().display_basic(return_type_id),
-            substitutions = ?substitutions.iter().map(|(k, v)| (k, ctx.analyzed().type_arena().display_basic(*v))).collect::<Vec<_>>(),
             remap = ?union_tag_remap,
             "implement registry: tag remap check"
         );
@@ -2308,9 +2405,10 @@ fn resolve_vtable_target<C: VtableCtx>(
     // Returns (method_info, param_type_ids, return_type_id)
     let direct_method_result: Option<(MethodInfo, Vec<TypeId>, TypeId)> = (|| {
         let method_name_id = method_name_id?;
-        // Get type_def_id from concrete_type_id using arena unwraps
-        let arena = ctx.analyzed().type_arena();
-        let type_def_id = arena.unwrap_class(concrete_type_id).map(|(id, _)| id)?;
+        // Get type_def_id from concrete_type_id using VIR
+        let vir_table = &ctx.analyzed().vir_program().type_table;
+        let vir_id = vir_table.lookup_type_id(concrete_type_id)?;
+        let type_def_id = vir_table.unwrap_class(vir_id).map(|(id, _)| id)?;
 
         let type_name_id = ctx.analyzed().entity_type_name_id(type_def_id);
         let meta = type_metadata_by_name_id(ctx.type_metadata(), type_name_id)?;
@@ -2322,30 +2420,52 @@ fn resolve_vtable_target<C: VtableCtx>(
             .find_method(type_def_id, method_name_id)
             .and_then(|m_id| {
                 let method = ctx.analyzed().get_method(m_id);
-                let arena = ctx.analyzed().type_arena();
-                let (params, ret, _) = arena.unwrap_function(method.signature_id)?;
-                Some((params.to_vec(), ret))
+                let vir_table = &ctx.analyzed().vir_program().type_table;
+                let sig_vir = vir_table.lookup_type_id(method.signature_id)?;
+                let (params, ret) = vir_table.unwrap_function(sig_vir)?;
+                let sema_params: Vec<TypeId> = params
+                    .iter()
+                    .map(|&p| {
+                        vir_table.lookup_vir_type_id(p).unwrap_or_else(|| {
+                            crate::types::vir_conversions::vir_to_sema_type_id_lossy(p)
+                        })
+                    })
+                    .collect();
+                let sema_ret = vir_table.lookup_vir_type_id(ret).unwrap_or_else(|| {
+                    crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret)
+                });
+                Some((sema_params, sema_ret))
             });
         // Use entity registry signature, fall back to substituted interface types
         let (param_ids, ret_id) = sig_from_entity
             .or_else(|| substituted_types.clone())
             .unwrap_or_else(|| {
                 // Last resort: use original interface method's unsubstituted types.
-                // This handles cases where both entity lookup and substitution fail.
-                let arena = ctx.analyzed().type_arena();
-                let (params, ret, _) = arena
-                    .unwrap_function(interface_method.signature_id)
+                let vir_table = &ctx.analyzed().vir_program().type_table;
+                let sig_vir = vir_table
+                    .lookup_type_id(interface_method.signature_id)
+                    .expect("INTERNAL: vtable method: signature must be in VIR table");
+                let (params, ret) = vir_table
+                    .unwrap_function(sig_vir)
                     .expect("INTERNAL: vtable method: signature is not a function type");
-                (params.to_vec(), ret)
+                let sema_params: Vec<TypeId> = params
+                    .iter()
+                    .map(|&p| {
+                        vir_table.lookup_vir_type_id(p).unwrap_or_else(|| {
+                            crate::types::vir_conversions::vir_to_sema_type_id_lossy(p)
+                        })
+                    })
+                    .collect();
+                let sema_ret = vir_table.lookup_vir_type_id(ret).unwrap_or_else(|| {
+                    crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret)
+                });
+                (sema_params, sema_ret)
             });
         Some((method_info, param_ids, ret_id))
     })();
 
     if let Some((method_info, param_type_ids, return_type_id)) = direct_method_result {
-        let returns_void = matches!(
-            ctx.analyzed().type_arena().get(return_type_id),
-            SemaType::Void
-        );
+        let returns_void = is_void_ctx(return_type_id, ctx);
         return Ok(VtableMethod {
             param_count: param_type_ids.len(),
             returns_void,
@@ -2368,17 +2488,9 @@ fn resolve_vtable_target<C: VtableCtx>(
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.
-            let (param_type_ids, return_type_id) = {
-                let arena = ctx.analyzed().type_arena();
-                let (params, ret, _) = arena
-                    .unwrap_function(interface_method.signature_id)
-                    .expect("INTERNAL: interface vtable: method signature is not a function type");
-                (params.to_vec(), ret)
-            };
-            let returns_void = matches!(
-                ctx.analyzed().type_arena().get(return_type_id),
-                SemaType::Void
-            );
+            let (param_type_ids, return_type_id) =
+                unwrap_sig_via_vir(interface_method.signature_id, ctx);
+            let returns_void = is_void_ctx(return_type_id, ctx);
             return Ok(VtableMethod {
                 param_count: param_type_ids.len(),
                 returns_void,
@@ -2398,17 +2510,9 @@ fn resolve_vtable_target<C: VtableCtx>(
         if let Some(method_name_id) = method_name_id {
             let type_name_id = impl_type_name_id;
             if let Some(&func_key) = ctx.method_func_keys().get(&(type_name_id, method_name_id)) {
-                let (param_type_ids, return_type_id) = substituted_types.unwrap_or_else(|| {
-                    let arena = ctx.analyzed().type_arena();
-                    let (params, ret, _) = arena
-                        .unwrap_function(interface_method.signature_id)
-                        .expect("INTERNAL: vtable default: signature is not a function");
-                    (params.to_vec(), ret)
-                });
-                let returns_void = matches!(
-                    ctx.analyzed().type_arena().get(return_type_id),
-                    SemaType::Void
-                );
+                let (param_type_ids, return_type_id) = substituted_types
+                    .unwrap_or_else(|| unwrap_sig_via_vir(interface_method.signature_id, ctx));
+                let returns_void = is_void_ctx(return_type_id, ctx);
                 let method_info = MethodInfo { func_key };
                 return Ok(VtableMethod {
                     param_count: param_type_ids.len(),
@@ -2441,12 +2545,15 @@ fn resolve_vtable_target<C: VtableCtx>(
 ///
 /// Returns `None` if no remapping is needed (identity mapping).
 fn build_union_tag_remap(
-    arena: &vole_sema::type_arena::TypeArena,
+    vir_table: &vole_vir::type_table::VirTypeTable,
     callee_type_id: TypeId,
     concrete_type_id: TypeId,
     substitutions: &FxHashMap<NameId, TypeId>,
 ) -> Option<Vec<u8>> {
-    let callee_variants = arena.unwrap_union(callee_type_id)?;
+    use vole_vir::types::VirType;
+
+    let callee_vir = vir_table.lookup_type_id(callee_type_id)?;
+    let callee_variants = vir_table.unwrap_union(callee_vir)?;
 
     if callee_type_id == concrete_type_id {
         // Same type: check for TypeParam misordering.
@@ -2454,7 +2561,7 @@ fn build_union_tag_remap(
         // but at runtime become concrete types that sort before sentinels.
         let has_type_params = callee_variants
             .iter()
-            .any(|&v| matches!(arena.get(v), SemaType::TypeParam(_)));
+            .any(|&v| matches!(vir_table.get(v), VirType::Param { .. }));
         if !has_type_params {
             return None;
         }
@@ -2462,7 +2569,7 @@ fn build_union_tag_remap(
         let mut type_param_indices: Vec<usize> = Vec::new();
         let mut non_type_param_indices: Vec<usize> = Vec::new();
         for (i, &v) in callee_variants.iter().enumerate() {
-            if matches!(arena.get(v), SemaType::TypeParam(_)) {
+            if matches!(vir_table.get(v), VirType::Param { .. }) {
                 type_param_indices.push(i);
             } else {
                 non_type_param_indices.push(i);
@@ -2483,7 +2590,8 @@ fn build_union_tag_remap(
     }
 
     // Different types: callee and concrete have different union layouts.
-    let concrete_variants = arena.unwrap_union(concrete_type_id)?;
+    let concrete_vir = vir_table.lookup_type_id(concrete_type_id)?;
+    let concrete_variants = vir_table.unwrap_union(concrete_vir)?;
     if callee_variants.len() != concrete_variants.len() {
         return None;
     }
@@ -2497,21 +2605,22 @@ fn build_union_tag_remap(
     // First pass: match non-TypeParam callee variants by identity in concrete union
     let mut pending_type_params: Vec<usize> = Vec::new();
     for (callee_tag, &callee_variant) in callee_variants.iter().enumerate() {
-        match arena.get(callee_variant) {
-            SemaType::TypeParam(name_id) => {
+        match vir_table.get(callee_variant) {
+            VirType::Param { name } => {
                 // Try to resolve via substitution
-                let resolved = substitutions.get(name_id).copied();
+                let resolved = substitutions.get(name).copied();
                 let is_still_type_param = resolved
-                    .map(|r| matches!(arena.get(r), SemaType::TypeParam(_)))
+                    .and_then(|r| vir_table.lookup_type_id(r))
+                    .map(|vir_id| matches!(vir_table.get(vir_id), VirType::Param { .. }))
                     .unwrap_or(true);
                 if is_still_type_param {
                     // Can't resolve to concrete, defer
                     pending_type_params.push(callee_tag);
                     remap.push(0); // placeholder
-                } else if let Some(concrete_variant) = resolved {
-                    let pos = concrete_variants
-                        .iter()
-                        .position(|&v| v == concrete_variant)?;
+                } else if let Some(resolved_type_id) = resolved {
+                    // Find the resolved type's VirTypeId so we can match it in concrete_variants
+                    let resolved_vir = vir_table.lookup_type_id(resolved_type_id)?;
+                    let pos = concrete_variants.iter().position(|&v| v == resolved_vir)?;
                     used_concrete[pos] = true;
                     if callee_tag != pos {
                         is_identity = false;
@@ -2522,7 +2631,7 @@ fn build_union_tag_remap(
                 }
             }
             _ => {
-                // Match by TypeId identity
+                // Match by VirTypeId identity (structurally interned)
                 let pos = concrete_variants
                     .iter()
                     .position(|&v| v == callee_variant)?;

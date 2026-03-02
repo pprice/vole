@@ -889,11 +889,24 @@ impl Cg<'_, '_, '_> {
                         .find_method(type_def_id, method_name_id)
                         .map(|mid| {
                             let method = self.analyzed().method_def(mid);
-                            let (params, ret) = self
-                                .analyzed()
-                                .type_arena()
-                                .unwrap_function(method.signature_id)
-                                .map(|(params, ret, _)| (Some(params.clone()), ret))
+                            let vir_table = &self.analyzed().vir_program().type_table;
+                            let (params, ret) = vir_table
+                                .lookup_type_id(method.signature_id)
+                                .and_then(|vir_id| vir_table.unwrap_function(vir_id))
+                                .map(|(params, ret)| {
+                                    let sema_params: SmallVec<[TypeId; 4]> = params
+                                        .iter()
+                                        .map(|&p| {
+                                            vir_table.lookup_vir_type_id(p).unwrap_or_else(|| {
+                                                crate::types::vir_conversions::vir_to_sema_type_id_lossy(p)
+                                            })
+                                        })
+                                        .collect();
+                                    let sema_ret = vir_table.lookup_vir_type_id(ret).unwrap_or_else(|| {
+                                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret)
+                                    });
+                                    (Some(sema_params), sema_ret)
+                                })
                                 .unwrap_or((None, TypeId::VOID));
                             (ret, params)
                         })

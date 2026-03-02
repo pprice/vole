@@ -132,12 +132,8 @@ impl Cg<'_, '_, '_> {
             "sum" | "reduce" => Some(elem_type_id),
 
             // Methods returning T? (optional element): first, last, nth, find
-            // The optional type is a Union(T, nil). Try VirTypeTable first,
-            // fall back to type_arena for types not yet interned in VIR
-            // (Iterable default bodies where Optional wasn't lowered).
-            "first" | "last" | "nth" | "find" => table
-                .lookup_optional_sema(elem_type_id)
-                .or_else(|| self.analyzed().type_arena().lookup_optional(elem_type_id)),
+            // VIR type table contains all Optional types after recursive sweep.
+            "first" | "last" | "nth" | "find" => table.lookup_optional_sema(elem_type_id),
 
             // next() -> T | Done — return the T type directly
             "next" => {

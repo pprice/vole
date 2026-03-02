@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
 use vole_frontend::Symbol;
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::VirTypeId;
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
 use crate::context::{Captures, Cg};
@@ -32,16 +32,16 @@ pub enum DefaultReturn {
 /// This struct captures the common parameters needed by all function compilation
 /// paths, allowing them to share the core compilation logic.
 pub struct FunctionCompileConfig<'a> {
-    /// Parameters: (name, vole_type_id, cranelift_type)
-    pub params: Vec<(Symbol, TypeId, Type)>,
-    /// Self binding for methods: (name, vole_type_id, cranelift_type)
-    pub self_binding: Option<(Symbol, TypeId, Type)>,
+    /// Parameters: (name, vir_type_id, cranelift_type)
+    pub params: Vec<(Symbol, VirTypeId, Type)>,
+    /// Self binding for methods: (name, vir_type_id, cranelift_type)
+    pub self_binding: Option<(Symbol, VirTypeId, Type)>,
     /// Capture bindings for closures. If Some, the first block param is the closure pointer.
     pub capture_bindings: Option<&'a FxHashMap<Symbol, CaptureBinding>>,
     /// Cranelift type for the closure pointer (needed when capture_bindings is Some)
     pub closure_ptr_type: Option<Type>,
     /// Return type (for nested return type context)
-    pub return_type_id: Option<TypeId>,
+    pub return_type_id: Option<VirTypeId>,
     /// Number of block params to skip before binding user params.
     /// Used for lambdas where the first param is the closure pointer,
     /// or for sret functions where the first param is the return buffer pointer.
@@ -55,7 +55,10 @@ pub struct FunctionCompileConfig<'a> {
 
 impl<'a> FunctionCompileConfig<'a> {
     /// Create a config for a top-level function (no self, no captures)
-    pub fn top_level(params: Vec<(Symbol, TypeId, Type)>, return_type_id: Option<TypeId>) -> Self {
+    pub fn top_level(
+        params: Vec<(Symbol, VirTypeId, Type)>,
+        return_type_id: Option<VirTypeId>,
+    ) -> Self {
         Self {
             params,
             self_binding: None,
@@ -82,9 +85,9 @@ impl<'a> FunctionCompileConfig<'a> {
 
     /// Create a config for a method (has self, no captures)
     pub fn method(
-        params: Vec<(Symbol, TypeId, Type)>,
-        self_binding: (Symbol, TypeId, Type),
-        return_type_id: Option<TypeId>,
+        params: Vec<(Symbol, VirTypeId, Type)>,
+        self_binding: (Symbol, VirTypeId, Type),
+        return_type_id: Option<VirTypeId>,
     ) -> Self {
         Self {
             params,
@@ -105,8 +108,8 @@ impl<'a> FunctionCompileConfig<'a> {
     /// the closure pointer parameter is still present (for calling convention
     /// consistency) but ignored.
     pub fn lambda(
-        params: Vec<(Symbol, TypeId, Type)>,
-        return_type_id: TypeId,
+        params: Vec<(Symbol, VirTypeId, Type)>,
+        return_type_id: VirTypeId,
         capture_bindings: Option<&'a FxHashMap<Symbol, CaptureBinding>>,
         closure_ptr_type: Type,
     ) -> Self {
@@ -137,7 +140,7 @@ impl<'a> FunctionCompileConfig<'a> {
 pub(crate) fn setup_function_entry<'a>(
     builder: &mut FunctionBuilder,
     config: &FunctionCompileConfig<'a>,
-    vir_type_table: &vole_vir::type_table::VirTypeTable,
+    _vir_type_table: &vole_vir::type_table::VirTypeTable,
 ) -> (
     FxHashMap<Symbol, (Variable, VirTypeId)>,
     Option<Captures<'a>>,
@@ -154,13 +157,6 @@ pub(crate) fn setup_function_entry<'a>(
     // Build variables map
     let mut variables: FxHashMap<Symbol, (Variable, VirTypeId)> = FxHashMap::default();
 
-    // Helper: bridge sema TypeId → VirTypeId using the type table with compat fallback.
-    let to_vir = |type_id: TypeId| -> VirTypeId {
-        vir_type_table
-            .lookup_type_id(type_id)
-            .unwrap_or_else(|| VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG))
-    };
-
     // Set up closure variable if this is a capturing lambda
     let captures = if let (Some(bindings), Some(closure_ptr_type)) =
         (config.capture_bindings, config.closure_ptr_type)
@@ -176,18 +172,18 @@ pub(crate) fn setup_function_entry<'a>(
     };
 
     // Bind self if this is a method
-    if let Some((self_sym, self_type_id, self_cranelift_type)) = config.self_binding {
+    if let Some((self_sym, self_vir_ty, self_cranelift_type)) = config.self_binding {
         let self_var = builder.declare_var(self_cranelift_type);
         builder.def_var(self_var, block_params[param_offset]);
-        variables.insert(self_sym, (self_var, to_vir(self_type_id)));
+        variables.insert(self_sym, (self_var, self_vir_ty));
         param_offset += 1;
     }
 
     // Bind regular parameters
-    for (i, (name, type_id, cranelift_type)) in config.params.iter().enumerate() {
+    for (i, (name, vir_ty, cranelift_type)) in config.params.iter().enumerate() {
         let var = builder.declare_var(*cranelift_type);
         builder.def_var(var, block_params[param_offset + i]);
-        variables.insert(*name, (var, to_vir(*type_id)));
+        variables.insert(*name, (var, *vir_ty));
     }
 
     (variables, captures)
@@ -494,11 +490,13 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
     substitutions: Option<&FxHashMap<vole_identity::NameId, VirTypeId>>,
 ) -> CodegenResult<()> {
     // Auto-detect sret convention.
-    let config = if let Some(ret_type_id) = config.return_type_id {
-        let arena = env.analyzed.type_arena();
-        if let Some(flat_count) =
-            crate::structs::struct_flat_slot_count(ret_type_id, arena, env.analyzed)
-        {
+    let config = if let Some(ret_vir_ty) = config.return_type_id {
+        let vir_table = &env.analyzed.vir_program().type_table;
+        if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+            ret_vir_ty,
+            vir_table,
+            env.analyzed,
+        ) {
             if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
                 config.with_sret()
             } else {
@@ -517,7 +515,7 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
     let mut cg = Cg::new(&mut builder, codegen_ctx, env)
         .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
         .with_vars(variables)
-        .with_return_type(config.return_type_id)
+        .with_return_type_v(config.return_type_id)
         .with_captures(captures)
         .with_module(module_id)
         .with_substitutions(substitutions);

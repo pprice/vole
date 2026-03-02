@@ -192,7 +192,9 @@ impl Compiler<'_> {
                 .iter()
                 .zip(param_type_ids.iter())
                 .zip(param_cranelift_types.iter())
-                .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
+                .map(|((vp, &type_id), &cranelift_type)| {
+                    (vp.0, self.vir_lookup(type_id), cranelift_type)
+                })
                 .collect();
 
             let sig = self.build_signature_from_type_ids(
@@ -203,6 +205,7 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             let source_file_ptr = self.source_file_ptr();
+            let return_vir_ty = self.vir_lookup(return_type_id);
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -218,7 +221,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
+                let config = FunctionCompileConfig::top_level(params, Some(return_vir_ty));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -272,7 +275,9 @@ impl Compiler<'_> {
             .iter()
             .zip(param_type_ids.iter())
             .zip(param_cranelift_types.iter())
-            .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
+            .map(|((vp, &type_id), &cranelift_type)| {
+                (vp.0, self.vir_lookup(type_id), cranelift_type)
+            })
             .collect();
 
         // Create function signature from concrete types using shared builder
@@ -284,6 +289,7 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         let source_file_ptr = self.source_file_ptr();
+        let return_vir_ty = self.vir_lookup(return_type_id);
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -294,7 +300,7 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
+            let config = FunctionCompileConfig::top_level(params, Some(return_vir_ty));
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
@@ -587,7 +593,9 @@ impl Compiler<'_> {
                 .iter()
                 .zip(param_type_ids.iter())
                 .zip(param_cranelift_types.iter())
-                .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
+                .map(|((vp, &type_id), &cranelift_type)| {
+                    (vp.0, self.vir_lookup(type_id), cranelift_type)
+                })
                 .collect();
 
             // Create method signature (self + params) with concrete types using shared builder
@@ -601,10 +609,12 @@ impl Compiler<'_> {
             // Use pre-computed self type from sema
             let self_type_id = instance.self_type;
             let self_sym = self.self_symbol();
-            let self_binding = (self_sym, self_type_id, self.pointer_type);
+            let self_vir_ty = self.vir_lookup(self_type_id);
+            let self_binding = (self_sym, self_vir_ty, self.pointer_type);
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
+            let return_vir_ty = self.vir_lookup(return_type_id);
             let mut builder_ctx = FunctionBuilderContext::new();
             // Determine module_id for Cg context (needed for expression data lookup)
             let cg_module_id = effective_module_path
@@ -626,7 +636,7 @@ impl Compiler<'_> {
                 );
 
                 let config =
-                    FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
+                    FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -784,7 +794,9 @@ impl Compiler<'_> {
                 .iter()
                 .zip(param_type_ids.iter())
                 .zip(param_cranelift_types.iter())
-                .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
+                .map(|((vp, &type_id), &cranelift_type)| {
+                    (vp.0, self.vir_lookup(type_id), cranelift_type)
+                })
                 .collect();
 
             // Create signature (no self parameter) with concrete types using shared builder
@@ -797,6 +809,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
+            let return_vir_ty = self.vir_lookup(return_type_id);
             let mut builder_ctx = FunctionBuilderContext::new();
             // Determine module_id for Cg context (needed for expression data lookup)
             let cg_module_id = effective_module_path
@@ -817,7 +830,7 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
 
-                let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
+                let config = FunctionCompileConfig::top_level(params, Some(return_vir_ty));
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -1264,7 +1277,9 @@ impl Compiler<'_> {
                     .iter()
                     .zip(param_type_ids.iter())
                     .zip(param_cranelift_types.iter())
-                    .map(|((vp, &type_id), &cranelift_type)| (vp.0, type_id, cranelift_type))
+                    .map(|((vp, &type_id), &cranelift_type)| {
+                        (vp.0, self.vir_lookup(type_id), cranelift_type)
+                    })
                     .collect();
 
                 let sig = self.build_signature_from_type_ids(
@@ -1276,9 +1291,11 @@ impl Compiler<'_> {
 
                 let self_type_id = data.self_type;
                 let self_sym = self.self_symbol();
-                let self_binding = (self_sym, self_type_id, self.pointer_type);
+                let self_vir_ty = self.vir_lookup(self_type_id);
+                let self_binding = (self_sym, self_vir_ty, self.pointer_type);
 
                 let source_file_ptr = self.source_file_ptr();
+                let return_vir_ty = self.vir_lookup(return_type_id);
                 let mut builder_ctx = FunctionBuilderContext::new();
                 let cg_module_id = Some(module_id);
                 // Hoist module interner Rc so it outlives the compile_env borrow.
@@ -1298,7 +1315,7 @@ impl Compiler<'_> {
                     );
 
                     let config =
-                        FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
+                        FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty));
                     compile_function_inner_with_vir(
                         builder,
                         &mut codegen_ctx,
