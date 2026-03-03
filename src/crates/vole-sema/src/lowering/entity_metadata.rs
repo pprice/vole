@@ -39,35 +39,46 @@ use vole_vir::type_table::VirTypeTable;
 pub fn build_entity_metadata(
     entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
-    type_table: &VirTypeTable,
+    type_table: &mut VirTypeTable,
     interner: &mut Interner,
     name_table: &NameTable,
 ) -> VirEntityMetadata {
     let registry = entities.as_entity_registry();
     let mut meta = VirEntityMetadata::new();
 
-    // Use a mutable clone of the type table for translating field types.
-    // translate_type_id may intern new compound types it encounters.
-    let mut tt = type_table.clone();
-
     populate_type_defs(
         registry.all_type_defs(),
         registry.all_field_defs(),
         type_arena,
-        &mut tt,
+        type_table,
         &mut meta,
     );
     populate_field_defs(
         registry.all_field_defs(),
         type_arena,
-        &mut tt,
+        type_table,
         &mut meta,
         interner,
         name_table,
     );
-    populate_method_defs(registry.all_method_defs(), type_arena, &mut tt, &mut meta);
-    populate_function_defs(registry.all_function_defs(), type_arena, &mut tt, &mut meta);
-    populate_global_defs(registry.all_global_defs(), type_arena, &mut tt, &mut meta);
+    populate_method_defs(
+        registry.all_method_defs(),
+        type_arena,
+        type_table,
+        &mut meta,
+    );
+    populate_function_defs(
+        registry.all_function_defs(),
+        type_arena,
+        type_table,
+        &mut meta,
+    );
+    populate_global_defs(
+        registry.all_global_defs(),
+        type_arena,
+        type_table,
+        &mut meta,
+    );
 
     // Populate the function_by_name reverse lookup from the registry.
     // (insert_function_def already inserts by name_id, but the registry's
@@ -157,7 +168,6 @@ fn populate_type_defs(
                 .map(|&ty| translate_type_id(type_table, ty, type_arena))
                 .collect()
         });
-        let sema_generic_field_types = td.generic_info.as_ref().map(|gi| gi.field_types.clone());
         let generic_field_names = td.generic_info.as_ref().map(|gi| gi.field_names.clone());
 
         // Build concrete field_types by translating each field's sema
@@ -188,7 +198,6 @@ fn populate_type_defs(
             module: td.module,
             is_generic: td.generic_info.is_some(),
             generic_field_types,
-            sema_generic_field_types,
             generic_field_names,
         });
     }
@@ -220,7 +229,6 @@ fn populate_field_defs(
             full_name_id: fd.full_name_id,
             defining_type: fd.defining_type,
             vir_ty,
-            sema_type_id: fd.ty,
             slot: fd.slot,
             symbol,
             field_type_tag,
@@ -346,7 +354,6 @@ fn populate_global_defs(
             id: gd.id,
             name_id: gd.name_id,
             vir_ty,
-            sema_type_id: gd.type_id,
             module_id: gd.module_id,
         });
     }

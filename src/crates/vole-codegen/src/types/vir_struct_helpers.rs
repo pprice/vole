@@ -610,7 +610,7 @@ mod tests {
             module: main_mod,
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         };
 
@@ -903,7 +903,6 @@ mod tests {
             module: main_mod,
             is_generic: false,
             generic_field_types: Some(field_vir_types.to_vec()),
-            sema_generic_field_types: Some(field_sema_types.to_vec()),
             generic_field_names: Some(generic_field_names),
         };
 
@@ -1019,7 +1018,6 @@ mod tests {
             module: main_mod,
             is_generic: false,
             generic_field_types: Some(vec![VirTypeId::I128, VirTypeId::I64]),
-            sema_generic_field_types: Some(vec![TypeId::I128, TypeId::I64]),
             generic_field_names: Some(vec![field_a_name, field_b_name]),
         };
 
@@ -1101,7 +1099,6 @@ mod tests {
             module: main_mod,
             is_generic: true,
             generic_field_types: Some(vec![param_vir]),
-            sema_generic_field_types: Some(vec![sema_param_ty]),
             generic_field_names: Some(vec![field_val_name]),
         };
 

@@ -74,22 +74,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if type_def.type_params.is_empty() {
             return base_type_id;
         }
-        let Some(sema_field_types) = &type_def.sema_generic_field_types else {
+        let Some(generic_field_types) = &type_def.generic_field_types else {
             return base_type_id;
         };
 
-        // Build substitution map: type_param NameId -> concrete TypeId
-        let subs: FxHashMap<NameId, TypeId> = type_def
+        // Build VIR-native substitution map: type_param NameId -> concrete VirTypeId
+        let table = self.vir_type_table();
+        let subs: FxHashMap<NameId, VirTypeId> = type_def
             .type_params
             .iter()
             .zip(concrete_type_args.iter())
-            .map(|(&param, &arg)| (param, arg))
+            .filter_map(|(&param, &arg)| table.lookup_type_id(arg).map(|vir| (param, vir)))
             .collect();
+        if subs.len() != type_def.type_params.len() {
+            return base_type_id;
+        }
 
-        // Substitute field types to get concrete types
-        let concrete_field_types: Vec<TypeId> = sema_field_types
+        // Substitute field types to get concrete VIR types
+        let concrete_field_vir_types: Vec<VirTypeId> = generic_field_types
             .iter()
-            .map(|&ft| self.vir_query_expect_substitute(ft, &subs, "mono_instance_type_id"))
+            .map(|&ft| {
+                table
+                    .substitute_vir_ids(ft, &subs)
+                    .unwrap_or(VirTypeId::UNKNOWN)
+            })
             .collect();
 
         // Check if any field type changes its cleanup tag after substitution.
@@ -103,9 +111,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .iter()
             .map(|&fid| self.analyzed().field_def(fid).field_type_tag)
             .collect();
-        let concrete_tags: Vec<vole_vir::VirFieldTypeTag> = concrete_field_types
+        let concrete_tags: Vec<vole_vir::VirFieldTypeTag> = concrete_field_vir_types
             .iter()
-            .map(|&ft| self.field_type_tag_as_vir(ft))
+            .map(|&ft| vole_vir::compute_field_type_tag(ft, table))
             .collect();
         if base_tags == concrete_tags {
             return base_type_id;
@@ -628,17 +636,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             FieldTypeTag::Value
         }
-    }
-
-    /// Compute the VIR-native field type tag for a sema `TypeId`.
-    ///
-    /// Converts the sema TypeId to a VirTypeId and delegates to the
-    /// canonical `compute_field_type_tag`.  Used by the generic class
-    /// monomorphization path where concrete substituted types are sema
-    /// TypeIds but we need VirFieldTypeTag for comparison.
-    fn field_type_tag_as_vir(&self, type_id: TypeId) -> vole_vir::VirFieldTypeTag {
-        let vir_ty = self.to_vir_type(type_id);
-        vole_vir::compute_field_type_tag(vir_ty, self.vir_type_table())
     }
 
     /// Mark a CompiledValue as owned if its type needs RC cleanup.

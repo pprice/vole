@@ -1421,14 +1421,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get field slot and type for a field access using VirTypeId.
     ///
     /// Converts `VirTypeId` → `TypeId` internally and delegates to the
-    /// legacy `get_field_slot_and_type_id_cg` path, which uses
-    /// `sema_generic_field_types` for reliable substitution.
-    ///
-    /// Note: The VIR-native path (`vir_get_field_slot_and_type_id`) is not
-    /// used here because `VirTypeDef::generic_field_types` has known
-    /// translation bugs for some generic types (e.g. type params that map
-    /// to wrong VirTypeIds).  Once those are fixed upstream, this can
-    /// switch to the VIR-native path.
+    /// `get_field_slot_and_type_id_cg` path, which uses
+    /// `generic_field_types` (VirTypeIds) for substitution.
     #[inline]
     pub fn vir_field_slot_and_type(
         &self,

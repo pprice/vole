@@ -17,7 +17,7 @@ use rustc_hash::FxHashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::{sextend_const, uextend_const};
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{NameId, NameTable, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{NameId, NameTable, TypeDefId, VirTypeId};
 use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};
@@ -1407,51 +1407,28 @@ fn vir_compute_composite_rc_offsets(
     if let Some((type_def_id, type_args)) = vir_unwrap_struct(vir_ty, table) {
         let td = entities.vir_type_def(type_def_id);
 
-        // For generic structs, substitute type params with concrete type_args.
-        //
-        // VirTypeDef.field_types and generic_field_types may contain VirTypeIds
-        // that were interned into a CLONED type table during entity metadata
-        // building.  Newly-interned compound types (e.g. Box<T> as a struct
-        // field) may have different VirTypeIds in the clone vs the main table.
-        //
-        // To avoid stale VirTypeId lookups, use sema_generic_field_types
-        // (sema TypeIds) and re-resolve them through the main VirTypeTable
-        // via lookup_substitute, which is guaranteed to use the main table's
-        // interned types.
+        // For generic structs, substitute type params with concrete type_args
+        // using VIR-native substitution (VirTypeId → VirTypeId).
         let field_vir_types: Vec<VirTypeId> = if !type_args.is_empty() {
             let type_params: Vec<NameId> = td.map(|td| td.type_params.clone()).unwrap_or_default();
             if type_params.is_empty() {
                 td.map(|td| td.field_types.clone()).unwrap_or_default()
-            } else if let Some(sema_field_types) =
-                td.and_then(|td| td.sema_generic_field_types.clone())
+            } else if let Some(generic_field_types) =
+                td.and_then(|td| td.generic_field_types.clone())
             {
-                // Build sema TypeId substitution map: type_param NameId -> concrete sema TypeId.
-                // The type_args are VirTypeIds; convert each to its sema TypeId counterpart.
-                let subs: FxHashMap<NameId, TypeId> = type_params
+                let subs: FxHashMap<NameId, VirTypeId> = type_params
                     .iter()
                     .zip(type_args.iter())
-                    .filter_map(|(&param, &arg)| {
-                        table
-                            .lookup_vir_type_id(arg)
-                            .map(|sema_id| (param, sema_id))
-                    })
+                    .map(|(&param, &arg)| (param, arg))
                     .collect();
-                if subs.len() != type_params.len() {
-                    // Could not resolve all type args to sema TypeIds; fall back
-                    // to un-substituted field_types (conservative: may produce
-                    // false positives, but won't crash).
-                    td.map(|td| td.field_types.clone()).unwrap_or_default()
-                } else {
-                    sema_field_types
-                        .iter()
-                        .map(|&field_ty| {
-                            table
-                                .lookup_substitute(field_ty, &subs)
-                                .and_then(|sema_result| table.lookup_type_id(sema_result))
-                                .unwrap_or(VirTypeId::UNKNOWN)
-                        })
-                        .collect()
-                }
+                generic_field_types
+                    .iter()
+                    .map(|&field_ty| {
+                        table
+                            .substitute_vir_ids(field_ty, &subs)
+                            .unwrap_or(VirTypeId::UNKNOWN)
+                    })
+                    .collect()
             } else {
                 td.map(|td| td.field_types.clone()).unwrap_or_default()
             }

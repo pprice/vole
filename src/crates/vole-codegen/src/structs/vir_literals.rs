@@ -179,14 +179,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Returns both sema `TypeId` (for downstream arena-based operations like
     /// `construct_union_id`) and `VirTypeId` (for VIR-native queries like
-    /// `vir_query_is_union_v`).  The sema TypeId comes from the field's
-    /// `sema_type_id` (set during VIR lowering) with monomorphization
+    /// `vir_query_is_union_v`).  The sema TypeId is derived from the field's
+    /// `vir_ty` via the VirTypeTable reverse mapping, with monomorphization
     /// substitution applied.  The VirTypeId is substituted in the VIR domain.
-    ///
-    /// We use the sema TypeId from entity metadata rather than converting
-    /// from VirTypeId because entity metadata VirTypeIds for generic type
-    /// parameters may be out of sync with the codegen type table (they are
-    /// interned in a separate cloned table during lowering).
     fn collect_field_types(
         &self,
         type_def_id: vole_identity::TypeDefId,

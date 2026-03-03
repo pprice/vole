@@ -356,7 +356,7 @@ where
     let monomorph_info = populate_monomorph_info(entities, type_arena, &mut type_table);
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
     let mut entity_metadata =
-        build_entity_metadata(entities, type_arena, &type_table, interner, names);
+        build_entity_metadata(entities, type_arena, &mut type_table, interner, names);
     populate_implement_block_entries(PopulateImplementBlockEntriesArgs {
         program,
         interner,

@@ -83,39 +83,23 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     let (type_def_id, type_args) =
         crate::types::vir_conversions::vir_unwrap_class(vir_ty, vir_table)
             .or_else(|| crate::types::vir_conversions::vir_unwrap_struct(vir_ty, vir_table))
-            .map(|(def, args)| {
-                // Convert VirTypeId args back to TypeId for sema substitution
-                let sema_args: Vec<TypeId> = args
-                    .iter()
-                    .map(|&a| {
-                        vir_table
-                            .lookup_vir_type_id(a)
-                            .or_else(|| {
-                                let lossy = a.to_type_id_lossy();
-                                (lossy != TypeId::UNKNOWN).then_some(lossy)
-                            })
-                            .unwrap_or(TypeId::UNKNOWN)
-                    })
-                    .collect();
-                (def, sema_args)
-            })
             .ok_or_else(|| {
                 CodegenError::type_mismatch("field access", "class or struct", "other type")
             })?;
 
     let type_def = cg.analyzed().type_def(type_def_id);
-    let sema_field_types = type_def
-        .sema_generic_field_types
+    let generic_field_types = type_def
+        .generic_field_types
         .as_ref()
-        .ok_or_else(|| CodegenError::not_found("sema_generic_field_types", "type"))?;
+        .ok_or_else(|| CodegenError::not_found("generic_field_types", "type"))?;
     let field_names = type_def
         .generic_field_names
         .as_ref()
         .ok_or_else(|| CodegenError::not_found("generic_field_names", "type"))?;
 
-    // Build combined substitution map: type params -> type args, plus monomorphization context
-    // This allows a single pass through the type tree instead of two.
-    let mut combined_subs: FxHashMap<NameId, TypeId> = type_def
+    // Build VIR-native combined substitution map: type params -> VirTypeId args,
+    // plus monomorphization context (sema TypeId -> VirTypeId).
+    let mut combined_subs: FxHashMap<NameId, VirTypeId> = type_def
         .type_params
         .iter()
         .zip(type_args.iter())
@@ -123,17 +107,19 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         .collect();
 
     // Merge in function-level substitutions (monomorphization context).
-    // Prefer concrete function substitutions over placeholder type args from
-    // partially-specialized generic instances.
+    // Convert sema TypeId subs to VirTypeId.  Prefer concrete function
+    // substitutions over placeholder type args from partially-specialized
+    // generic instances.
     if let Some(ref func_subs) = sema_subs_ref {
         for (&k, &v) in func_subs.iter() {
-            let should_override = combined_subs.get(&k).is_some_and(|&existing| {
-                vir_table
-                    .lookup_type_id(existing)
-                    .is_some_and(|vir| matches!(vir_table.get(vir), VirType::Param { .. }))
-            });
-            if should_override || !combined_subs.contains_key(&k) {
-                combined_subs.insert(k, v);
+            let vir_v = vir_table.lookup_type_id(v);
+            let should_override = combined_subs
+                .get(&k)
+                .is_some_and(|&existing| matches!(vir_table.get(existing), VirType::Param { .. }));
+            if (should_override || !combined_subs.contains_key(&k))
+                && let Some(vir_v) = vir_v
+            {
+                combined_subs.insert(k, vir_v);
             }
         }
     }
@@ -147,28 +133,31 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     for (idx, field_name_id) in field_names.iter().enumerate() {
         let name = cg.analyzed().last_segment(*field_name_id);
         if name.as_deref() == Some(field_name) {
-            let base_type_id = sema_field_types[idx];
-            let field_type_id = if !combined_subs.is_empty() {
+            let base_vir = generic_field_types[idx];
+            let field_vir = if !combined_subs.is_empty() {
                 vir_table
-                    .lookup_substitute(base_type_id, &combined_subs)
-                    .unwrap_or(base_type_id)
+                    .substitute_vir_ids(base_vir, &combined_subs)
+                    .unwrap_or(base_vir)
             } else {
-                base_type_id
+                base_vir
             };
+            let field_type_id = vir_table
+                .lookup_vir_type_id(field_vir)
+                .unwrap_or_else(|| field_vir.to_type_id_lossy());
             // For structs, use the original sema slot (they don't go through instance storage)
             let slot = if is_class { physical_slot } else { idx };
             return Ok((slot, field_type_id));
         }
         // Advance physical slot counter
-        let ft = sema_field_types[idx];
-        let resolved_ft = if !combined_subs.is_empty() {
+        let ft = generic_field_types[idx];
+        let resolved_vir = if !combined_subs.is_empty() {
             vir_table
-                .lookup_substitute(ft, &combined_subs)
+                .substitute_vir_ids(ft, &combined_subs)
                 .unwrap_or(ft)
         } else {
             ft
         };
-        physical_slot += if is_class && matches!(resolved_ft, TypeId::I128 | TypeId::F128) {
+        physical_slot += if is_class && matches!(resolved_vir, VirTypeId::I128 | VirTypeId::F128) {
             2
         } else {
             1

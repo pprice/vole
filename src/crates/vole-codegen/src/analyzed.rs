@@ -570,15 +570,18 @@ impl AnalyzedProgram {
 
     /// Return the sema field type for a field ID.
     ///
-    /// Legacy bridge: returns the sema `TypeId` stored alongside
-    /// `vir_ty` in `VirFieldDef`.  Used by `collect_field_types` for
-    /// arena-based operations (union construction) that cannot yet
-    /// consume `VirTypeId` directly.
+    /// Derives the sema `TypeId` from the VirFieldDef's `vir_ty` via
+    /// the VirTypeTable reverse mapping.  Falls back to lossy conversion
+    /// for types not in the table (e.g. reserved primitives).
     pub(crate) fn entity_field_sema_type(
         &self,
         field_id: FieldId,
     ) -> vole_sema::type_arena::TypeId {
-        self.field_def(field_id).sema_type_id
+        let vir_ty = self.field_def(field_id).vir_ty;
+        self.vir_program()
+            .type_table
+            .lookup_vir_type_id(vir_ty)
+            .unwrap_or_else(|| vir_ty.to_type_id_lossy())
     }
 
     /// Return declared type parameter NameIds for a type definition.
@@ -590,11 +593,26 @@ impl AnalyzedProgram {
     }
 
     /// Return generic field types metadata for a type definition, if present.
+    ///
+    /// Converts VirTypeIds from `VirTypeDef::generic_field_types` back to
+    /// sema TypeIds via the VirTypeTable reverse mapping.  Returns `None` if
+    /// the type has no generic field types.
     pub(crate) fn entity_generic_field_types(
         &self,
         type_def_id: TypeDefId,
     ) -> Option<Vec<vole_sema::type_arena::TypeId>> {
-        self.type_def(type_def_id).sema_generic_field_types.clone()
+        let vir_field_types = self.type_def(type_def_id).generic_field_types.as_ref()?;
+        let table = &self.vir_program().type_table;
+        Some(
+            vir_field_types
+                .iter()
+                .map(|&vir_ty| {
+                    table
+                        .lookup_vir_type_id(vir_ty)
+                        .unwrap_or_else(|| vir_ty.to_type_id_lossy())
+                })
+                .collect(),
+        )
     }
 
     /// Return whether a type definition is a sentinel type.

@@ -197,15 +197,9 @@ pub struct VirTypeDef {
     /// Generic field types translated to `VirTypeId`s.
     ///
     /// From sema `TypeDef::generic_info.field_types`.  Used by
-    /// `entity_generic_field_types()` in rc_ops.rs and structs/helpers.rs
-    /// for generic type substitution.  `None` for non-generic types.
+    /// codegen for generic type substitution via `substitute_vir_ids`.
+    /// `None` for non-generic types.
     pub generic_field_types: Option<Vec<VirTypeId>>,
-    /// Generic field types as sema `TypeId`s (temporary).
-    ///
-    /// Kept so codegen callers that call `arena.expect_substitute()` can
-    /// continue to work with sema `TypeId`s.  Will be removed once Phase 3
-    /// converts all codegen callers to `VirTypeId`.
-    pub sema_generic_field_types: Option<Vec<TypeId>>,
     /// Field names as stable `NameId`s for generic field lookup.
     ///
     /// From sema `GenericTypeInfo::field_names`.  Used by
@@ -250,16 +244,11 @@ pub struct VirFieldDef {
     /// The type that owns this field.
     pub defining_type: TypeDefId,
     /// The field's VIR type.
-    pub vir_ty: VirTypeId,
-    /// The field's sema type (kept alongside `vir_ty` as a legacy bridge for
-    /// arena-based operations that cannot yet use VirTypeId).
     ///
-    /// NOTE: `vir_ty` from entity metadata may be out-of-sync with the main
-    /// VirTypeTable for generic type parameter types due to the clone-based
-    /// translation in `build_entity_metadata`.  This sema TypeId remains the
-    /// authoritative field type for sema-domain substitution until that sync
-    /// issue is resolved.
-    pub sema_type_id: TypeId,
+    /// Reliable for all types including generic type parameters.  Interned
+    /// into the main VirTypeTable (not a clone), so VirTypeIds are always
+    /// valid in the codegen type table.
+    pub vir_ty: VirTypeId,
     /// The field's slot index in the type's storage layout.
     pub slot: usize,
     /// Interned symbol for the field name (for name matching during
@@ -435,8 +424,6 @@ pub struct VirGlobalDef {
     pub name_id: NameId,
     /// The global's VIR type (translated from sema `TypeId` during lowering).
     pub vir_ty: VirTypeId,
-    /// The global's sema type (kept alongside `vir_ty` as a legacy bridge).
-    pub sema_type_id: TypeId,
     /// The module this global is declared in.
     pub module_id: ModuleId,
 }
@@ -1349,7 +1336,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1388,7 +1375,6 @@ mod tests {
             full_name_id: make_name_id(51),
             defining_type: make_type_def_id(1),
             vir_ty: VirTypeId::I64,
-            sema_type_id: TypeId::I64,
             slot: 3,
             symbol: None,
             field_type_tag: VirFieldTypeTag::Value,
@@ -1522,7 +1508,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1551,7 +1537,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1579,7 +1565,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1600,7 +1586,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1621,7 +1607,6 @@ mod tests {
             id,
             name_id: name,
             vir_ty: VirTypeId::I64,
-            sema_type_id: TypeId::I64,
             module_id: make_module_id(0),
         });
 
@@ -1750,7 +1735,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1781,7 +1766,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1802,7 +1787,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1879,7 +1864,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1910,7 +1895,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -1980,7 +1965,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -2047,7 +2032,7 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -2107,7 +2092,7 @@ mod tests {
             module: module_id,
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
 
@@ -2152,7 +2137,7 @@ mod tests {
             module: module_id,
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
         meta.insert_short_name("nil".to_string(), sentinel_id);
@@ -2173,7 +2158,7 @@ mod tests {
             module: module_id,
             is_generic: false,
             generic_field_types: None,
-            sema_generic_field_types: None,
+
             generic_field_names: None,
         });
         meta.insert_short_name("nil".to_string(), other_id);
