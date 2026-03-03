@@ -21,8 +21,9 @@ use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
-use vole_frontend::Symbol;
-use vole_identity::{ConstantValue, ModuleId, StringConversion, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{
+    ConstantValue, ModuleId, StringConversion, Symbol, TypeDefId, TypeId, VirTypeId,
+};
 use vole_vir::{
     AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
 };

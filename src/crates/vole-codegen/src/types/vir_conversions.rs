@@ -16,8 +16,7 @@ use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::{sextend_const, uextend_const};
-use vole_frontend::{Interner, Symbol};
-use vole_identity::{NameId, NameTable, TypeDefId, VirTypeId};
+use vole_identity::{Interner, NameId, NameTable, Symbol, TypeDefId, VirTypeId};
 use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};

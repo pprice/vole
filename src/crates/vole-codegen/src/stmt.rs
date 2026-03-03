@@ -6,8 +6,7 @@ use cranelift::prelude::*;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
-use vole_frontend::{self, Symbol};
-use vole_identity::{NameId, TypeId, VirTypeId};
+use vole_identity::{NameId, Symbol, TypeId, VirTypeId};
 use vole_vir::VirStmt;
 use vole_vir::stmt::LetStorageHint;
 

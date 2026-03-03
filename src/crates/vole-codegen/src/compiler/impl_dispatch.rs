@@ -15,8 +15,7 @@ use crate::types::vir_conversions::vir_type_to_cranelift;
 use crate::types::{CodegenCtx, TypeMetadata};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use rustc_hash::FxHashSet;
-use vole_frontend::{Interner, Symbol};
-use vole_identity::{MethodId, ModuleId, TypeDefId, VirTypeId};
+use vole_identity::{Interner, MethodId, ModuleId, Symbol, TypeDefId, VirTypeId};
 
 impl Compiler<'_> {
     /// Register a method in the JIT function registry if not already registered.

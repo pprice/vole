@@ -5,9 +5,9 @@ use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use vole_frontend::{Interner, Symbol};
 use vole_identity::{
-    FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId, TypeId, VirTypeId,
+    FieldId, FunctionId, Interner, MethodId, ModuleId, NameId, NameTable, Span, Symbol, TypeDefId,
+    TypeId, VirTypeId,
 };
 use vole_vir::types::VirType;
 use vole_vir::{VirEntityMetadata, VirFunction, VirProgram};

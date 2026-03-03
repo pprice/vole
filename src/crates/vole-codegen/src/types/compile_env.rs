@@ -4,8 +4,7 @@
 
 use rustc_hash::FxHashMap;
 
-use vole_frontend::{Interner, Symbol};
-use vole_identity::{ModuleId, VirTypeId};
+use vole_identity::{Interner, ModuleId, Symbol, VirTypeId};
 
 use crate::AnalyzedProgram;
 

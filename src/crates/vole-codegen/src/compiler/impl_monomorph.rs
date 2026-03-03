@@ -19,8 +19,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::vir_conversions::vir_type_to_cranelift;
 use crate::types::{CodegenCtx, MethodInfo};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
-use vole_frontend::{Interner, Symbol};
-use vole_identity::{MethodId, ModuleId, NameId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{Interner, MethodId, ModuleId, NameId, Symbol, TypeDefId, TypeId, VirTypeId};
 use vole_vir::VirImplementBlockEntry;
 
 impl Compiler<'_> {

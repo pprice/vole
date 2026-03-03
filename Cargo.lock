@@ -1718,7 +1718,6 @@ dependencies = [
  "smallvec",
  "thiserror",
  "tracing",
- "vole-frontend",
  "vole-identity",
  "vole-runtime",
  "vole-vir",

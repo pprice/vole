@@ -6,7 +6,6 @@ description = "Code generation for the Vole programming language (Cranelift JIT)
 
 [dependencies]
 # Workspace crates
-vole-frontend = { path = "../vole-frontend" }
 vole-identity = { path = "../vole-identity" }
 vole-runtime = { path = "../vole-runtime" }
 vole-vir = { path = "../vole-vir" }
