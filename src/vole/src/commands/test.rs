@@ -418,10 +418,6 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
     // Create shared module cache for all test files (sema caching)
     let cache = Rc::new(RefCell::new(ModuleCache::new()));
 
-    // Shared VIR cache for module type methods across compilations
-    let vir_cache: Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>> =
-        Rc::new(RefCell::new(None));
-
     // Compiled modules cache (codegen caching) - populated on first file
     let mut compiled_modules: Option<CompiledModules> = None;
 
@@ -454,7 +450,6 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
             file,
             &config,
             cache.clone(),
-            vir_cache.clone(),
             &mut compiled_modules,
             progress.as_mut(),
         ) {
@@ -547,7 +542,6 @@ fn run_file_tests_with_modules(
     path: &Path,
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
-    vir_cache: Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>,
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
@@ -559,7 +553,6 @@ fn run_file_tests_with_modules(
         path,
         config,
         cache,
-        vir_cache,
         compiled_modules,
         progress,
     )
@@ -572,7 +565,6 @@ fn run_source_tests_with_modules(
     path: &Path,
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
-    vir_cache: Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>,
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
@@ -585,7 +577,6 @@ fn run_source_tests_with_modules(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
-            module_vir_cache: Some(vir_cache),
             color_mode: config.color_mode,
         },
         &mut diag_buffer,
@@ -741,7 +732,6 @@ fn run_source_tests_with_progress(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
-            module_vir_cache: None,
             color_mode: config.color_mode,
         },
         &mut diag_buffer,
