@@ -16,6 +16,7 @@ impl Cg<'_, '_, '_> {
     /// Handles union wrapping (non-union → union, union → heap copy),
     /// interface boxing, unknown boxing, and interface fat pointer copying
     /// for class fields.
+    #[allow(dead_code)]
     pub(crate) fn coerce_field_value(
         &mut self,
         value: CompiledValue,
@@ -55,6 +56,38 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// VirTypeId variant of [`coerce_field_value`](Self::coerce_field_value).
+    ///
+    /// Coerces a value to match a field's declared type using VirTypeId
+    /// throughout, with no sema TypeId dependency.
+    pub(crate) fn coerce_field_value_v(
+        &mut self,
+        value: CompiledValue,
+        field_vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let field_is_union = self.vir_query_is_union_v(field_vir_ty);
+        let field_is_interface = self.vir_query_is_interface_v(field_vir_ty);
+        let field_is_unknown = self.vir_query_is_unknown_v(field_vir_ty);
+        let value_is_union = self.vir_query_is_union_v(value.type_id);
+        let value_is_unknown = self.vir_query_is_unknown_v(value.type_id);
+
+        if field_is_unknown && !value_is_unknown {
+            self.box_to_unknown_no_inc(value)
+        } else if field_is_unknown && value_is_unknown {
+            self.copy_tagged_value_to_heap(value)
+        } else if field_is_union && !value_is_union {
+            self.construct_union_heap_id_v(value, field_vir_ty)
+        } else if field_is_union && value_is_union {
+            self.copy_union_to_heap(value)
+        } else if field_is_interface && self.vir_query_is_interface_v(value.type_id) {
+            self.copy_interface_fat_ptr(value)
+        } else if field_is_interface {
+            self.box_interface_value_v(value, field_vir_ty)
+        } else {
+            Ok(value)
+        }
+    }
+
     /// Construct a union value on the heap (for storing in class fields).
     /// Unlike the stack-based construct_union_id, this allocates on the heap so the
     /// union persists beyond the current function's stack frame.
@@ -64,6 +97,20 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let union_vir = self.vir_lookup_or_compat(union_type_id);
+        let result = self.construct_union_heap_id_v(value, union_vir)?;
+        // Re-wrap with original TypeId to preserve caller semantics.
+        Ok(self.compiled_with_ty(result.value, result.ty, union_type_id))
+    }
+
+    /// VirTypeId variant of [`construct_union_heap_id`](Self::construct_union_heap_id).
+    ///
+    /// Allocates a union buffer on the heap and stores the tag, is_rc flag,
+    /// and payload.  Works entirely with VirTypeId, no sema TypeId needed.
+    pub(crate) fn construct_union_heap_id_v(
+        &mut self,
+        value: CompiledValue,
+        union_vir: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
         let vir_variants = self.vir_query_unwrap_union_v(union_vir).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union")
         })?;
@@ -107,7 +154,7 @@ impl Cg<'_, '_, '_> {
             );
         }
 
-        Ok(self.compiled_with_ty(heap_ptr, self.ptr_type(), union_type_id))
+        Ok(CompiledValue::new(heap_ptr, self.ptr_type(), union_vir))
     }
 
     /// Copy a union value (possibly stack-allocated) to a heap-allocated buffer.

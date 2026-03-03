@@ -87,8 +87,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 CodegenError::not_found("field", format!("{init_name} in struct"))
             })?;
             let offset = self.struct_field_byte_offset(layout_type_id, field_slot);
-            let mut value = if let Some(&(field_sema_ty, _)) = field_types.get(init_name) {
-                self.compile_vir_expr_with_expected_type(value_expr, field_sema_ty)?
+            let mut value = if let Some(&field_vir_ty) = field_types.get(init_name) {
+                self.compile_vir_expr_with_expected_type_v(value_expr, field_vir_ty)?
             } else {
                 self.compile_vir_expr(value_expr)?
             };
@@ -175,29 +175,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(self.compiled_with_ty(instance_ptr, self.ptr_type(), result_type_id))
     }
 
-    /// Collect field name -> (TypeId, VirTypeId) mapping for a type definition.
+    /// Collect field name -> VirTypeId mapping for a type definition.
     ///
-    /// Returns both sema `TypeId` (for downstream arena-based operations like
-    /// `construct_union_id`) and `VirTypeId` (for VIR-native queries like
-    /// `vir_query_is_union_v`).  The sema TypeId is derived from the field's
-    /// `vir_ty` via the VirTypeTable reverse mapping, with monomorphization
-    /// substitution applied.  The VirTypeId is substituted in the VIR domain.
+    /// Returns the substituted `VirTypeId` for each field.  All downstream
+    /// operations (union construction, coercion, expected-type compilation)
+    /// use VirTypeId-native `_v` variants, so no sema `TypeId` is needed.
     fn collect_field_types(
         &self,
         type_def_id: vole_identity::TypeDefId,
-    ) -> HashMap<String, (TypeId, VirTypeId)> {
+    ) -> HashMap<String, VirTypeId> {
         self.analyzed()
             .fields_on_type(type_def_id)
             .map(|field_id| {
                 let field = self.analyzed().field_def(field_id);
                 let vir_ty = self.try_substitute_type_v(field.vir_ty);
-                let sema_ty =
-                    self.try_substitute_type(self.analyzed().entity_field_sema_type(field_id));
                 let name = self
                     .name_table()
                     .last_segment_str(field.name_id)
                     .unwrap_or_default();
-                (name, (sema_ty, vir_ty))
+                (name, vir_ty)
             })
             .collect()
     }
@@ -206,7 +202,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// and wrap non-union values into union fields.
     fn coerce_struct_field(
         &mut self,
-        field_types: &HashMap<String, (TypeId, VirTypeId)>,
+        field_types: &HashMap<String, VirTypeId>,
         field_name: &str,
         value: &mut CompiledValue,
     ) -> CodegenResult<()> {
@@ -218,18 +214,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.emit_rc_inc_for_type_v(value.value, value.type_id)?;
         }
         // Coerce to unknown when the field type is unknown.
-        if let Some(&(_, field_vir_ty)) = field_types.get(field_name)
+        if let Some(&field_vir_ty) = field_types.get(field_name)
             && self.vir_query_is_unknown_v(field_vir_ty)
             && !self.vir_query_is_unknown_v(value.type_id)
         {
             *value = self.box_to_unknown_no_inc(*value)?;
         }
         // Coerce non-union to union for payload-carrying union fields.
-        if let Some(&(field_sema_ty, field_vir_ty)) = field_types.get(field_name)
+        if let Some(&field_vir_ty) = field_types.get(field_name)
             && self.vir_query_is_payload_union_v(field_vir_ty)
             && !self.vir_query_is_union_v(value.type_id)
         {
-            *value = self.construct_union_id(*value, field_sema_ty)?;
+            *value = self.construct_union_id_v(*value, field_vir_ty)?;
         }
         Ok(())
     }
@@ -240,7 +236,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_def_id: vole_identity::TypeDefId,
         provided: &[(Symbol, vole_vir::VirRef)],
         field_slots: &FxHashMap<String, usize>,
-        field_types: &HashMap<String, (TypeId, VirTypeId)>,
+        field_types: &HashMap<String, VirTypeId>,
         result_type_id: TypeId,
         slot: cranelift_codegen::ir::StackSlot,
     ) -> CodegenResult<()> {
@@ -264,24 +260,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 CodegenError::not_found("field", format!("{field_name} in struct"))
             })?;
             let offset = self.struct_field_byte_offset(result_type_id, field_slot);
-            let mut value = if let Some(&(field_sema_ty, _)) = field_types.get(&field_name) {
-                self.compile_vir_expr_with_expected_type(&default_expr, field_sema_ty)?
+            let mut value = if let Some(&field_vir_ty) = field_types.get(&field_name) {
+                self.compile_vir_expr_with_expected_type_v(&default_expr, field_vir_ty)?
             } else {
                 self.compile_vir_expr(&default_expr)?
             };
             // Coerce concrete defaults to unknown.
-            if let Some(&(_, field_vir_ty)) = field_types.get(&field_name)
+            if let Some(&field_vir_ty) = field_types.get(&field_name)
                 && self.vir_query_is_unknown_v(field_vir_ty)
                 && !self.vir_query_is_unknown_v(value.type_id)
             {
                 value = self.box_to_unknown(value)?;
             }
             // Coerce non-union defaults to union.
-            if let Some(&(field_sema_ty, field_vir_ty)) = field_types.get(&field_name)
+            if let Some(&field_vir_ty) = field_types.get(&field_name)
                 && self.vir_query_is_payload_union_v(field_vir_ty)
                 && !self.vir_query_is_union_v(value.type_id)
             {
-                value = self.construct_union_id(value, field_sema_ty)?;
+                value = self.construct_union_id_v(value, field_vir_ty)?;
             }
             self.store_struct_field(value, slot, offset)?;
         }
@@ -345,7 +341,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         name: Symbol,
         value_expr: &vole_vir::VirExpr,
         field_slots: &FxHashMap<String, usize>,
-        field_types: &HashMap<String, (TypeId, VirTypeId)>,
+        field_types: &HashMap<String, VirTypeId>,
         set_func_ref: FuncRef,
         instance_ptr: Value,
     ) -> CodegenResult<()> {
@@ -353,9 +349,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let slot = *field_slots
             .get(init_name)
             .ok_or_else(|| CodegenError::not_found("field", format!("{init_name} in class")))?;
-        let field_tys = field_types.get(init_name).copied();
-        let mut value = if let Some((field_sema_ty, _)) = field_tys {
-            self.compile_vir_expr_with_expected_type(value_expr, field_sema_ty)?
+        let field_vir_ty = field_types.get(init_name).copied();
+        let mut value = if let Some(fvt) = field_vir_ty {
+            self.compile_vir_expr_with_expected_type_v(value_expr, fvt)?
         } else {
             self.compile_vir_expr(value_expr)?
         };
@@ -370,8 +366,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         value.mark_consumed();
 
-        let final_value = if let Some((field_sema_ty, _field_vir_ty)) = field_tys {
-            self.coerce_field_value(value, field_sema_ty)?
+        let final_value = if let Some(fvt) = field_vir_ty {
+            self.coerce_field_value_v(value, fvt)?
         } else {
             value
         };
@@ -386,7 +382,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_def_id: vole_identity::TypeDefId,
         provided: &[(Symbol, vole_vir::VirRef)],
         field_slots: &FxHashMap<String, usize>,
-        field_types: &HashMap<String, (TypeId, VirTypeId)>,
+        field_types: &HashMap<String, VirTypeId>,
         set_func_ref: FuncRef,
         instance_ptr: Value,
     ) -> CodegenResult<()> {
@@ -409,14 +405,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let slot = *field_slots.get(&field_name).ok_or_else(|| {
                 CodegenError::not_found("field", format!("{field_name} in class"))
             })?;
-            let field_tys = field_types.get(&field_name).copied();
-            let value = if let Some((field_sema_ty, _)) = field_tys {
-                self.compile_vir_expr_with_expected_type(&default_expr, field_sema_ty)?
+            let field_vir_ty = field_types.get(&field_name).copied();
+            let value = if let Some(fvt) = field_vir_ty {
+                self.compile_vir_expr_with_expected_type_v(&default_expr, fvt)?
             } else {
                 self.compile_vir_expr(&default_expr)?
             };
-            let final_value = if let Some((field_sema_ty, _)) = field_tys {
-                self.coerce_field_value(value, field_sema_ty)?
+            let final_value = if let Some(fvt) = field_vir_ty {
+                self.coerce_field_value_v(value, fvt)?
             } else {
                 value
             };

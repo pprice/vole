@@ -397,11 +397,7 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let table = self.vir_type_table();
-        let union_type_id = table
-            .lookup_vir_type_id(union_vir_ty)
-            .unwrap_or_else(|| union_vir_ty.to_type_id_lossy());
-        self.construct_union_id(value, union_type_id)
+        self.construct_union_id_with_hint_v(value, union_vir_ty, None)
     }
 
     /// Construct a stack-allocated union buffer using a pre-computed tag hint.
