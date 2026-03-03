@@ -35,8 +35,9 @@ pub use vole_identity::{NodeId, Span};
 pub use builder::VirBuilder;
 pub use calls::{BuiltinMethod, CallTarget, LambdaDefaultsInfo, NativeAbi};
 pub use entity_metadata::{
-    VirEntityMetadata, VirFieldDef, VirFunctionDef, VirGlobalDef, VirImplementBlockEntry,
-    VirImplementation, VirMethodBinding, VirMethodDef, VirTypeDef, VirTypeDefKind,
+    VirEntityMetadata, VirFieldDef, VirFieldTypeTag, VirFunctionDef, VirGlobalDef,
+    VirImplementBlockEntry, VirImplementation, VirMethodBinding, VirMethodDef, VirTypeDef,
+    VirTypeDefKind, compute_field_type_tag,
 };
 pub use expr::{
     AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture,

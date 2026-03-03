@@ -22,6 +22,7 @@ use vole_vir::VirExternalMethodInfo;
 use vole_vir::entity_metadata::{
     VirEntityMetadata, VirFieldDef, VirFunctionDef, VirGlobalDef, VirImplementBlockEntry,
     VirImplementation, VirMethodBinding, VirMethodDef, VirTypeDef, VirTypeDefKind,
+    compute_field_type_tag,
 };
 use vole_vir::type_table::VirTypeTable;
 
@@ -212,6 +213,7 @@ fn populate_field_defs(
         let symbol = name_table
             .last_segment_str(fd.name_id)
             .map(|name| interner.intern(&name));
+        let field_type_tag = compute_field_type_tag(vir_ty, type_table);
         meta.insert_field_def(VirFieldDef {
             id: fd.id,
             name_id: fd.name_id,
@@ -221,6 +223,7 @@ fn populate_field_defs(
             sema_type_id: fd.ty,
             slot: fd.slot,
             symbol,
+            field_type_tag,
         });
     }
 }

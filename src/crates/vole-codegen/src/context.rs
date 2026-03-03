@@ -1546,7 +1546,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_type_tags: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .map(|field_id| self.field_type_tag(self.analyzed().entity_field_sema_type(field_id)))
+            .map(|field_id| {
+                crate::compiler::type_registry::to_runtime_field_tag(
+                    self.analyzed().field_def(field_id).field_type_tag,
+                )
+            })
             .collect();
         vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
 
@@ -1592,7 +1596,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_type_tags: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .map(|field_id| self.field_type_tag(self.analyzed().entity_field_sema_type(field_id)))
+            .map(|field_id| {
+                crate::compiler::type_registry::to_runtime_field_tag(
+                    self.analyzed().field_def(field_id).field_type_tag,
+                )
+            })
             .collect();
         vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
 

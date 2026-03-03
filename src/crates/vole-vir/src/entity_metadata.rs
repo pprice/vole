@@ -14,6 +14,83 @@ use vole_identity::{
 };
 
 use crate::expr::VirExternalMethodInfo;
+use crate::type_table::VirTypeTable;
+use crate::types::{VirPrimitiveKind, VirType};
+
+// ---------------------------------------------------------------------------
+// Field type tag — RC cleanup classification
+// ---------------------------------------------------------------------------
+
+/// RC cleanup classification for a field in a struct or class instance.
+///
+/// Mirrors `vole_runtime::type_registry::FieldTypeTag` without depending on
+/// `vole-runtime`.  Computed once during VIR lowering so codegen can read the
+/// tag directly from `VirFieldDef` instead of re-deriving it at compile time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VirFieldTypeTag {
+    /// Non-reference type (i64, f64, bool, etc.) — no cleanup needed.
+    Value,
+    /// Reference-counted field (String, Array, Instance) — needs rc_dec.
+    Rc,
+    /// Union heap buffer field (e.g. `Person?` in a class) — needs union_heap_cleanup.
+    UnionHeap,
+    /// Interface fat pointer field — heap-allocated `[data_word, vtable_ptr]`.
+    Interface,
+    /// Unknown-typed TaggedValue field — heap-allocated `[tag: u64, value: u64]`.
+    UnknownHeap,
+}
+
+impl VirFieldTypeTag {
+    /// Whether this field type needs any form of RC cleanup.
+    pub fn needs_cleanup(self) -> bool {
+        !matches!(self, Self::Value)
+    }
+}
+
+/// Compute the `VirFieldTypeTag` for a VIR type.
+///
+/// This is the canonical classification used by both VIR lowering and codegen's
+/// `vir_type_id_to_field_tag`.  The logic mirrors the runtime's `FieldTypeTag`
+/// semantics: Unknown → UnknownHeap, Interface → Interface, RC types → Rc,
+/// unions/optionals with RC variants → UnionHeap, everything else → Value.
+pub fn compute_field_type_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> VirFieldTypeTag {
+    // F128 is reserved as VirType::Unknown (no VirPrimitiveKind::F128 yet)
+    // but is a plain value type — must check before the Unknown arm.
+    if vir_ty == VirTypeId::F128 {
+        return VirFieldTypeTag::Value;
+    }
+    match table.get(vir_ty) {
+        VirType::Unknown => VirFieldTypeTag::UnknownHeap,
+        VirType::Interface { .. } => VirFieldTypeTag::Interface,
+        VirType::Primitive(VirPrimitiveKind::String)
+        | VirType::Array { .. }
+        | VirType::Class { .. }
+        | VirType::Function { .. } => VirFieldTypeTag::Rc,
+        VirType::Union { variants } => {
+            for &variant in variants {
+                if compute_field_type_tag(variant, table).needs_cleanup() {
+                    return VirFieldTypeTag::UnionHeap;
+                }
+            }
+            VirFieldTypeTag::Value
+        }
+        VirType::Optional { inner } => {
+            if compute_field_type_tag(*inner, table).needs_cleanup() {
+                VirFieldTypeTag::UnionHeap
+            } else {
+                VirFieldTypeTag::Value
+            }
+        }
+        _ => {
+            // Handle type (TypeId::HANDLE) maps to VirType::Primitive(Handle)
+            if vir_ty == VirTypeId::HANDLE {
+                VirFieldTypeTag::Rc
+            } else {
+                VirFieldTypeTag::Value
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Type definition kind
@@ -188,6 +265,13 @@ pub struct VirFieldDef {
     /// Interned symbol for the field name (for name matching during
     /// monomorph rederive without requiring the interner).
     pub symbol: Option<Symbol>,
+    /// Pre-computed RC cleanup classification for this field.
+    ///
+    /// Computed during VIR lowering from the field's `vir_ty` so codegen
+    /// can read the tag directly without re-deriving it from the type.
+    /// For generic type parameters this defaults to `Value`; codegen
+    /// recomputes the tag post-monomorphization for concrete types.
+    pub field_type_tag: VirFieldTypeTag,
 }
 
 // ---------------------------------------------------------------------------
@@ -1307,6 +1391,7 @@ mod tests {
             sema_type_id: TypeId::I64,
             slot: 3,
             symbol: None,
+            field_type_tag: VirFieldTypeTag::Value,
         });
 
         assert_eq!(meta.field_def_count(), 1);

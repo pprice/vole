@@ -95,13 +95,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Check if any field type changes its cleanup tag after substitution.
         // If all concrete field types have the same tag as the base registration,
         // we can reuse the base type_id.
-        let base_tags: Vec<_> = sema_field_types
+        //
+        // Base tags: read from VirFieldDef (pre-computed during VIR lowering).
+        // For generic type parameters these are Value (type params aren't RC).
+        let base_tags: Vec<vole_vir::VirFieldTypeTag> = type_def
+            .fields
             .iter()
-            .map(|&ft| self.field_type_tag(ft))
+            .map(|&fid| self.analyzed().field_def(fid).field_type_tag)
             .collect();
-        let concrete_tags: Vec<_> = concrete_field_types
+        let concrete_tags: Vec<vole_vir::VirFieldTypeTag> = concrete_field_types
             .iter()
-            .map(|&ft| self.field_type_tag(ft))
+            .map(|&ft| self.field_type_tag_as_vir(ft))
             .collect();
         if base_tags == concrete_tags {
             return base_type_id;
@@ -117,9 +121,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let new_type_id = vole_runtime::type_registry::alloc_type_id();
 
         // Compute field type tags from concrete types
-        let field_type_tags: Vec<vole_runtime::type_registry::FieldTypeTag> = concrete_field_types
+        let field_type_tags: Vec<vole_runtime::type_registry::FieldTypeTag> = concrete_tags
             .iter()
-            .map(|&ft| self.field_type_tag(ft))
+            .map(|&tag| crate::compiler::type_registry::to_runtime_field_tag(tag))
             .collect();
 
         // Register in the runtime type registry
@@ -624,6 +628,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             FieldTypeTag::Value
         }
+    }
+
+    /// Compute the VIR-native field type tag for a sema `TypeId`.
+    ///
+    /// Converts the sema TypeId to a VirTypeId and delegates to the
+    /// canonical `compute_field_type_tag`.  Used by the generic class
+    /// monomorphization path where concrete substituted types are sema
+    /// TypeIds but we need VirFieldTypeTag for comparison.
+    fn field_type_tag_as_vir(&self, type_id: TypeId) -> vole_vir::VirFieldTypeTag {
+        let vir_ty = self.to_vir_type(type_id);
+        vole_vir::compute_field_type_tag(vir_ty, self.vir_type_table())
     }
 
     /// Mark a CompiledValue as owned if its type needs RC cleanup.

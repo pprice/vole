@@ -358,7 +358,11 @@ fn collect_annotation_field_type_tags(
 ) -> Vec<vole_runtime::type_registry::FieldTypeTag> {
     cg.analyzed()
         .fields_on_type(ann_type_def_id)
-        .map(|field_id| cg.field_type_tag(cg.analyzed().entity_field_sema_type(field_id)))
+        .map(|field_id| {
+            crate::compiler::type_registry::to_runtime_field_tag(
+                cg.analyzed().field_def(field_id).field_type_tag,
+            )
+        })
         .collect()
 }
 

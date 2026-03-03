@@ -35,7 +35,7 @@ mod monomorphization;
 mod program;
 mod signatures;
 mod state;
-mod type_registry;
+pub(crate) mod type_registry;
 
 pub use signatures::{SelfParam, VirSelfParam};
 

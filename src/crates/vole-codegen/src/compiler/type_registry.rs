@@ -4,51 +4,18 @@ use super::{Compiler, SelfParam};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{MethodInfo, TypeMetadata};
-use vole_identity::{MethodId, NameId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{MethodId, NameId, TypeDefId, VirTypeId};
 use vole_runtime::type_registry::{FieldTypeTag, alloc_type_id, register_instance_type};
-use vole_vir::type_table::VirTypeTable;
-use vole_vir::types::VirType;
+use vole_vir::VirFieldTypeTag;
 
-/// Convert a VirTypeId to a FieldTypeTag for runtime cleanup.
-///
-/// With RcHeader v2, we only need to distinguish Value (no cleanup) from Rc (needs rc_dec).
-/// Each RC allocation's own drop_fn handles type-specific cleanup.
-fn vir_type_id_to_field_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> FieldTypeTag {
-    // F128 is reserved as VirType::Unknown (no VirPrimitiveKind::F128 yet)
-    // but is a plain value type — must check before the Unknown arm.
-    if vir_ty == VirTypeId::F128 {
-        return FieldTypeTag::Value;
-    }
-    match table.get(vir_ty) {
-        VirType::Unknown => FieldTypeTag::UnknownHeap,
-        VirType::Interface { .. } => FieldTypeTag::Interface,
-        VirType::Primitive(vole_vir::types::VirPrimitiveKind::String)
-        | VirType::Array { .. }
-        | VirType::Class { .. }
-        | VirType::Function { .. } => FieldTypeTag::Rc,
-        VirType::Union { variants } => {
-            for &variant in variants {
-                if vir_type_id_to_field_tag(variant, table).needs_cleanup() {
-                    return FieldTypeTag::UnionHeap;
-                }
-            }
-            FieldTypeTag::Value
-        }
-        VirType::Optional { inner } => {
-            if vir_type_id_to_field_tag(*inner, table).needs_cleanup() {
-                FieldTypeTag::UnionHeap
-            } else {
-                FieldTypeTag::Value
-            }
-        }
-        _ => {
-            // Handle type (TypeId::HANDLE) maps to VirType::Primitive(Handle)
-            if vir_ty == VirTypeId::HANDLE {
-                FieldTypeTag::Rc
-            } else {
-                FieldTypeTag::Value
-            }
-        }
+/// Convert a `VirFieldTypeTag` (VIR-native) to a runtime `FieldTypeTag`.
+pub(crate) fn to_runtime_field_tag(tag: VirFieldTypeTag) -> FieldTypeTag {
+    match tag {
+        VirFieldTypeTag::Value => FieldTypeTag::Value,
+        VirFieldTypeTag::Rc => FieldTypeTag::Rc,
+        VirFieldTypeTag::UnionHeap => FieldTypeTag::UnionHeap,
+        VirFieldTypeTag::Interface => FieldTypeTag::Interface,
+        VirFieldTypeTag::UnknownHeap => FieldTypeTag::UnknownHeap,
     }
 }
 
@@ -181,7 +148,6 @@ impl Compiler<'_> {
             .collect();
         fields_by_slot.sort_by_key(|(slot, _)| *slot);
 
-        let table = self.vir_type_table();
         let mut physical_slot = 0usize;
         for (ordinal, (_, field_id)) in fields_by_slot.iter().enumerate() {
             let field_def = self.analyzed.get_field(*field_id);
@@ -193,26 +159,16 @@ impl Compiler<'_> {
             // Structs use ordinal indices (struct_field_byte_offset iterates field_types).
             let slot_key = if is_class { physical_slot } else { ordinal };
             field_slots.insert(field_name, slot_key);
-            // Use sema TypeId to look up the VirTypeId in the main type table.
-            // Entity metadata's `vir_ty` may be out-of-sync for generic type
-            // parameters due to the clone-based translation in lowering.
-            let sema_ty = self.analyzed.entity_field_sema_type(*field_id);
-            let vir_field_ty = table
-                .lookup_type_id(sema_ty)
-                .expect("field type must be in VIR table after recursive sweep");
+            let is_wide = matches!(field_def.vir_ty, VirTypeId::I128 | VirTypeId::F128);
             if is_class {
-                let tag = vir_type_id_to_field_tag(vir_field_ty, table);
+                let tag = to_runtime_field_tag(field_def.field_type_tag);
                 field_type_tags.push(tag);
-                // i128 uses 2 physical slots; add a Value tag for the high half
-                if matches!(sema_ty, TypeId::I128 | TypeId::F128) {
+                // i128/f128 uses 2 physical slots; add a Value tag for the high half
+                if is_wide {
                     field_type_tags.push(FieldTypeTag::Value);
                 }
             }
-            physical_slot += if matches!(sema_ty, TypeId::I128 | TypeId::F128) {
-                2
-            } else {
-                1
-            };
+            physical_slot += if is_wide { 2 } else { 1 };
         }
 
         Ok((field_slots, physical_slot, field_type_tags))
