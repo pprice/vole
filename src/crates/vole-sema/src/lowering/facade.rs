@@ -1,3 +1,14 @@
+// lowering/facade.rs
+//
+// VIR lowering orchestration — split into module-only and file-specific
+// phases.  The module phase runs passes that depend only on imported modules
+// and shared entity state; the file phase runs per-compilation passes that
+// depend on the specific file being compiled.
+//
+// `lower_vir_program` is the single entry point: it calls `lower_module_vir`
+// then `lower_file_vir` in sequence, with no behavior change vs the original
+// monolithic function.
+
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -34,21 +45,29 @@ use super::monomorph_functions::{
     LowerMonomorphizedInstancesArgs, build_generic_func_map, lower_monomorphized_instances,
 };
 use super::monomorph_info::populate_monomorph_info;
+use super::test_bodies::lower_test_bodies;
 use super::test_scoped_type_methods::lower_test_scoped_type_methods;
 use super::type_method_monomorph::{
     MethodMonomorphLoweringCtx, MethodMonomorphLoweringWork,
     lower_type_method_monomorphized_instances,
 };
 use super::type_methods::{lower_module_type_methods, lower_top_level_type_methods};
+use super::vir_monomorph::{
+    build_generic_vir_storage, run_early_vir_monomorphize, run_vir_monomorphize,
+};
 use crate::LoweringEntityLookup;
+use crate::TypeArena;
 use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::type_translate::sweep_unmapped_type_ids;
-use crate::vir_lower::{lower_stmts, lower_test_body};
-use crate::{NodeMap, TypeArena};
-use vole_frontend::{Decl, Interner, Program};
+use vole_frontend::{Interner, Program};
 use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, Span};
+use vole_vir::implement_dispatch::VirImplementDispatch;
 use vole_vir::type_table::VirTypeTable;
-use vole_vir::{VirFunction, VirProgram, VirTest};
+use vole_vir::{VirFunction, VirProgram};
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
 
 pub struct LowerVirProgramArgs<'a, E>
 where
@@ -59,7 +78,7 @@ where
     pub names: &'a NameTable,
     pub entities: &'a E,
     pub type_arena: &'a TypeArena,
-    pub node_map: &'a NodeMap,
+    pub node_map: &'a crate::NodeMap,
     pub tests_virtual_modules: &'a FxHashMap<Span, ModuleId>,
     pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     pub module_id: ModuleId,
@@ -91,7 +110,7 @@ where
         type_arena,
         node_map,
         tests_virtual_modules,
-        mut module_programs,
+        module_programs,
         module_id,
         modules_with_errors,
         generic_vir_functions,
@@ -103,6 +122,185 @@ where
     // templates already use VirTypeIds from this table, so no merge/remap
     // is needed — concrete lowering continues interning into the same table.
     let mut type_table = vir_type_table;
+
+    // Phase M: module-only passes (cacheable across test file compilations).
+    //
+    // These passes depend only on imported modules and shared entity state.
+    // They do NOT touch the VirTypeTable, so they can run before function
+    // lowering without affecting type interning order.
+    let module_result = lower_module_vir(LowerModuleVirArgs {
+        entities,
+        type_arena,
+        module_programs,
+        implements,
+    });
+
+    // Phase F: file-specific passes (and type-table-dependent module passes).
+    lower_file_vir(LowerFileVirArgs {
+        program,
+        interner,
+        names,
+        entities,
+        type_arena,
+        node_map,
+        tests_virtual_modules,
+        module_programs: module_result.module_programs,
+        module_id,
+        modules_with_errors,
+        generic_vir_functions,
+        type_table: &mut type_table,
+        module_vir: module_result.output,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Module VIR output: all results from module-only (cacheable) passes
+// ---------------------------------------------------------------------------
+
+/// Output from module-only VIR lowering passes.
+///
+/// Contains VIR data produced by passes that only depend on imported modules
+/// and shared entity state (not on the specific file being compiled, and not
+/// on VirTypeTable ordering).  A future caching layer (vol-fe6d) can store
+/// and reuse `ModuleVirOutput` across test file compilations.
+///
+/// Passes that depend on VirTypeTable (global inits, module bindings, default
+/// inits, entity metadata, monomorph info) remain in the file phase to
+/// preserve exact type interning order.  They are logically module-only and
+/// will move here once the caching layer pre-populates the type table.
+pub struct ModuleVirOutput {
+    /// Implement-dispatch metadata from the implement registry.
+    pub implement_dispatch: VirImplementDispatch,
+    /// Per-module compile-time constant values.
+    pub module_constants: FxHashMap<(ModuleId, NameId), vole_identity::ConstantValue>,
+    /// Module type exports.
+    pub module_exports:
+        FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>,
+}
+
+// ---------------------------------------------------------------------------
+// Module VIR lowering args and result
+// ---------------------------------------------------------------------------
+
+/// Arguments for the module-only VIR lowering pass.
+pub struct LowerModuleVirArgs<'a, E>
+where
+    E: LoweringEntityLookup,
+{
+    pub entities: &'a E,
+    pub type_arena: &'a TypeArena,
+    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
+    pub implements: &'a ImplementRegistry,
+}
+
+/// Result of the module-only VIR lowering pass, including the module_programs
+/// that file passes still need.
+pub struct LowerModuleVirResult {
+    pub output: ModuleVirOutput,
+    /// Returned so that file passes (and mixed passes) can still use them.
+    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
+}
+
+// ---------------------------------------------------------------------------
+// File VIR lowering args
+// ---------------------------------------------------------------------------
+
+/// Arguments for the file-specific VIR lowering pass.
+pub struct LowerFileVirArgs<'a, E>
+where
+    E: LoweringEntityLookup,
+{
+    pub program: &'a Program,
+    pub interner: &'a mut Interner,
+    pub names: &'a NameTable,
+    pub entities: &'a E,
+    pub type_arena: &'a TypeArena,
+    pub node_map: &'a crate::NodeMap,
+    pub tests_virtual_modules: &'a FxHashMap<Span, ModuleId>,
+    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
+    pub module_id: ModuleId,
+    pub modules_with_errors: &'a HashSet<String>,
+    pub generic_vir_functions: Vec<(NameId, VirFunction)>,
+    pub type_table: &'a mut VirTypeTable,
+    pub module_vir: ModuleVirOutput,
+}
+
+// ---------------------------------------------------------------------------
+// Phase M: module-only passes
+// ---------------------------------------------------------------------------
+
+/// Run module-only VIR lowering passes.
+///
+/// These passes depend only on imported modules and shared entity state, not
+/// on the specific file being compiled.  Crucially, they do NOT use the
+/// VirTypeTable, so they can safely run before function lowering without
+/// affecting type interning order.
+///
+/// A future caching layer (vol-fe6d) can store and reuse `ModuleVirOutput`
+/// across test file compilations.  Type-table-dependent module passes
+/// (global inits, defaults, entity metadata, monomorph info) will move here
+/// once the cache pre-populates the type table.
+fn lower_module_vir<E>(args: LowerModuleVirArgs<'_, E>) -> LowerModuleVirResult
+where
+    E: LoweringEntityLookup,
+{
+    let LowerModuleVirArgs {
+        entities: _,
+        type_arena,
+        module_programs,
+        implements,
+    } = args;
+
+    // Build implement-dispatch metadata (reads ImplementRegistry only).
+    let implement_dispatch = build_implement_dispatch(implements);
+
+    // Collect module metadata: constants and exports (reads TypeArena only).
+    let (module_constants, module_exports) = collect_module_metadata(type_arena);
+
+    LowerModuleVirResult {
+        output: ModuleVirOutput {
+            implement_dispatch,
+            module_constants,
+            module_exports,
+        },
+        module_programs,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase F: file-specific passes (+ type-table-dependent module passes)
+// ---------------------------------------------------------------------------
+
+/// Run file-specific VIR lowering passes and assemble the final VirProgram.
+///
+/// Includes both file-specific passes (top-level functions, test bodies, etc.)
+/// and type-table-dependent module passes (module global inits, module
+/// defaults, entity metadata, monomorph info) that must run after function
+/// lowering to preserve type interning order.
+fn lower_file_vir<E>(args: LowerFileVirArgs<'_, E>) -> LowerVirProgramOutput
+where
+    E: LoweringEntityLookup,
+{
+    let LowerFileVirArgs {
+        program,
+        interner,
+        names,
+        entities,
+        type_arena,
+        node_map,
+        tests_virtual_modules,
+        mut module_programs,
+        module_id,
+        modules_with_errors,
+        generic_vir_functions,
+        type_table,
+        module_vir,
+    } = args;
+
+    // -----------------------------------------------------------------------
+    // Function lowering (file + module, original interleaved order)
+    // -----------------------------------------------------------------------
+
     let mut vir_functions = lower_top_level_functions(LowerTopLevelFunctionsArgs {
         program,
         interner,
@@ -111,7 +309,7 @@ where
         type_arena,
         node_map,
         module_id,
-        type_table: &mut type_table,
+        type_table,
     });
     lower_module_functions(LowerModuleFunctionsArgs {
         module_programs: &mut module_programs,
@@ -121,16 +319,19 @@ where
         node_map,
         modules_with_errors,
         vir_functions: &mut vir_functions,
-        type_table: &mut type_table,
+        type_table,
     });
 
-    let (generic_vir_functions, generic_vir_map) = build_generic_vir_storage(generic_vir_functions);
+    // -----------------------------------------------------------------------
+    // Monomorphization (mixed pass)
+    // -----------------------------------------------------------------------
 
+    let (generic_vir_functions, generic_vir_map) = build_generic_vir_storage(generic_vir_functions);
     let vir_handled_function_ids = run_early_vir_monomorphize(
         &mut vir_functions,
         &generic_vir_functions,
         &generic_vir_map,
-        &mut type_table,
+        type_table,
         entities,
         type_arena,
     );
@@ -153,9 +354,14 @@ where
         modules_with_errors,
         interner,
         vir_functions: &mut vir_functions,
-        type_table: &mut type_table,
+        type_table,
         vir_handled_function_ids: &vir_handled_function_ids,
     });
+
+    // -----------------------------------------------------------------------
+    // Type methods and implement-block methods (file + module)
+    // -----------------------------------------------------------------------
+
     lower_top_level_type_methods(
         program,
         interner,
@@ -166,7 +372,7 @@ where
         module_id,
         Some(&module_programs),
         &mut vir_functions,
-        &mut type_table,
+        type_table,
     );
     lower_module_type_methods(
         &mut module_programs,
@@ -176,7 +382,7 @@ where
         node_map,
         modules_with_errors,
         &mut vir_functions,
-        &mut type_table,
+        type_table,
     );
     lower_implement_block_methods(LowerImplementBlockMethodsArgs {
         program,
@@ -187,7 +393,7 @@ where
         node_map,
         module_id,
         vir_functions: &mut vir_functions,
-        type_table: &mut type_table,
+        type_table,
     });
     lower_module_implement_block_methods(LowerModuleImplementBlockMethodsArgs {
         module_programs: &mut module_programs,
@@ -197,8 +403,13 @@ where
         node_map,
         modules_with_errors,
         vir_functions: &mut vir_functions,
-        type_table: &mut type_table,
+        type_table,
     });
+
+    // -----------------------------------------------------------------------
+    // Test-scoped type methods and method monomorphization
+    // -----------------------------------------------------------------------
+
     lower_test_scoped_type_methods(
         program,
         interner,
@@ -210,7 +421,7 @@ where
         Some(&module_programs),
         module_id,
         &mut vir_functions,
-        &mut type_table,
+        type_table,
     );
     let method_monomorph_ctx = MethodMonomorphLoweringCtx {
         names,
@@ -226,31 +437,29 @@ where
         tests_virtual_modules,
         module_id,
         vir_functions: &mut vir_functions,
-        type_table: &mut type_table,
+        type_table,
     };
     lower_type_method_monomorphized_instances(&mut method_monomorph_work, &method_monomorph_ctx);
+
+    // -----------------------------------------------------------------------
+    // Lookup maps
+    // -----------------------------------------------------------------------
 
     let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
     let vir_function_map = build_vir_function_map(&vir_functions);
     let vir_method_map = build_vir_method_map(&vir_functions);
+
+    // -----------------------------------------------------------------------
+    // Test bodies, global inits, module bindings (file + module)
+    // -----------------------------------------------------------------------
+
     let vir_tests = lower_test_bodies(
-        program,
-        node_map,
-        interner,
-        type_arena,
-        entities,
-        names,
-        &mut type_table,
+        program, node_map, interner, type_arena, entities, names, type_table,
     );
     let vir_global_inits = lower_global_inits(
-        program,
-        interner,
-        node_map,
-        type_arena,
-        entities,
-        names,
-        &mut type_table,
+        program, interner, node_map, type_arena, entities, names, type_table,
     );
+    // Module global inits (type-table-dependent, logically module-only).
     let module_vir_global_inits = lower_module_global_inits(
         &mut module_programs,
         names,
@@ -258,24 +467,24 @@ where
         type_arena,
         entities,
         modules_with_errors,
-        &mut type_table,
+        type_table,
     );
-    let vir_module_bindings = lower_module_bindings(
-        program,
-        node_map,
-        type_arena,
-        names,
-        interner,
-        &mut type_table,
-    );
+    let vir_module_bindings =
+        lower_module_bindings(program, node_map, type_arena, names, interner, type_table);
+    // Module-level module bindings (type-table-dependent, logically module-only).
     let vir_module_module_bindings = lower_module_module_bindings(
         &mut module_programs,
         names,
         node_map,
         type_arena,
         modules_with_errors,
-        &mut type_table,
+        type_table,
     );
+
+    // -----------------------------------------------------------------------
+    // Default inits (file + module)
+    // -----------------------------------------------------------------------
+
     let mut vir_function_default_inits =
         lower_function_default_inits(LowerFunctionDefaultInitsArgs {
             program,
@@ -286,8 +495,9 @@ where
             entities,
             node_map,
             type_arena,
-            type_table: &mut type_table,
+            type_table,
         });
+    // Module function defaults (type-table-dependent, logically module-only).
     let module_vir_function_default_inits =
         lower_module_function_default_inits(LowerModuleFunctionDefaultInitsArgs {
             module_programs: &mut module_programs,
@@ -296,7 +506,7 @@ where
             node_map,
             type_arena,
             modules_with_errors,
-            type_table: &mut type_table,
+            type_table,
         });
     vir_function_default_inits.extend(module_vir_function_default_inits);
 
@@ -309,8 +519,9 @@ where
         entities,
         node_map,
         type_arena,
-        type_table: &mut type_table,
+        type_table,
     });
+    // Module method defaults (type-table-dependent, logically module-only).
     let module_vir_method_default_inits =
         lower_module_method_default_inits(LowerModuleMethodDefaultInitsArgs {
             module_programs: &mut module_programs,
@@ -319,10 +530,11 @@ where
             node_map,
             type_arena,
             modules_with_errors,
-            type_table: &mut type_table,
+            type_table,
         });
     vir_method_default_inits.extend(module_vir_method_default_inits);
 
+    // Lambda default inits (mixed pass).
     let vir_lambda_default_inits = lower_lambda_default_inits(LowerLambdaDefaultInitsArgs {
         program,
         interner,
@@ -334,8 +546,9 @@ where
         node_map,
         type_arena,
         modules_with_errors,
-        type_table: &mut type_table,
+        type_table,
     });
+
     let mut vir_field_default_inits = lower_field_default_inits(LowerFieldDefaultInitsArgs {
         program,
         interner,
@@ -345,8 +558,9 @@ where
         entities,
         node_map,
         type_arena,
-        type_table: &mut type_table,
+        type_table,
     });
+    // Module field defaults (type-table-dependent, logically module-only).
     let module_vir_field_default_inits =
         lower_module_field_default_inits(LowerModuleFieldDefaultInitsArgs {
             module_programs: &mut module_programs,
@@ -355,14 +569,21 @@ where
             node_map,
             type_arena,
             modules_with_errors,
-            type_table: &mut type_table,
+            type_table,
         });
     vir_field_default_inits.extend(module_vir_field_default_inits);
 
-    let monomorph_info = populate_monomorph_info(entities, type_arena, &mut type_table);
+    // -----------------------------------------------------------------------
+    // Entity metadata and monomorph info (type-table-dependent, logically
+    // module-only — will move to Phase M once caching pre-populates the
+    // type table)
+    // -----------------------------------------------------------------------
+
+    let monomorph_info = populate_monomorph_info(entities, type_arena, type_table);
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
     let mut entity_metadata =
-        build_entity_metadata(entities, type_arena, &mut type_table, interner, names);
+        build_entity_metadata(entities, type_arena, type_table, interner, names);
+    // Populate implement block entries (mixed pass: file + module portions).
     populate_implement_block_entries(PopulateImplementBlockEntriesArgs {
         program,
         interner,
@@ -374,17 +595,19 @@ where
         modules_with_errors,
         meta: &mut entity_metadata,
     });
-    let implement_dispatch = build_implement_dispatch(implements);
+
     // Collect module interners from module_programs for VirProgram.
     let module_interners: FxHashMap<String, Rc<Interner>> = module_programs
         .iter()
         .map(|(path, (_program, interner))| (path.clone(), Rc::clone(interner)))
         .collect();
-    // Populate module metadata for codegen (replaces arena().module_metadata
-    // and arena().unwrap_module lookups).
-    let (module_constants, module_exports) = collect_module_metadata(type_arena);
+
+    // -----------------------------------------------------------------------
+    // Assemble the final VirProgram
+    // -----------------------------------------------------------------------
+
     let mut vir_program = VirProgram {
-        type_table,
+        type_table: std::mem::take(type_table),
         functions: vir_functions,
         monomorph_map: vir_monomorph_map,
         function_map: vir_function_map,
@@ -401,11 +624,11 @@ where
         annotation_inits: vir_annotation_inits,
         module_bindings: vir_module_bindings,
         module_module_bindings: vir_module_module_bindings,
-        module_constants,
-        module_exports,
+        module_constants: module_vir.module_constants,
+        module_exports: module_vir.module_exports,
         vir_monomorph_base: usize::MAX,
         entity_metadata,
-        implement_dispatch,
+        implement_dispatch: module_vir.implement_dispatch,
         free_monomorphs: monomorph_info.free_monomorphs,
         free_monomorphs_by_key: monomorph_info.free_monomorphs_by_key,
         class_method_monomorphs: monomorph_info.class_method_monomorphs,
@@ -417,13 +640,15 @@ where
     run_vir_monomorphize(&mut vir_program);
 
     // Sweep all TypeIds in the arena and populate VirTypeId mappings for any
-    // that were not encountered during on-demand lowering.  This catches the
-    // monomorphized types created by sema's TypeArena::substitute() during
-    // Pass 2 generic analysis (~1,900 types in typical programs).
+    // that were not encountered during on-demand lowering.
     sweep_unmapped_type_ids(&mut vir_program.type_table, type_arena);
 
     LowerVirProgramOutput { vir_program }
 }
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 
 /// Collect module metadata (constants and exports) from the type arena for
 /// codegen to use without direct arena access.
@@ -435,14 +660,12 @@ fn collect_module_metadata(type_arena: &TypeArena) -> (ModuleConstants, ModuleEx
     let mut constants = FxHashMap::default();
     let mut exports = FxHashMap::default();
 
-    // Collect per-module constants from arena's module_metadata.
     for (module_id, meta) in type_arena.all_module_metadata() {
         for (name_id, value) in &meta.constants {
             constants.insert((*module_id, *name_id), value.clone());
         }
     }
 
-    // Collect module type exports from all interned Module types.
     for (type_id, module_info) in type_arena.all_module_types() {
         let export_vec: Vec<(NameId, vole_identity::TypeId)> =
             module_info.exports.iter().map(|&(n, t)| (n, t)).collect();
@@ -452,11 +675,6 @@ fn collect_module_metadata(type_arena: &TypeArena) -> (ModuleConstants, ModuleEx
     (constants, exports)
 }
 
-/// Build a lookup map from monomorphized mangled NameId to VirFunction index.
-///
-/// Only includes VIR functions that have a `mangled_name_id` set (i.e.,
-/// monomorphized instances).  Non-generic functions are not indexed here
-/// because they are compiled via the normal (non-monomorph) path.
 fn build_vir_monomorph_map(vir_functions: &[VirFunction]) -> FxHashMap<NameId, usize> {
     let mut map = FxHashMap::default();
     for (idx, vf) in vir_functions.iter().enumerate() {
@@ -467,10 +685,6 @@ fn build_vir_monomorph_map(vir_functions: &[VirFunction]) -> FxHashMap<NameId, u
     map
 }
 
-/// Build a lookup map from semantic FunctionId to VirFunction index.
-///
-/// Only includes non-monomorphized functions (those without a `mangled_name_id`).
-/// Monomorphized instances are looked up via `vir_monomorph_map` instead.
 fn build_vir_function_map(vir_functions: &[VirFunction]) -> FxHashMap<FunctionId, usize> {
     let mut map = FxHashMap::default();
     for (idx, vf) in vir_functions.iter().enumerate() {
@@ -481,10 +695,6 @@ fn build_vir_function_map(vir_functions: &[VirFunction]) -> FxHashMap<FunctionId
     map
 }
 
-/// Build a lookup map from semantic MethodId to VirFunction index.
-///
-/// Only includes VIR functions that have a `method_id` set (class/struct
-/// methods and static methods).
 fn build_vir_method_map(vir_functions: &[VirFunction]) -> FxHashMap<MethodId, usize> {
     let mut map = FxHashMap::default();
     for (idx, vf) in vir_functions.iter().enumerate() {
@@ -495,302 +705,10 @@ fn build_vir_method_map(vir_functions: &[VirFunction]) -> FxHashMap<MethodId, us
     map
 }
 
-/// Lower all test function bodies in the program to VIR.
-///
-/// Walks the program's `Decl::Tests` blocks (including nested ones) and
-/// lowers each `TestCase.body` to a `VirBody`.  Returns a map keyed by
-/// the `TestCase`'s `Span` for O(1) lookup during test compilation.
-fn lower_test_bodies(
-    program: &Program,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-    type_arena: &TypeArena,
-    entities: &impl LoweringEntityLookup,
-    names: &NameTable,
-    type_table: &mut VirTypeTable,
-) -> Vec<VirTest> {
-    let mut tests = Vec::new();
-    for decl in &program.declarations {
-        if let Decl::Tests(tests_decl) = decl {
-            lower_tests_decl_bodies(
-                tests_decl, node_map, interner, type_arena, entities, names, &mut tests, type_table,
-            );
-        }
-    }
-    tests
-}
-
-/// Recursively lower test bodies from a single `TestsDecl`.
-#[allow(clippy::too_many_arguments)]
-fn lower_tests_decl_bodies(
-    tests_decl: &vole_frontend::ast::TestsDecl,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-    type_arena: &TypeArena,
-    entities: &impl LoweringEntityLookup,
-    names: &NameTable,
-    tests: &mut Vec<VirTest>,
-    type_table: &mut VirTypeTable,
-) {
-    let scoped_let_stmts: Vec<vole_frontend::Stmt> = tests_decl
-        .decls
-        .iter()
-        .filter_map(|decl| match decl {
-            Decl::Let(let_stmt) => Some(vole_frontend::Stmt::Let(let_stmt.clone())),
-            Decl::LetTuple(let_tuple) => Some(vole_frontend::Stmt::LetTuple(let_tuple.clone())),
-            _ => None,
-        })
-        .collect();
-    let scoped_let_vir_stmts = if scoped_let_stmts.is_empty() {
-        Vec::new()
-    } else {
-        let mut ctx = crate::vir_lower::LoweringCtx {
-            node_map,
-            interner,
-            type_arena,
-            entities: entities.as_entity_registry(),
-            name_table: names,
-            type_table,
-            generic: false,
-            func_return_type: vole_identity::TypeId::VOID,
-        };
-        lower_stmts(&scoped_let_stmts, &mut ctx).stmts
-    };
-
-    for test in &tests_decl.tests {
-        let mut vir_body = lower_test_body(
-            &test.body,
-            node_map,
-            interner,
-            type_arena,
-            entities.as_entity_registry(),
-            names,
-            type_table,
-        );
-        if !scoped_let_vir_stmts.is_empty() {
-            vir_body
-                .stmts
-                .splice(0..0, scoped_let_vir_stmts.iter().cloned());
-        }
-        tests.push(VirTest {
-            name: test.name.clone(),
-            body: vir_body,
-            span: test.span,
-        });
-    }
-    // Recurse into nested tests blocks
-    for decl in &tests_decl.decls {
-        if let Decl::Tests(nested) = decl {
-            lower_tests_decl_bodies(
-                nested, node_map, interner, type_arena, entities, names, tests, type_table,
-            );
-        }
-    }
-}
-
-/// Build generic VIR storage: index generic templates by NameId.
-///
-/// With the shared VirTypeTable, generic templates already use the same
-/// VirTypeIds as the program's main table — no remapping needed.
-fn build_generic_vir_storage(
-    pairs: Vec<(NameId, VirFunction)>,
-) -> (Vec<VirFunction>, FxHashMap<NameId, usize>) {
-    let mut map = FxHashMap::default();
-    let mut functions = Vec::with_capacity(pairs.len());
-    for (name_id, vir) in pairs {
-        let idx = functions.len();
-        map.insert(name_id, idx);
-        functions.push(vir);
-    }
-    (functions, map)
-}
-
-/// Run VIR monomorphization for free-function generics.
-///
-/// Converts sema monomorph cache entries into VIR `MonomorphInstance` seeds,
-/// builds a temporary `VirProgram`, runs VIR monomorphization with those
-/// seeds, and merges the produced concrete functions back into the working
-/// `vir_functions` vec and `type_table`.
-///
-/// Returns the set of `FunctionId`s for generic functions that were
-/// successfully monomorphized -- `lower_monomorphized_instances` should skip
-/// all sema cache entries whose `original_name` resolves to one of these.
-#[allow(clippy::too_many_arguments)]
-fn run_early_vir_monomorphize(
-    vir_functions: &mut Vec<VirFunction>,
-    generic_vir_functions: &[VirFunction],
-    generic_vir_map: &FxHashMap<NameId, usize>,
-    type_table: &mut VirTypeTable,
-    entities: &impl LoweringEntityLookup,
-    type_arena: &TypeArena,
-) -> HashSet<FunctionId> {
-    use crate::vir_lower::type_translate::translate_type_id;
-
-    let mut handled = HashSet::new();
-
-    // Build seeds from the sema monomorph cache.
-    let mut seeds: Vec<vole_vir::MonomorphInstance> = Vec::new();
-    let mut seed_mangled_names: FxHashMap<vole_vir::MonomorphInstance, NameId> =
-        FxHashMap::default();
-    for sema_instance in entities.monomorph_instances() {
-        let Some(func_id) = entities.function_by_name(sema_instance.original_name) else {
-            continue;
-        };
-        // Find the generic VIR template to get the type param order.
-        let template = generic_vir_functions.iter().find(|f| f.id == func_id);
-        let Some(template) = template else {
-            // No generic VIR template — can't VIR-monomorphize this one.
-            continue;
-        };
-
-        // Convert sema substitutions to ordered VIR type args.
-        let mut type_args = Vec::with_capacity(template.type_params.len());
-        let mut all_resolved = true;
-        for &param_name in &template.type_params {
-            if let Some(&sema_ty) = sema_instance.substitutions.get(&param_name) {
-                let vir_ty = translate_type_id(type_table, sema_ty, type_arena);
-                type_args.push(vir_ty);
-            } else {
-                // Substitution missing for this param — skip this instance.
-                all_resolved = false;
-                break;
-            }
-        }
-        if !all_resolved {
-            continue;
-        }
-
-        let seed = vole_vir::MonomorphInstance {
-            function_id: func_id,
-            type_args,
-        };
-        seed_mangled_names.insert(seed.clone(), sema_instance.mangled_name);
-        seeds.push(seed);
-    }
-
-    if seeds.is_empty() {
-        return handled;
-    }
-
-    // Build a temporary VirProgram for VIR monomorphization.
-    let mut temp_program = VirProgram {
-        type_table: std::mem::take(type_table),
-        functions: std::mem::take(vir_functions),
-        monomorph_map: FxHashMap::default(),
-        function_map: FxHashMap::default(),
-        method_map: FxHashMap::default(),
-        generic_functions: generic_vir_functions.to_vec(),
-        generic_map: generic_vir_map.clone(),
-        tests: Vec::new(),
-        global_inits: FxHashMap::default(),
-        module_global_inits: FxHashMap::default(),
-        function_default_inits: FxHashMap::default(),
-        method_default_inits: FxHashMap::default(),
-        lambda_default_inits: FxHashMap::default(),
-        field_default_inits: FxHashMap::default(),
-        annotation_inits: FxHashMap::default(),
-        module_bindings: FxHashMap::default(),
-        module_module_bindings: FxHashMap::default(),
-        module_constants: FxHashMap::default(),
-        module_exports: FxHashMap::default(),
-        vir_monomorph_base: usize::MAX,
-        entity_metadata: vole_vir::VirEntityMetadata::new(),
-        implement_dispatch: vole_vir::VirImplementDispatch::new(),
-        free_monomorphs: FxHashMap::default(),
-        free_monomorphs_by_key: FxHashMap::default(),
-        class_method_monomorphs: FxHashMap::default(),
-        static_method_monomorphs: FxHashMap::default(),
-        module_interners: FxHashMap::default(),
-        interner: Rc::new(Interner::new()),
-        name_table: Rc::new(NameTable::new()),
-    };
-
-    let mut result = vole_vir::monomorphize_with_seeds(&mut temp_program, seeds);
-
-    for (instance, &rel_idx) in &result.instance_map {
-        if let Some(&mangled_name_id) = seed_mangled_names.get(instance)
-            && let Some(func) = result.functions.get_mut(rel_idx)
-        {
-            func.mangled_name_id = Some(mangled_name_id);
-        }
-    }
-
-    if !result.functions.is_empty() {
-        // Record which generic FunctionIds were handled.
-        for instance in result.instance_map.keys() {
-            handled.insert(instance.function_id);
-        }
-
-        // Compute the base index where new functions will be appended.
-        let base_index = temp_program.functions.len();
-        temp_program.vir_monomorph_base = base_index;
-
-        // Build the absolute instance index (base + relative offset).
-        let abs_index: vole_vir::InstanceIndex = result
-            .instance_map
-            .into_iter()
-            .map(|(instance, rel_idx)| (instance, base_index + rel_idx))
-            .collect();
-
-        // Append the monomorphized functions.
-        temp_program.functions.extend(result.functions);
-
-        // Resolve GenericCall -> VirDirect in all concrete functions.
-        vole_vir::resolve_generic_calls(&mut temp_program.functions, &abs_index);
-    }
-
-    // Move the (possibly updated) type_table and functions back.
-    *type_table = temp_program.type_table;
-    *vir_functions = temp_program.functions;
-
-    handled
-}
-
-/// Run the VIR monomorphization pass: discover generic calls in concrete
-/// functions, instantiate generic templates, and resolve call targets.
-///
-/// This is the final VIR monomorph pass that runs on the fully assembled
-/// VirProgram.  It catches any `GenericCall` sites in concrete functions
-/// (including those produced by the early VIR monomorph pass) and resolves
-/// them to `VirDirect` call targets.
-fn run_vir_monomorphize(program: &mut VirProgram) {
-    let result = vole_vir::monomorphize(program);
-    if result.functions.is_empty() {
-        return;
-    }
-
-    // Compute the base index where new functions will be appended.
-    let base_index = program.functions.len();
-    // Preserve the earliest VIR monomorph base if an earlier pass already
-    // appended VIR monomorphized functions (e.g. early seeded monomorphize).
-    if program.vir_monomorph_base == usize::MAX {
-        program.vir_monomorph_base = base_index;
-    }
-
-    // Build the absolute instance index (base + relative offset).
-    let abs_index: vole_vir::InstanceIndex = result
-        .instance_map
-        .into_iter()
-        .map(|(instance, rel_idx)| (instance, base_index + rel_idx))
-        .collect();
-
-    // Append the monomorphized functions to the program.
-    program.functions.extend(result.functions);
-
-    // Resolve GenericCall -> VirDirect in all concrete functions.
-    vole_vir::resolve_generic_calls(&mut program.functions, &abs_index);
-}
-
 /// Build VIR implement-dispatch metadata from sema's `ImplementRegistry`.
-///
-/// Converts all registry entries into VIR-native types, populating the
-/// four lookup maps (external_funcs, generic_externals,
-/// generic_external_methods, methods).
-fn build_implement_dispatch(registry: &ImplementRegistry) -> vole_vir::VirImplementDispatch {
+fn build_implement_dispatch(registry: &ImplementRegistry) -> VirImplementDispatch {
     use crate::implement_registry::ImplTypeId;
-    use vole_vir::{
-        VirExternalFuncInfo, VirFuncSignature, VirImplementDispatch, VirMethodImplInfo,
-    };
+    use vole_vir::{VirExternalFuncInfo, VirFuncSignature, VirMethodImplInfo};
 
     let mut dispatch = VirImplementDispatch::new();
 
@@ -838,7 +756,6 @@ fn build_implement_dispatch(registry: &ImplementRegistry) -> vole_vir::VirImplem
     dispatch
 }
 
-/// Convert a sema `GenericExternalInfo` to VIR.
 fn convert_generic_info(
     info: &crate::implement_registry::GenericExternalInfo,
 ) -> vole_vir::VirGenericExternalInfo {
