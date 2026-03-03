@@ -4,7 +4,7 @@
 
 use cranelift::prelude::*;
 
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 
 use super::super::context::Cg;
 

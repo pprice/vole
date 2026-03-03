@@ -15,7 +15,7 @@ use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{TypeId, VirTypeId};
 use vole_runtime::value::RuntimeTypeId;
 

@@ -14,7 +14,7 @@ use cranelift_codegen::ir::{FuncRef, Function};
 use cranelift_module::Module;
 use rustc_hash::FxHashMap;
 
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{TypeId, VirTypeId};
 use vole_vir::VirBody;
 

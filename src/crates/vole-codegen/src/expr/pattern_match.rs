@@ -9,8 +9,8 @@ use rustc_hash::FxHashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag};
 
-use vole_frontend::Symbol;
 use vole_frontend::ast::RecordFieldPattern;
+use vole_identity::Symbol;
 use vole_identity::{IsCheckResult, TypeId, VirIsCheckResult, VirTypeId};
 
 use super::super::context::Cg;

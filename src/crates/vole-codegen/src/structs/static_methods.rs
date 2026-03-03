@@ -6,7 +6,7 @@ use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{
     MethodId, NameId, NodeId, StaticMethodMonomorphKey, TypeDefId, TypeId, VirTypeId,
 };

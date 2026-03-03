@@ -6,7 +6,7 @@ use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::AnalyzedProgram;
-use vole_frontend::Interner;
+use vole_identity::Interner;
 use vole_identity::{ModuleId, NameId, TypeId, VirTypeId};
 use vole_runtime::native_registry::NativeType;
 

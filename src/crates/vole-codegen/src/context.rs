@@ -17,7 +17,7 @@ use crate::callable_registry::CallableBackendPreference;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, TypeId, UnionStorageKind, VirTypeId,
 };
@@ -1695,7 +1695,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get the interner for symbol resolution
     #[inline]
-    pub fn interner(&self) -> &'ctx vole_frontend::Interner {
+    pub fn interner(&self) -> &'ctx vole_identity::Interner {
         self.env.interner
     }
 
@@ -2347,7 +2347,7 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.env.analyzed
     }
 
-    fn interner(&self) -> &vole_frontend::Interner {
+    fn interner(&self) -> &vole_identity::Interner {
         self.env.interner
     }
 

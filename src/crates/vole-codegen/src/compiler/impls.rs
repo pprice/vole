@@ -4,7 +4,7 @@
 //! - `impl_dispatch` (class/struct method compilation)
 //! - `impl_monomorph` (implement block registration and compilation)
 
-use vole_frontend::Interner;
+use vole_identity::Interner;
 use vole_identity::ModuleId;
 
 /// Module-specific compilation context passed to method compilation helpers.

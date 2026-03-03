@@ -11,8 +11,8 @@ use crate::types::{
     load_fallible_tag,
 };
 
-use vole_frontend::Symbol;
 use vole_frontend::ast::RecordFieldPattern;
+use vole_identity::Symbol;
 use vole_identity::{TypeId, VirTypeId};
 
 use super::super::context::Cg;

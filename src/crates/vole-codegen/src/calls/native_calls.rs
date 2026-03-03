@@ -6,7 +6,7 @@
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{ModuleId, NodeId, TypeId};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 

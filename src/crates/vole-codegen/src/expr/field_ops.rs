@@ -14,7 +14,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::helpers::{convert_to_i64_for_storage, store_field_value};
 use crate::types::{CompiledValue, module_name_id};
 
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{ConstantValue, TypeId, VirTypeId};
 use vole_vir::VirExpr;
 use vole_vir::expr::FieldStorage;

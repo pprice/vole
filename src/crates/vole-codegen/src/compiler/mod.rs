@@ -60,7 +60,7 @@ use crate::types::CodegenState;
 use crate::AnalyzedProgram;
 use crate::types::PendingMonomorph;
 use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeKey};
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::VirTypeId;
 use vole_identity::{ModuleId, NameId, TypeDefId, TypeId};
 use vole_runtime::NativeRegistry;

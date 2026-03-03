@@ -12,7 +12,7 @@ use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{
     ClassMethodMonomorphKey, MethodId, NameId, NamerLookup, NodeId, TypeId, VirTypeId,
 };

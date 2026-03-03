@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
 
-use vole_frontend::Interner;
+use vole_identity::Interner;
 use vole_identity::NameId;
 use vole_runtime::NativeRegistry;
 

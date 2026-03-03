@@ -18,7 +18,7 @@ use super::super::context::Cg;
 
 pub(super) struct VirOptionalMethodCallArgs<'a> {
     pub object_expr: &'a VirExpr,
-    pub method: vole_frontend::Symbol,
+    pub method: vole_identity::Symbol,
     pub method_args: &'a [vole_vir::VirRef],
     pub dispatch: &'a VirMethodDispatchMeta,
     pub call_node_id: NodeId,
@@ -31,7 +31,7 @@ impl Cg<'_, '_, '_> {
     fn optional_chain_field_access(
         &mut self,
         inner: CompiledValue,
-        field: vole_frontend::Symbol,
+        field: vole_identity::Symbol,
     ) -> CodegenResult<CompiledValue> {
         let field_name = self.interner().resolve(field);
         let (slot, field_type_id) = self.vir_field_slot_and_type(inner.type_id, field_name)?;
@@ -279,7 +279,7 @@ impl Cg<'_, '_, '_> {
     pub(super) fn compile_vir_optional_chain(
         &mut self,
         object_expr: &VirExpr,
-        field: vole_frontend::Symbol,
+        field: vole_identity::Symbol,
         vir_inner_type_id: VirTypeId,
         vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
@@ -420,7 +420,7 @@ impl Cg<'_, '_, '_> {
     fn vir_optional_chain_method_call(
         &mut self,
         inner: CompiledValue,
-        method: vole_frontend::Symbol,
+        method: vole_identity::Symbol,
         method_args: &[vole_vir::VirRef],
         dispatch: &VirMethodDispatchMeta,
         call_node_id: NodeId,

@@ -18,7 +18,7 @@ use cranelift_module::Module;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::methods::ArgSource;
 
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{NameId, NodeId, TypeId};
 
 use super::context::Cg;

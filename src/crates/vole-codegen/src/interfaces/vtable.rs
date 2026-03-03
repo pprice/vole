@@ -13,7 +13,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use crate::types::{CompiledValue, MethodInfo, method_name_id_by_str, type_metadata_by_name_id};
 use crate::union_layout;
-use vole_frontend::Symbol;
+use vole_identity::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId, TypeId, VirTypeId};
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
