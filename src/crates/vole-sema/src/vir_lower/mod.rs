@@ -66,20 +66,12 @@ impl LoweringCtx<'_> {
         translate_type_id(self.type_table, type_id, self.type_arena)
     }
 
-    /// Compatibility `VirTypeId` for mixed migration fields.
+    /// Translate a `TypeId` to a `VirTypeId` for VIR node annotations.
     ///
-    /// Prefer a true translated VIR ID when available; when translation yields
-    /// `UNKNOWN` for a non-unknown sema type (for types not represented in
-    /// `VirTypeTable` yet), preserve the raw sema ID with a high-bit flag
-    /// so legacy bridges can recover the original `TypeId` while keeping the
-    /// VirTypeId namespace separate from real table indices.
+    /// Returns `VirTypeId::UNKNOWN` for sema-internal types (Module,
+    /// Placeholder, Invalid) that have no VirTypeTable representation.
     pub fn compat_ty(&mut self, type_id: TypeId) -> VirTypeId {
-        let vir_ty = self.translate(type_id);
-        if vir_ty == VirTypeId::UNKNOWN && type_id != TypeId::UNKNOWN {
-            VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG)
-        } else {
-            vir_ty
-        }
+        self.translate(type_id)
     }
 
     // -- Tolerant NodeMap query helpers -------------------------------------
@@ -188,7 +180,14 @@ impl LoweringCtx<'_> {
                 });
         }
 
-        // Module, interface, or other type — codegen handles separately.
+        // Module types carry the ModuleId for codegen dispatch.
+        if let crate::SemaType::Module(interned) = self.type_arena.get(object_type) {
+            return FieldStorage::Module {
+                module_id: interned.module_id,
+            };
+        }
+
+        // Interface or other type — codegen handles separately.
         FieldStorage::ByName
     }
 

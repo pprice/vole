@@ -51,6 +51,11 @@ pub struct FunctionCompileConfig<'a> {
     /// True when compiling an Iterable default method body.
     /// Affects RC lifecycle for closure parameters passed to pipeline/terminal methods.
     pub in_iterable_default_body: bool,
+    /// Concrete VirTypeId for `Self` in interface default method bodies.
+    ///
+    /// During VIR lowering, `Self` (Placeholder) maps to `VirTypeId::UNKNOWN`.
+    /// When set, `try_substitute_type_v` replaces UNKNOWN with this type.
+    pub self_vir_type: Option<VirTypeId>,
 }
 
 impl<'a> FunctionCompileConfig<'a> {
@@ -68,6 +73,7 @@ impl<'a> FunctionCompileConfig<'a> {
             skip_block_params: 0,
             default_return: DefaultReturn::Empty,
             in_iterable_default_body: false,
+            self_vir_type: None,
         }
     }
 
@@ -80,6 +86,12 @@ impl<'a> FunctionCompileConfig<'a> {
     /// Mark this as an Iterable default method body compilation.
     pub fn with_iterable_default_body(mut self) -> Self {
         self.in_iterable_default_body = true;
+        self
+    }
+
+    /// Set the concrete Self type for interface default method bodies.
+    pub fn with_self_vir_type(mut self, self_vir_ty: VirTypeId) -> Self {
+        self.self_vir_type = Some(self_vir_ty);
         self
     }
 
@@ -98,6 +110,7 @@ impl<'a> FunctionCompileConfig<'a> {
             skip_block_params: 0,
             default_return: DefaultReturn::Empty,
             in_iterable_default_body: false,
+            self_vir_type: None,
         }
     }
 
@@ -126,6 +139,7 @@ impl<'a> FunctionCompileConfig<'a> {
             skip_block_params: 1, // Skip the closure pointer
             default_return: DefaultReturn::Zero,
             in_iterable_default_body: false,
+            self_vir_type: None,
         }
     }
 }
@@ -522,6 +536,9 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
 
     if config.in_iterable_default_body {
         cg = cg.with_iterable_default_body();
+    }
+    if let Some(self_vir_ty) = config.self_vir_type {
+        cg = cg.with_self_vir_type(self_vir_ty);
     }
 
     compile_vir_body_with_cg(&mut cg, vir_body, config.default_return)?;

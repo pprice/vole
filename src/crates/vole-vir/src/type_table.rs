@@ -797,6 +797,28 @@ impl VirTypeTable {
     pub fn lookup_vir_type_id(&self, vir_type_id: VirTypeId) -> Option<TypeId> {
         self.vir_to_type_id.get(&vir_type_id).copied()
     }
+
+    /// Resolve a `VirTypeId` to its sema `TypeId`.
+    ///
+    /// First consults the reverse lookup table, then falls back to the
+    /// builtin identity mapping for well-known types (raw index < FIRST_DYNAMIC).
+    /// Returns `TypeId::UNKNOWN` if no mapping exists.
+    ///
+    /// This replaces the old `lookup_vir_type_id(v).unwrap_or_else(|| v.to_type_id_lossy())`
+    /// pattern without requiring compat-encoded VirTypeIds.
+    #[inline]
+    pub fn vir_to_type_id(&self, vir_ty: VirTypeId) -> TypeId {
+        if let Some(tid) = self.vir_to_type_id.get(&vir_ty).copied() {
+            return tid;
+        }
+        // Builtin types (I64, F64, BOOL, etc.) share raw indices with TypeId.
+        let raw = vir_ty.raw();
+        if raw < TypeId::FIRST_DYNAMIC {
+            TypeId::from_raw(raw)
+        } else {
+            TypeId::UNKNOWN
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

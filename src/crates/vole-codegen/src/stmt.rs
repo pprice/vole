@@ -255,10 +255,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(usize, Value, TypeId)> {
         let resolved_value_type_id = {
             let v = self.try_substitute_type_v(value.type_id);
-            let table = self.vir_type_table();
-            table
-                .lookup_vir_type_id(v)
-                .unwrap_or_else(|| v.to_type_id_lossy())
+            self.vir_type_table().vir_to_type_id(v)
         };
 
         // Direct type match
@@ -855,12 +852,7 @@ impl Cg<'_, '_, '_> {
         if it.next().is_some() {
             None
         } else {
-            let table = self.vir_type_table();
-            Some(
-                table
-                    .lookup_vir_type_id(first)
-                    .unwrap_or_else(|| first.to_type_id_lossy()),
-            )
+            Some(self.vir_type_table().vir_to_type_id(first))
         }
     }
 
@@ -1206,13 +1198,7 @@ impl Cg<'_, '_, '_> {
             self.vir_let_declared_type_v(value_expr, binding_vir, declared_vir_type);
 
         let init = if let Some(declared_vir) = declared_vir_opt {
-            if declared_vir.is_compat() {
-                // Compat-encoded VirTypeId: bridge through TypeId to avoid
-                // VirTypeTable index panic.
-                self.compile_vir_expr_with_expected_type(value_expr, declared_vir.compat_type_id())?
-            } else {
-                self.compile_vir_expr_with_expected_type_v(value_expr, declared_vir)?
-            }
+            self.compile_vir_expr_with_expected_type_v(value_expr, declared_vir)?
         } else {
             self.compile_vir_expr(value_expr)?
         };

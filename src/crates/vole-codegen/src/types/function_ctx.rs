@@ -81,9 +81,7 @@ impl<'a> FunctionCtx<'a> {
             let sema_subs: FxHashMap<NameId, TypeId> = vir_subs
                 .iter()
                 .map(|(&name, &vir_ty)| {
-                    let tid = vir_table
-                        .lookup_vir_type_id(vir_ty)
-                        .unwrap_or_else(|| vir_ty.to_type_id_lossy());
+                    let tid = vir_table.vir_to_type_id(vir_ty);
                     (name, tid)
                 })
                 .collect();

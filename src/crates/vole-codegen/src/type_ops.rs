@@ -60,21 +60,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// VIR-native substitution: try to substitute a `VirTypeId`, returning
     /// the original if no substitution applies or the result is not interned.
     ///
-    /// For compat-encoded VirTypeIds (raw TypeId encoding), falls back to the
-    /// TypeId-based substitution path and re-maps the result to VirTypeId.
+    /// Also substitutes `VirTypeId::UNKNOWN` with `self_vir_type` when set
+    /// (interface default method bodies where `Self` lowered to UNKNOWN).
     pub fn try_substitute_type_v(&self, vir_ty: VirTypeId) -> VirTypeId {
-        if let Some(substitutions) = self.substitutions {
-            if vir_ty.is_compat() {
-                // Compat-encoded: round-trip through TypeId substitution,
-                // then re-map to VirTypeId (with compat fallback for unmapped types).
-                let sema_ty = vir_ty.compat_type_id();
-                let substituted = self.try_substitute_type(sema_ty);
-                self.vir_lookup_or_compat(substituted)
-            } else {
-                self.vir_type_table()
-                    .substitute_vir_ids(vir_ty, substitutions)
-                    .unwrap_or(vir_ty)
+        // Self placeholder: UNKNOWN → concrete self type in default method bodies.
+        if vir_ty == VirTypeId::UNKNOWN
+            && let Some(self_ty) = self.self_vir_type {
+                return self_ty;
             }
+        if let Some(substitutions) = self.substitutions {
+            self.vir_type_table()
+                .substitute_vir_ids(vir_ty, substitutions)
+                .unwrap_or(vir_ty)
         } else {
             vir_ty
         }
@@ -89,9 +86,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a `VirTypeId` to a Cranelift type via the VIR type table.
     pub fn cranelift_type_v(&self, vir_ty: VirTypeId) -> Type {
-        if vir_ty.is_compat() {
-            return self.cranelift_type(vir_ty.compat_type_id());
-        }
         self.vir_query_type_to_cranelift_v(vir_ty)
     }
 
@@ -197,10 +191,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         use vole_vir::types::VirType;
 
         let table = self.vir_type_table();
-        if !vir_ty.is_compat()
-            && vir_ty != VirTypeId::UNKNOWN
-            && (vir_ty.raw() as usize) < table.len()
-        {
+        if vir_ty != VirTypeId::UNKNOWN && (vir_ty.raw() as usize) < table.len() {
             match table.get(vir_ty) {
                 // Optional<T> always has nil at tag 1 by VIR convention
                 VirType::Optional { .. } => return Some(1),
@@ -211,11 +202,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
 
-        // Fallback to sema TypeId path (reverse lookup, no arena)
-        let sema_ty = self
-            .vir_type_table()
-            .lookup_vir_type_id(vir_ty)
-            .unwrap_or_else(|| vir_ty.to_type_id_lossy());
+        // Fallback to sema TypeId path (reverse lookup)
+        let sema_ty = self.vir_type_table().vir_to_type_id(vir_ty);
         self.find_nil_variant(sema_ty)
     }
 

@@ -983,6 +983,7 @@ impl<'a> VirPrinter<'a> {
         match storage {
             FieldStorage::Direct { slot } => w!(out, "@s{}", slot),
             FieldStorage::Heap { slot } => w!(out, "#h{}", slot),
+            FieldStorage::Module { module_id } => w!(out, "@mod{}", module_id.index()),
             FieldStorage::ByName => {} // no suffix
         }
     }

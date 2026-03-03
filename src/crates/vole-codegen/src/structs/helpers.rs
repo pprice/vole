@@ -141,9 +141,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
             } else {
                 base_vir
             };
-            let field_type_id = vir_table
-                .lookup_vir_type_id(field_vir)
-                .unwrap_or_else(|| field_vir.to_type_id_lossy());
+            let field_type_id = vir_table.vir_to_type_id(field_vir);
             // For structs, use the original sema slot (they don't go through instance storage)
             let slot = if is_class { physical_slot } else { idx };
             return Ok((slot, field_type_id));

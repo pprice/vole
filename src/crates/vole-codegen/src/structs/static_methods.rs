@@ -60,16 +60,12 @@ impl Cg<'_, '_, '_> {
                     .substituted_return_type
                     .map(|ty| {
                         let v = self.try_substitute_type_v(ty);
-                        table
-                            .lookup_vir_type_id(v)
-                            .unwrap_or_else(|| v.to_type_id_lossy())
+                        table.vir_to_type_id(v)
                     })
                     .or_else(|| {
                         dispatch.resolved_method.as_ref().map(|resolved| {
                             let v = self.try_substitute_type_v(resolved.return_type_id());
-                            table
-                                .lookup_vir_type_id(v)
-                                .unwrap_or_else(|| v.to_type_id_lossy())
+                            table.vir_to_type_id(v)
                         })
                     })
             })
@@ -552,9 +548,7 @@ impl Cg<'_, '_, '_> {
             let vir = self.vir_lookup(ret_ty);
             let elem_vir = self.vir_query_unwrap_array_v(vir)?;
             let table = self.vir_type_table();
-            let elem_ty = table
-                .lookup_vir_type_id(elem_vir)
-                .unwrap_or_else(|| elem_vir.to_type_id_lossy());
+            let elem_ty = table.vir_to_type_id(elem_vir);
             Some((ret_ty, elem_ty))
         };
         let hint_array_elem = return_type_hint.and_then(&unwrap_array_sema);

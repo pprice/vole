@@ -170,9 +170,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let is_value_interface = self.vir_query_is_interface_v(resolved_value_vir);
         let is_target_union = self.vir_query_is_union_v(resolved_target_vir);
         let is_value_union = self.vir_query_is_union_v(resolved_value_vir);
-        // Safe: callers use to_vir_type, which produces compat-encoded
-        // VirTypeIds for unmapped types instead of VirTypeId::UNKNOWN. Only
-        // genuinely unknown targets will have VirTypeId::UNKNOWN here.
         let is_target_unknown = self.vir_query_is_unknown_v(resolved_target_vir);
         let is_value_unknown = self.vir_query_is_unknown_v(resolved_value_vir);
 

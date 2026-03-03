@@ -209,6 +209,12 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// When false (regular user code), closure params are borrowed — the CALLER retains
     /// ownership and will dec_ref them. Pipeline methods must rc_inc to get their own ref.
     pub in_iterable_default_body: bool,
+    /// Concrete VirTypeId for `Self` in interface default method bodies.
+    ///
+    /// During VIR lowering, `Self` (Placeholder) maps to `VirTypeId::UNKNOWN`.
+    /// When compiling a default method for a concrete implementor, this field
+    /// tells `try_substitute_type_v` to replace UNKNOWN with the concrete type.
+    pub self_vir_type: Option<VirTypeId>,
     /// Pre-resolved named-argument reordering mapping from VIR.
     ///
     /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
@@ -307,6 +313,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
             in_iterable_default_body: false,
+            self_vir_type: None,
             vir_resolved_call_args: None,
             vir_lambda_defaults: None,
             vir_monomorph_key: None,
@@ -364,9 +371,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let sema_map: FxHashMap<NameId, TypeId> = subs
             .iter()
             .map(|(&name, &vir_ty)| {
-                let type_id = table
-                    .lookup_vir_type_id(vir_ty)
-                    .unwrap_or_else(|| vir_ty.to_type_id_lossy());
+                let type_id = table.vir_to_type_id(vir_ty);
                 (name, type_id)
             })
             .collect();
@@ -389,6 +394,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Pipeline methods skip rc_inc; terminal methods emit rc_dec after the runtime call.
     pub fn with_iterable_default_body(mut self) -> Self {
         self.in_iterable_default_body = true;
+        self
+    }
+
+    /// Set the concrete Self type for interface default method compilation.
+    pub fn with_self_vir_type(mut self, self_vir_ty: VirTypeId) -> Self {
+        self.self_vir_type = Some(self_vir_ty);
         self
     }
 
@@ -481,25 +492,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         lookup.unwrap_or(VirTypeId::UNKNOWN)
     }
 
-    /// Look up the VirTypeId for a sema TypeId, falling back to a compat-encoded
-    /// VirTypeId that preserves the original TypeId for round-tripping.
+    /// Look up the VirTypeId for a sema TypeId.
     ///
-    /// Unlike `vir_lookup`, this never returns `VirTypeId::UNKNOWN` for unmapped
-    /// types (unless `type_id` is genuinely `TypeId::UNKNOWN`).  Safe for callers
-    /// that need `VirTypeId` but may encounter unmapped cross-module types.
+    /// Returns the VirTypeId from VirTypeTable. For types that cannot be
+    /// properly mapped (Placeholder, sema-internal), returns
+    /// `VirTypeId::UNKNOWN`. Callers that need type substitution should use
+    /// `try_substitute_type_v` which handles the UNKNOWN case by falling
+    /// back to sema-level substitution.
+    #[inline]
     pub fn vir_lookup_or_compat(&self, type_id: TypeId) -> VirTypeId {
-        let lookup = self.vir_type_table().lookup_type_id(type_id);
-        match lookup {
-            Some(vir_ty) if vir_ty == VirTypeId::UNKNOWN && type_id != TypeId::UNKNOWN => {
-                // The VIR type table mapped this TypeId to VirTypeId::UNKNOWN
-                // (cross-module type not properly interned). Use compat encoding
-                // so callers can distinguish this from genuinely unknown types.
-                VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG)
-            }
-            Some(vir_ty) => vir_ty,
-            None if type_id == TypeId::UNKNOWN => VirTypeId::UNKNOWN,
-            None => VirTypeId::from_raw(type_id.raw() | VirTypeId::COMPAT_FLAG),
-        }
+        self.vir_lookup(type_id)
     }
 
     /// Convert a sema `TypeId` to a `VirTypeId` for interior codegen use.
@@ -521,9 +523,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// arena's `is_struct()` semantics.
     #[inline]
     pub fn vir_query_is_struct_v(&self, vir_ty: VirTypeId) -> bool {
-        if vir_ty.is_compat() {
-            return self.vir_query_is_struct(vir_ty.compat_type_id());
-        }
         crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
     }
 
@@ -539,9 +538,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check if a `VirTypeId` is a union type via VirTypeTable.
     #[inline]
     pub fn vir_query_is_union_v(&self, vir_ty: VirTypeId) -> bool {
-        if vir_ty.is_compat() {
-            return self.vir_query_is_union(vir_ty.compat_type_id());
-        }
         crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
     }
 
@@ -552,12 +548,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a `VirTypeId` is the unknown type.
+    ///
+    /// Uses identity check against the reserved `VirTypeId::UNKNOWN` constant
+    /// rather than table lookup, since unmapped types (Placeholder, etc.) also
+    /// map to `VirType::Unknown` but are not genuinely unknown.
     #[inline]
     pub fn vir_query_is_unknown_v(&self, vir_ty: VirTypeId) -> bool {
-        if vir_ty.is_compat() {
-            return self.vir_query_is_unknown(vir_ty.compat_type_id());
-        }
-        crate::types::vir_conversions::vir_is_unknown(vir_ty, self.vir_type_table())
+        vir_ty.is_unknown()
     }
 
     /// Check if a sema `TypeId` is the unknown type.
@@ -655,9 +652,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check if a `VirTypeId` is an interface type via VirTypeTable.
     #[inline]
     pub fn vir_query_is_interface_v(&self, vir_ty: VirTypeId) -> bool {
-        if vir_ty.is_compat() {
-            return self.vir_query_is_interface(vir_ty.compat_type_id());
-        }
         crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
     }
 
@@ -723,9 +717,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Map a `VirTypeId` to its Cranelift type via VirTypeTable.
     #[inline]
     pub fn vir_query_type_to_cranelift_v(&self, vir_ty: VirTypeId) -> Type {
-        if vir_ty.is_compat() {
-            return self.vir_query_type_to_cranelift(vir_ty.compat_type_id());
-        }
         // Sentinel types are always i8 (zero-field struct tag). VIR maps them
         // as Struct, which would incorrectly resolve to ptr_type.
         if crate::types::vir_conversions::vir_is_sentinel(vir_ty, self.vir_type_table()) {
@@ -759,9 +750,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_function_v(&self, vir_ty: VirTypeId) -> bool {
-        if vir_ty.is_compat() {
-            return self.vir_query_is_function(vir_ty.compat_type_id());
-        }
         crate::types::vir_conversions::vir_is_function(vir_ty, self.vir_type_table())
     }
 
@@ -863,9 +851,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_runtime_iterator_v(&self, vir_ty: VirTypeId) -> bool {
-        if vir_ty.is_compat() {
-            return self.vir_query_is_runtime_iterator(vir_ty.compat_type_id());
-        }
         crate::types::vir_conversions::vir_is_runtime_iterator(vir_ty, self.vir_type_table())
     }
 
@@ -989,9 +974,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_type_param_v(&self, vir_ty: VirTypeId) -> Option<NameId> {
-        if vir_ty.is_compat() {
-            return self.vir_query_unwrap_type_param(vir_ty.compat_type_id());
-        }
         crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
     }
 
@@ -1167,9 +1149,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_numeric_v(&self, vir_ty: VirTypeId) -> bool {
-        if vir_ty.is_compat() {
-            return self.vir_query_is_numeric(vir_ty.compat_type_id());
-        }
         crate::types::vir_conversions::vir_is_numeric(vir_ty, self.vir_type_table())
     }
 
@@ -1305,15 +1284,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let (vir_params, vir_ret) = table.unwrap_function(vir_ty)?;
         let params: Vec<TypeId> = vir_params
             .iter()
-            .map(|&p| {
-                table
-                    .lookup_vir_type_id(p)
-                    .unwrap_or_else(|| p.to_type_id_lossy())
-            })
+            .map(|&p| table.vir_to_type_id(p))
             .collect();
-        let ret = table
-            .lookup_vir_type_id(vir_ret)
-            .unwrap_or_else(|| vir_ret.to_type_id_lossy());
+        let ret = table.vir_to_type_id(vir_ret);
         Some((params, ret))
     }
 
@@ -1352,6 +1325,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(mid, exports)| (*mid, exports.iter().copied().collect()))
     }
 
+    /// Look up module exports by `ModuleId`.
+    ///
+    /// Scans `VirProgram::module_exports` for a matching `ModuleId`.
+    /// Used by module field access dispatch when the ModuleId is known
+    /// from VIR lowering (FieldStorage::Module).
+    #[inline]
+    pub fn vir_query_module_exports_by_id(
+        &self,
+        module_id: ModuleId,
+    ) -> Option<smallvec::SmallVec<[(NameId, TypeId); 8]>> {
+        let vir = self.env.analyzed.vir_program();
+        vir.module_exports
+            .values()
+            .find(|(mid, _)| *mid == module_id)
+            .map(|(_, exports)| exports.iter().copied().collect())
+    }
+
     /// Look up a compile-time constant in a module's metadata.
     ///
     /// Uses VirProgram's pre-populated module_constants map.
@@ -1381,9 +1371,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// For compat-encoded VirTypeIds, resolves via VirTypeTable lookup.
     #[inline]
     pub fn vir_struct_flat_slot_count(&self, vir_ty: VirTypeId) -> Option<usize> {
-        let resolved = self.resolve_compat(vir_ty);
         crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
-            resolved,
+            vir_ty,
             self.vir_type_table(),
             self.analyzed(),
         )
@@ -1391,31 +1380,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Compute the byte offset of field `slot` within a VIR struct type.
     ///
-    /// For compat-encoded VirTypeIds, resolves via VirTypeTable lookup.
     /// Panics if the type is not a struct or the slot is out of range.
     #[inline]
     pub fn vir_struct_field_byte_offset(&self, vir_ty: VirTypeId, slot: usize) -> i32 {
-        let resolved = self.resolve_compat(vir_ty);
         crate::types::vir_struct_helpers::vir_struct_field_byte_offset(
-            resolved,
+            vir_ty,
             slot,
             self.vir_type_table(),
             self.analyzed(),
         )
         .expect("INTERNAL: struct field offset must be computable for valid struct type")
-    }
-
-    /// Resolve a compat-encoded `VirTypeId` to a proper `VirTypeId` via
-    /// `VirTypeTable::lookup_type_id`.  Non-compat IDs pass through unchanged.
-    #[inline]
-    fn resolve_compat(&self, vir_ty: VirTypeId) -> VirTypeId {
-        if vir_ty.is_compat() {
-            self.vir_type_table()
-                .lookup_type_id(vir_ty.compat_type_id())
-                .unwrap_or(vir_ty)
-        } else {
-            vir_ty
-        }
     }
 
     /// Get field slot and type for a field access using VirTypeId.
@@ -1429,10 +1403,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         vir_ty: VirTypeId,
         field_name: &str,
     ) -> CodegenResult<(usize, TypeId)> {
-        let type_id = self
-            .vir_type_table()
-            .lookup_vir_type_id(vir_ty)
-            .unwrap_or_else(|| vir_ty.to_type_id_lossy());
+        let type_id = self.vir_type_table().vir_to_type_id(vir_ty);
         crate::structs::helpers::get_field_slot_and_type_id_cg(type_id, field_name, self)
     }
 
@@ -1446,17 +1417,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         vir_ty: VirTypeId,
     ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
-        let type_id = self
-            .vir_type_table()
-            .lookup_vir_type_id(vir_ty)
-            .or_else(|| {
-                let lossy = vir_ty.to_type_id_lossy();
-                if lossy != TypeId::UNKNOWN {
-                    Some(lossy)
-                } else {
-                    None
-                }
-            })?;
+        let type_id = self.vir_type_table().vir_to_type_id(vir_ty);
+        if type_id == TypeId::UNKNOWN {
+            return None;
+        }
         self.vir_query_unwrap_module(type_id)
     }
 
@@ -1880,9 +1844,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         union_storage_hint: Option<vole_sema::UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
         let table = &self.env.analyzed.vir_program().type_table;
-        let elem_sema = table
-            .lookup_vir_type_id(elem_vir)
-            .unwrap_or_else(|| elem_vir.to_type_id_lossy());
+        let elem_sema = table.vir_to_type_id(elem_vir);
         self.prepare_dynamic_array_store_with_hint(value, elem_sema, union_storage_hint)
     }
 
@@ -2471,13 +2433,12 @@ fn build_monomorph_signature(
 
     let vir_lookup = |tid: TypeId| -> VirTypeId {
         table.lookup_type_id(tid).unwrap_or_else(|| {
-            // Fallback: for primitives, reserved IDs are identity-mapped.
-            let raw = tid.raw();
-            if raw < TypeId::FIRST_DYNAMIC {
-                VirTypeId::from_raw(raw)
-            } else {
-                VirTypeId::from_raw(raw | VirTypeId::COMPAT_FLAG)
-            }
+            debug_assert!(
+                false,
+                "TypeId({}) not in VirTypeTable for signature",
+                tid.raw()
+            );
+            VirTypeId::UNKNOWN
         })
     };
 

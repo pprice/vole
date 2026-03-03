@@ -59,9 +59,7 @@ impl Cg<'_, '_, '_> {
                 .vir_query_unwrap_function_v(func_vir_type_id)
                 .expect("INTERNAL: module method: missing function type");
             let table = self.vir_type_table();
-            table
-                .lookup_vir_type_id(ret_vir)
-                .unwrap_or_else(|| ret_vir.to_type_id_lossy())
+            table.vir_to_type_id(ret_vir)
         };
 
         // Compile arguments, tracking owned RC temps for cleanup
@@ -242,9 +240,7 @@ impl Cg<'_, '_, '_> {
 
             // Perform the indirect call (call_result still needs sema TypeId)
             let table = self.vir_type_table();
-            let return_type_id = table
-                .lookup_vir_type_id(return_vir)
-                .unwrap_or_else(|| return_vir.to_type_id_lossy());
+            let return_type_id = table.vir_to_type_id(return_vir);
             let call_inst = self.emit_call_indirect(sig_ref, func_ptr, &args);
             self.call_result(call_inst, return_type_id)
         } else {
@@ -264,9 +260,7 @@ impl Cg<'_, '_, '_> {
             let mut args = values;
             let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
             let table = self.vir_type_table();
-            let return_type_id = table
-                .lookup_vir_type_id(return_vir)
-                .unwrap_or_else(|| return_vir.to_type_id_lossy());
+            let return_type_id = table.vir_to_type_id(return_vir);
             let call_inst = self.emit_call_indirect(sig_ref, func_ptr_or_closure, &args);
             self.call_result(call_inst, return_type_id)
         }
@@ -403,9 +397,7 @@ impl Cg<'_, '_, '_> {
 
         // Convert result from i64 storage to typed value (needs sema TypeId)
         let table = self.vir_type_table();
-        let return_type_id = table
-            .lookup_vir_type_id(return_vir)
-            .unwrap_or_else(|| return_vir.to_type_id_lossy());
+        let return_type_id = table.vir_to_type_id(return_vir);
         let word = results
             .first()
             .copied()

@@ -416,9 +416,14 @@ impl AnalyzedProgram {
         sema_subs
             .into_iter()
             .map(|(name, tid)| {
-                let vir_ty = type_table
-                    .lookup_type_id(tid)
-                    .unwrap_or_else(|| VirTypeId::from_raw(tid.raw() | VirTypeId::COMPAT_FLAG));
+                let vir_ty = type_table.lookup_type_id(tid).unwrap_or_else(|| {
+                    debug_assert!(
+                        false,
+                        "interface impl sub TypeId({}) not in VirTypeTable",
+                        tid.raw()
+                    );
+                    VirTypeId::UNKNOWN
+                });
                 (name, vir_ty)
             })
             .collect()
@@ -578,10 +583,7 @@ impl AnalyzedProgram {
         field_id: FieldId,
     ) -> vole_sema::type_arena::TypeId {
         let vir_ty = self.field_def(field_id).vir_ty;
-        self.vir_program()
-            .type_table
-            .lookup_vir_type_id(vir_ty)
-            .unwrap_or_else(|| vir_ty.to_type_id_lossy())
+        self.vir_program().type_table.vir_to_type_id(vir_ty)
     }
 
     /// Return declared type parameter NameIds for a type definition.
@@ -606,11 +608,7 @@ impl AnalyzedProgram {
         Some(
             vir_field_types
                 .iter()
-                .map(|&vir_ty| {
-                    table
-                        .lookup_vir_type_id(vir_ty)
-                        .unwrap_or_else(|| vir_ty.to_type_id_lossy())
-                })
+                .map(|&vir_ty| table.vir_to_type_id(vir_ty))
                 .collect(),
         )
     }
@@ -698,7 +696,7 @@ impl AnalyzedProgram {
             }
             _ => {
                 // Primitives, Range, Handle: try the pre-computed map keyed by sema TypeId.
-                let sema_id = vir_ty.to_type_id_lossy();
+                let sema_id = self.vir_program().type_table.vir_to_type_id(vir_ty);
                 entity_metadata.impl_type_name(sema_id)
             }
         }

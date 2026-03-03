@@ -142,7 +142,12 @@ fn compile_generator_body<'ctx>(
         let vir_ty = vir_type_table
             .lookup_type_id(param_type_ids[i])
             .unwrap_or_else(|| {
-                VirTypeId::from_raw(param_type_ids[i].raw() | VirTypeId::COMPAT_FLAG)
+                debug_assert!(
+                    false,
+                    "generator param TypeId({}) not in VirTypeTable",
+                    param_type_ids[i].raw()
+                );
+                VirTypeId::UNKNOWN
             });
         capture_bindings.insert(name, crate::lambda::CaptureBinding::new(i, vir_ty));
     }

@@ -65,14 +65,6 @@ impl VirTypeId {
     /// First non-reserved index (for dynamic / user-defined types).
     pub const FIRST_DYNAMIC: u32 = 23;
 
-    /// High-bit flag for compat_ty-encoded VirTypeIds.
-    ///
-    /// During VIR lowering, types that `translate_type_id()` cannot resolve
-    /// are encoded by `compat_ty()` as `VirTypeId(type_id.raw() | COMPAT_FLAG)`.
-    /// This separates them from real VirTypeTable indices so the post-lowering
-    /// sweep can safely grow the table via `intern()` without collisions.
-    pub const COMPAT_FLAG: u32 = 0x8000_0000;
-
     /// Create a VirTypeId from a raw u32 index.
     pub fn from_raw(index: u32) -> Self {
         VirTypeId(index)
@@ -87,12 +79,6 @@ impl VirTypeId {
     #[inline]
     pub fn is_invalid(self) -> bool {
         self == Self::INVALID
-    }
-
-    /// Check if this VirTypeId was produced by `compat_ty()` (raw TypeId encoding).
-    #[inline]
-    pub fn is_compat(self) -> bool {
-        self.0 & Self::COMPAT_FLAG != 0
     }
 
     /// Raw-preserving conversion from a sema `TypeId`.
@@ -111,48 +97,10 @@ impl VirTypeId {
     /// Inverse of `from_type_id()`.  Recovers the original `TypeId` from a
     /// `VirTypeId` that was created via the raw-preserving path.  This is
     /// NOT valid for VirTypeIds that were assigned by the VirTypeTable
-    /// (use `lookup_vir_type_id` for those).
+    /// (use `VirTypeTable::vir_to_type_id` for those).
     #[inline]
     pub fn to_type_id_raw(self) -> TypeId {
         TypeId::from_raw(self.0)
-    }
-
-    /// Strip the compat flag to recover the original TypeId raw value.
-    /// Only valid when `is_compat()` returns true.
-    #[inline]
-    pub fn compat_raw(self) -> u32 {
-        self.0 & !Self::COMPAT_FLAG
-    }
-
-    /// Convert a compat-encoded VirTypeId directly to a sema `TypeId`.
-    ///
-    /// Only valid when `is_compat()` returns true.  This is a zero-cost
-    /// operation that strips the compat flag and wraps the raw value as
-    /// a `TypeId`, avoiding the full `vir_to_sema_type_id` table walk.
-    #[inline]
-    pub fn compat_type_id(self) -> TypeId {
-        debug_assert!(
-            self.is_compat(),
-            "compat_type_id called on non-compat VirTypeId"
-        );
-        TypeId::from_raw(self.compat_raw())
-    }
-
-    /// Best-effort conversion to sema `TypeId` without table lookup.
-    ///
-    /// Returns the corresponding `TypeId` for compat-encoded IDs and for
-    /// builtin IDs whose raw value is below `TypeId::FIRST_DYNAMIC`.
-    /// Returns `TypeId::UNKNOWN` for dynamic VirTypeIds that require a
-    /// `VirTypeTable` reverse lookup.
-    #[inline]
-    pub fn to_type_id_lossy(self) -> TypeId {
-        if self.is_compat() {
-            TypeId::from_raw(self.compat_raw())
-        } else if self.0 < TypeId::FIRST_DYNAMIC {
-            TypeId::from_raw(self.0)
-        } else {
-            TypeId::UNKNOWN
-        }
     }
 
     /// Check if this is the UNKNOWN type.

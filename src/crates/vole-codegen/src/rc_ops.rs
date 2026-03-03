@@ -45,11 +45,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let table = self.vir_type_table();
         let type_args: Vec<TypeId> = vir_type_args
             .iter()
-            .map(|&v| {
-                table
-                    .lookup_vir_type_id(v)
-                    .unwrap_or_else(|| v.to_type_id_lossy())
-            })
+            .map(|&v| table.vir_to_type_id(v))
             .collect();
         self.mono_instance_type_id_with_args(base_type_id, type_def_id, type_args)
     }
@@ -568,9 +564,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// `vir_query_unwrap_union_v` (which uses sema's canonical order) to
     /// ensure RC variant tags match the runtime layout.
     pub fn rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
-        if vir_ty.is_compat() {
-            return self.rc_state(vir_ty.compat_type_id());
-        }
         // Optional variant ordering may differ between VIR convention
         // (tag 0 = inner, tag 1 = nil) and sema's canonical sort order.
         // Resolve via vir_query_unwrap_union_v which uses the authoritative
@@ -593,6 +586,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// interface types get `FieldTypeTag::Interface`, other RC types get
     /// `FieldTypeTag::Rc`, union types that contain RC variants get
     /// `FieldTypeTag::UnionHeap`, everything else is `Value`.
+    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
     pub fn field_type_tag(&self, type_id: TypeId) -> vole_runtime::type_registry::FieldTypeTag {
         use vole_runtime::type_registry::FieldTypeTag;
         if type_id.is_unknown() {
@@ -617,9 +611,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     pub fn field_type_tag_v(&self, vir_ty: VirTypeId) -> vole_runtime::type_registry::FieldTypeTag {
         use vole_runtime::type_registry::FieldTypeTag;
-        if vir_ty.is_compat() {
-            return self.field_type_tag(vir_ty.compat_type_id());
-        }
         if vir_ty == VirTypeId::UNKNOWN {
             FieldTypeTag::UnknownHeap
         } else if self.vir_query_is_interface_v(vir_ty) {

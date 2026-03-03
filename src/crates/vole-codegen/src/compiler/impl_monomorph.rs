@@ -840,7 +840,8 @@ impl Compiler<'_> {
                     &mut self.pending_monomorphs,
                 );
                 let mut config =
-                    FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty));
+                    FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
+                        .with_self_vir_type(self_vir_ty);
                 if self
                     .analyzed
                     .name_table()
@@ -1081,7 +1082,8 @@ impl Compiler<'_> {
                     );
                     let config =
                         FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
-                            .with_iterable_default_body();
+                            .with_iterable_default_body()
+                            .with_self_vir_type(self_vir_ty);
                     let vir_func = self.analyzed.get_vir_method(*semantic_method_id)
                         .unwrap_or_else(|| {
                             panic!("VIR must be available for array iterable default method (MethodId={semantic_method_id:?})")

@@ -507,6 +507,11 @@ pub enum FieldStorage {
     /// `slot` is the physical slot index accounting for wide types
     /// (i128/f128 fields occupy 2 consecutive slots).
     Heap { slot: u32 },
+    /// Module field access — resolved to a module constant or export.
+    ///
+    /// Carries the `ModuleId` so codegen can dispatch module field access
+    /// without needing to recover the module identity from the VirTypeId.
+    Module { module_id: ModuleId },
     /// Unresolved storage — emitted for generic function templates where
     /// the object type contains type parameters.  Must be resolved before
     /// codegen via the monomorph rederive pass.

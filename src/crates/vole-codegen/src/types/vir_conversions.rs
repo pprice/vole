@@ -27,8 +27,7 @@ use super::vir_struct_helpers::{
 };
 
 // Bridge functions vir_to_sema_type_id_lossy and vir_to_sema_type_id
-// have been deleted. All callers now use VirTypeId::to_type_id_lossy()
-// (on the identity type) or VirTypeTable::lookup_vir_type_id().
+// have been deleted. All callers now use VirTypeTable::vir_to_type_id().
 
 /// Map a `VirTypeId` to a Cranelift type using the VIR type table.
 ///

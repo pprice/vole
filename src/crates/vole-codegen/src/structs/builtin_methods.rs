@@ -63,9 +63,7 @@ impl Cg<'_, '_, '_> {
                     let result = self.call_runtime(RuntimeKey::ArrayIter, &[obj.value])?;
                     let iter_type_id = iter_type_hint.unwrap_or_else(|| {
                         let table = self.vir_type_table();
-                        let elem_sema = table
-                            .lookup_vir_type_id(elem_vir_type_id)
-                            .unwrap_or_else(|| elem_vir_type_id.to_type_id_lossy());
+                        let elem_sema = table.vir_to_type_id(elem_vir_type_id);
                         self.vir_query_lookup_runtime_iterator(elem_sema).expect(
                             "INTERNAL: array iterator: RuntimeIterator type not pre-created",
                         )

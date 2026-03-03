@@ -43,10 +43,12 @@ impl Cg<'_, '_, '_> {
             return self.extract_field(obj, slot as usize, field_type_id);
         }
 
-        // ByName fallback: module field access or full arena lookup.
-        if let Some(cv) = self.try_module_field_load(obj, field)? {
-            return Ok(cv);
+        // Module field access with pre-resolved ModuleId.
+        if let FieldStorage::Module { module_id } = storage {
+            return self.try_module_field_load_by_id(obj, field, module_id);
         }
+
+        // ByName fallback: full arena lookup for unresolved generic templates.
         let field_name = self.interner().resolve(field);
         let (slot, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
         self.extract_field(obj, slot, field_type_id)
@@ -78,6 +80,7 @@ impl Cg<'_, '_, '_> {
                 let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
                 self.vir_class_field_store(obj, slot as usize, field_type_id, value)
             }
+            FieldStorage::Module { .. } => Err(CodegenError::unsupported("store to module field")),
             FieldStorage::ByName => {
                 let field_name = self.interner().resolve(field);
                 let (slot, field_type_id) =
@@ -92,20 +95,17 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Try to resolve a module field access.
+    /// Resolve a module field access using a pre-resolved `ModuleId`.
     ///
-    /// Returns `Some(value)` if the object is a module type and the field
-    /// is a constant or sentinel export. Returns `None` if the object is
-    /// not a module, allowing the caller to fall through to struct/class.
-    fn try_module_field_load(
+    /// Used when `FieldStorage::Module` carries the module identity directly
+    /// from VIR lowering, avoiding the need to recover the `ModuleId` from
+    /// the object's `VirTypeId`.
+    fn try_module_field_load_by_id(
         &mut self,
-        obj: CompiledValue,
+        _obj: CompiledValue,
         field: Symbol,
-    ) -> CodegenResult<Option<CompiledValue>> {
-        let Some((module_id, exports)) = self.vir_query_unwrap_module_v(obj.type_id) else {
-            return Ok(None);
-        };
-
+        module_id: vole_identity::ModuleId,
+    ) -> CodegenResult<CompiledValue> {
         let field_name = self.interner().resolve(field);
         let module_path = self.name_table().module_path(module_id).to_string();
         let name_id = module_name_id(self.analyzed(), module_id, field_name);
@@ -113,13 +113,16 @@ impl Cg<'_, '_, '_> {
         // Constant value lookup
         let const_val = name_id.and_then(|nid| self.vir_query_module_constant(module_id, nid));
         if let Some(const_val) = const_val {
-            let cv = self.compile_constant_value(const_val)?;
-            return Ok(Some(cv));
+            return self.compile_constant_value(const_val);
         }
 
         // Export check (function, sentinel, or unsupported)
-        let export_type_id =
-            name_id.and_then(|nid| exports.iter().find(|(n, _)| *n == nid).map(|(_, tid)| *tid));
+        let exports = self.vir_query_module_exports_by_id(module_id);
+        let export_type_id = name_id.and_then(|nid| {
+            exports
+                .as_ref()
+                .and_then(|e| e.iter().find(|(n, _)| *n == nid).map(|(_, tid)| *tid))
+        });
         if let Some(export_type_id) = export_type_id {
             if self.vir_query_is_function(export_type_id) {
                 return Err(CodegenError::unsupported_with_context(
@@ -129,11 +132,7 @@ impl Cg<'_, '_, '_> {
             }
             if self.vir_query_is_sentinel(export_type_id) {
                 let value = self.iconst_cached(types::I8, 0);
-                return Ok(Some(self.compiled_with_ty(
-                    value,
-                    types::I8,
-                    export_type_id,
-                )));
+                return Ok(self.compiled_with_ty(value, types::I8, export_type_id));
             }
             return Err(CodegenError::unsupported_with_context(
                 "non-constant module export",

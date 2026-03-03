@@ -1107,10 +1107,7 @@ impl Compiler<'_> {
                     .iter()
                     .map(|&(i, param_name)| {
                         let vir = concrete_type_args[i];
-                        let type_id = self
-                            .vir_type_table()
-                            .lookup_vir_type_id(vir)
-                            .unwrap_or_else(|| vir.to_type_id_lossy());
+                        let type_id = self.vir_type_table().vir_to_type_id(vir);
                         (param_name, type_id)
                     })
                     .collect();

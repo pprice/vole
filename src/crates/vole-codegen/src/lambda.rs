@@ -292,13 +292,7 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().call(rc_inc_ref, &[current_value]);
             }
 
-            // Prefer VIR-native size lookup; fall back through compat_type_id
-            // for compat-encoded VirTypeIds that are not yet in the VirTypeTable.
-            let size = if vole_vir_ty.is_compat() {
-                self.type_size(vole_vir_ty.compat_type_id())
-            } else {
-                self.type_size_v(vole_vir_ty)
-            };
+            let size = self.type_size_v(vole_vir_ty);
             let size_val = self.iconst_cached(types::I64, size as i64);
 
             let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
