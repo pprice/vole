@@ -1721,7 +1721,6 @@ dependencies = [
  "vole-frontend",
  "vole-identity",
  "vole-runtime",
- "vole-sema",
  "vole-vir",
 ]
 

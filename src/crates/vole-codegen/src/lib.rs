@@ -48,7 +48,7 @@ pub use types::CompiledValue;
 pub use errors::{CodegenError, CodegenResult};
 
 // Analysis types
-pub use analyzed::AnalyzedProgram;
+pub use analyzed::{AnalyzedProgram, AnalyzedProgramArgs, SubstituteFallbackFn};
 
 // VIR printer
 pub use vir_printer::VirPrinter;

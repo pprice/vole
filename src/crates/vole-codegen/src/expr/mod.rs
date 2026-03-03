@@ -22,7 +22,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
 use vole_frontend::{BinaryOp, Symbol};
-use vole_identity::{ConstantValue, ModuleId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{ConstantValue, ModuleId, StringConversion, TypeDefId, TypeId, VirTypeId};
 use vole_vir::{
     AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
 };
@@ -816,11 +816,9 @@ impl Cg<'_, '_, '_> {
                 }
                 VirStringPart::Expr { value, conversion } => {
                     let compiled = self.compile_vir_expr(value)?;
-                    #[allow(clippy::wildcard_enum_match_arm)] // sema enum, not VIR dispatch
+                    #[allow(clippy::wildcard_enum_match_arm)]
                     match conversion {
-                        vole_sema::StringConversion::Identity => {
-                            (compiled.value, compiled.is_owned())
-                        }
+                        StringConversion::Identity => (compiled.value, compiled.is_owned()),
                         _ => (self.apply_string_conversion(compiled, conversion)?, true),
                     }
                 }

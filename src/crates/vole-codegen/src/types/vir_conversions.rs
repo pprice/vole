@@ -2597,12 +2597,30 @@ mod tests {
     // vir_compute_rc_state
     // -----------------------------------------------------------------------
 
-    use vole_sema::entity_registry::EntityRegistry;
+    use crate::types::vir_struct_helpers::VirStructEntityLookup;
+    use vole_identity::{NameId, TypeDefId};
+    use vole_vir::entity_metadata::VirTypeDef;
+
+    /// Minimal VirStructEntityLookup for tests that don't need VirTypeDef
+    /// or field name resolution.
+    struct NullEntities;
+
+    impl VirStructEntityLookup for NullEntities {
+        fn is_sentinel_type_def(&self, _type_def_id: TypeDefId) -> bool {
+            false
+        }
+        fn last_segment(&self, _name_id: NameId) -> Option<String> {
+            None
+        }
+        fn vir_type_def(&self, _type_def_id: TypeDefId) -> Option<&VirTypeDef> {
+            None
+        }
+    }
 
     #[test]
     fn rc_state_primitives_not_rc() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(VirTypeId::I8, &table, &entities),
             RcState::None
@@ -2624,7 +2642,7 @@ mod tests {
     #[test]
     fn rc_state_string_is_simple_capture() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(VirTypeId::STRING, &table, &entities),
             RcState::Simple { is_capture: true }
@@ -2634,7 +2652,7 @@ mod tests {
     #[test]
     fn rc_state_handle_is_simple_not_capture() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(VirTypeId::HANDLE, &table, &entities),
             RcState::Simple { is_capture: false }
@@ -2644,7 +2662,7 @@ mod tests {
     #[test]
     fn rc_state_void_not_rc() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(VirTypeId::VOID, &table, &entities),
             RcState::None
@@ -2667,7 +2685,7 @@ mod tests {
             },
             Some(layout),
         );
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(arr, &table, &entities),
             RcState::Simple { is_capture: true }
@@ -2684,7 +2702,7 @@ mod tests {
             },
             None,
         );
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(class_ty, &table, &entities),
             RcState::Simple { is_capture: true }
@@ -2700,7 +2718,7 @@ mod tests {
             },
             None,
         );
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(union_ty, &table, &entities),
             RcState::None
@@ -2716,7 +2734,7 @@ mod tests {
             },
             None,
         );
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         match vir_compute_rc_state(union_ty, &table, &entities) {
             RcState::Union { rc_variants } => {
                 assert!(!rc_variants.is_empty());
@@ -2737,7 +2755,7 @@ mod tests {
             },
             None,
         );
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         match vir_compute_rc_state(fa, &table, &entities) {
             RcState::Composite {
                 shallow_offsets,
@@ -2761,7 +2779,7 @@ mod tests {
             },
             None,
         );
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(vir_compute_rc_state(fa, &table, &entities), RcState::None);
     }
 
@@ -2774,7 +2792,7 @@ mod tests {
             },
             None,
         );
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         match vir_compute_rc_state(tuple_ty, &table, &entities) {
             RcState::Composite {
                 shallow_offsets,
@@ -2798,7 +2816,7 @@ mod tests {
             },
             None,
         );
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(tuple_ty, &table, &entities),
             RcState::None
@@ -2808,7 +2826,7 @@ mod tests {
     #[test]
     fn rc_state_range_not_rc() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_compute_rc_state(VirTypeId::RANGE, &table, &entities),
             RcState::None

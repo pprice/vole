@@ -18,7 +18,9 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_frontend::Symbol;
-use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeId, VirTypeId};
+use vole_identity::{
+    FieldId, FunctionId, MethodId, ModuleId, NameId, TypeId, UnionStorageKind, VirTypeId,
+};
 
 use super::lambda::CaptureBinding;
 use super::rc_cleanup::RcScopeStack;
@@ -1086,7 +1088,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<TypeId> {
         self.vir_type_table()
             .lookup_substitute(ty, subs)
-            .or_else(|| self.analyzed().type_arena().lookup_substitute(ty, subs))
+            .or_else(|| self.analyzed().substitute_fallback(ty, subs))
     }
 
     /// Look up an existing runtime iterator type by element `TypeId` via VirTypeTable.
@@ -1104,8 +1106,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Substitute type parameters in a type, panicking on failure.
     ///
-    /// Tries VirTypeTable first, falls back to sema TypeArena for compound
-    /// types not yet interned in VIR.
+    /// Tries VirTypeTable first, falls back to the injected substitution
+    /// callback for compound types not yet interned in VIR.
     #[allow(dead_code)]
     #[track_caller]
     #[inline]
@@ -1117,7 +1119,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> TypeId {
         self.vir_type_table()
             .lookup_substitute(ty, subs)
-            .or_else(|| self.analyzed().type_arena().lookup_substitute(ty, subs))
+            .or_else(|| self.analyzed().substitute_fallback(ty, subs))
             .unwrap_or_else(|| {
                 panic!(
                     "vir_query_expect_substitute: type not found after substitution\n\
@@ -1841,7 +1843,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         value: CompiledValue,
         elem_vir: VirTypeId,
-        union_storage_hint: Option<vole_sema::UnionStorageKind>,
+        union_storage_hint: Option<UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
         let table = &self.env.analyzed.vir_program().type_table;
         let elem_sema = table.vir_to_type_id(elem_vir);
@@ -1854,7 +1856,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         value: CompiledValue,
         elem_type_id: TypeId,
-        union_storage_hint: Option<vole_sema::UnionStorageKind>,
+        union_storage_hint: Option<UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
         let mut value = if self.vir_query_is_struct_v(value.type_id) {
             self.copy_struct_to_heap(value)?
@@ -1898,8 +1900,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Union array element type: use sema hint or compute storage strategy.
         let prefers_inline = match union_storage_hint {
-            Some(vole_sema::UnionStorageKind::Inline) => true,
-            Some(vole_sema::UnionStorageKind::Heap) => false,
+            Some(UnionStorageKind::Inline) => true,
+            Some(UnionStorageKind::Heap) => false,
             None => self.union_array_prefers_inline_storage(resolved_elem_type),
         };
         if prefers_inline {

@@ -94,17 +94,6 @@ impl MethodResolutionRef<'_> {
     }
 }
 
-fn sema_dispatch_kind_from_vir(kind: VirMethodDispatchKind) -> vole_sema::MethodDispatchKind {
-    match kind {
-        VirMethodDispatchKind::Module { module_id } => {
-            vole_sema::MethodDispatchKind::Module(module_id)
-        }
-        VirMethodDispatchKind::Builtin => vole_sema::MethodDispatchKind::Builtin,
-        VirMethodDispatchKind::ArrayPush => vole_sema::MethodDispatchKind::ArrayPush,
-        VirMethodDispatchKind::Standard => vole_sema::MethodDispatchKind::Standard,
-    }
-}
-
 impl Cg<'_, '_, '_> {
     // ========================================================================
     // ArgSource helpers: compile arguments from VIR refs
@@ -197,39 +186,31 @@ impl Cg<'_, '_, '_> {
 
     /// Resolve method parameter types for argument coercion.
     ///
-    /// Primary source is the resolved function type. If unavailable, fall back
-    /// to canonical method signatures from the entity registry.
+    /// Primary source is the VIR method definition's `param_types`.  Falls back
+    /// to the resolved function type from the VIR type table.
     fn resolved_method_param_type_ids(
         &self,
         resolved: MethodResolutionRef<'_>,
     ) -> Option<Vec<TypeId>> {
-        // Use the arena to unwrap function signatures here because parameter
-        // types may include Self placeholders (TypeId values that VIR maps to
-        // Unknown).  The arena preserves these placeholder identities, which
-        // concretize_method_param_type_ids_for_receiver then substitutes with
-        // the concrete receiver type.
+        let table = self.vir_type_table();
+
+        // Prefer VirMethodDef.param_types (VIR resolves Self during lowering)
         if let Some(method_id) = resolved.method_id() {
-            let signature_id = self.analyzed().method_signature_id(method_id);
-            if let Some((params, _, _)) = self.analyzed().type_arena().unwrap_function(signature_id)
-            {
-                return Some(params.to_vec());
-            }
+            let method_def = self.analyzed().method_def(method_id);
+            return Some(
+                method_def
+                    .param_types
+                    .iter()
+                    .map(|&ty| {
+                        let v = self.try_substitute_type_v(ty);
+                        table.vir_to_type_id(v)
+                    })
+                    .collect(),
+            );
         }
 
-        let resolved_signature_id = self.resolved_func_type_id(resolved);
-        if let Some((params, _, _)) = self
-            .analyzed()
-            .type_arena()
-            .unwrap_function(resolved_signature_id)
-        {
-            return Some(params.to_vec());
-        }
-
-        // Fall back to VIR type directly
-        if let VirType::Function { params, .. } =
-            self.vir_type_table().get(resolved.0.func_type_id())
-        {
-            let table = self.vir_type_table();
+        // Fall back to the resolved function type from VIR
+        if let VirType::Function { params, .. } = table.get(resolved.0.func_type_id()) {
             return Some(
                 params
                     .iter()
@@ -269,14 +250,15 @@ impl Cg<'_, '_, '_> {
         receiver_type_id: TypeId,
         param_type_ids: &[TypeId],
     ) -> Vec<TypeId> {
-        // Replace Self placeholders with the concrete receiver type.
-        // Interface default methods declare params as `Self`, which remains
-        // as a Placeholder(SelfType) TypeId in the arena-based signature.
-        let arena = self.analyzed().type_arena();
+        // VIR lowering resolves Self placeholders, so param types from VirMethodDef
+        // should not contain Self.  However, UNKNOWN TypeIds (which Self maps to in
+        // VIR before resolution) are replaced with the concrete receiver type.
+        let table = self.vir_type_table();
         let mut resolved: Vec<TypeId> = param_type_ids
             .iter()
             .map(|&ty| {
-                let ty = if arena.is_self_type(ty) {
+                let vir_ty = table.lookup_type_id(ty);
+                let ty = if vir_ty == Some(VirTypeId::UNKNOWN) {
                     receiver_type_id
                 } else {
                     ty
@@ -440,15 +422,14 @@ impl Cg<'_, '_, '_> {
         let obj = self.compile_vir_expr(mc.receiver)?;
         let method_name_str = self.interner().resolve(mc_method);
 
-        // Route method dispatch based on sema's MethodDispatchKind annotation.
+        // Route method dispatch based on VIR's MethodDispatchKind annotation.
         // In monomorphized contexts sema doesn't annotate (resolution is skipped),
         // so we fall back to type-detection for those cases.
         let dispatch_kind = dispatch
             .dispatch_kind
-            .map(sema_dispatch_kind_from_vir)
             .unwrap_or_else(|| self.infer_method_dispatch_kind(&obj, method_name_str));
         match dispatch_kind {
-            vole_sema::MethodDispatchKind::Module(module_id) => {
+            VirMethodDispatchKind::Module { module_id } => {
                 let resolved = dispatch.resolved_method.as_ref().ok_or_else(|| {
                     CodegenError::missing_resource("module method call missing VIR resolved method")
                 })?;
@@ -460,7 +441,7 @@ impl Cg<'_, '_, '_> {
                     dispatch.generic_monomorph.as_ref(),
                 );
             }
-            vole_sema::MethodDispatchKind::Builtin => {
+            VirMethodDispatchKind::Builtin => {
                 if let Some(result) =
                     self.builtin_method(&obj, method_name_str, concrete_return_hint)?
                 {
@@ -469,13 +450,13 @@ impl Cg<'_, '_, '_> {
                     return Ok(result);
                 }
             }
-            vole_sema::MethodDispatchKind::ArrayPush => {
+            VirMethodDispatchKind::ArrayPush => {
                 let result = self.array_push_call(&obj, &mc.arg_source())?;
                 let mut obj = obj;
                 self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                 return Ok(result);
             }
-            vole_sema::MethodDispatchKind::Standard => {
+            VirMethodDispatchKind::Standard => {
                 // Fall through to RuntimeIterator check and standard dispatch below.
             }
         }
@@ -1319,22 +1300,22 @@ impl Cg<'_, '_, '_> {
         &self,
         obj: &CompiledValue,
         method_name: &str,
-    ) -> vole_sema::MethodDispatchKind {
+    ) -> VirMethodDispatchKind {
         if let Some((module_id, _)) = self.vir_query_unwrap_module_v(obj.type_id) {
-            return vole_sema::MethodDispatchKind::Module(module_id);
+            return VirMethodDispatchKind::Module { module_id };
         }
         // Check array-specific methods: push needs its own path, other array
         // builtins (length, iter) go through builtin_method.
         if self.vir_query_unwrap_array_v(obj.type_id).is_some() {
             if method_name == "push" {
-                return vole_sema::MethodDispatchKind::ArrayPush;
+                return VirMethodDispatchKind::ArrayPush;
             }
-            return vole_sema::MethodDispatchKind::Builtin;
+            return VirMethodDispatchKind::Builtin;
         }
         // String and range builtins
         if obj.type_id == VirTypeId::STRING || obj.type_id == VirTypeId::RANGE {
-            return vole_sema::MethodDispatchKind::Builtin;
+            return VirMethodDispatchKind::Builtin;
         }
-        vole_sema::MethodDispatchKind::Standard
+        VirMethodDispatchKind::Standard
     }
 }

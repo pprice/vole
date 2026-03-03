@@ -1217,6 +1217,199 @@ impl VirTypeTable {
             .collect()
     }
 
+    /// Like [`lookup_substitute`] but interns compound types that don't already
+    /// exist in the table after substitution.
+    ///
+    /// This is the mutable counterpart to `lookup_substitute`: instead of
+    /// returning `None` when a substituted compound type is missing, it interns
+    /// the new type and records its sema TypeId mapping.
+    ///
+    /// Returns `None` only when:
+    /// - `ty` has no `VirTypeId` mapping (unmapped sema type), or
+    /// - a `Param` name is not in `subs`, or
+    /// - the concrete `TypeId` for a param has no `VirTypeId` mapping.
+    pub fn lookup_substitute_or_intern(
+        &mut self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<TypeId> {
+        if subs.is_empty() {
+            return Some(ty);
+        }
+        let vir_id = self.lookup_type_id(ty)?;
+        let result_vir = self.substitute_vir_or_intern(vir_id, subs)?;
+        // If no reverse mapping exists for result_vir, create one.
+        if let Some(existing_tid) = self.lookup_vir_type_id(result_vir) {
+            return Some(existing_tid);
+        }
+        // Synthesize a fresh TypeId for the newly interned compound type.
+        // Use the same approach as translate_type_id: TypeId::from_raw(vir_id)
+        // so the mapping is stable.
+        let new_tid = TypeId::from_raw(result_vir.raw());
+        self.record_type_id(new_tid, result_vir);
+        Some(new_tid)
+    }
+
+    /// Recursive VIR-level substitution with intern-on-miss.
+    ///
+    /// Like [`substitute_vir`] but interns compound types that don't already
+    /// exist in the table. Returns `None` only when a `Param` name is missing
+    /// from `subs` or the concrete `TypeId` has no `VirTypeId` mapping.
+    fn substitute_vir_or_intern(
+        &mut self,
+        vir_id: VirTypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<VirTypeId> {
+        let vir_type = self.get(vir_id).clone();
+        match &vir_type {
+            VirType::Param { name } => {
+                let concrete_type_id = subs.get(name)?;
+                self.lookup_type_id(*concrete_type_id)
+            }
+
+            VirType::Array { elem } => {
+                let new_elem = self.substitute_vir_or_intern(*elem, subs)?;
+                if new_elem == *elem {
+                    return Some(vir_id);
+                }
+                Some(self.intern(VirType::Array { elem: new_elem }, None))
+            }
+            VirType::FixedArray { elem, len } => {
+                let new_elem = self.substitute_vir_or_intern(*elem, subs)?;
+                if new_elem == *elem {
+                    return Some(vir_id);
+                }
+                Some(self.intern(
+                    VirType::FixedArray {
+                        elem: new_elem,
+                        len: *len,
+                    },
+                    None,
+                ))
+            }
+            VirType::Optional { inner } => {
+                let new_inner = self.substitute_vir_or_intern(*inner, subs)?;
+                if new_inner == *inner {
+                    return Some(vir_id);
+                }
+                Some(self.intern(VirType::Optional { inner: new_inner }, None))
+            }
+            VirType::RuntimeIterator { elem } => {
+                let new_elem = self.substitute_vir_or_intern(*elem, subs)?;
+                if new_elem == *elem {
+                    return Some(vir_id);
+                }
+                Some(self.intern(VirType::RuntimeIterator { elem: new_elem }, None))
+            }
+            VirType::Tuple { elems } => {
+                let new_elems = self.substitute_vir_vec_or_intern(elems, subs)?;
+                if new_elems == *elems {
+                    return Some(vir_id);
+                }
+                Some(self.intern(VirType::Tuple { elems: new_elems }, None))
+            }
+            VirType::Union { variants } => {
+                let new_variants = self.substitute_vir_vec_or_intern(variants, subs)?;
+                if new_variants == *variants {
+                    return Some(vir_id);
+                }
+                Some(self.intern(
+                    VirType::Union {
+                        variants: new_variants,
+                    },
+                    None,
+                ))
+            }
+            VirType::Fallible { success, errors } => {
+                let new_success = self.substitute_vir_or_intern(*success, subs)?;
+                let new_errors = self.substitute_vir_vec_or_intern(errors, subs)?;
+                if new_success == *success && new_errors == *errors {
+                    return Some(vir_id);
+                }
+                Some(self.intern(
+                    VirType::Fallible {
+                        success: new_success,
+                        errors: new_errors,
+                    },
+                    None,
+                ))
+            }
+            VirType::Function { params, ret } => {
+                let new_params = self.substitute_vir_vec_or_intern(params, subs)?;
+                let new_ret = self.substitute_vir_or_intern(*ret, subs)?;
+                if new_params == *params && new_ret == *ret {
+                    return Some(vir_id);
+                }
+                Some(self.intern(
+                    VirType::Function {
+                        params: new_params,
+                        ret: new_ret,
+                    },
+                    None,
+                ))
+            }
+            VirType::Class { def, type_args } => {
+                let new_args = self.substitute_vir_vec_or_intern(type_args, subs)?;
+                if new_args == *type_args {
+                    return Some(vir_id);
+                }
+                Some(self.intern(
+                    VirType::Class {
+                        def: *def,
+                        type_args: new_args,
+                    },
+                    None,
+                ))
+            }
+            VirType::Struct { def, type_args } => {
+                let new_args = self.substitute_vir_vec_or_intern(type_args, subs)?;
+                if new_args == *type_args {
+                    return Some(vir_id);
+                }
+                Some(self.intern(
+                    VirType::Struct {
+                        def: *def,
+                        type_args: new_args,
+                    },
+                    None,
+                ))
+            }
+            VirType::Interface { def, type_args } => {
+                let new_args = self.substitute_vir_vec_or_intern(type_args, subs)?;
+                if new_args == *type_args {
+                    return Some(vir_id);
+                }
+                Some(self.intern(
+                    VirType::Interface {
+                        def: *def,
+                        type_args: new_args,
+                    },
+                    None,
+                ))
+            }
+
+            VirType::Primitive(_)
+            | VirType::Error { .. }
+            | VirType::Void
+            | VirType::Never
+            | VirType::Range
+            | VirType::MetaType
+            | VirType::Unknown => Some(vir_id),
+        }
+    }
+
+    /// Substitute a vector of VirTypeIds with intern-on-miss, returning None if any
+    /// param fails to resolve.
+    fn substitute_vir_vec_or_intern(
+        &mut self,
+        ids: &[VirTypeId],
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<Vec<VirTypeId>> {
+        ids.iter()
+            .map(|&id| self.substitute_vir_or_intern(id, subs))
+            .collect()
+    }
+
     /// Substitute type parameters using a VirTypeId-native substitution map.
     ///
     /// Like [`lookup_substitute_vir`] but the substitution map maps `NameId`

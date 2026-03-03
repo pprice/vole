@@ -9,7 +9,6 @@ description = "Code generation for the Vole programming language (Cranelift JIT)
 vole-frontend = { path = "../vole-frontend" }
 vole-identity = { path = "../vole-identity" }
 vole-runtime = { path = "../vole-runtime" }
-vole-sema = { path = "../vole-sema" }
 vole-vir = { path = "../vole-vir" }
 
 # Cranelift for JIT compilation

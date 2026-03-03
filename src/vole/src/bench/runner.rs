@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bench::{ResourceUsage, Stats, SystemInfo};
 use crate::codegen::{Compiler, JitContext, JitOptions};
-use crate::commands::common::AnalyzedProgram;
+use crate::commands::common::build_analyzed_program;
 use crate::frontend::{Lexer, ModuleId, Parser};
 use crate::sema::Analyzer;
 
@@ -155,7 +155,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     let output = analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
 
-    let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
+    let analyzed = build_analyzed_program(program, interner, output);
 
     // Codegen phase - always use release mode for benchmarks
     let codegen_start = Instant::now();
@@ -208,7 +208,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
     let output = analyzer.into_analysis_results();
 
-    let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
+    let analyzed = build_analyzed_program(program, interner, output);
 
     // Compile - always use release mode for benchmarks
     let mut jit = JitContext::with_options(JitOptions::release());

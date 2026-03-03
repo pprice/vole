@@ -332,11 +332,8 @@ impl<'a> Compiler<'a> {
             .map(|(params, ret)| (params.to_vec(), ret))
     }
 
-    /// Look up the result of substituting type parameters in a type via VirTypeTable.
-    ///
-    /// Falls back to arena for compound types that were not lowered into the
-    /// VIR type table (e.g., cross-module Self parameters in interface default
-    /// methods).
+    /// Look up the result of substituting type parameters in a type via VirTypeTable,
+    /// falling back to the injected substitution callback for compound types.
     #[inline]
     fn vir_query_lookup_substitute(
         &self,
@@ -345,7 +342,7 @@ impl<'a> Compiler<'a> {
     ) -> Option<TypeId> {
         self.vir_type_table()
             .lookup_substitute(ty, subs)
-            .or_else(|| self.analyzed.type_arena().lookup_substitute(ty, subs))
+            .or_else(|| self.analyzed.substitute_fallback(ty, subs))
     }
 
     // vir_query_primitives() deleted — use TypeId constants directly

@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::cli::ColorMode;
-use crate::codegen::{Compiler, JitContext, JitOptions};
+use crate::codegen::{AnalyzedProgramArgs, Compiler, JitContext, JitOptions};
 use crate::errors::{
     CodegenError, LexerError, ParserError, WithExtraHelp, render_to_writer_terminal,
 };
@@ -274,7 +274,68 @@ pub fn compile_source(
         );
     }
 
-    Ok(AnalyzedProgram::from_analysis(program, interner, output))
+    Ok(build_analyzed_program(program, interner, output))
+}
+
+/// Bridge between sema's `AnalysisOutput` and codegen's `AnalyzedProgram`.
+///
+/// Runs VIR lowering on the sema output and assembles the result into an
+/// `AnalyzedProgram`.  This function lives in the CLI crate (which depends on
+/// both vole-sema and vole-codegen) so that vole-codegen itself does not need
+/// a direct dependency on vole-sema.
+pub fn build_analyzed_program(
+    program: crate::frontend::Program,
+    mut interner: crate::frontend::Interner,
+    output: crate::sema::AnalysisOutput,
+) -> AnalyzedProgram {
+    use crate::sema::lowering::{LowerVirProgramArgs, lower_vir_program};
+
+    let crate::sema::AnalysisOutput {
+        node_map,
+        tests_virtual_modules,
+        module_programs,
+        db: output_db,
+        module_id,
+        modules_with_errors,
+        generic_vir_functions,
+        generic_vir_type_table,
+    } = output;
+
+    let db = match Rc::try_unwrap(output_db) {
+        Ok(compilation_db) => compilation_db.into_codegen(),
+        Err(rc) => rc.to_codegen_shared(),
+    };
+    let lowering_output = lower_vir_program(LowerVirProgramArgs {
+        program: &program,
+        interner: &mut interner,
+        names: &db.names,
+        entities: &db.entities,
+        type_arena: &db.types,
+        node_map: &node_map,
+        tests_virtual_modules: &tests_virtual_modules,
+        module_programs,
+        module_id,
+        modules_with_errors: &modules_with_errors,
+        generic_vir_functions,
+        generic_vir_type_table,
+        implements: &db.implements,
+    });
+    let mut vir_program = lowering_output.vir_program;
+    vir_program.interner = Rc::new(interner);
+    vir_program.name_table = Rc::clone(&db.names);
+
+    // Inject TypeArena substitution fallback for compound types not yet in VirTypeTable.
+    let type_arena = Rc::clone(&db.types);
+    let substitute_fallback: Box<crate::codegen::SubstituteFallbackFn> =
+        Box::new(move |ty, subs| type_arena.lookup_substitute(ty, subs));
+
+    AnalyzedProgram::new(AnalyzedProgramArgs {
+        tests_virtual_modules,
+        module_id,
+        modules_with_errors,
+        vir_program,
+        substitute_fallback: Some(substitute_fallback),
+    })
 }
 
 /// Options for the compile_and_run codegen+execution pipeline.

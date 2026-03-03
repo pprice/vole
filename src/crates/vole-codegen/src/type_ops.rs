@@ -65,9 +65,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn try_substitute_type_v(&self, vir_ty: VirTypeId) -> VirTypeId {
         // Self placeholder: UNKNOWN → concrete self type in default method bodies.
         if vir_ty == VirTypeId::UNKNOWN
-            && let Some(self_ty) = self.self_vir_type {
-                return self_ty;
-            }
+            && let Some(self_ty) = self.self_vir_type
+        {
+            return self_ty;
+        }
         if let Some(substitutions) = self.substitutions {
             self.vir_type_table()
                 .substitute_vir_ids(vir_ty, substitutions)

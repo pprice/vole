@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::{TypeId, UnionStorageKind, VirTypeId};
 use vole_vir::stmt::{VirFor, VirIterKind};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
@@ -229,9 +229,9 @@ impl Cg<'_, '_, '_> {
             elem_vir = arr_elem_vir;
             if union_storage.is_none() && self.vir_query_is_union_v(arr_elem_vir) {
                 union_storage = Some(if self.union_array_prefers_inline_storage_v(arr_elem_vir) {
-                    vole_sema::UnionStorageKind::Inline
+                    UnionStorageKind::Inline
                 } else {
-                    vole_sema::UnionStorageKind::Heap
+                    UnionStorageKind::Heap
                 });
             }
         }
@@ -641,7 +641,7 @@ impl Cg<'_, '_, '_> {
         elem_val: Value,
         elem_ptr: Value,
         elem_type_id: TypeId,
-        union_storage: Option<vole_sema::UnionStorageKind>,
+        union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<Value> {
         self.decode_array_elem_v(
             elem_val,
@@ -657,7 +657,7 @@ impl Cg<'_, '_, '_> {
         elem_val: Value,
         elem_ptr: Value,
         elem_vir: VirTypeId,
-        union_storage: Option<vole_sema::UnionStorageKind>,
+        union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<Value> {
         if self.vir_query_is_unknown_v(elem_vir) {
             let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;

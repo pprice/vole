@@ -5,15 +5,21 @@ use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use vole_frontend::{Interner, Program, Symbol};
+use vole_frontend::{Interner, Symbol};
 use vole_identity::{
-    FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId, VirTypeId,
+    FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId, TypeId, VirTypeId,
 };
-use vole_sema::AnalysisOutput;
-use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
-use vole_sema::type_arena::TypeArena;
 use vole_vir::types::VirType;
 use vole_vir::{VirEntityMetadata, VirFunction, VirProgram};
+
+/// Substitution fallback function type.
+///
+/// Called when VirTypeTable cannot resolve a substituted compound type.
+/// Allows the CLI crate to inject sema TypeArena substitution logic without
+/// vole-codegen depending on vole-sema.
+///
+/// Arguments: (type_id, substitution_map) -> Option<TypeId>
+pub type SubstituteFallbackFn = dyn Fn(TypeId, &FxHashMap<NameId, TypeId>) -> Option<TypeId>;
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
@@ -29,10 +35,11 @@ pub struct AnalyzedProgram {
     /// This is the single entry point for all VIR data produced during lowering.
     /// Codegen accesses VIR through this struct rather than individual fields.
     vir_program: VirProgram,
-    /// Sema type arena — retained as a substitution fallback for compound types
-    /// that exist in the arena but were not interned in the VirTypeTable.
+    /// Substitution fallback for compound types not yet interned in VirTypeTable.
+    ///
+    /// Injected by the CLI crate (wraps sema TypeArena::lookup_substitute).
     /// Will be removed once VirTypeTable supports intern-on-substitute.
-    types: Rc<TypeArena>,
+    substitute_fallback: Option<Box<SubstituteFallbackFn>>,
 }
 
 /// Codegen-local external binding payload from implement-registry lookups.
@@ -76,66 +83,49 @@ impl From<&vole_vir::VirMethodBinding> for MethodBindingRef {
     }
 }
 
-impl AnalyzedProgram {
-    /// Construct AnalyzedProgram from parsed program and analysis output.
-    ///
-    /// When the CompilationDb has a single owner (non-cached path), unwraps it
-    /// directly. When shared (cached path, where module cache holds a reference),
-    /// creates a CodegenDb that shares all data via Rc (O(1), zero cloning).
-    pub fn from_analysis(program: Program, mut interner: Interner, output: AnalysisOutput) -> Self {
-        let AnalysisOutput {
-            node_map,
-            tests_virtual_modules,
-            module_programs,
-            db: output_db,
-            module_id,
-            modules_with_errors,
-            generic_vir_functions,
-            generic_vir_type_table,
-        } = output;
+/// Arguments for constructing an `AnalyzedProgram`.
+///
+/// This struct bundles the VIR lowering output with analysis metadata.
+/// The caller (typically the CLI crate) is responsible for running VIR
+/// lowering on the sema output before passing the results here.
+pub struct AnalyzedProgramArgs {
+    /// Virtual module IDs for tests blocks.
+    pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
+    /// The module ID for the main program.
+    pub module_id: ModuleId,
+    /// Module paths that had sema errors.
+    pub modules_with_errors: HashSet<String>,
+    /// Fully assembled VIR program (functions, tests, globals, type table, entity metadata).
+    pub vir_program: VirProgram,
+    /// Optional substitution fallback for compound types not yet in VirTypeTable.
+    pub substitute_fallback: Option<Box<SubstituteFallbackFn>>,
+}
 
-        let db = match Rc::try_unwrap(output_db) {
-            // Non-cached path: sole owner, move data directly (zero-cost)
-            Ok(compilation_db) => compilation_db.into_codegen(),
-            // Cached path: share Rc-wrapped fields instead of cloning entire CompilationDb
-            Err(rc) => rc.to_codegen_shared(),
-        };
-        let lowering_output = lower_vir_program(LowerVirProgramArgs {
-            program: &program,
-            interner: &mut interner,
-            names: &db.names,
-            entities: &db.entities,
-            type_arena: &db.types,
-            node_map: &node_map,
-            tests_virtual_modules: &tests_virtual_modules,
-            module_programs,
-            module_id,
-            modules_with_errors: &modules_with_errors,
-            generic_vir_functions,
-            generic_vir_type_table,
-            implements: &db.implements,
-        });
-        let mut vir_program = lowering_output.vir_program;
-        // Move name resolution data into VirProgram (zero-clone for NameTable
-        // via Rc::clone, single Rc::new wrap for interner).
-        vir_program.interner = Rc::new(interner);
-        vir_program.name_table = Rc::clone(&db.names);
+impl AnalyzedProgram {
+    /// Construct an `AnalyzedProgram` from pre-lowered VIR data.
+    ///
+    /// The caller is responsible for VIR lowering (via `lower_vir_program`)
+    /// and populating the `VirProgram` with interner and name table data.
+    pub fn new(args: AnalyzedProgramArgs) -> Self {
         Self {
-            tests_virtual_modules,
-            module_id,
-            modules_with_errors,
-            vir_program,
-            types: Rc::clone(&db.types),
+            tests_virtual_modules: args.tests_virtual_modules,
+            module_id: args.module_id,
+            modules_with_errors: args.modules_with_errors,
+            vir_program: args.vir_program,
+            substitute_fallback: args.substitute_fallback,
         }
     }
 
-    /// Get read-only access to the sema type arena (substitution fallback).
+    /// Try substituting via the injected fallback (TypeArena wrapper).
     ///
-    /// Used only by `vir_query_lookup_substitute` / `vir_query_expect_substitute`
-    /// when the VirTypeTable cannot resolve a substituted compound type.
-    /// Will be removed once VirTypeTable supports intern-on-substitute.
-    pub(crate) fn type_arena(&self) -> &TypeArena {
-        &self.types
+    /// Returns `None` when no fallback was provided or when the fallback itself
+    /// cannot resolve the type.
+    pub(crate) fn substitute_fallback(
+        &self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<TypeId> {
+        self.substitute_fallback.as_ref()?.as_ref()(ty, subs)
     }
 
     /// Get read-only access to the name table.
@@ -262,7 +252,7 @@ impl AnalyzedProgram {
     }
 
     /// Return the sema signature TypeId for a method.
-    pub(crate) fn method_signature_id(&self, method_id: MethodId) -> vole_sema::type_arena::TypeId {
+    pub(crate) fn method_signature_id(&self, method_id: MethodId) -> TypeId {
         self.method_def(method_id).signature_id
     }
 
@@ -328,10 +318,7 @@ impl AnalyzedProgram {
     }
 
     /// Return sentinel base type for a sentinel TypeDef, when present.
-    pub(crate) fn sentinel_base_type(
-        &self,
-        type_def_id: TypeDefId,
-    ) -> Option<vole_sema::type_arena::TypeId> {
+    pub(crate) fn sentinel_base_type(&self, type_def_id: TypeDefId) -> Option<TypeId> {
         self.type_def(type_def_id).base_type_id
     }
 
@@ -352,7 +339,7 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
         method_name_id: NameId,
-    ) -> Option<vole_sema::type_arena::TypeId> {
+    ) -> Option<TypeId> {
         self.entity_metadata()
             .find_method_binding(type_def_id, method_name_id)
             .map(|binding| binding.sema_func_type.return_type_id)
@@ -392,7 +379,7 @@ impl AnalyzedProgram {
         &self,
         implementing_type_id: TypeDefId,
         interface_id: TypeDefId,
-    ) -> FxHashMap<NameId, vole_sema::type_arena::TypeId> {
+    ) -> FxHashMap<NameId, TypeId> {
         let type_params = self.entity_type_params(interface_id);
         let type_args = self
             .entity_metadata()
@@ -493,10 +480,7 @@ impl AnalyzedProgram {
     }
 
     /// Return function parameter TypeIds by FunctionId.
-    pub(crate) fn function_param_type_ids(
-        &self,
-        func_id: FunctionId,
-    ) -> Vec<vole_sema::type_arena::TypeId> {
+    pub(crate) fn function_param_type_ids(&self, func_id: FunctionId) -> Vec<TypeId> {
         self.function_def(func_id).sema_param_types.clone()
     }
 
@@ -559,58 +543,12 @@ impl AnalyzedProgram {
             .interface_methods_ordered(interface_type_def_id)
     }
 
-    /// Return all field IDs declared on a type definition.
-    pub(crate) fn entity_field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.entity_metadata()
-            .fields_on_type(type_def_id)
-            .map(|s| s.to_vec())
-            .unwrap_or_default()
-    }
-
-    /// Return the VIR field type for a field ID.
-    #[allow(dead_code)]
-    pub(crate) fn entity_field_vir_type(&self, field_id: FieldId) -> VirTypeId {
-        self.field_def(field_id).vir_ty
-    }
-
-    /// Return the sema field type for a field ID.
-    ///
-    /// Derives the sema `TypeId` from the VirFieldDef's `vir_ty` via
-    /// the VirTypeTable reverse mapping.  Falls back to lossy conversion
-    /// for types not in the table (e.g. reserved primitives).
-    pub(crate) fn entity_field_sema_type(
-        &self,
-        field_id: FieldId,
-    ) -> vole_sema::type_arena::TypeId {
-        let vir_ty = self.field_def(field_id).vir_ty;
-        self.vir_program().type_table.vir_to_type_id(vir_ty)
-    }
-
     /// Return declared type parameter NameIds for a type definition.
     pub(crate) fn entity_type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
         self.entity_metadata()
             .type_params(type_def_id)
             .map(|s| s.to_vec())
             .unwrap_or_default()
-    }
-
-    /// Return generic field types metadata for a type definition, if present.
-    ///
-    /// Converts VirTypeIds from `VirTypeDef::generic_field_types` back to
-    /// sema TypeIds via the VirTypeTable reverse mapping.  Returns `None` if
-    /// the type has no generic field types.
-    pub(crate) fn entity_generic_field_types(
-        &self,
-        type_def_id: TypeDefId,
-    ) -> Option<Vec<vole_sema::type_arena::TypeId>> {
-        let vir_field_types = self.type_def(type_def_id).generic_field_types.as_ref()?;
-        let table = &self.vir_program().type_table;
-        Some(
-            vir_field_types
-                .iter()
-                .map(|&vir_ty| table.vir_to_type_id(vir_ty))
-                .collect(),
-        )
     }
 
     /// Return whether a type definition is a sentinel type.

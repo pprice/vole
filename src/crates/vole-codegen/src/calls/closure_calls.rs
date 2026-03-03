@@ -123,13 +123,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let mut args: ArgVec = smallvec![closure_ptr];
 
         // Check if this call has lambda defaults from VIR dispatch.
-        let lambda_defaults =
-            self.vir_lambda_defaults
-                .take()
-                .map(|info| vole_sema::LambdaDefaults {
-                    required_params: info.required_params,
-                    lambda_node_id: info.lambda_node_id,
-                });
+        let lambda_defaults = self.vir_lambda_defaults.take();
 
         // Compile provided arguments, tracking RC temps for cleanup.
         // When named args were used, sema stored a resolved_call_args mapping that tells
@@ -224,7 +218,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         arg_source: &ArgSource<'_>,
         mapping: &[Option<usize>],
         params: &[TypeId],
-        lambda_defaults: &Option<vole_sema::LambdaDefaults>,
+        lambda_defaults: &Option<vole_vir::LambdaDefaultsInfo>,
         args: &mut ArgVec,
         rc_temp_args: &mut Vec<CompiledValue>,
     ) -> CodegenResult<()> {
@@ -265,7 +259,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         arg_source: &ArgSource<'_>,
         params: &[TypeId],
-        lambda_defaults: &Option<vole_sema::LambdaDefaults>,
+        lambda_defaults: &Option<vole_vir::LambdaDefaultsInfo>,
         args: &mut ArgVec,
         rc_temp_args: &mut Vec<CompiledValue>,
     ) -> CodegenResult<()> {

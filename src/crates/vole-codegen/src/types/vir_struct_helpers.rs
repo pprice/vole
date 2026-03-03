@@ -51,23 +51,6 @@ impl VirStructEntityLookup for crate::analyzed::AnalyzedProgram {
     }
 }
 
-#[cfg(test)]
-impl VirStructEntityLookup for vole_sema::entity_registry::EntityRegistry {
-    fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
-        self.get_type(type_def_id).kind.is_sentinel()
-    }
-
-    fn last_segment(&self, _name_id: NameId) -> Option<String> {
-        // Tests use NameTable directly; not available here.
-        None
-    }
-
-    fn vir_type_def(&self, _type_def_id: TypeDefId) -> Option<&VirTypeDef> {
-        // Tests don't have VirTypeDef; they use the TestStructRegistry wrapper.
-        None
-    }
-}
-
 // ============================================================================
 // Field type lookup from VirTypeDef
 // ============================================================================
@@ -498,11 +481,28 @@ pub(crate) fn vir_convert_field_value(
 mod tests {
     use super::*;
     use vole_identity::TypeDefId;
-    use vole_sema::entity_registry::EntityRegistry;
     use vole_vir::type_table::VirTypeTable;
 
     fn test_table() -> VirTypeTable {
         VirTypeTable::new()
+    }
+
+    /// Minimal `VirStructEntityLookup` for tests that don't need VirTypeDef
+    /// or field name resolution. No sentinel types.
+    struct NullEntities;
+
+    impl VirStructEntityLookup for NullEntities {
+        fn is_sentinel_type_def(&self, _type_def_id: TypeDefId) -> bool {
+            false
+        }
+
+        fn last_segment(&self, _name_id: NameId) -> Option<String> {
+            None
+        }
+
+        fn vir_type_def(&self, _type_def_id: TypeDefId) -> Option<&VirTypeDef> {
+            None
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -512,7 +512,7 @@ mod tests {
     #[test]
     fn payload_union_with_i64_variant() {
         let mut table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         let union_ty = table.intern(
             VirType::Union {
                 variants: vec![VirTypeId::I64, VirTypeId::NIL],
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn tag_only_union_nil_done() {
         let mut table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         let union_ty = table.intern(
             VirType::Union {
                 variants: vec![VirTypeId::NIL, VirTypeId::DONE],
@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn non_union_is_not_payload_union() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert!(!vir_is_payload_union(VirTypeId::I64, &table, &entities));
     }
 
@@ -548,15 +548,14 @@ mod tests {
     // Struct layout helpers
     // -----------------------------------------------------------------------
 
-    /// Test wrapper that combines an EntityRegistry with VirTypeDef metadata.
+    /// Test wrapper that provides VirTypeDef metadata for struct layout tests.
     struct TestStructRegistry {
-        registry: EntityRegistry,
         type_defs: FxHashMap<TypeDefId, VirTypeDef>,
     }
 
     impl VirStructEntityLookup for TestStructRegistry {
-        fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
-            self.registry.get_type(type_def_id).kind.is_sentinel()
+        fn is_sentinel_type_def(&self, _type_def_id: TypeDefId) -> bool {
+            false
         }
 
         fn last_segment(&self, _name_id: NameId) -> Option<String> {
@@ -569,36 +568,17 @@ mod tests {
     }
 
     /// Create a test struct type with fields and VirTypeDef metadata.
-    fn make_struct_registry(
-        field_sema_types: &[TypeId],
-        field_vir_types: &[VirTypeId],
-    ) -> (TestStructRegistry, TypeDefId) {
-        use vole_identity::NameTable;
-        use vole_sema::entity_defs::TypeDefKind;
+    fn make_struct_registry(field_vir_types: &[VirTypeId]) -> (TestStructRegistry, TypeDefId) {
         use vole_vir::entity_metadata::VirTypeDefKind;
 
-        let mut names = NameTable::new();
-        let main_mod = names.main_module();
-        let builtin_mod = names.builtin_module();
-        let type_name = names.intern_raw(main_mod, &["TestStruct"]);
-
-        let mut registry = EntityRegistry::new();
-        let type_def_id = registry.register_type(type_name, TypeDefKind::Struct, main_mod);
-
-        let mut field_ids = Vec::new();
-        for (i, &ty) in field_sema_types.iter().enumerate() {
-            let field_name_str = format!("f{i}");
-            let field_name = names.intern_raw(builtin_mod, &[&field_name_str]);
-            let full_name = names.intern_raw(main_mod, &["TestStruct", &field_name_str]);
-            let fid = registry.register_field(type_def_id, field_name, full_name, ty, i);
-            field_ids.push(fid);
-        }
+        let type_def_id = TypeDefId::new(0);
+        let type_name = NameId::new_for_test(0);
 
         let vir_td = VirTypeDef {
             id: type_def_id,
             name_id: type_name,
             kind: VirTypeDefKind::Struct,
-            fields: field_ids,
+            fields: vec![],
             field_types: field_vir_types.to_vec(),
             methods: vec![],
             static_methods: vec![],
@@ -607,30 +587,21 @@ mod tests {
             implements: vec![],
             is_annotation: false,
             base_type_id: None,
-            module: main_mod,
+            module: vole_identity::ModuleId::new(0),
             is_generic: false,
             generic_field_types: None,
-
             generic_field_names: None,
         };
 
         let mut type_defs = FxHashMap::default();
         type_defs.insert(type_def_id, vir_td);
 
-        (
-            TestStructRegistry {
-                registry,
-                type_defs,
-            },
-            type_def_id,
-        )
+        (TestStructRegistry { type_defs }, type_def_id)
     }
 
     #[test]
     fn struct_flat_slot_count_two_i64_fields() {
-        let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) =
-            make_struct_registry(&[sema_i64, sema_i64], &[VirTypeId::I64, VirTypeId::I64]);
+        let (entities, type_def_id) = make_struct_registry(&[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -649,10 +620,7 @@ mod tests {
 
     #[test]
     fn struct_flat_slot_count_with_wide_field() {
-        let sema_i64 = TypeId::I64;
-        let sema_i128 = TypeId::I128;
-        let (entities, type_def_id) =
-            make_struct_registry(&[sema_i64, sema_i128], &[VirTypeId::I64, VirTypeId::I128]);
+        let (entities, type_def_id) = make_struct_registry(&[VirTypeId::I64, VirTypeId::I128]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -673,15 +641,13 @@ mod tests {
     #[test]
     fn struct_flat_slot_count_returns_none_for_non_struct() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert!(vir_struct_flat_slot_count(VirTypeId::I64, &table, &entities).is_none());
     }
 
     #[test]
     fn struct_field_byte_offset_two_i64() {
-        let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) =
-            make_struct_registry(&[sema_i64, sema_i64], &[VirTypeId::I64, VirTypeId::I64]);
+        let (entities, type_def_id) = make_struct_registry(&[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -704,10 +670,7 @@ mod tests {
 
     #[test]
     fn struct_field_byte_offset_with_wide() {
-        let sema_i128 = TypeId::I128;
-        let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) =
-            make_struct_registry(&[sema_i128, sema_i64], &[VirTypeId::I128, VirTypeId::I64]);
+        let (entities, type_def_id) = make_struct_registry(&[VirTypeId::I128, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -731,9 +694,7 @@ mod tests {
 
     #[test]
     fn struct_total_byte_size_two_i64() {
-        let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) =
-            make_struct_registry(&[sema_i64, sema_i64], &[VirTypeId::I64, VirTypeId::I64]);
+        let (entities, type_def_id) = make_struct_registry(&[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -752,9 +713,7 @@ mod tests {
 
     #[test]
     fn struct_flat_field_cranelift_types_two_i64() {
-        let sema_i64 = TypeId::I64;
-        let (entities, type_def_id) =
-            make_struct_registry(&[sema_i64, sema_i64], &[VirTypeId::I64, VirTypeId::I64]);
+        let (entities, type_def_id) = make_struct_registry(&[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -771,10 +730,7 @@ mod tests {
 
     #[test]
     fn struct_flat_field_cranelift_types_with_f64() {
-        let sema_i64 = TypeId::I64;
-        let sema_f64 = TypeId::F64;
-        let (entities, type_def_id) =
-            make_struct_registry(&[sema_i64, sema_f64], &[VirTypeId::I64, VirTypeId::F64]);
+        let (entities, type_def_id) = make_struct_registry(&[VirTypeId::I64, VirTypeId::F64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -792,14 +748,14 @@ mod tests {
     #[test]
     fn struct_flat_field_cranelift_types_returns_none_for_non_struct() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert!(vir_struct_flat_field_cranelift_types(VirTypeId::I64, &table, &entities).is_none());
     }
 
     #[test]
     fn field_flat_slots_recursive_for_primitives() {
         let table = test_table();
-        let entities = EntityRegistry::new();
+        let entities = NullEntities;
         assert_eq!(
             vir_field_flat_slots_recursive(VirTypeId::I64, &table, &entities),
             1
@@ -842,14 +798,13 @@ mod tests {
     /// Test helper that holds VirTypeDef data and a NameTable for field name
     /// resolution, implementing VirStructEntityLookup.
     struct TestVirEntities {
-        registry: EntityRegistry,
         type_defs: FxHashMap<TypeDefId, VirTypeDef>,
         names: vole_identity::NameTable,
     }
 
     impl VirStructEntityLookup for TestVirEntities {
-        fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
-            self.registry.get_type(type_def_id).kind.is_sentinel()
+        fn is_sentinel_type_def(&self, _type_def_id: TypeDefId) -> bool {
+            false
         }
 
         fn last_segment(&self, name_id: NameId) -> Option<String> {
@@ -864,11 +819,9 @@ mod tests {
     /// Build test entities with a struct type, field names, and VirTypeDef.
     fn make_vir_test_entities(
         field_names: &[&str],
-        field_sema_types: &[TypeId],
         field_vir_types: &[VirTypeId],
     ) -> (TestVirEntities, TypeDefId) {
         use vole_identity::NameTable;
-        use vole_sema::entity_defs::TypeDefKind;
         use vole_vir::entity_metadata::VirTypeDefKind;
 
         let mut names = NameTable::new();
@@ -876,14 +829,11 @@ mod tests {
         let builtin_mod = names.builtin_module();
         let type_name = names.intern_raw(main_mod, &["TestStruct"]);
 
-        let mut registry = EntityRegistry::new();
-        let type_def_id = registry.register_type(type_name, TypeDefKind::Struct, main_mod);
+        let type_def_id = TypeDefId::new(0);
 
         let mut generic_field_names = Vec::new();
-        for (i, (&fname, &sema_ty)) in field_names.iter().zip(field_sema_types.iter()).enumerate() {
+        for &fname in field_names {
             let field_name = names.intern_raw(builtin_mod, &[fname]);
-            let full_name = names.intern_raw(main_mod, &["TestStruct", fname]);
-            registry.register_field(type_def_id, field_name, full_name, sema_ty, i);
             generic_field_names.push(field_name);
         }
 
@@ -909,23 +859,13 @@ mod tests {
         let mut type_defs = FxHashMap::default();
         type_defs.insert(type_def_id, vir_type_def);
 
-        (
-            TestVirEntities {
-                registry,
-                type_defs,
-                names,
-            },
-            type_def_id,
-        )
+        (TestVirEntities { type_defs, names }, type_def_id)
     }
 
     #[test]
     fn vir_get_field_struct_two_i64() {
-        let (entities, type_def_id) = make_vir_test_entities(
-            &["x", "y"],
-            &[TypeId::I64, TypeId::I64],
-            &[VirTypeId::I64, VirTypeId::I64],
-        );
+        let (entities, type_def_id) =
+            make_vir_test_entities(&["x", "y"], &[VirTypeId::I64, VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -951,8 +891,7 @@ mod tests {
 
     #[test]
     fn vir_get_field_not_found() {
-        let (entities, type_def_id) =
-            make_vir_test_entities(&["x"], &[TypeId::I64], &[VirTypeId::I64]);
+        let (entities, type_def_id) = make_vir_test_entities(&["x"], &[VirTypeId::I64]);
 
         let mut table = test_table();
         let struct_ty = table.intern(
@@ -969,7 +908,6 @@ mod tests {
     #[test]
     fn vir_get_field_non_struct_type() {
         let entities = TestVirEntities {
-            registry: EntityRegistry::new(),
             type_defs: FxHashMap::default(),
             names: vole_identity::NameTable::new(),
         };
@@ -983,7 +921,6 @@ mod tests {
     #[test]
     fn vir_get_field_class_with_wide_type() {
         use vole_identity::NameTable;
-        use vole_sema::entity_defs::TypeDefKind;
         use vole_vir::entity_metadata::VirTypeDefKind;
 
         let mut names = NameTable::new();
@@ -991,16 +928,10 @@ mod tests {
         let builtin_mod = names.builtin_module();
         let type_name = names.intern_raw(main_mod, &["TestClass"]);
 
-        let mut registry = EntityRegistry::new();
-        let type_def_id = registry.register_type(type_name, TypeDefKind::Class, main_mod);
+        let type_def_id = TypeDefId::new(0);
 
         let field_a_name = names.intern_raw(builtin_mod, &["a"]);
-        let field_a_full = names.intern_raw(main_mod, &["TestClass", "a"]);
-        registry.register_field(type_def_id, field_a_name, field_a_full, TypeId::I128, 0);
-
         let field_b_name = names.intern_raw(builtin_mod, &["b"]);
-        let field_b_full = names.intern_raw(main_mod, &["TestClass", "b"]);
-        registry.register_field(type_def_id, field_b_name, field_b_full, TypeId::I64, 1);
 
         let vir_type_def = VirTypeDef {
             id: type_def_id,
@@ -1024,11 +955,7 @@ mod tests {
         let mut type_defs = FxHashMap::default();
         type_defs.insert(type_def_id, vir_type_def);
 
-        let entities = TestVirEntities {
-            registry,
-            type_defs,
-            names,
-        };
+        let entities = TestVirEntities { type_defs, names };
 
         let mut table = test_table();
         let class_ty = table.intern(
@@ -1055,7 +982,6 @@ mod tests {
     #[test]
     fn vir_get_field_generic_substitution() {
         use vole_identity::NameTable;
-        use vole_sema::entity_defs::TypeDefKind;
         use vole_vir::entity_metadata::VirTypeDefKind;
 
         let mut names = NameTable::new();
@@ -1064,20 +990,9 @@ mod tests {
         let type_name = names.intern_raw(main_mod, &["Wrapper"]);
         let t_param = names.intern_raw(builtin_mod, &["T"]);
 
-        let mut registry = EntityRegistry::new();
-        let type_def_id = registry.register_type(type_name, TypeDefKind::Struct, main_mod);
+        let type_def_id = TypeDefId::new(0);
 
         let field_val_name = names.intern_raw(builtin_mod, &["val"]);
-        let field_val_full = names.intern_raw(main_mod, &["Wrapper", "val"]);
-        // sema type for the generic field is a type param placeholder
-        let sema_param_ty = TypeId::from_raw(500);
-        registry.register_field(
-            type_def_id,
-            field_val_name,
-            field_val_full,
-            sema_param_ty,
-            0,
-        );
 
         let mut table = test_table();
         // Intern the Param type for T
@@ -1105,11 +1020,7 @@ mod tests {
         let mut type_defs = FxHashMap::default();
         type_defs.insert(type_def_id, vir_type_def);
 
-        let entities = TestVirEntities {
-            registry,
-            type_defs,
-            names,
-        };
+        let entities = TestVirEntities { type_defs, names };
 
         // Concrete instantiation: Wrapper<i64>
         let struct_ty = table.intern(
