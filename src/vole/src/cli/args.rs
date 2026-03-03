@@ -73,6 +73,10 @@ pub enum Commands {
         #[arg(short, long)]
         verbose: bool,
 
+        /// Suppress progress output, only show failures and summary
+        #[arg(short, long)]
+        quiet: bool,
+
         /// Stop after N test failures (default: 5, 0 = no limit)
         #[arg(short = 'x', long, default_value_t = 5)]
         max_failures: u32,

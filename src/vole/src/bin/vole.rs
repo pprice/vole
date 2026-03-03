@@ -94,6 +94,7 @@ fn main() -> ExitCode {
             paths,
             filter,
             verbose,
+            quiet,
             max_failures,
             include_skipped,
             root,
@@ -102,6 +103,7 @@ fn main() -> ExitCode {
             TestRunOptions {
                 filter: filter.as_deref(),
                 verbose,
+                quiet,
                 max_failures,
                 include_skipped,
                 project_root: root.as_deref(),

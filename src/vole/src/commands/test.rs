@@ -180,6 +180,8 @@ pub struct TestRunOptions<'a> {
     pub filter: Option<&'a str>,
     /// Show verbose output (per-test results)
     pub verbose: bool,
+    /// Suppress progress output, only show failures and summary
+    pub quiet: bool,
     /// Maximum number of failures before stopping (0 = unlimited)
     pub max_failures: u32,
     /// Whether to include files with `_` prefix in discovery
@@ -198,6 +200,8 @@ struct TestRunConfig<'a> {
     filter: Option<&'a str>,
     /// Show verbose output (per-test results)
     verbose: bool,
+    /// Suppress progress output, only show failures and summary
+    quiet: bool,
     /// Root directory for module resolution
     project_root: Option<&'a Path>,
     /// Use release optimizations
@@ -339,6 +343,7 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
     let config = TestRunConfig {
         filter: options.filter,
         verbose: options.verbose,
+        quiet: options.quiet,
         project_root: options.project_root,
         release: options.release,
         colors: TermColors::with_mode(options.color),
@@ -413,11 +418,15 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
     // Create shared module cache for all test files (sema caching)
     let cache = Rc::new(RefCell::new(ModuleCache::new()));
 
+    // Shared VIR cache for module type methods across compilations
+    let vir_cache: Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>> =
+        Rc::new(RefCell::new(None));
+
     // Compiled modules cache (codegen caching) - populated on first file
     let mut compiled_modules: Option<CompiledModules> = None;
 
-    // Create progress line for non-verbose mode
-    let mut progress = if config.verbose {
+    // Create progress line for non-verbose mode (quiet mode suppresses it)
+    let mut progress = if config.verbose || config.quiet {
         None
     } else {
         println!("\nRunning {} test files...\n", files.len());
@@ -445,6 +454,7 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
             file,
             &config,
             cache.clone(),
+            vir_cache.clone(),
             &mut compiled_modules,
             progress.as_mut(),
         ) {
@@ -537,6 +547,7 @@ fn run_file_tests_with_modules(
     path: &Path,
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
+    vir_cache: Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>,
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
@@ -548,6 +559,7 @@ fn run_file_tests_with_modules(
         path,
         config,
         cache,
+        vir_cache,
         compiled_modules,
         progress,
     )
@@ -560,6 +572,7 @@ fn run_source_tests_with_modules(
     path: &Path,
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
+    vir_cache: Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>,
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
@@ -572,6 +585,7 @@ fn run_source_tests_with_modules(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
+            module_vir_cache: Some(vir_cache),
             color_mode: config.color_mode,
         },
         &mut diag_buffer,
@@ -727,6 +741,7 @@ fn run_source_tests_with_progress(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
+            module_vir_cache: None,
             color_mode: config.color_mode,
         },
         &mut diag_buffer,

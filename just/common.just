@@ -19,9 +19,61 @@ test:
 snap:
     cargo run -p vole-snap {{cargo_profile}} -- test test/snapshot/
 
-# Run vole unit tests
+# Run vole unit tests (parallel across cores)
 unit:
-    cargo run --bin vole {{cargo_profile}} -- test test/unit/
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Build once, then run the binary directly to avoid cargo lock contention
+    cargo build --bin vole {{cargo_profile}} 2>&1
+    VOLE=$(cargo build --bin vole {{cargo_profile}} --message-format=json 2>/dev/null \
+        | jq -r 'select(.executable != null) | .executable' | tail -1)
+    if [[ -z "$VOLE" || ! -x "$VOLE" ]]; then
+        echo "error: could not find vole binary"
+        exit 1
+    fi
+
+    NCPU=$(( ($(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) + 1) / 2 ))
+    WORK=$(mktemp -d)
+    trap 'rm -rf "$WORK"' EXIT
+
+    # Collect test files, filter _prefixed
+    mapfile -t FILES < <(find test/unit -name '*.vole' ! -name '_*' | sort)
+    NFILES=${#FILES[@]}
+    if [[ $NFILES -eq 0 ]]; then
+        echo "error: no test files found"
+        exit 1
+    fi
+
+    # Distribute files round-robin into shards
+    for ((i=0; i<NCPU; i++)); do > "$WORK/shard_$i.txt"; done
+    for ((i=0; i<NFILES; i++)); do
+        echo "${FILES[$i]}" >> "$WORK/shard_$((i % NCPU)).txt"
+    done
+
+    # Launch shards in background
+    PIDS=()
+    for ((i=0; i<NCPU; i++)); do
+        [[ -s "$WORK/shard_$i.txt" ]] || continue
+        mapfile -t SHARD_FILES < "$WORK/shard_$i.txt"
+        (
+            "$VOLE" test -q --color=never "${SHARD_FILES[@]}" 2>&1 | sed "s/^/[test:$i] /"  > "$WORK/out_$i.txt"
+            echo $? > "$WORK/exit_$i.txt"
+        ) &
+        PIDS+=($!)
+    done
+
+    # Wait for all, then print output atomically per shard
+    ANY_FAIL=0
+    for pid in "${PIDS[@]}"; do wait "$pid" || true; done
+    for ((i=0; i<NCPU; i++)); do
+        [[ -f "$WORK/out_$i.txt" ]] || continue
+        cat "$WORK/out_$i.txt"
+        if [[ -f "$WORK/exit_$i.txt" ]] && [[ $(cat "$WORK/exit_$i.txt") -ne 0 ]]; then
+            ANY_FAIL=1
+        fi
+    done
+    exit $ANY_FAIL
 
 # Run vole unit tests with verbose output
 unit-verbose:
