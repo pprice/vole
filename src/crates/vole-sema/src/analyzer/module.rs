@@ -926,36 +926,16 @@ impl Analyzer {
             .tests_virtual_modules
             .extend(sub.results.tests_virtual_modules);
 
-        // Merge generic VIR templates from the tests module.  Templates lowered
-        // in the sub-analyzer use that analyzer's type table, so remap their
-        // VirTypeIds into the parent's shared generic VIR type table.
-        self.merge_generic_vir_results(
-            sub.results.generic_vir_functions,
-            sub.results.generic_vir_type_table,
-        );
+        // Merge generic VIR templates from the tests module.  With shared
+        // VirTypeTable in AnalyzerContext, sub-analyzers intern directly into
+        // the same table — no merge/rewrite needed.
+        self.results
+            .generic_vir_functions
+            .extend(sub.results.generic_vir_functions);
 
         // Merge errors and warnings
         self.diagnostics.errors.extend(sub.diagnostics.errors);
         self.diagnostics.warnings.extend(sub.diagnostics.warnings);
-    }
-
-    /// Merge generic VIR templates and their type table into this analyzer's
-    /// shared generic VIR storage, remapping VirTypeIds as needed.
-    pub(super) fn merge_generic_vir_results(
-        &mut self,
-        generic_vir_functions: Vec<(NameId, vole_vir::func::VirFunction)>,
-        generic_vir_type_table: vole_vir::type_table::VirTypeTable,
-    ) {
-        let type_remap = self
-            .results
-            .generic_vir_type_table
-            .merge_from(&generic_vir_type_table);
-        let rewrite_ctx = vole_vir::RewriteCtx::new(type_remap);
-        self.results.generic_vir_functions.extend(
-            generic_vir_functions
-                .into_iter()
-                .map(|(name_id, vir)| (name_id, vole_vir::rewrite_function(&vir, &rewrite_ctx))),
-        );
     }
 
     /// Fork for analyzing a prelude file.

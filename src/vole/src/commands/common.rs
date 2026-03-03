@@ -298,7 +298,7 @@ pub fn build_analyzed_program(
         module_id,
         modules_with_errors,
         generic_vir_functions,
-        generic_vir_type_table,
+        vir_type_table,
     } = output;
 
     let db = match Rc::try_unwrap(output_db) {
@@ -317,7 +317,7 @@ pub fn build_analyzed_program(
         module_id,
         modules_with_errors: &modules_with_errors,
         generic_vir_functions,
-        generic_vir_type_table,
+        vir_type_table,
         implements: &db.implements,
     });
     let mut vir_program = lowering_output.vir_program;

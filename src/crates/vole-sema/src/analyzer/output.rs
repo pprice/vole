@@ -77,12 +77,12 @@ pub struct AnalysisOutput {
     /// monomorphization fixpoint loop, so the NodeMap entries used here have
     /// abstract TypeParam types.  Keyed by the function's original `NameId`.
     pub generic_vir_functions: Vec<(NameId, VirFunction)>,
-    /// Shared type table for all generic VIR templates.
+    /// Shared VIR type table populated during sema analysis.
     ///
-    /// All generic VIR functions use VirTypeIds from this table.  VIR
-    /// monomorphization merges this into the program's type table so that
-    /// type substitution can correctly remap generic type references.
-    pub generic_vir_type_table: VirTypeTable,
+    /// Both generic VIR templates and concrete VIR functions intern into the
+    /// same table (via `AnalyzerContext`), so no merge/remap is needed.
+    /// facade.rs uses this as the initial type table for the VirProgram.
+    pub vir_type_table: VirTypeTable,
 }
 
 /// Analysis results collected during type checking for codegen.
@@ -100,8 +100,6 @@ pub(crate) struct AnalysisResults {
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Generic VIR function templates lowered during Pass 2a.
     pub generic_vir_functions: Vec<(NameId, VirFunction)>,
-    /// Shared type table for all generic VIR templates.
-    pub generic_vir_type_table: VirTypeTable,
 }
 
 /// Function and global variable symbol tables.

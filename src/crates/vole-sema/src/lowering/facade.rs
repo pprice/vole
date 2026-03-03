@@ -65,7 +65,12 @@ where
     pub module_id: ModuleId,
     pub modules_with_errors: &'a HashSet<String>,
     pub generic_vir_functions: Vec<(NameId, VirFunction)>,
-    pub generic_vir_type_table: VirTypeTable,
+    /// Shared VIR type table pre-populated by sema analysis.
+    ///
+    /// Generic VIR templates already use VirTypeIds from this table, so no
+    /// merge/remap is needed. Concrete VIR lowering continues interning into
+    /// the same table.
+    pub vir_type_table: VirTypeTable,
     pub implements: &'a ImplementRegistry,
 }
 
@@ -90,11 +95,14 @@ where
         module_id,
         modules_with_errors,
         generic_vir_functions,
-        generic_vir_type_table,
+        vir_type_table,
         implements,
     } = args;
 
-    let mut type_table = VirTypeTable::new();
+    // Use the shared VIR type table from sema analysis.  Generic VIR
+    // templates already use VirTypeIds from this table, so no merge/remap
+    // is needed — concrete lowering continues interning into the same table.
+    let mut type_table = vir_type_table;
     let mut vir_functions = lower_top_level_functions(LowerTopLevelFunctionsArgs {
         program,
         interner,
@@ -116,9 +124,7 @@ where
         type_table: &mut type_table,
     });
 
-    let generic_type_remap = type_table.merge_from(&generic_vir_type_table);
-    let (generic_vir_functions, generic_vir_map) =
-        build_generic_vir_storage_remapped(generic_vir_functions, &generic_type_remap);
+    let (generic_vir_functions, generic_vir_map) = build_generic_vir_storage(generic_vir_functions);
 
     let vir_handled_function_ids = run_early_vir_monomorphize(
         &mut vir_functions,
@@ -582,23 +588,19 @@ fn lower_tests_decl_bodies(
     }
 }
 
-/// Build generic VIR storage with VirTypeId remapping.
+/// Build generic VIR storage: index generic templates by NameId.
 ///
-/// Like `build_generic_vir_storage` but applies a VirTypeId remapping to
-/// each generic function template.  This is needed because generic templates
-/// are lowered with their own type table (in sema Pass 2a) and their
-/// VirTypeIds must be translated to the program's main type table.
-fn build_generic_vir_storage_remapped(
+/// With the shared VirTypeTable, generic templates already use the same
+/// VirTypeIds as the program's main table — no remapping needed.
+fn build_generic_vir_storage(
     pairs: Vec<(NameId, VirFunction)>,
-    type_remap: &FxHashMap<vole_identity::VirTypeId, vole_identity::VirTypeId>,
 ) -> (Vec<VirFunction>, FxHashMap<NameId, usize>) {
-    let ctx = vole_vir::RewriteCtx::new(type_remap.clone());
     let mut map = FxHashMap::default();
     let mut functions = Vec::with_capacity(pairs.len());
     for (name_id, vir) in pairs {
         let idx = functions.len();
         map.insert(name_id, idx);
-        functions.push(vole_vir::rewrite_function(&vir, &ctx));
+        functions.push(vir);
     }
     (functions, map)
 }

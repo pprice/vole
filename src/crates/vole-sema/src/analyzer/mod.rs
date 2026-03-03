@@ -139,7 +139,7 @@ impl Analyzer {
 
         // Try to take ownership of the shared context to avoid cloning AST trees.
         // By this point all sub-analyzers should be dropped, so Rc strong count is 1.
-        let (merged_node_map, module_programs, db, modules_with_errors) =
+        let (merged_node_map, module_programs, db, modules_with_errors, vir_type_table) =
             match Rc::try_unwrap(self.ctx) {
                 Ok(ctx) => {
                     let errored = ctx.modules_with_errors.into_inner();
@@ -148,6 +148,7 @@ impl Analyzer {
                         ctx.module_programs.into_inner(),
                         ctx.db,
                         errored,
+                        ctx.vir_type_table.into_inner(),
                     )
                 }
                 Err(ctx) => {
@@ -157,6 +158,7 @@ impl Analyzer {
                         ctx.module_programs.borrow().clone(),
                         Rc::clone(&ctx.db),
                         errored,
+                        ctx.vir_type_table.borrow().clone(),
                     )
                 }
             };
@@ -172,7 +174,7 @@ impl Analyzer {
             module_id: current_module,
             modules_with_errors: modules_with_errors.into_iter().collect(),
             generic_vir_functions: self.results.generic_vir_functions,
-            generic_vir_type_table: self.results.generic_vir_type_table,
+            vir_type_table,
         }
     }
 
@@ -531,9 +533,7 @@ impl Analyzer {
         // and lower them to VIR templates.  These templates are consumed by
         // the VIR monomorph pass (in codegen's `from_analysis`) which handles
         // free-function monomorphization via type substitution.
-        let (generic_vir_fns, generic_vir_tt) = self.lower_generic_bodies_to_vir(program, interner);
-        self.results.generic_vir_functions = generic_vir_fns;
-        self.results.generic_vir_type_table = generic_vir_tt;
+        self.results.generic_vir_functions = self.lower_generic_bodies_to_vir(program, interner);
 
         // Pass 2.5: Propagate concrete substitutions to class method monomorphs.
         // Generic class bodies record identity monomorphs for self-calls (T -> TypeParam(T)).
@@ -604,8 +604,10 @@ impl Analyzer {
 
         // Pass 2a for virtual modules: analyze generic function bodies in this
         // tests-scoped program and lower them to generic VIR templates.
-        let (generic_vir_fns, generic_vir_tt) = self.lower_generic_bodies_to_vir(program, interner);
-        self.merge_generic_vir_results(generic_vir_fns, generic_vir_tt);
+        let generic_vir_fns = self.lower_generic_bodies_to_vir(program, interner);
+        // With shared VirTypeTable in AnalyzerContext, no merge/rewrite is
+        // needed — sub-analyzers intern directly into the same table.
+        self.results.generic_vir_functions.extend(generic_vir_fns);
     }
 
     /// Pass 0: Collect type aliases (so they're available for function signatures)
