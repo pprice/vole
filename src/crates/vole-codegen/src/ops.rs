@@ -7,8 +7,8 @@ use cranelift_codegen::ir::{BlockArg, Function, InstructionData};
 
 use crate::RuntimeKey;
 use crate::context::ExternalMethodRef;
-use vole_frontend::BinaryOp;
 use vole_identity::{TypeId, VirTypeId};
+use vole_vir::VirBinOp;
 use vole_vir::numeric_model::numeric_result_type_v;
 
 use super::context::Cg;
@@ -194,12 +194,12 @@ impl Cg<'_, '_, '_> {
         &mut self,
         mut left: CompiledValue,
         mut right: CompiledValue,
-        op: BinaryOp,
+        op: VirBinOp,
         line: u32,
     ) -> CodegenResult<CompiledValue> {
         // Handle optional/nil comparisons specially
         // When comparing optional == nil or optional != nil, we need to check the tag
-        if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+        if matches!(op, VirBinOp::Eq | VirBinOp::Ne) {
             // Check if left is optional and right is nil
             let left_is_opt = self.vir_query_is_optional_v(left.type_id);
             let right_is_nil = right.type_id.is_nil();
@@ -260,7 +260,7 @@ impl Cg<'_, '_, '_> {
         };
 
         let result = match op {
-            BinaryOp::Add => {
+            VirBinOp::Add => {
                 if result_ty == types::F128 {
                     self.call_f128_binary_op(RuntimeKey::F128Add, left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
@@ -269,7 +269,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().iadd(left_val, right_val)
                 }
             }
-            BinaryOp::Sub => {
+            VirBinOp::Sub => {
                 if result_ty == types::F128 {
                     self.call_f128_binary_op(RuntimeKey::F128Sub, left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
@@ -278,7 +278,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().isub(left_val, right_val)
                 }
             }
-            BinaryOp::Mul => {
+            VirBinOp::Mul => {
                 if result_ty == types::F128 {
                     self.call_f128_binary_op(RuntimeKey::F128Mul, left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
@@ -287,7 +287,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().imul(left_val, right_val)
                 }
             }
-            BinaryOp::Div => {
+            VirBinOp::Div => {
                 if result_ty == types::F128 {
                     self.call_f128_binary_op(RuntimeKey::F128Div, left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
@@ -306,7 +306,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().sdiv(left_val, right_val)
                 }
             }
-            BinaryOp::Mod => {
+            VirBinOp::Mod => {
                 if result_ty == types::F128 {
                     self.call_f128_binary_op(RuntimeKey::F128Rem, left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
@@ -328,7 +328,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().srem(left_val, right_val)
                 }
             }
-            BinaryOp::Eq => {
+            VirBinOp::Eq => {
                 if left_is_string {
                     self.string_eq(left_val, right_val)?
                 } else if result_ty == types::F128 {
@@ -344,7 +344,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().icmp(IntCC::Equal, left_val, right_val)
                 }
             }
-            BinaryOp::Ne => {
+            VirBinOp::Ne => {
                 if left_is_string {
                     let eq = self.string_eq(left_val, right_val)?;
                     let one = self.iconst_cached(types::I8, 1);
@@ -368,7 +368,7 @@ impl Cg<'_, '_, '_> {
                         .icmp(IntCC::NotEqual, left_val, right_val)
                 }
             }
-            BinaryOp::Lt => {
+            VirBinOp::Lt => {
                 if result_ty == types::F128 {
                     self.call_f128_cmp(RuntimeKey::F128Lt, left_val, right_val)?
                 } else {
@@ -385,7 +385,7 @@ impl Cg<'_, '_, '_> {
                     )
                 }
             }
-            BinaryOp::Gt => {
+            VirBinOp::Gt => {
                 if result_ty == types::F128 {
                     self.call_f128_cmp(RuntimeKey::F128Gt, left_val, right_val)?
                 } else {
@@ -402,7 +402,7 @@ impl Cg<'_, '_, '_> {
                     )
                 }
             }
-            BinaryOp::Le => {
+            VirBinOp::Le => {
                 if result_ty == types::F128 {
                     self.call_f128_cmp(RuntimeKey::F128Le, left_val, right_val)?
                 } else {
@@ -419,7 +419,7 @@ impl Cg<'_, '_, '_> {
                     )
                 }
             }
-            BinaryOp::Ge => {
+            VirBinOp::Ge => {
                 if result_ty == types::F128 {
                     self.call_f128_cmp(RuntimeKey::F128Ge, left_val, right_val)?
                 } else {
@@ -436,12 +436,12 @@ impl Cg<'_, '_, '_> {
                     )
                 }
             }
-            BinaryOp::And | BinaryOp::Or => unreachable!("handled above"),
-            BinaryOp::BitAnd => self.builder.ins().band(left_val, right_val),
-            BinaryOp::BitOr => self.builder.ins().bor(left_val, right_val),
-            BinaryOp::BitXor => self.builder.ins().bxor(left_val, right_val),
-            BinaryOp::Shl => self.builder.ins().ishl(left_val, right_val),
-            BinaryOp::Shr => {
+            VirBinOp::And | VirBinOp::Or => unreachable!("handled above"),
+            VirBinOp::BitAnd => self.builder.ins().band(left_val, right_val),
+            VirBinOp::BitOr => self.builder.ins().bor(left_val, right_val),
+            VirBinOp::BitXor => self.builder.ins().bxor(left_val, right_val),
+            VirBinOp::Shl => self.builder.ins().ishl(left_val, right_val),
+            VirBinOp::Shr => {
                 if left_vir_ty.is_unsigned_int() {
                     self.builder.ins().ushr(left_val, right_val)
                 } else {
@@ -451,20 +451,20 @@ impl Cg<'_, '_, '_> {
         };
 
         // Consume RC operands used by string comparison
-        if left_is_string && matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+        if left_is_string && matches!(op, VirBinOp::Eq | VirBinOp::Ne) {
             self.consume_rc_value(&mut left)?;
             self.consume_rc_value(&mut right)?;
         }
 
         // For comparison ops, result is bool; otherwise use the promoted type
         let (final_ty, final_vir_ty) = match op {
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Gt
-            | BinaryOp::Le
-            | BinaryOp::Ge => (types::I8, VirTypeId::BOOL),
-            BinaryOp::And | BinaryOp::Or => unreachable!(),
+            VirBinOp::Eq
+            | VirBinOp::Ne
+            | VirBinOp::Lt
+            | VirBinOp::Gt
+            | VirBinOp::Le
+            | VirBinOp::Ge => (types::I8, VirTypeId::BOOL),
+            VirBinOp::And | VirBinOp::Or => unreachable!(),
             _ => (result_ty, result_vir_ty),
         };
 
@@ -569,7 +569,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         left: CompiledValue,
         right: CompiledValue,
-        op: BinaryOp,
+        op: VirBinOp,
     ) -> CodegenResult<CompiledValue> {
         let field_slots = self
             .struct_flat_field_cranelift_types_v(left.type_id)
@@ -586,7 +586,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // For NotEq, negate the result
-        if op == BinaryOp::Ne {
+        if op == VirBinOp::Ne {
             let one = self.iconst_cached(types::I8, 1);
             result = self.builder.ins().bxor(result, one);
         }
@@ -694,7 +694,7 @@ impl Cg<'_, '_, '_> {
     fn optional_nil_compare(
         &mut self,
         optional: CompiledValue,
-        op: BinaryOp,
+        op: VirBinOp,
     ) -> CodegenResult<CompiledValue> {
         // Find the position of nil in the variants (this is the nil tag value)
         // Use VIR path for correct variant ordering (round-tripped sema TypeId
@@ -705,8 +705,8 @@ impl Cg<'_, '_, '_> {
 
         // Compare tag with nil_tag
         let result = match op {
-            BinaryOp::Eq => self.tag_eq(optional.value, nil_tag as i64),
-            BinaryOp::Ne => self.tag_ne(optional.value, nil_tag as i64),
+            VirBinOp::Eq => self.tag_eq(optional.value, nil_tag as i64),
+            VirBinOp::Ne => self.tag_ne(optional.value, nil_tag as i64),
             _ => unreachable!("optional_nil_compare only handles Eq and Ne"),
         };
 
@@ -719,7 +719,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         optional: CompiledValue,
         value: CompiledValue,
-        op: BinaryOp,
+        op: VirBinOp,
     ) -> CodegenResult<CompiledValue> {
         // Find the position of nil in the variants (this is the nil tag value)
         let nil_tag = self.find_nil_variant_vir(optional.type_id).ok_or_else(|| {
@@ -752,11 +752,11 @@ impl Cg<'_, '_, '_> {
 
         // Result is: is_not_nil AND values_equal
         let result = match op {
-            BinaryOp::Eq => {
+            VirBinOp::Eq => {
                 // (not nil) AND (values equal)
                 self.builder.ins().band(is_not_nil, values_equal)
             }
-            BinaryOp::Ne => {
+            VirBinOp::Ne => {
                 // NOT ((not nil) AND (values equal)) = is_nil OR (values not equal)
                 let equal = self.builder.ins().band(is_not_nil, values_equal);
                 let one = self.iconst_cached(types::I8, 1);
@@ -776,7 +776,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         optional: CompiledValue,
         value: CompiledValue,
-        op: BinaryOp,
+        op: VirBinOp,
         is_not_nil: Value,
         inner_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
@@ -787,8 +787,8 @@ impl Cg<'_, '_, '_> {
 
         // When nil: Eq -> false (0), Ne -> true (1)
         let nil_result: i64 = match op {
-            BinaryOp::Eq => 0,
-            BinaryOp::Ne => 1,
+            VirBinOp::Eq => 0,
+            VirBinOp::Ne => 1,
             _ => unreachable!("optional_struct_compare only handles Eq and Ne"),
         };
         let nil_block = self.builder.create_block();

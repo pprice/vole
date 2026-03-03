@@ -21,7 +21,7 @@ use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
-use vole_frontend::{BinaryOp, Symbol};
+use vole_frontend::Symbol;
 use vole_identity::{ConstantValue, ModuleId, StringConversion, TypeDefId, TypeId, VirTypeId};
 use vole_vir::{
     AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
@@ -701,8 +701,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR binary operation by delegating to `binary_op()`.
     ///
-    /// Converts `VirBinOp` back to the AST `BinaryOp` and calls the existing
-    /// `binary_op()` method which handles type promotion and Cranelift emission.
+    /// Delegates to `binary_op()` which handles type promotion and Cranelift emission.
     fn compile_vir_binary_op(
         &mut self,
         op: VirBinOp,
@@ -712,11 +711,10 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
-        let ast_op = vir_binop_to_ast(op);
-        if ast_op == BinaryOp::Add && left.type_id == VirTypeId::STRING {
+        if op == VirBinOp::Add && left.type_id == VirTypeId::STRING {
             return self.string_concat(left, right);
         }
-        self.binary_op(left, right, ast_op, line)
+        self.binary_op(left, right, op, line)
     }
 
     /// Compile a VIR unary operation.
@@ -729,21 +727,19 @@ impl Cg<'_, '_, '_> {
         operand: &VirExpr,
     ) -> CodegenResult<CompiledValue> {
         let compiled = self.compile_vir_expr(operand)?;
-        let ast_op = vir_unop_to_ast(op);
-        self.emit_unary_op(ast_op, compiled)
+        self.emit_unary_op(op, compiled)
     }
 
     /// Emit a unary operation on an already-compiled value.
     fn emit_unary_op(
         &mut self,
-        op: vole_frontend::UnaryOp,
+        op: VirUnOp,
         operand: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
         use crate::ops::try_constant_value;
-        use vole_frontend::UnaryOp;
 
         let result = match op {
-            UnaryOp::Neg => {
+            VirUnOp::Neg => {
                 if operand.ty == types::F128 {
                     let bits = self.call_runtime(RuntimeKey::F128Neg, &[operand.value])?;
                     self.builder
@@ -757,7 +753,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().ineg(operand.value)
                 }
             }
-            UnaryOp::Not => {
+            VirUnOp::Not => {
                 let op_val = if operand.ty != types::I8 {
                     self.builder.ins().ireduce(types::I8, operand.value)
                 } else {
@@ -770,7 +766,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().isub(one, op_val)
                 }
             }
-            UnaryOp::BitNot => self.builder.ins().bnot(operand.value),
+            VirUnOp::BitNot => self.builder.ins().bnot(operand.value),
         };
         Ok(operand.with_value(result))
     }
@@ -1587,37 +1583,4 @@ impl Cg<'_, '_, '_> {
     }
 
     // VIR call dispatch is in the `vir_calls` submodule.
-}
-
-/// Convert a VIR binary operator to its AST equivalent.
-fn vir_binop_to_ast(op: VirBinOp) -> BinaryOp {
-    match op {
-        VirBinOp::Add => BinaryOp::Add,
-        VirBinOp::Sub => BinaryOp::Sub,
-        VirBinOp::Mul => BinaryOp::Mul,
-        VirBinOp::Div => BinaryOp::Div,
-        VirBinOp::Mod => BinaryOp::Mod,
-        VirBinOp::Eq => BinaryOp::Eq,
-        VirBinOp::Ne => BinaryOp::Ne,
-        VirBinOp::Lt => BinaryOp::Lt,
-        VirBinOp::Le => BinaryOp::Le,
-        VirBinOp::Gt => BinaryOp::Gt,
-        VirBinOp::Ge => BinaryOp::Ge,
-        VirBinOp::And => BinaryOp::And,
-        VirBinOp::Or => BinaryOp::Or,
-        VirBinOp::BitAnd => BinaryOp::BitAnd,
-        VirBinOp::BitOr => BinaryOp::BitOr,
-        VirBinOp::BitXor => BinaryOp::BitXor,
-        VirBinOp::Shl => BinaryOp::Shl,
-        VirBinOp::Shr => BinaryOp::Shr,
-    }
-}
-
-/// Convert a VIR unary operator to its AST equivalent.
-fn vir_unop_to_ast(op: VirUnOp) -> vole_frontend::UnaryOp {
-    match op {
-        VirUnOp::Neg => vole_frontend::UnaryOp::Neg,
-        VirUnOp::Not => vole_frontend::UnaryOp::Not,
-        VirUnOp::BitNot => vole_frontend::UnaryOp::BitNot,
-    }
 }
