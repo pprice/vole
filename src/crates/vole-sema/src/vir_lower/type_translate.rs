@@ -35,11 +35,19 @@ pub fn translate_type_id(
     // Sentinel types (nil, Done, user-defined zero-field structs) are
     // special: they have reserved VirTypeId slots and zero-size layout.
     // Check before SemaType match since sentinels may be SemaType::Struct
-    // internally after prelude rebinding.
+    // internally after prelude rebinding.  Must run every time (not cached)
+    // because rebind_sentinel needs to fire when the TypeDefId becomes known.
     if arena.is_sentinel(type_id) {
         let vir_id = translate_sentinel(table, type_id, arena);
         table.record_type_id(type_id, vir_id);
         return vir_id;
+    }
+
+    // Fast path: return cached mapping if this TypeId was already translated.
+    // Placed after sentinel/F128 checks because sentinel rebinding must run
+    // each time (it updates the VirType slot with the real TypeDefId).
+    if let Some(cached) = table.lookup_type_id(type_id) {
+        return cached;
     }
 
     let vir_type = translate_sema_type(table, type_id, arena);
