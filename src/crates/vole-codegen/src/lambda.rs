@@ -7,8 +7,7 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{Capture, Symbol};
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::{Symbol, TypeId, VirTypeId};
 use vole_vir::VirBody;
 use vole_vir::expr::VirCapture;
 
@@ -38,7 +37,7 @@ impl CaptureBinding {
 /// For transitive captures (nested closures), the type may be in parent_captures
 /// rather than in variables.
 pub(crate) fn build_capture_bindings(
-    captures: &[Capture],
+    captures: &[VirCapture],
     variables: &FxHashMap<Symbol, (Variable, VirTypeId)>,
     parent_captures: Option<&FxHashMap<Symbol, CaptureBinding>>,
 ) -> FxHashMap<Symbol, CaptureBinding> {
@@ -101,24 +100,15 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let (param_type_ids, return_type_id) = self.unwrap_lambda_func_type(vir_ty)?;
 
-        let captures: Vec<Capture> = vir_captures
-            .iter()
-            .map(|c| Capture {
-                name: c.name,
-                is_mutable: false,
-                is_mutated: false,
-            })
-            .collect();
-
         let func_id = self.declare_vir_lambda_func(
             param_names,
             &param_type_ids,
             return_type_id,
-            &captures,
+            vir_captures,
             body,
         )?;
 
-        self.alloc_closure(func_id, vir_ty, &captures)
+        self.alloc_closure(func_id, vir_ty, vir_captures)
     }
 
     /// Unwrap a function type into param types and return type, applying
@@ -154,7 +144,7 @@ impl Cg<'_, '_, '_> {
         param_names: &[Symbol],
         param_type_ids: &[TypeId],
         return_type_id: TypeId,
-        captures: &[Capture],
+        captures: &[VirCapture],
         body: &VirBody,
     ) -> CodegenResult<cranelift_module::FuncId> {
         let lambda_id = self.next_lambda_id();
@@ -239,7 +229,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         func_id: cranelift_module::FuncId,
         func_vir_type_id: VirTypeId,
-        captures: &[Capture],
+        captures: &[VirCapture],
     ) -> CodegenResult<CompiledValue> {
         let ptr_type = self.ptr_type();
         let func_ref = self
@@ -270,7 +260,7 @@ impl Cg<'_, '_, '_> {
     /// and registers the capture with the closure runtime.
     fn setup_closure_captures(
         &mut self,
-        captures: &[Capture],
+        captures: &[VirCapture],
         closure_ptr: Value,
     ) -> CodegenResult<()> {
         let set_capture_ref = self.runtime_func_ref(RuntimeKey::ClosureSetCapture)?;
@@ -329,7 +319,7 @@ impl Cg<'_, '_, '_> {
     /// Returns (value, vir_type_id, is_self_capture).
     fn resolve_capture(
         &mut self,
-        capture: &Capture,
+        capture: &VirCapture,
         closure_ptr: Value,
     ) -> CodegenResult<(Value, VirTypeId, bool)> {
         let is_self_capture = Some(capture.name) == self.self_capture;

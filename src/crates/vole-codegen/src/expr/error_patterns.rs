@@ -11,9 +11,9 @@ use crate::types::{
     load_fallible_tag,
 };
 
-use vole_frontend::ast::RecordFieldPattern;
 use vole_identity::Symbol;
 use vole_identity::{TypeId, VirTypeId};
+use vole_vir::VirErrorFieldBinding;
 
 use super::super::context::Cg;
 
@@ -216,7 +216,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         error_type_def_id: vole_identity::TypeDefId,
         scrutinee_value: Value,
-        fields: &[RecordFieldPattern],
+        fields: &[VirErrorFieldBinding],
         arm_variables: &mut FxHashMap<Symbol, (Variable, VirTypeId)>,
     ) -> CodegenResult<()> {
         // Get fields from EntityRegistry

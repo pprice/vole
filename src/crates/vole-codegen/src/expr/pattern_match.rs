@@ -9,7 +9,6 @@ use rustc_hash::FxHashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag};
 
-use vole_frontend::ast::RecordFieldPattern;
 use vole_identity::Symbol;
 use vole_identity::{IsCheckResult, TypeId, VirIsCheckResult, VirTypeId};
 
@@ -608,18 +607,10 @@ impl Cg<'_, '_, '_> {
                 fields,
             } => {
                 let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, *error_tag);
-                let ast_fields: Vec<_> = fields
-                    .iter()
-                    .map(|f| RecordFieldPattern {
-                        field_name: f.field_name,
-                        binding: f.binding,
-                        span: vole_identity::Span::default(),
-                    })
-                    .collect();
                 self.extract_error_field_bindings(
                     *type_def,
                     scrutinee.value,
-                    &ast_fields,
+                    fields,
                     arm_variables,
                 )?;
                 Ok(Some(is_this_error))
