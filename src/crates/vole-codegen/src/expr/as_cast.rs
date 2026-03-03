@@ -8,26 +8,11 @@ use cranelift::prelude::*;
 use crate::errors::CodegenResult;
 use crate::types::CompiledValue;
 
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::VirTypeId;
 
 use super::super::context::Cg;
 
 impl Cg<'_, '_, '_> {
-    /// Core safe-branch: if match -> extract and wrap nullable, else -> nil.
-    #[allow(dead_code)]
-    pub(super) fn as_cast_safe_branch_with_type(
-        &mut self,
-        is_match: Value,
-        nullable_type_id: TypeId,
-        extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
-    ) -> CodegenResult<CompiledValue> {
-        self.as_cast_safe_branch_v(
-            is_match,
-            self.vir_lookup_or_compat(nullable_type_id),
-            extract,
-        )
-    }
-
     /// VirTypeId-native safe-branch: if match -> extract and wrap nullable, else -> nil.
     pub(super) fn as_cast_safe_branch_v(
         &mut self,
@@ -66,23 +51,6 @@ impl Cg<'_, '_, '_> {
         let result = self.builder.block_params(merge_block)[0];
         let cv = CompiledValue::new(result, result_cranelift_type, nullable_vir);
         Ok(self.mark_rc_owned(cv))
-    }
-
-    /// Core unsafe-branch: if match -> extract, else -> panic.
-    #[allow(dead_code)]
-    pub(super) fn as_cast_unsafe_branch_with_type(
-        &mut self,
-        is_match: Value,
-        tested_type_id: TypeId,
-        line: u32,
-        extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
-    ) -> CodegenResult<CompiledValue> {
-        self.as_cast_unsafe_branch_v(
-            is_match,
-            self.vir_lookup_or_compat(tested_type_id),
-            line,
-            extract,
-        )
     }
 
     /// VirTypeId-native unsafe-branch: if match -> extract, else -> panic.

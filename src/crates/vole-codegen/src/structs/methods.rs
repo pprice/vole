@@ -164,26 +164,6 @@ impl Cg<'_, '_, '_> {
         })
     }
 
-    /// Resolve canonical interface method signature from `(interface, slot)`.
-    ///
-    /// Some VIR-carried interface func_type_ids still reference placeholder-
-    /// based signatures; this recovers the canonical signature from the
-    /// EntityRegistry method table.
-    #[allow(dead_code)]
-    fn resolved_interface_signature_id(&self, resolved: MethodResolutionRef<'_>) -> Option<TypeId> {
-        if !resolved.is_interface_method() {
-            return None;
-        }
-        let interface_type_def_id = resolved.type_def_id()?;
-        let slot = resolved.method_index()? as usize;
-        let method_id = self
-            .analyzed()
-            .interface_method_ids_ordered(interface_type_def_id)
-            .get(slot)
-            .copied()?;
-        Some(self.analyzed().method_signature_id(method_id))
-    }
-
     /// Resolve method parameter types for argument coercion.
     ///
     /// Primary source is the VIR method definition's `param_types`.  Falls back

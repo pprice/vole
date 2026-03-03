@@ -10,7 +10,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag};
 use crate::union_layout;
 
-use vole_identity::{NodeId, TypeId, VirTypeId};
+use vole_identity::{NodeId, VirTypeId};
 use vole_vir::VirExpr;
 use vole_vir::expr::VirMethodDispatchMeta;
 
@@ -38,19 +38,7 @@ impl Cg<'_, '_, '_> {
         self.extract_field(inner, slot, field_type_id)
     }
 
-    /// Produce a nil value wrapped in the given optional result type.
-    #[allow(dead_code)]
-    pub(super) fn compile_nil_for_optional(
-        &mut self,
-        result_type_id: TypeId,
-    ) -> CodegenResult<CompiledValue> {
-        let nil_type_id = self.vir_query_nil();
-        let zero = self.iconst_cached(types::I8, 0);
-        let nil_val = self.compiled_with_ty(zero, types::I8, nil_type_id);
-        self.coerce_to_type_id(nil_val, result_type_id)
-    }
-
-    /// VirTypeId variant: produce a nil value wrapped in the given optional result type.
+    /// Produce a nil value wrapped in the given optional result type (VirTypeId variant).
     pub(super) fn compile_nil_for_optional_v(
         &mut self,
         result_vir: VirTypeId,

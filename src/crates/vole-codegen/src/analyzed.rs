@@ -623,7 +623,6 @@ impl AnalyzedProgram {
     /// Inspects the `VirTypeTable` directly for Array / Class / Struct, and
     /// falls back through `vir_to_sema_type_id_lossy` for primitives that are
     /// in the pre-computed `impl_type_names` map.
-    #[allow(dead_code)]
     pub(crate) fn impl_type_name_id_from_vir_type_id(&self, vir_ty: VirTypeId) -> Option<NameId> {
         let entity_metadata = self.vir_program.entity_metadata();
         let table = &self.vir_program.type_table;
@@ -645,7 +644,6 @@ impl AnalyzedProgram {
     /// Bridge method — converts VirTypeId to the implement-registry NameId via
     /// `impl_type_name_id_from_vir_type_id`, then delegates to
     /// `implement_method_by_name`.
-    #[allow(dead_code)]
     pub(crate) fn implement_method_for_type_v(
         &self,
         vir_ty: VirTypeId,

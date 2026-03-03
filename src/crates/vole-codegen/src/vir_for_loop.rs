@@ -458,26 +458,12 @@ impl Cg<'_, '_, '_> {
     // Shared for-loop helpers (moved from deleted for_loop.rs)
     // =========================================================================
 
-    /// Create a `CompiledValue` for a `RuntimeIterator<T>` from a raw pointer.
+    /// Create a `CompiledValue` for a `RuntimeIterator<T>` from a raw pointer (VirTypeId-native).
     ///
     /// Falls back to `RuntimeIterator<i64>` when sema did not pre-intern
     /// the specific element type (e.g. propagated class method monomorphs).
     /// All RuntimeIterator types share the same physical layout (RC pointer),
     /// so the fallback is layout-safe; only VIR type metadata differs.
-    #[allow(dead_code)]
-    pub(crate) fn make_runtime_iter_value(
-        &self,
-        raw: Value,
-        elem_type_id: TypeId,
-    ) -> super::types::CompiledValue {
-        let runtime_iter_type_id = self
-            .vir_query_lookup_runtime_iterator(elem_type_id)
-            .or_else(|| self.vir_query_lookup_runtime_iterator(TypeId::I64))
-            .expect("RuntimeIterator<i64> must always be pre-interned");
-        self.compiled_owned_with_ty(raw, types::I64, runtime_iter_type_id)
-    }
-
-    /// VirTypeId-native variant of [`make_runtime_iter_value`](Self::make_runtime_iter_value).
     pub(crate) fn make_runtime_iter_value_v(
         &self,
         raw: Value,
@@ -517,19 +503,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Wrap an interface value via `InterfaceIter`, consuming the old value and
-    /// returning a `RuntimeIterator` `CompiledValue`.
-    #[allow(dead_code)]
-    pub(crate) fn wrap_interface_iter(
-        &mut self,
-        mut iface: super::types::CompiledValue,
-        elem_type_id: TypeId,
-    ) -> CodegenResult<super::types::CompiledValue> {
-        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iface.value])?;
-        self.consume_rc_value(&mut iface)?;
-        Ok(self.make_runtime_iter_value(wrapped, elem_type_id))
-    }
-
-    /// VirTypeId-native variant of [`wrap_interface_iter`](Self::wrap_interface_iter).
+    /// returning a `RuntimeIterator` `CompiledValue` (VirTypeId-native).
     pub(crate) fn wrap_interface_iter_v(
         &mut self,
         mut iface: super::types::CompiledValue,
@@ -540,36 +514,7 @@ impl Cg<'_, '_, '_> {
         Ok(self.make_runtime_iter_value_v(wrapped, elem_vir))
     }
 
-    /// Convert a raw i64 value from iter_next to the element's Cranelift type.
-    #[allow(dead_code)]
-    pub(crate) fn convert_iter_elem(
-        &mut self,
-        raw_val: Value,
-        elem_type_id: TypeId,
-        elem_cr_type: Type,
-    ) -> CodegenResult<Value> {
-        if let Some(wide) = self.vir_query_wide_type(elem_type_id) {
-            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
-            Ok(wide.reinterpret_i128(self.builder, wide_bits))
-        } else if elem_cr_type == types::F64 {
-            Ok(self
-                .builder
-                .ins()
-                .bitcast(types::F64, MemFlags::new(), raw_val))
-        } else if elem_cr_type == types::F32 {
-            let i32_val = self.builder.ins().ireduce(types::I32, raw_val);
-            Ok(self
-                .builder
-                .ins()
-                .bitcast(types::F32, MemFlags::new(), i32_val))
-        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
-            Ok(self.builder.ins().ireduce(elem_cr_type, raw_val))
-        } else {
-            Ok(raw_val)
-        }
-    }
-
-    /// VirTypeId-native variant of [`convert_iter_elem`](Self::convert_iter_elem).
+    /// Convert a raw i64 value from iter_next to the element's Cranelift type (VirTypeId-native).
     pub(crate) fn convert_iter_elem_v(
         &mut self,
         raw_val: Value,
@@ -631,27 +576,10 @@ impl Cg<'_, '_, '_> {
         self.call_result(call_inst, return_type_id)
     }
 
-    /// Decode a raw array element value to the correct Cranelift type.
+    /// Decode a raw array element value to the correct Cranelift type (VirTypeId-native).
     ///
     /// Handles union storage (inline/heap), wide types (i128), narrow
     /// integers, and float reinterpretation.
-    #[allow(dead_code)]
-    pub(crate) fn decode_array_elem(
-        &mut self,
-        elem_val: Value,
-        elem_ptr: Value,
-        elem_type_id: TypeId,
-        union_storage: Option<UnionStorageKind>,
-    ) -> CodegenResult<Value> {
-        self.decode_array_elem_v(
-            elem_val,
-            elem_ptr,
-            self.vir_lookup(elem_type_id),
-            union_storage,
-        )
-    }
-
-    /// VirTypeId-native variant of [`decode_array_elem`](Self::decode_array_elem).
     pub(crate) fn decode_array_elem_v(
         &mut self,
         elem_val: Value,

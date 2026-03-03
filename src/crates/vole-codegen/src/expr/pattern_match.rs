@@ -10,7 +10,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag};
 
 use vole_identity::Symbol;
-use vole_identity::{IsCheckResult, TypeId, VirIsCheckResult, VirTypeId};
+use vole_identity::{VirIsCheckResult, VirTypeId};
 
 use super::super::context::Cg;
 use super::super::control_flow::match_switch;
@@ -46,67 +46,6 @@ impl Cg<'_, '_, '_> {
     // =========================================================================
     // Unknown is-check helper
     // =========================================================================
-
-    /// Compile an `is` check against an unknown-typed value.
-    ///
-    /// For non-annotation types, compares the TaggedValue's tag against the
-    /// expected RuntimeTypeId.
-    ///
-    /// For annotation types (structs with `@annotation`), performs a two-level
-    /// check: (1) tag == Instance, (2) the instance's `type_id` field matches
-    /// the annotation type's registered runtime type_id. This distinguishes
-    /// different annotation types that all share the Instance tag.
-    #[allow(dead_code)]
-    pub(super) fn compile_unknown_is_check(
-        &mut self,
-        tagged_value_ptr: Value,
-        tested_type_id: TypeId,
-    ) -> Value {
-        // TaggedValue layout: [tag: u64 at offset 0][value: u64 at offset 8]
-        let tag = self
-            .builder
-            .ins()
-            .load(types::I64, MemFlags::new(), tagged_value_ptr, 0);
-
-        if let Some(ann_runtime_type_id) = self.get_annotation_runtime_type_id(tested_type_id) {
-            // Two-level annotation check:
-            // 1. Tag must be Instance (7)
-            let instance_tag = self.iconst_cached(
-                types::I64,
-                vole_runtime::value::RuntimeTypeId::Instance as i64,
-            );
-            let tag_match = self.builder.ins().icmp(IntCC::Equal, tag, instance_tag);
-
-            // 2. Load the instance pointer from TaggedValue.value (offset 8)
-            let instance_ptr =
-                self.builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), tagged_value_ptr, 8);
-
-            // 3. Load RcInstance.type_id (u32 at offset 16 = sizeof(RcHeader))
-            //    RcHeader: [ref_count: u32, header_type_id: u32, drop_fn: ptr] = 16 bytes
-            //    RcInstance: [header: RcHeader, type_id: u32 @ offset 16, ...]
-            let inst_type_id =
-                self.builder
-                    .ins()
-                    .load(types::I32, MemFlags::new(), instance_ptr, 16);
-
-            // 4. Compare against the expected annotation runtime type_id
-            let expected_id = self.iconst_cached(types::I32, ann_runtime_type_id as i64);
-            let id_match = self
-                .builder
-                .ins()
-                .icmp(IntCC::Equal, inst_type_id, expected_id);
-
-            // Both checks must pass
-            self.builder.ins().band(tag_match, id_match)
-        } else {
-            // Standard single-level tag check
-            let expected_tag = self.vir_query_unknown_type_tag(tested_type_id);
-            let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
-            self.builder.ins().icmp(IntCC::Equal, tag, expected_val)
-        }
-    }
 
     /// Compile an `is` check against an unknown value using VIR type metadata.
     ///
@@ -164,19 +103,8 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Compile an equality check for two values based on their Vole type.
+    /// Compile an equality check for two values based on their Vole type (VirTypeId variant).
     /// Handles string comparison via runtime function, floats via fcmp, and integers via icmp.
-    #[allow(dead_code)]
-    fn compile_equality_check(
-        &mut self,
-        type_id: TypeId,
-        left: Value,
-        right: Value,
-    ) -> CodegenResult<Value> {
-        self.compile_equality_check_v(self.vir_lookup(type_id), left, right)
-    }
-
-    /// VirTypeId variant: compile an equality check for two values.
     fn compile_equality_check_v(
         &mut self,
         vir_ty: VirTypeId,
@@ -770,30 +698,6 @@ impl Cg<'_, '_, '_> {
             arm_variables.insert(field.binding_name, (var, self.to_vir_type(field_type_id)));
         }
         Ok(())
-    }
-
-    /// Compile an IsCheckResult into a condition value (if runtime check needed).
-    #[allow(dead_code)]
-    fn compile_is_check_result(
-        &mut self,
-        result: &IsCheckResult,
-        scrutinee: &CompiledValue,
-    ) -> CodegenResult<Option<Value>> {
-        match result {
-            IsCheckResult::AlwaysTrue => Ok(None),
-            IsCheckResult::AlwaysFalse => {
-                let never_match = self.iconst_cached(types::I8, 0);
-                Ok(Some(never_match))
-            }
-            IsCheckResult::CheckTag(tag_index) => {
-                let cmp = self.tag_eq(scrutinee.value, *tag_index as i64);
-                Ok(Some(cmp))
-            }
-            IsCheckResult::CheckUnknown(tested_type_id) => {
-                let cmp = self.compile_unknown_is_check(scrutinee.value, *tested_type_id);
-                Ok(Some(cmp))
-            }
-        }
     }
 
     /// Compile a VIR `IsCheckResult` into a condition value (if runtime check needed).

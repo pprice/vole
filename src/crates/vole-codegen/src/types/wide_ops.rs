@@ -41,7 +41,6 @@ impl WideType {
     /// VIR equivalent of [`WideType::from_type_id`].  Uses reserved
     /// `VirTypeId` constants rather than looking up the type table, since
     /// F128 has no `VirPrimitiveKind` variant yet.
-    #[allow(dead_code)] // call-site migration is a separate ticket
     pub fn from_vir_type_id(vir_ty: VirTypeId, _table: &VirTypeTable) -> Option<Self> {
         if vir_ty == VirTypeId::I128 {
             Some(WideType::I128)

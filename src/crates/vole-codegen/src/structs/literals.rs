@@ -11,52 +11,7 @@ use cranelift_codegen::ir::StackSlot;
 use vole_identity::{TypeId, VirTypeId};
 
 impl Cg<'_, '_, '_> {
-    /// Coerce a value to match a field's declared type.
-    ///
-    /// Handles union wrapping (non-union → union, union → heap copy),
-    /// interface boxing, unknown boxing, and interface fat pointer copying
-    /// for class fields.
-    #[allow(dead_code)]
-    pub(crate) fn coerce_field_value(
-        &mut self,
-        value: CompiledValue,
-        field_type_id: TypeId,
-    ) -> CodegenResult<CompiledValue> {
-        let field_is_union = self.vir_query_is_union(field_type_id);
-        let field_is_interface = self.vir_query_is_interface(field_type_id);
-        let field_is_unknown = self.vir_query_is_unknown(field_type_id);
-        let value_is_union = self.vir_query_is_union_v(value.type_id);
-        let value_is_unknown = self.vir_query_is_unknown_v(value.type_id);
-
-        if field_is_unknown && !value_is_unknown {
-            // Box the value into a heap-allocated TaggedValue.
-            // box_to_unknown() heap-allocates, so no further copy needed.
-            // Use _no_inc because the class literal init site already rc_inc'd
-            // borrowed values before calling coerce_field_value.
-            self.box_to_unknown_no_inc(value)
-        } else if field_is_unknown && value_is_unknown {
-            // Value is already a TaggedValue pointer. Copy to heap so
-            // instance_drop can free it independently.
-            self.copy_tagged_value_to_heap(value)
-        } else if field_is_union && !value_is_union {
-            self.construct_union_heap_id(value, field_type_id)
-        } else if field_is_union && value_is_union {
-            // Union value stored in class field must be heap-allocated.
-            // The value may be stack-allocated (from construct_union_id),
-            // so copy the 16-byte buffer to the heap.
-            self.copy_union_to_heap(value)
-        } else if field_is_interface && self.vir_query_is_interface_v(value.type_id) {
-            // Value is already an interface fat pointer. Copy it into a new
-            // heap allocation so instance_drop can free it independently.
-            self.copy_interface_fat_ptr(value)
-        } else if field_is_interface {
-            self.box_interface_value(value, field_type_id)
-        } else {
-            Ok(value)
-        }
-    }
-
-    /// VirTypeId variant of [`coerce_field_value`](Self::coerce_field_value).
+    /// Coerce a value to match a field's declared type (VirTypeId variant).
     ///
     /// Coerces a value to match a field's declared type using VirTypeId
     /// throughout, with no sema TypeId dependency.

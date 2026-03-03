@@ -12,7 +12,7 @@ use crate::types::{
 };
 
 use vole_identity::Symbol;
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::VirTypeId;
 use vole_vir::VirErrorFieldBinding;
 
 use super::super::context::Cg;
@@ -199,14 +199,6 @@ impl Cg<'_, '_, '_> {
         }
 
         None
-    }
-
-    /// Look up the numeric error tag for a named error type within a fallible error union.
-    ///
-    /// Uses VIR type table to resolve error types without arena access.
-    #[allow(dead_code)]
-    pub(crate) fn error_tag_for(&self, error_type_id: TypeId, error_name: Symbol) -> Option<i64> {
-        self.error_tag_for_v(self.vir_lookup(error_type_id), error_name)
     }
 
     /// Extract field bindings from an error record pattern. Loads fields from the

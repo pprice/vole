@@ -154,7 +154,6 @@ fn float_width_v(ty: VirTypeId) -> Option<u8> {
 }
 
 /// VirTypeId version of [`numeric_coercion`].
-#[allow(dead_code)] // Convenience for downstream VIR migration tickets.
 pub fn numeric_coercion_v(from: VirTypeId, to: VirTypeId) -> NumericCoercion {
     if from == to {
         return NumericCoercion::Identity;
@@ -201,7 +200,6 @@ pub fn numeric_coercion_v(from: VirTypeId, to: VirTypeId) -> NumericCoercion {
 }
 
 /// VirTypeId version of [`numeric_result_type`].
-#[allow(dead_code)] // Convenience for downstream VIR migration tickets.
 pub fn numeric_result_type_v(left: VirTypeId, right: VirTypeId) -> VirTypeId {
     if left == VirTypeId::F128 || right == VirTypeId::F128 {
         VirTypeId::F128
@@ -215,7 +213,6 @@ pub fn numeric_result_type_v(left: VirTypeId, right: VirTypeId) -> VirTypeId {
 }
 
 /// VirTypeId version of [`integer_result_type`].
-#[allow(dead_code)] // Convenience for downstream VIR migration tickets.
 pub fn integer_result_type_v(left: VirTypeId, right: VirTypeId) -> VirTypeId {
     if left == VirTypeId::I128 || right == VirTypeId::I128 {
         VirTypeId::I128

@@ -425,16 +425,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.captures.is_some()
     }
 
-    /// Register a variable binding with a sema `TypeId`, converting to `VirTypeId`.
-    ///
-    /// Boundary method: converts `TypeId` → `VirTypeId` via `vir_lookup_or_compat`
-    /// and stores the binding in `self.vars`.
-    #[allow(dead_code)]
-    pub fn bind_var(&mut self, name: Symbol, var: Variable, type_id: TypeId) {
-        self.vars
-            .insert(name, (var, self.vir_lookup_or_compat(type_id)));
-    }
-
     /// Bind a variable directly with a VirTypeId, skipping the sema TypeId round-trip.
     ///
     /// Used when the VirTypeId is known to be correct (e.g., from interface boxing
@@ -559,16 +549,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         vir_ty.is_unknown()
     }
 
-    /// Check if a sema `TypeId` is the unknown type.
-    ///
-    /// Constant check — `TypeId::UNKNOWN` is a well-known constant (no arena or
-    /// VirTypeTable state needed).  Cannot use `vir_lookup` because unmapped
-    /// types also resolve to `VirTypeId::UNKNOWN`, producing false positives.
-    #[inline]
-    pub fn vir_query_is_unknown(&self, type_id: TypeId) -> bool {
-        type_id.is_unknown()
-    }
-
     /// Check if a `VirTypeId` is a payload-carrying union via VirTypeTable.
     #[inline]
     pub fn vir_query_is_payload_union_v(&self, vir_ty: VirTypeId) -> bool {
@@ -623,18 +603,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_is_wide(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a wide type (i128/f128) via VirTypeTable.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn vir_query_is_wide(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_wide_v(self.vir_lookup(type_id))
-    }
-
     /// Classify a `VirTypeId` as a `WideType` (i128/f128) via VirTypeTable.
     ///
     /// Returns `None` for non-wide types.
     #[inline]
-    #[allow(dead_code)] // call-site migration is a separate ticket
     pub fn vir_query_wide_type_v(
         &self,
         vir_ty: VirTypeId,
@@ -646,7 +618,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Returns `None` for non-wide types.
     #[inline]
-    #[allow(dead_code)] // call-site migration is a separate ticket
     pub fn vir_query_wide_type(&self, type_id: TypeId) -> Option<crate::types::wide_ops::WideType> {
         self.vir_query_wide_type_v(self.vir_lookup(type_id))
     }
@@ -672,13 +643,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_unwrap_nominal(vir_ty, self.vir_type_table())
     }
 
-    /// Unwrap a nominal type to its TypeDefId via VirTypeTable.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn vir_query_unwrap_nominal(&self, type_id: TypeId) -> Option<vole_identity::TypeDefId> {
-        self.vir_query_unwrap_nominal_v(self.vir_lookup(type_id))
-    }
-
     /// Get a human-readable type display string for a `VirTypeId` via VirTypeTable.
     #[inline]
     pub fn vir_query_display_basic_v(&self, vir_ty: VirTypeId) -> String {
@@ -695,13 +659,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_field_byte_size_v(&self, vir_ty: VirTypeId) -> u32 {
         crate::types::vir_conversions::vir_field_byte_size(vir_ty, self.vir_type_table())
-    }
-
-    /// Get the field byte size for a type via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_field_byte_size(&self, type_id: TypeId) -> u32 {
-        self.vir_query_field_byte_size_v(self.vir_lookup(type_id))
     }
 
     /// Get the runtime type tag for boxing a `VirTypeId` to unknown via VirTypeTable.
@@ -735,136 +692,78 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a `VirTypeId` is a sentinel type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_sentinel_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_sentinel(vir_ty, self.vir_type_table())
     }
 
     /// Check if a sema `TypeId` is a sentinel type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_sentinel(&self, type_id: TypeId) -> bool {
         self.vir_query_is_sentinel_v(self.vir_lookup(type_id))
     }
 
     /// Check if a `VirTypeId` is a function type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_function_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_function(vir_ty, self.vir_type_table())
     }
 
     /// Check if a sema `TypeId` is a function type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_function(&self, type_id: TypeId) -> bool {
         self.vir_query_is_function_v(self.vir_lookup(type_id))
     }
 
     /// Check if a `VirTypeId` is an unsigned integer type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_unsigned_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_unsigned(vir_ty, self.vir_type_table())
     }
 
     /// Check if a sema `TypeId` is an unsigned integer type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_unsigned(&self, type_id: TypeId) -> bool {
         self.vir_query_is_unsigned_v(self.vir_lookup(type_id))
     }
 
-    /// Check if a sema `TypeId` is a SelfType placeholder.
-    ///
-    /// VIR resolves SelfType during lowering, so post-VIR types never contain
-    /// SelfType placeholders.  Always returns `false`.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_self_type(&self, _type_id: TypeId) -> bool {
-        false
-    }
-
     /// Check if a `VirTypeId` is an integer type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_integer_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_integer(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is an integer type via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_integer(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_integer_v(self.vir_lookup(type_id))
-    }
-
     /// Check if a `VirTypeId` is a floating point type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_float_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_float(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a floating point type via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_float(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_float_v(self.vir_lookup(type_id))
-    }
-
     /// Check if a `VirTypeId` is the string type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_string_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_string(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is the string type via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_string(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_string_v(self.vir_lookup(type_id))
-    }
-
     /// Check if a `VirTypeId` is an optional type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_optional_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_optional(vir_ty, self.vir_type_table())
     }
 
     /// Check if a `VirTypeId` is an array type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_array_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_array(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is an array type via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_array(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_array_v(self.vir_lookup(type_id))
-    }
-
     /// Check if a `VirTypeId` is a runtime iterator type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_runtime_iterator_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_runtime_iterator(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a runtime iterator type via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_runtime_iterator(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_runtime_iterator_v(self.vir_lookup(type_id))
-    }
-
     /// Unwrap a fallible `VirTypeId` to `(success, errors)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_fallible_v(
         &self,
@@ -889,7 +788,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// vector matching the sema arena's sorted variant order.  The VirTypeTable's
     /// `expand_optional_variants()` replicates the sema sort key logic so the
     /// inner type and nil appear in the correct order.
-    #[allow(dead_code)]
     pub fn vir_query_unwrap_union_v(&self, vir_ty: VirTypeId) -> Option<Vec<VirTypeId>> {
         let table = self.vir_type_table();
         match table.get(vir_ty) {
@@ -906,7 +804,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap a tuple `VirTypeId` to its element `VirTypeId`s via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_tuple_v(&self, vir_ty: VirTypeId) -> Option<Vec<VirTypeId>> {
         crate::types::vir_conversions::vir_unwrap_tuple(vir_ty, self.vir_type_table())
@@ -914,7 +811,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap a fixed array `VirTypeId` to `(element, size)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_fixed_array_v(&self, vir_ty: VirTypeId) -> Option<(VirTypeId, usize)> {
         crate::types::vir_conversions::vir_unwrap_fixed_array(vir_ty, self.vir_type_table())
@@ -922,14 +818,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap an array `VirTypeId` to its element `VirTypeId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_array_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
         crate::types::vir_conversions::vir_unwrap_array(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a struct `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_struct_v(
         &self,
@@ -939,21 +833,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap a struct type to `(TypeDefId, type_args)` via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_unwrap_struct(
-        &self,
-        type_id: TypeId,
-    ) -> Option<(vole_identity::TypeDefId, Vec<VirTypeId>)> {
-        self.vir_query_unwrap_struct_v(self.vir_lookup(type_id))
-    }
-
     /// Unwrap a function `VirTypeId` to `(params, return_type)` via VirTypeTable.
     ///
     /// VIR does not track the `is_closure` flag. Callers that need it must
     /// consult the arena directly.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_function_v(
         &self,
@@ -973,28 +856,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap a type parameter `VirTypeId` to its `NameId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_type_param_v(&self, vir_ty: VirTypeId) -> Option<NameId> {
         crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
     }
 
-    /// Unwrap a type parameter to its `NameId` via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_unwrap_type_param(&self, type_id: TypeId) -> Option<NameId> {
-        self.vir_query_unwrap_type_param_v(self.vir_lookup(type_id))
-    }
-
     /// Unwrap a runtime iterator `VirTypeId` to its element `VirTypeId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_runtime_iterator_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
         crate::types::vir_conversions::vir_unwrap_runtime_iterator(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap an interface `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_interface_v(
         &self,
@@ -1014,48 +887,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap an error `VirTypeId` to its `TypeDefId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_error_v(&self, vir_ty: VirTypeId) -> Option<vole_identity::TypeDefId> {
         crate::types::vir_conversions::vir_unwrap_error(vir_ty, self.vir_type_table())
     }
 
-    /// Unwrap an error type to its `TypeDefId` via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_unwrap_error(&self, type_id: TypeId) -> Option<vole_identity::TypeDefId> {
-        self.vir_query_unwrap_error_v(self.vir_lookup(type_id))
-    }
-
-    /// Get the void `TypeId`.
-    ///
-    /// Constant — always `TypeId::VOID`.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_void(&self) -> TypeId {
-        TypeId::VOID
-    }
-
     /// Get the range `TypeId`.
     ///
     /// Constant — always `TypeId::RANGE`.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_range(&self) -> TypeId {
         TypeId::RANGE
     }
 
-    /// Get the nil `TypeId`.
-    ///
-    /// Constant — always `TypeId::NIL`.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_nil(&self) -> TypeId {
-        TypeId::NIL
-    }
-
     /// Look up an existing array type by element `TypeId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_array(&self, elem: TypeId) -> Option<TypeId> {
         self.vir_type_table().lookup_array_sema(elem)
@@ -1067,19 +912,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_type_table().lookup_array_v(elem)
     }
 
-    /// Look up an existing union type by variant `TypeId`s via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_lookup_union(&self, variants: vole_identity::TypeIdVec) -> Option<TypeId> {
-        self.vir_type_table().lookup_union_sema(&variants)
-    }
-
     /// Look up the result of substituting type parameters in a type via VirTypeTable.
     ///
     /// Falls back to arena for compound types that were not lowered into the
     /// VIR type table (e.g., cross-module Self parameters in interface default
     /// methods).
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_substitute(
         &self,
@@ -1092,7 +929,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Look up an existing runtime iterator type by element `TypeId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_lookup_runtime_iterator(&self, elem: TypeId) -> Option<TypeId> {
         self.vir_type_table().lookup_runtime_iterator_sema(elem)
@@ -1108,7 +944,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Tries VirTypeTable first, falls back to the injected substitution
     /// callback for compound types not yet interned in VIR.
-    #[allow(dead_code)]
     #[track_caller]
     #[inline]
     pub fn vir_query_expect_substitute(
@@ -1133,54 +968,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a `VirTypeId` contains any type parameter anywhere in its structure
     /// via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_contains_type_param_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_contains_type_param(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a type contains any type parameter anywhere in its structure
-    /// via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_contains_type_param(&self, type_id: TypeId) -> bool {
-        self.vir_query_contains_type_param_v(self.vir_lookup(type_id))
-    }
-
     /// Check if a `VirTypeId` is a numeric type (integer or float) via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_numeric_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_numeric(vir_ty, self.vir_type_table())
-    }
-
-    /// Check if a sema `TypeId` is a numeric type (integer or float) via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_numeric(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_numeric_v(self.vir_lookup(type_id))
-    }
-
-    /// Get the `TypeId` for the `unknown` type.
-    ///
-    /// Constant — always `TypeId::UNKNOWN`.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_unknown(&self) -> TypeId {
-        TypeId::UNKNOWN
-    }
-
-    /// Look up an existing interface type by `TypeDefId` and type arguments
-    /// via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_lookup_interface(
-        &self,
-        type_def_id: vole_identity::TypeDefId,
-        type_args: vole_identity::TypeIdVec,
-    ) -> Option<TypeId> {
-        self.vir_type_table()
-            .lookup_interface_sema(type_def_id, &type_args)
     }
 
     /// Look up an existing interface type by `TypeDefId` and VIR type arguments
@@ -1199,20 +995,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // (e.g. TypeId::STRING, TypeId::I64)
 
     /// Check if a `VirTypeId` is a class type via VirTypeTable.
-    #[allow(dead_code)]
     pub fn vir_query_is_class_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_class(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a class type via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_class(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_class_v(self.vir_lookup(type_id))
-    }
-
     /// Unwrap a class `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_class_v(
         &self,
@@ -1232,44 +1019,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap an optional `VirTypeId` to its inner `VirTypeId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_optional_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
         crate::types::vir_conversions::vir_unwrap_optional(vir_ty, self.vir_type_table())
     }
 
     /// Check if a `VirTypeId` is the nil type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_nil_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_nil(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is the nil type via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_is_nil(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_nil_v(self.vir_lookup(type_id))
-    }
-
     /// Unwrap an error or struct `VirTypeId` to its `TypeDefId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_unwrap_error_or_struct_def_v(
         &self,
         vir_ty: VirTypeId,
     ) -> Option<vole_identity::TypeDefId> {
         crate::types::vir_conversions::vir_unwrap_error_or_struct_def(vir_ty, self.vir_type_table())
-    }
-
-    /// Unwrap an error or struct type to its `TypeDefId` via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_unwrap_error_or_struct_def(
-        &self,
-        type_id: TypeId,
-    ) -> Option<vole_identity::TypeDefId> {
-        self.vir_query_unwrap_error_or_struct_def_v(self.vir_lookup(type_id))
     }
 
     /// Unwrap a function `VirTypeId` to `(params, return_type)` as sema `TypeId`s.
@@ -1290,14 +1057,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect();
         let ret = table.vir_to_type_id(vir_ret);
         Some((params, ret))
-    }
-
-    /// Look up an existing fixed-array type by element `TypeId` and size
-    /// via VirTypeTable.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn vir_query_lookup_fixed_array(&self, element: TypeId, size: usize) -> Option<TypeId> {
-        self.vir_type_table().lookup_fixed_array_sema(element, size)
     }
 
     /// Look up an existing fixed-array type by element `VirTypeId` and size
@@ -1347,7 +1106,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Look up a compile-time constant in a module's metadata.
     ///
     /// Uses VirProgram's pre-populated module_constants map.
-    #[allow(dead_code)]
     #[inline]
     pub fn vir_query_module_constant(
         &self,
@@ -1466,64 +1224,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get the runtime type_id for an annotation struct type, eagerly registering
     /// it if needed.
-    ///
-    /// Returns `Some(runtime_type_id)` if the type is a struct with `@annotation`,
-    /// `None` otherwise. This is used by `is` checks on `unknown` values to
-    /// distinguish different annotation types that all share the `Instance` tag.
-    ///
-    /// Unlike `is_heap_allocated_annotation()`, this checks sema's `is_annotation`
-    /// flag directly, so it works even when the annotation type hasn't been through
-    /// the FieldMeta.annotations codepath yet (cross-function case).
-    pub fn get_annotation_runtime_type_id(&self, type_id: TypeId) -> Option<u32> {
-        let (type_def_id, _) = self.vir_query_unwrap_struct(type_id)?;
-
-        // Check sema's is_annotation flag (authoritative source)
-        if !self.analyzed().type_is_annotation(type_def_id) {
-            return None;
-        }
-
-        // Check the annotation_type_ids cache first
-        if let Some(&cached_id) = self
-            .env
-            .state
-            .annotation_type_ids
-            .borrow()
-            .get(&type_def_id)
-        {
-            return Some(cached_id);
-        }
-
-        // Check if this type already has a non-zero type_id in type_metadata
-        // (it's a class rather than a struct)
-        if let Some(meta) = self.type_metadata().get(&type_def_id)
-            && meta.type_id != 0
-        {
-            return Some(meta.type_id);
-        }
-
-        // Eagerly register: allocate a new runtime type_id with field type tags
-        let new_type_id = vole_runtime::type_registry::alloc_type_id();
-        let field_type_tags: Vec<_> = self
-            .analyzed()
-            .fields_on_type(type_def_id)
-            .map(|field_id| {
-                crate::compiler::type_registry::to_runtime_field_tag(
-                    self.analyzed().field_def(field_id).field_type_tag,
-                )
-            })
-            .collect();
-        vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
-
-        self.env
-            .state
-            .annotation_type_ids
-            .borrow_mut()
-            .insert(type_def_id, new_type_id);
-
-        Some(new_type_id)
-    }
-
-    /// VirTypeId overload of [`get_annotation_runtime_type_id`].
     pub fn get_annotation_runtime_type_id_v(&self, vir_ty: VirTypeId) -> Option<u32> {
         let (type_def_id, _) = self.vir_query_unwrap_struct_v(vir_ty)?;
 

@@ -497,14 +497,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         drop_flag
     }
 
-    /// Register a RC local using a sema `TypeId`, converting to `VirTypeId`.
-    ///
-    /// Boundary bridge for callers that have `TypeId` from sema APIs.
-    #[allow(dead_code)]
-    pub fn register_rc_local_id(&mut self, variable: Variable, type_id: TypeId) -> Variable {
-        self.register_rc_local(variable, self.vir_lookup_or_compat(type_id))
-    }
-
     /// Register a composite RC local (struct/fixed-array/tuple with RC fields)
     /// in the current scope. Returns the drop flag Variable.
     pub fn register_composite_rc_local(
@@ -579,54 +571,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return RcState::None;
         }
         vir_compute_rc_state(vir_ty, self.vir_type_table(), self.analyzed())
-    }
-
-    /// Get the field type tag for a type, determining how instance fields of this
-    /// type should be cleaned up. Unknown types get `FieldTypeTag::UnknownHeap`,
-    /// interface types get `FieldTypeTag::Interface`, other RC types get
-    /// `FieldTypeTag::Rc`, union types that contain RC variants get
-    /// `FieldTypeTag::UnionHeap`, everything else is `Value`.
-    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
-    pub fn field_type_tag(&self, type_id: TypeId) -> vole_runtime::type_registry::FieldTypeTag {
-        use vole_runtime::type_registry::FieldTypeTag;
-        if type_id.is_unknown() {
-            FieldTypeTag::UnknownHeap
-        } else if self.vir_query_is_interface(type_id) {
-            FieldTypeTag::Interface
-        } else if self.rc_state(type_id).needs_cleanup() {
-            FieldTypeTag::Rc
-        } else if let Some(vir_variants) = self.vir_query_unwrap_union(type_id) {
-            for &vir_variant in &vir_variants {
-                if self.rc_state_v(vir_variant).needs_cleanup() {
-                    return FieldTypeTag::UnionHeap;
-                }
-            }
-            FieldTypeTag::Value
-        } else {
-            FieldTypeTag::Value
-        }
-    }
-
-    /// VirTypeId overload of [`field_type_tag`].
-    #[allow(dead_code)]
-    pub fn field_type_tag_v(&self, vir_ty: VirTypeId) -> vole_runtime::type_registry::FieldTypeTag {
-        use vole_runtime::type_registry::FieldTypeTag;
-        if vir_ty == VirTypeId::UNKNOWN {
-            FieldTypeTag::UnknownHeap
-        } else if self.vir_query_is_interface_v(vir_ty) {
-            FieldTypeTag::Interface
-        } else if self.rc_state_v(vir_ty).needs_cleanup() {
-            FieldTypeTag::Rc
-        } else if let Some(vir_variants) = self.vir_query_unwrap_union_v(vir_ty) {
-            for &vir_variant in &vir_variants {
-                if self.rc_state_v(vir_variant).needs_cleanup() {
-                    return FieldTypeTag::UnionHeap;
-                }
-            }
-            FieldTypeTag::Value
-        } else {
-            FieldTypeTag::Value
-        }
     }
 
     /// Mark a CompiledValue as owned if its type needs RC cleanup.

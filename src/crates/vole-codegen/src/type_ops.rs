@@ -113,22 +113,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         )
     }
 
-    /// Compute the memory layout for a tuple type.
-    ///
-    /// Returns (total_size_bytes, per_element_byte_offsets).
-    #[allow(dead_code)]
-    pub fn tuple_layout(&self, elem_type_ids: &[TypeId]) -> (u32, Vec<i32>) {
-        let vir_elems: Vec<VirTypeId> = elem_type_ids
-            .iter()
-            .map(|&ty| self.vir_lookup(ty))
-            .collect();
-        self.tuple_layout_v(&vir_elems)
-    }
-
     /// Compute the memory layout for a tuple type from `VirTypeId` elements.
     ///
     /// Returns (total_size_bytes, per_element_byte_offsets).
-    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
     pub fn tuple_layout_v(&self, elems: &[VirTypeId]) -> (u32, Vec<i32>) {
         super::types::vir_conversions::vir_tuple_layout(
             elems,
@@ -217,12 +204,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Unwrap an interface type, returning the TypeDefId if it is one
-    #[allow(dead_code)]
-    pub fn interface_type_def_id(&self, ty: TypeId) -> Option<TypeDefId> {
-        self.vir_query_unwrap_interface(ty).map(|(id, _)| id)
-    }
-
     /// Unwrap an interface `VirTypeId`, returning the `TypeDefId` if it is one.
     pub fn interface_type_def_id_v(&self, vir_ty: VirTypeId) -> Option<TypeDefId> {
         self.vir_query_unwrap_interface_v(vir_ty).map(|(id, _)| id)
@@ -242,10 +223,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.union_array_prefers_inline_storage_v(vir_ty)
     }
 
-    /// VirTypeId version of [`union_array_prefers_inline_storage`](Self::union_array_prefers_inline_storage).
+    /// Returns true when a union array can be stored inline as (runtime_tag, payload)
+    /// without losing variant identity.
     ///
     /// VirTypeId types are post-monomorphization, so no substitution is needed.
-    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
     pub fn union_array_prefers_inline_storage_v(&self, vir_ty: VirTypeId) -> bool {
         use rustc_hash::FxHashSet;
         use vole_runtime::value::RuntimeTypeId;
@@ -274,22 +255,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         true
     }
 
-    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
-    fn supports_inline_union_array_variant(&self, variant: TypeId) -> bool {
-        // Codegen/runtime layout policy: inline union array slots store only
-        // (runtime_tag, payload_bits), so variants that need richer tagging or
-        // heap-backed payload wrappers must use boxed union storage.
-        let vir_variant = self.to_vir_type(variant);
-        !(self.vir_query_is_union(variant)
-            || self.vir_query_is_interface(variant)
-            || self.vir_query_is_class(variant)
-            || self.vir_query_is_struct(variant)
-            || self.vir_query_is_unknown(variant)
-            || self.vir_query_unwrap_tuple_v(vir_variant).is_some()
-            || self.vir_query_unwrap_fallible_v(vir_variant).is_some()
-            || self.vir_query_unwrap_type_param(variant).is_some())
-    }
-
     fn supports_inline_union_array_variant_v(&self, variant: VirTypeId) -> bool {
         !(self.vir_query_is_union_v(variant)
             || self.vir_query_is_interface_v(variant)
@@ -299,26 +264,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             || self.vir_query_unwrap_tuple_v(variant).is_some()
             || self.vir_query_unwrap_fallible_v(variant).is_some()
             || self.vir_query_unwrap_type_param_v(variant).is_some())
-    }
-
-    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
-    pub(crate) fn union_variant_index_to_array_tag(
-        &mut self,
-        variant_idx: Value,
-        variants: &[TypeId],
-    ) -> Value {
-        let vir_variants: Vec<VirTypeId> = variants.iter().map(|&v| self.vir_lookup(v)).collect();
-        self.union_variant_index_to_array_tag_v(variant_idx, &vir_variants)
-    }
-
-    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
-    pub(crate) fn array_tag_to_union_variant_index(
-        &mut self,
-        array_tag: Value,
-        variants: &[TypeId],
-    ) -> Value {
-        let vir_variants: Vec<VirTypeId> = variants.iter().map(|&v| self.vir_lookup(v)).collect();
-        self.array_tag_to_union_variant_index_v(array_tag, &vir_variants)
     }
 
     pub(crate) fn union_variant_index_to_array_tag_v(

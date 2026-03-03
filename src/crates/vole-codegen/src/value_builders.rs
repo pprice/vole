@@ -295,12 +295,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::owned(value, cranelift_ty, self.to_vir_type(type_id))
     }
 
-    /// Create a CompiledValue from a value and VirTypeId, computing the Cranelift type via VIR.
-    #[allow(dead_code)] // VIR-native helper for future VIR codegen migration
-    pub fn compiled_v(&self, value: Value, vir_ty: VirTypeId) -> CompiledValue {
-        CompiledValue::new(value, self.cranelift_type_v(vir_ty), vir_ty)
-    }
-
     /// Convert a raw i64 field value to a CompiledValue with the proper type.
     /// Handles type narrowing for primitives (f64 bitcast, bool/int reduction).
     pub fn convert_field_value(&mut self, raw_value: Value, type_id: TypeId) -> CompiledValue {
@@ -310,7 +304,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a raw i64 field value to a CompiledValue with the proper type (VirTypeId variant).
     /// Handles type narrowing for primitives (f64 bitcast, bool/int reduction).
-    #[allow(dead_code)] // VIR-native helper for future VIR codegen migration
     pub fn convert_field_value_v(&mut self, raw_value: Value, vir_ty: VirTypeId) -> CompiledValue {
         // Use env path to avoid borrow conflict with self.builder
         let table = &self.env.analyzed.vir_program().type_table;
@@ -323,16 +316,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(value, ty, vir_ty)
     }
 
-    /// Extract a value from a TaggedValue (unknown type) after type narrowing.
-    /// The raw_value is the value field from the TaggedValue (already loaded from offset 8).
-    /// This converts it to the appropriate Cranelift type based on the narrowed type.
-    #[allow(dead_code)]
-    pub fn extract_unknown_value(&mut self, raw_value: Value, type_id: TypeId) -> CompiledValue {
-        self.convert_field_value(raw_value, type_id)
-    }
-
     /// Extract a value from a TaggedValue (VirTypeId variant).
-    #[allow(dead_code)] // VIR-native helper for future VIR codegen migration
     pub fn extract_unknown_value_v(
         &mut self,
         raw_value: Value,
@@ -433,21 +417,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ))
     }
 
-    /// Copy a union heap buffer (16 bytes: [tag:i8, is_rc:i8, pad(6), payload:i64])
-    /// to a stack-allocated union slot (16 bytes: [tag:i8, pad(7), payload:i64]).
+    /// Copy a union heap buffer to a stack-allocated union slot (VirTypeId-native).
+    ///
+    /// Union heap layout: [tag:i8, is_rc:i8, pad(6), payload:i64] (16 bytes).
+    /// Stack union layout: [tag:i8, pad(7), payload:i64] (16 bytes).
     /// This prevents use-after-free when reading union elements from dynamic arrays,
     /// since the array slot may be overwritten (e.g. by rehash) while the value is
     /// still in use.
-    #[allow(dead_code)]
-    pub fn copy_union_heap_to_stack(
-        &mut self,
-        heap_ptr: Value,
-        union_type_id: TypeId,
-    ) -> CompiledValue {
-        self.copy_union_heap_to_stack_v(heap_ptr, self.vir_lookup(union_type_id))
-    }
-
-    /// VirTypeId-native variant of [`copy_union_heap_to_stack`](Self::copy_union_heap_to_stack).
     pub fn copy_union_heap_to_stack_v(
         &mut self,
         heap_ptr: Value,
@@ -530,49 +506,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(Some(self.builder.ins().stack_addr(ptr_type, slot, 0)))
     }
 
-    /// VirTypeId variant of [`alloc_sret_ptr`](Self::alloc_sret_ptr).
-    #[allow(dead_code)]
-    pub fn alloc_sret_ptr_v(&mut self, return_vir: VirTypeId) -> CodegenResult<Option<Value>> {
-        if !self.is_sret_struct_return_v(return_vir) {
-            return Ok(None);
-        }
-        let ptr_type = self.ptr_type();
-        let flat_count = self
-            .vir_struct_flat_slot_count(return_vir)
-            .ok_or_else(|| CodegenError::internal("sret call: missing flat slot count"))?;
-        let total_size = (flat_count as u32) * 8;
-        let slot = self.alloc_stack(total_size);
-        Ok(Some(self.builder.ins().stack_addr(ptr_type, slot, 0)))
-    }
-
-    /// Emit a return for a small struct (1-2 flat slots) via register passing.
+    /// Emit a return for a small struct (1-2 flat slots) via register passing (VIR variant).
     /// Loads flat slots into registers, pads to 2, and emits the return instruction.
-    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
-    pub fn emit_small_struct_return(
-        &mut self,
-        struct_ptr: Value,
-        ret_type_id: TypeId,
-    ) -> CodegenResult<()> {
-        let flat_count = self
-            .struct_flat_slot_count(ret_type_id)
-            .ok_or_else(|| CodegenError::internal("struct return: missing flat slot count"))?;
-        let mut return_vals = Vec::with_capacity(crate::MAX_SMALL_STRUCT_FIELDS);
-        for i in 0..flat_count {
-            let offset = (i as i32) * 8;
-            let val = self
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), struct_ptr, offset);
-            return_vals.push(val);
-        }
-        while return_vals.len() < crate::MAX_SMALL_STRUCT_FIELDS {
-            return_vals.push(self.iconst_cached(types::I64, 0));
-        }
-        self.builder.ins().return_(&return_vals);
-        Ok(())
-    }
-
-    /// Emit a return for a small struct (VIR variant).
     pub fn emit_small_struct_return_v(
         &mut self,
         struct_ptr: Value,
@@ -597,37 +532,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(())
     }
 
-    /// Emit a return for a large struct (3+ flat slots) via sret convention.
+    /// Emit a return for a large struct (3+ flat slots) via sret convention (VIR variant).
     /// Copies flat slots into the sret buffer (first parameter) and returns the pointer.
-    #[allow(dead_code)] // TypeId-based API preserved for non-VIR callers.
-    pub fn emit_sret_struct_return(
-        &mut self,
-        struct_ptr: Value,
-        ret_type_id: TypeId,
-    ) -> CodegenResult<()> {
-        let entry_block =
-            self.builder.func.layout.entry_block().ok_or_else(|| {
-                CodegenError::internal("sret return: function has no entry block")
-            })?;
-        let sret_ptr = self.builder.block_params(entry_block)[0];
-        let flat_count = self
-            .struct_flat_slot_count(ret_type_id)
-            .ok_or_else(|| CodegenError::internal("sret return: missing flat slot count"))?;
-        for i in 0..flat_count {
-            let offset = (i as i32) * 8;
-            let val = self
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), struct_ptr, offset);
-            self.builder
-                .ins()
-                .store(MemFlags::new(), val, sret_ptr, offset);
-        }
-        self.builder.ins().return_(&[sret_ptr]);
-        Ok(())
-    }
-
-    /// Emit a return for a large struct via sret convention (VIR variant).
     pub fn emit_sret_struct_return_v(
         &mut self,
         struct_ptr: Value,
@@ -677,30 +583,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
         Ok(self.compiled_with_ty(ptr, ptr_type, type_id))
-    }
-
-    /// VirTypeId variant of [`reconstruct_struct_from_regs`](Self::reconstruct_struct_from_regs).
-    #[allow(dead_code)]
-    pub fn reconstruct_struct_from_regs_v(
-        &mut self,
-        values: &[Value],
-        vir_ty: VirTypeId,
-    ) -> CodegenResult<CompiledValue> {
-        let flat_count = self.vir_struct_flat_slot_count(vir_ty).ok_or_else(|| {
-            CodegenError::internal("reconstruct_struct_from_regs_v: expected struct type")
-        })?;
-        let total_size = (flat_count as u32) * 8;
-        let slot = self.alloc_stack(total_size);
-
-        for (i, &val) in values.iter().enumerate().take(flat_count) {
-            let offset = (i as i32) * 8;
-            self.builder.ins().stack_store(val, slot, offset);
-        }
-
-        let ptr_type = self.ptr_type();
-        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-        Ok(CompiledValue::new(ptr, ptr_type, vir_ty))
     }
 
     /// Copy a struct value to a new stack slot (value semantics).
@@ -853,76 +735,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(self.compiled(results[0], return_type_id))
     }
 
-    /// VirTypeId variant of [`call_result`](Self::call_result).
-    #[allow(dead_code)]
-    pub fn call_result_v(
-        &mut self,
-        call: cranelift_codegen::ir::Inst,
-        return_vir: VirTypeId,
-    ) -> CodegenResult<CompiledValue> {
-        let results = self.builder.inst_results(call);
-        if results.is_empty() {
-            return Ok(self.void_value());
-        }
-
-        // Check for wide fallible multi-value return (3 results: tag, low, high)
-        if results.len() == 3 && self.vir_query_is_wide_fallible_v(return_vir) {
-            let tag = results[0];
-            let low = results[1];
-            let high = results[2];
-
-            let slot_size = 24u32;
-            let slot = self.alloc_stack(slot_size);
-
-            self.builder.ins().stack_store(tag, slot, 0);
-            let i128_val = super::structs::reconstruct_i128(self.builder, low, high);
-            super::structs::helpers::store_i128_to_stack(
-                self.builder,
-                i128_val,
-                slot,
-                union_layout::PAYLOAD_OFFSET,
-            );
-
-            let ptr_type = self.ptr_type();
-            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-            return Ok(CompiledValue::new(ptr, ptr_type, return_vir));
-        }
-
-        // Check for fallible multi-value return (2 results: tag, payload)
-        if results.len() == 2 && self.vir_query_unwrap_fallible_v(return_vir).is_some() {
-            let tag = results[0];
-            let payload = results[1];
-
-            let slot_size = union_layout::STANDARD_SIZE;
-            let slot = self.alloc_stack(slot_size);
-
-            self.builder.ins().stack_store(tag, slot, 0);
-            self.builder
-                .ins()
-                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
-
-            let ptr_type = self.ptr_type();
-            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-            return Ok(CompiledValue::new(ptr, ptr_type, return_vir));
-        }
-
-        // Check for small struct multi-value return (2 results: field0, field1)
-        if results.len() == 2 && self.is_small_struct_return_v(return_vir) {
-            let results_vec: Vec<Value> = results.to_vec();
-            return self.reconstruct_struct_from_regs_v(&results_vec, return_vir);
-        }
-
-        // If the return type is a union, the returned value is a pointer to the callee's stack.
-        if self.vir_query_is_union_v(return_vir) {
-            let src_ptr = results[0];
-            return Ok(self.copy_union_ptr_to_local_v(src_ptr, return_vir));
-        }
-
-        Ok(self.compiled_v(results[0], return_vir))
-    }
-
     /// Copy a union value from a pointer (typically callee's stack) to a local stack slot.
     ///
     /// This prevents the returned union from being clobbered when the callee's
@@ -963,67 +775,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             value.rc_lifecycle = RcLifecycle::Owned;
         }
         value
-    }
-
-    /// VirTypeId variant of [`copy_union_ptr_to_local`](Self::copy_union_ptr_to_local).
-    #[allow(dead_code)]
-    pub fn copy_union_ptr_to_local_v(
-        &mut self,
-        src_ptr: Value,
-        union_vir: VirTypeId,
-    ) -> CompiledValue {
-        let union_size = self.type_size_v(union_vir);
-        let slot = self.alloc_stack(union_size);
-
-        let tag_and_rc = self
-            .builder
-            .ins()
-            .load(types::I16, MemFlags::new(), src_ptr, 0);
-        self.builder.ins().stack_store(tag_and_rc, slot, 0);
-
-        if union_size > union_layout::TAG_ONLY_SIZE {
-            let payload = self.builder.ins().load(
-                types::I64,
-                MemFlags::new(),
-                src_ptr,
-                union_layout::PAYLOAD_OFFSET,
-            );
-            self.builder
-                .ins()
-                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
-        }
-
-        let ptr_type = self.ptr_type();
-        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        let mut value = self.compiled_v(ptr, union_vir);
-        if self.rc_state_v(union_vir).union_variants().is_some() {
-            value.rc_lifecycle = RcLifecycle::Owned;
-        }
-        value
-    }
-
-    /// Load the payload from a union pointer, returning zero if the union is tag-only.
-    ///
-    /// Sentinel-only unions have `union_size == TAG_ONLY_SIZE` (8 bytes, tag only)
-    /// and carry no payload data, so this returns an `iconst 0` for those.
-    #[allow(dead_code)]
-    pub fn load_union_payload(
-        &mut self,
-        union_ptr: Value,
-        union_type_id: TypeId,
-        payload_type: cranelift::prelude::Type,
-    ) -> Value {
-        let union_size = self.type_size(union_type_id);
-        if union_size > union_layout::TAG_ONLY_SIZE {
-            self.builder.ins().load(
-                payload_type,
-                MemFlags::new(),
-                union_ptr,
-                union_layout::PAYLOAD_OFFSET,
-            )
-        } else {
-            self.iconst_cached(payload_type, 0)
-        }
     }
 
     /// Load the payload from a union pointer using `VirTypeId` for size lookup.

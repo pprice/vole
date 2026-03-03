@@ -309,7 +309,6 @@ impl<'a> Compiler<'a> {
     }
 
     /// Unwrap a type parameter `VirTypeId` to its `NameId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_type_param_v(&self, vir_ty: VirTypeId) -> Option<NameId> {
         crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
@@ -322,7 +321,6 @@ impl<'a> Compiler<'a> {
     }
 
     /// Unwrap a function `VirTypeId` to `(params, return_type)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_function_v(
         &self,
@@ -355,7 +353,6 @@ impl<'a> Compiler<'a> {
     }
 
     /// Unwrap a fallible `VirTypeId` to `(success, errors)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_fallible_v(
         &self,
@@ -372,7 +369,6 @@ impl<'a> Compiler<'a> {
     }
 
     /// Unwrap a class `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_class_v(&self, vir_ty: VirTypeId) -> Option<(TypeDefId, Vec<VirTypeId>)> {
         crate::types::vir_conversions::vir_unwrap_class(vir_ty, self.vir_type_table())
@@ -386,7 +382,6 @@ impl<'a> Compiler<'a> {
     }
 
     /// Unwrap a struct `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_struct_v(&self, vir_ty: VirTypeId) -> Option<(TypeDefId, Vec<VirTypeId>)> {
         crate::types::vir_conversions::vir_unwrap_struct(vir_ty, self.vir_type_table())
@@ -400,7 +395,6 @@ impl<'a> Compiler<'a> {
     }
 
     /// Unwrap an interface `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_interface_v(
         &self,
@@ -411,14 +405,12 @@ impl<'a> Compiler<'a> {
     }
 
     /// Unwrap an array `VirTypeId` to its element `VirTypeId` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_array_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
         crate::types::vir_conversions::vir_unwrap_array(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a fixed array `VirTypeId` to `(elem, len)` via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_fixed_array_v(&self, vir_ty: VirTypeId) -> Option<(VirTypeId, usize)> {
         crate::types::vir_conversions::vir_unwrap_fixed_array(vir_ty, self.vir_type_table())
@@ -426,7 +418,6 @@ impl<'a> Compiler<'a> {
     }
 
     /// Unwrap a tuple `VirTypeId` to its element `VirTypeId`s via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_unwrap_tuple_v(&self, vir_ty: VirTypeId) -> Option<Vec<VirTypeId>> {
         crate::types::vir_conversions::vir_unwrap_tuple(vir_ty, self.vir_type_table())
@@ -437,7 +428,6 @@ impl<'a> Compiler<'a> {
     ///
     /// Also handles `VirType::Optional { inner }`, expanding it to a two-element
     /// vector matching the sema arena's sorted variant order.
-    #[allow(dead_code)]
     fn vir_query_unwrap_union_v(&self, vir_ty: VirTypeId) -> Option<Vec<VirTypeId>> {
         let table = self.vir_type_table();
         match table.get(vir_ty) {
@@ -449,7 +439,6 @@ impl<'a> Compiler<'a> {
 
     /// Check if a `VirTypeId` contains any type parameter anywhere in its structure
     /// via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_contains_type_param_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_contains_type_param(vir_ty, self.vir_type_table())
@@ -463,7 +452,6 @@ impl<'a> Compiler<'a> {
     }
 
     /// Map a `VirTypeId` to its Cranelift type via VirTypeTable.
-    #[allow(dead_code)]
     #[inline]
     fn vir_query_type_to_cranelift_v(&self, vir_ty: VirTypeId) -> clif_types::Type {
         // Sentinel types are always i8 (zero-field struct tag). VIR maps them
