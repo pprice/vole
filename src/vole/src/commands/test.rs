@@ -24,6 +24,7 @@ use crate::runtime::{
     take_assert_failure, take_stack_overflow,
 };
 use crate::sema::ModuleCache;
+use crate::sema::lowering::CachedModuleVir;
 use crate::util::format_duration;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -418,6 +419,9 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
     // Create shared module cache for all test files (sema caching)
     let cache = Rc::new(RefCell::new(ModuleCache::new()));
 
+    // Module VIR cache - populated on first file, reused for subsequent files
+    let module_vir_cache: Rc<RefCell<Option<CachedModuleVir>>> = Rc::new(RefCell::new(None));
+
     // Compiled modules cache (codegen caching) - populated on first file
     let mut compiled_modules: Option<CompiledModules> = None;
 
@@ -450,6 +454,7 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
             file,
             &config,
             cache.clone(),
+            module_vir_cache.clone(),
             &mut compiled_modules,
             progress.as_mut(),
         ) {
@@ -542,6 +547,7 @@ fn run_file_tests_with_modules(
     path: &Path,
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
+    module_vir_cache: Rc<RefCell<Option<CachedModuleVir>>>,
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
@@ -553,18 +559,21 @@ fn run_file_tests_with_modules(
         path,
         config,
         cache,
+        module_vir_cache,
         compiled_modules,
         progress,
     )
 }
 
 /// Parse, type check, compile, and run tests with shared compiled modules
+#[allow(clippy::too_many_arguments)]
 fn run_source_tests_with_modules(
     source: &str,
     file_path: &str,
     path: &Path,
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
+    module_vir_cache: Rc<RefCell<Option<CachedModuleVir>>>,
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
@@ -577,6 +586,7 @@ fn run_source_tests_with_modules(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
+            module_vir_cache: Some(module_vir_cache),
             color_mode: config.color_mode,
         },
         &mut diag_buffer,
@@ -732,6 +742,7 @@ fn run_source_tests_with_progress(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
+            module_vir_cache: None,
             color_mode: config.color_mode,
         },
         &mut diag_buffer,

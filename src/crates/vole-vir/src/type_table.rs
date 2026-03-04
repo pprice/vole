@@ -167,6 +167,54 @@ impl VirTypeTable {
         mapping
     }
 
+    /// Merge types from `other` into `self`, preserving existing TypeId
+    /// mappings.
+    ///
+    /// Like `merge_from`, but does NOT overwrite existing `type_id_to_vir`
+    /// entries in `self`.  This is used for module VIR cache merging: the
+    /// cached type table may contain TypeId mappings from a different file's
+    /// sema analysis, and we don't want those to overwrite the current file's
+    /// mappings.
+    ///
+    /// Returns a mapping from `other`'s VirTypeIds to `self`'s VirTypeIds.
+    pub fn merge_from_additive(&mut self, other: &VirTypeTable) -> FxHashMap<VirTypeId, VirTypeId> {
+        let mut mapping = FxHashMap::default();
+        let mut in_progress = FxHashSet::default();
+
+        for i in 0..VirTypeId::FIRST_DYNAMIC {
+            let id = VirTypeId::from_raw(i);
+            mapping.insert(id, id);
+        }
+
+        for i in VirTypeId::FIRST_DYNAMIC..other.types.len() as u32 {
+            let old_id = VirTypeId::from_raw(i);
+            merge_one(old_id, other, self, &mut mapping, &mut in_progress);
+        }
+
+        // Additive: only insert TypeId→VirTypeId entries that don't already
+        // exist in `self`.
+        for (&type_id, &old_vir_id) in &other.type_id_to_vir {
+            let new_vir_id = mapping.get(&old_vir_id).copied().unwrap_or(old_vir_id);
+            self.type_id_to_vir.entry(type_id).or_insert(new_vir_id);
+        }
+        for (&old_vir_id, &type_id) in &other.vir_to_type_id {
+            let new_vir_id = mapping.get(&old_vir_id).copied().unwrap_or(old_vir_id);
+            self.vir_to_type_id.entry(new_vir_id).or_insert(type_id);
+        }
+
+        // Merge sentinel_ids and closure_ids.
+        for &old_sentinel in &other.sentinel_ids {
+            let new_sentinel = mapping.get(&old_sentinel).copied().unwrap_or(old_sentinel);
+            self.sentinel_ids.insert(new_sentinel);
+        }
+        for &old_closure in &other.closure_ids {
+            let new_closure = mapping.get(&old_closure).copied().unwrap_or(old_closure);
+            self.closure_ids.insert(new_closure);
+        }
+
+        mapping
+    }
+
     /// Number of interned types (including reserved entries).
     pub fn len(&self) -> usize {
         self.types.len()

@@ -92,7 +92,7 @@ pub struct VirMethodImplInfo {
 /// Replaces codegen's `ImplementView` as the lookup source for external
 /// function bindings and implement-block method dispatch.  Populated once
 /// during VIR lowering from sema's `ImplementRegistry`.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct VirImplementDispatch {
     /// External function info by short name (e.g. "print").
     external_funcs: FxHashMap<String, VirExternalFuncInfo>,

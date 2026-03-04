@@ -162,6 +162,7 @@ fn compile_and_run_tests(
             skip_tests: false,
             project_root: None,
             module_cache: Some(cache),
+            module_vir_cache: None,
             color_mode: ColorMode::Never,
         },
         &mut diag_buffer,

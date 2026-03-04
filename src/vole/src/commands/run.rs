@@ -70,6 +70,7 @@ fn execute(
             skip_tests: true,
             project_root,
             module_cache: None,
+            module_vir_cache: None,
             color_mode,
         },
         &mut std::io::stderr(),

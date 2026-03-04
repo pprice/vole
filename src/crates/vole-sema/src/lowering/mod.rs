@@ -27,5 +27,5 @@ pub mod type_method_monomorph;
 pub mod type_methods;
 pub mod vir_monomorph;
 
-// Re-export the main entry point.
-pub use facade::{LowerVirProgramArgs, LowerVirProgramOutput, lower_vir_program};
+// Re-export the main entry point and cache type.
+pub use facade::{CachedModuleVir, LowerVirProgramArgs, LowerVirProgramOutput, lower_vir_program};

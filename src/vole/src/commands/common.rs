@@ -186,6 +186,11 @@ pub struct PipelineOptions<'a> {
     pub skip_tests: bool,
     pub project_root: Option<&'a std::path::Path>,
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
+    /// Optional cache for module VIR lowering output.
+    ///
+    /// When provided, module VIR lowering results are cached on the first
+    /// compilation and reused for subsequent files (e.g. across test files).
+    pub module_vir_cache: Option<Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>>,
     /// Color mode for diagnostic rendering (used for warnings).
     pub color_mode: ColorMode,
 }
@@ -205,6 +210,7 @@ pub fn compile_source(
         skip_tests,
         project_root,
         module_cache,
+        module_vir_cache,
         color_mode,
     } = opts;
 
@@ -274,7 +280,12 @@ pub fn compile_source(
         );
     }
 
-    Ok(build_analyzed_program(program, interner, output))
+    Ok(build_analyzed_program(
+        program,
+        interner,
+        output,
+        module_vir_cache,
+    ))
 }
 
 /// Bridge between sema's `AnalysisOutput` and codegen's `AnalyzedProgram`.
@@ -287,6 +298,7 @@ pub fn build_analyzed_program(
     program: crate::frontend::Program,
     mut interner: crate::frontend::Interner,
     output: crate::sema::AnalysisOutput,
+    module_vir_cache: Option<Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>>,
 ) -> AnalyzedProgram {
     use crate::sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 
@@ -319,6 +331,7 @@ pub fn build_analyzed_program(
         generic_vir_functions,
         vir_type_table,
         implements: &db.implements,
+        module_vir_cache,
     });
     let mut vir_program = lowering_output.vir_program;
     vir_program.interner = Rc::new(interner);
@@ -545,6 +558,7 @@ pub fn check_captured<W: Write + Send + 'static>(
             skip_tests: false,
             project_root: None,
             module_cache: None,
+            module_vir_cache: None,
             color_mode,
         },
         &mut stderr,
@@ -574,6 +588,7 @@ pub fn run_captured<W: Write + Send + 'static>(
             skip_tests: true,
             project_root: None,
             module_cache: None,
+            module_vir_cache: None,
             color_mode,
         },
         &mut stderr,

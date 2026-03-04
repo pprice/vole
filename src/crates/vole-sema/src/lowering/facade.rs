@@ -6,9 +6,10 @@
 // depend on the specific file being compiled.
 //
 // `lower_vir_program` is the single entry point: it calls `lower_module_vir`
-// then `lower_file_vir` in sequence, with no behavior change vs the original
-// monolithic function.
+// then `lower_file_vir` in sequence.  When a `CachedModuleVir` is provided
+// and valid, the module phase is skipped entirely.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -91,6 +92,9 @@ where
     /// the same table.
     pub vir_type_table: VirTypeTable,
     pub implements: &'a ImplementRegistry,
+    /// Optional cache for module VIR output.  When present, the module phase
+    /// is skipped on cache hit.
+    pub module_vir_cache: Option<Rc<RefCell<Option<CachedModuleVir>>>>,
 }
 
 pub struct LowerVirProgramOutput {
@@ -110,32 +114,79 @@ where
         type_arena,
         node_map,
         tests_virtual_modules,
-        module_programs,
+        mut module_programs,
         module_id,
         modules_with_errors,
         generic_vir_functions,
         vir_type_table,
         implements,
+        module_vir_cache,
     } = args;
 
-    // Use the shared VIR type table from sema analysis.  Generic VIR
-    // templates already use VirTypeIds from this table, so no merge/remap
-    // is needed — concrete lowering continues interning into the same table.
-    let mut type_table = vir_type_table;
+    // Collect module paths for cache invalidation.
+    let module_paths: Vec<String> = {
+        let mut paths: Vec<String> = module_programs.keys().cloned().collect();
+        paths.sort();
+        paths
+    };
 
-    // Phase M: module-only passes (cacheable across test file compilations).
-    //
-    // These passes depend only on imported modules and shared entity state.
-    // They do NOT touch the VirTypeTable, so they can run before function
-    // lowering without affecting type interning order.
-    let module_result = lower_module_vir(LowerModuleVirArgs {
-        entities,
-        type_arena,
-        module_programs,
-        implements,
-    });
+    // Build per-file metadata (NOT cached — these depend on shared registries
+    // that grow as more modules are analyzed).
+    let implement_dispatch = build_implement_dispatch(implements);
+    let (module_constants, module_exports) = collect_module_metadata(type_arena);
 
-    // Phase F: file-specific passes (and type-table-dependent module passes).
+    // Try to use the cached module VIR functions and type table.
+    let (module_vir_functions, mut type_table) =
+        if let Some(cached) = try_use_cache(&module_vir_cache, &module_paths) {
+            // Restore module interners from cache so codegen can resolve
+            // symbols referenced by cached VIR functions.
+            apply_cached_interners(&mut module_programs, &cached.module_interners);
+
+            // Merge cached module type table entries into this file's sema
+            // type table so both module and file-specific types are available.
+            let mut type_table = vir_type_table;
+            let merge_mapping = type_table.merge_from_additive(&cached.type_table);
+
+            // Remap VirTypeIds in cached module VIR functions if the merge
+            // placed any entries at different positions.
+            let needs_remap = merge_mapping.iter().any(|(&old, &new)| old != new);
+            let module_vir_functions = if needs_remap {
+                let remap_ctx = vole_vir::monomorph::rewrite::RewriteCtx::new(merge_mapping);
+                cached
+                    .module_vir_functions
+                    .iter()
+                    .map(|f| vole_vir::monomorph::rewrite::rewrite_function(f, &remap_ctx))
+                    .collect()
+            } else {
+                cached.module_vir_functions
+            };
+            (module_vir_functions, type_table)
+        } else {
+            // Cache miss: run module VIR lowering (mutates module_programs
+            // in place — their Interners gain symbols used by VIR functions).
+            let mut type_table = vir_type_table;
+            let module_vir_functions = lower_module_vir_functions(LowerModuleVirArgs {
+                names,
+                entities,
+                type_arena,
+                node_map,
+                module_programs: &mut module_programs,
+                modules_with_errors,
+                type_table: &mut type_table,
+            });
+
+            // Store in cache for subsequent files.
+            store_cache(
+                &module_vir_cache,
+                &module_vir_functions,
+                &type_table,
+                &module_programs,
+                module_paths,
+            );
+            (module_vir_functions, type_table)
+        };
+
+    // Phase F: file-specific passes.
     lower_file_vir(LowerFileVirArgs {
         program,
         interner,
@@ -144,13 +195,112 @@ where
         type_arena,
         node_map,
         tests_virtual_modules,
-        module_programs: module_result.module_programs,
+        module_programs,
         module_id,
         modules_with_errors,
         generic_vir_functions,
         type_table: &mut type_table,
-        module_vir: module_result.output,
+        module_vir: ModuleVirOutput {
+            implement_dispatch,
+            module_constants,
+            module_exports,
+            module_vir_functions,
+        },
     })
+}
+
+// ---------------------------------------------------------------------------
+// Module VIR cache
+// ---------------------------------------------------------------------------
+
+/// Cached module VIR lowering results for reuse across test file compilations.
+///
+/// Stores the module VIR functions (the expensive lowering result), a snapshot
+/// of the `VirTypeTable`, and the module Interners (which contain symbols
+/// referenced by the VIR functions).
+///
+/// Metadata that depends on shared registries (implement dispatch, module
+/// constants, module exports) is NOT cached because those registries grow as
+/// more modules are lazily analyzed.
+pub struct CachedModuleVir {
+    /// VIR functions lowered from imported modules.
+    module_vir_functions: Vec<VirFunction>,
+    /// Snapshot of the VirTypeTable after module function lowering.
+    type_table: VirTypeTable,
+    /// Module Interners after mutation by module function lowering.
+    ///
+    /// VIR functions reference `SymbolId`s that were interned into these
+    /// Interners.  On cache hit, we inject these into the current file's
+    /// `module_programs` so codegen can resolve those symbols.
+    module_interners: FxHashMap<String, Rc<Interner>>,
+    /// Sorted module paths — the cache key for invalidation.
+    module_paths: Vec<String>,
+}
+
+/// Attempt to use a cached module VIR result.
+///
+/// Returns `Some(cached)` if the cache is present and valid (same module set).
+fn try_use_cache(
+    cache_cell: &Option<Rc<RefCell<Option<CachedModuleVir>>>>,
+    module_paths: &[String],
+) -> Option<CachedModuleVir> {
+    let cache_rc = cache_cell.as_ref()?;
+    let mut cache_ref = cache_rc.borrow_mut();
+    let cached = cache_ref.as_ref()?;
+
+    // Validate: same module set.
+    if cached.module_paths != module_paths {
+        tracing::debug!("module VIR cache invalidated: module set changed");
+        *cache_ref = None;
+        return None;
+    }
+
+    // Clone the cached data for this file's use.
+    Some(CachedModuleVir {
+        module_vir_functions: cached.module_vir_functions.clone(),
+        type_table: cached.type_table.clone(),
+        module_interners: cached.module_interners.clone(),
+        module_paths: cached.module_paths.clone(),
+    })
+}
+
+/// Store module VIR lowering results in the cache.
+fn store_cache(
+    cache_cell: &Option<Rc<RefCell<Option<CachedModuleVir>>>>,
+    module_vir_functions: &[VirFunction],
+    type_table: &VirTypeTable,
+    module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
+    module_paths: Vec<String>,
+) {
+    if let Some(cache_rc) = cache_cell.as_ref() {
+        let module_interners: FxHashMap<String, Rc<Interner>> = module_programs
+            .iter()
+            .map(|(path, (_prog, interner))| (path.clone(), Rc::clone(interner)))
+            .collect();
+        *cache_rc.borrow_mut() = Some(CachedModuleVir {
+            module_vir_functions: module_vir_functions.to_vec(),
+            type_table: type_table.clone(),
+            module_interners,
+            module_paths,
+        });
+    }
+}
+
+/// Apply cached module interners to the current file's module programs.
+///
+/// On a cache hit, the VIR functions reference symbols that were interned
+/// during the first file's module lowering.  This function replaces the
+/// Interner in each module program entry with the cached (mutated) version
+/// so codegen can resolve those symbols.
+fn apply_cached_interners(
+    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
+    cached_interners: &FxHashMap<String, Rc<Interner>>,
+) {
+    for (path, (_prog, interner)) in module_programs.iter_mut() {
+        if let Some(cached_interner) = cached_interners.get(path) {
+            *interner = Rc::clone(cached_interner);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -160,14 +310,9 @@ where
 /// Output from module-only VIR lowering passes.
 ///
 /// Contains VIR data produced by passes that only depend on imported modules
-/// and shared entity state (not on the specific file being compiled, and not
-/// on VirTypeTable ordering).  A future caching layer (vol-fe6d) can store
-/// and reuse `ModuleVirOutput` across test file compilations.
-///
-/// Passes that depend on VirTypeTable (global inits, module bindings, default
-/// inits, entity metadata, monomorph info) remain in the file phase to
-/// preserve exact type interning order.  They are logically module-only and
-/// will move here once the caching layer pre-populates the type table.
+/// and shared entity state (not on the specific file being compiled).
+/// Cached across test file compilations via `CachedModuleVir`.
+#[derive(Clone)]
 pub struct ModuleVirOutput {
     /// Implement-dispatch metadata from the implement registry.
     pub implement_dispatch: VirImplementDispatch,
@@ -176,29 +321,27 @@ pub struct ModuleVirOutput {
     /// Module type exports.
     pub module_exports:
         FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>,
+    /// VIR functions lowered from imported modules (functions, type methods,
+    /// implement-block methods).  Prepended to the file's function list.
+    pub module_vir_functions: Vec<VirFunction>,
 }
 
 // ---------------------------------------------------------------------------
-// Module VIR lowering args and result
+// Module VIR lowering args
 // ---------------------------------------------------------------------------
 
-/// Arguments for the module-only VIR lowering pass.
-pub struct LowerModuleVirArgs<'a, E>
+/// Arguments for the module-only VIR function lowering pass.
+struct LowerModuleVirArgs<'a, E>
 where
     E: LoweringEntityLookup,
 {
-    pub entities: &'a E,
-    pub type_arena: &'a TypeArena,
-    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
-    pub implements: &'a ImplementRegistry,
-}
-
-/// Result of the module-only VIR lowering pass, including the module_programs
-/// that file passes still need.
-pub struct LowerModuleVirResult {
-    pub output: ModuleVirOutput,
-    /// Returned so that file passes (and mixed passes) can still use them.
-    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
+    names: &'a NameTable,
+    entities: &'a E,
+    type_arena: &'a TypeArena,
+    node_map: &'a crate::NodeMap,
+    module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
+    modules_with_errors: &'a HashSet<String>,
+    type_table: &'a mut VirTypeTable,
 }
 
 // ---------------------------------------------------------------------------
@@ -206,65 +349,82 @@ pub struct LowerModuleVirResult {
 // ---------------------------------------------------------------------------
 
 /// Arguments for the file-specific VIR lowering pass.
-pub struct LowerFileVirArgs<'a, E>
+struct LowerFileVirArgs<'a, E>
 where
     E: LoweringEntityLookup,
 {
-    pub program: &'a Program,
-    pub interner: &'a mut Interner,
-    pub names: &'a NameTable,
-    pub entities: &'a E,
-    pub type_arena: &'a TypeArena,
-    pub node_map: &'a crate::NodeMap,
-    pub tests_virtual_modules: &'a FxHashMap<Span, ModuleId>,
-    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
-    pub module_id: ModuleId,
-    pub modules_with_errors: &'a HashSet<String>,
-    pub generic_vir_functions: Vec<(NameId, VirFunction)>,
-    pub type_table: &'a mut VirTypeTable,
-    pub module_vir: ModuleVirOutput,
+    program: &'a Program,
+    interner: &'a mut Interner,
+    names: &'a NameTable,
+    entities: &'a E,
+    type_arena: &'a TypeArena,
+    node_map: &'a crate::NodeMap,
+    tests_virtual_modules: &'a FxHashMap<Span, ModuleId>,
+    module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
+    module_id: ModuleId,
+    modules_with_errors: &'a HashSet<String>,
+    generic_vir_functions: Vec<(NameId, VirFunction)>,
+    type_table: &'a mut VirTypeTable,
+    module_vir: ModuleVirOutput,
 }
 
 // ---------------------------------------------------------------------------
 // Phase M: module-only passes
 // ---------------------------------------------------------------------------
 
-/// Run module-only VIR lowering passes.
+/// Lower module VIR functions (functions, type methods, implement-block methods).
 ///
-/// These passes depend only on imported modules and shared entity state, not
-/// on the specific file being compiled.  Crucially, they do NOT use the
-/// VirTypeTable, so they can safely run before function lowering without
-/// affecting type interning order.
-///
-/// A future caching layer (vol-fe6d) can store and reuse `ModuleVirOutput`
-/// across test file compilations.  Type-table-dependent module passes
-/// (global inits, defaults, entity metadata, monomorph info) will move here
-/// once the cache pre-populates the type table.
-fn lower_module_vir<E>(args: LowerModuleVirArgs<'_, E>) -> LowerModuleVirResult
+/// This is the expensive part of module lowering — the main cache target.
+/// Mutates `module_programs` in place (Interner gains new symbols via
+/// `Rc::make_mut`).  The mutated Interners are later cached so subsequent
+/// files can resolve VIR function symbol references.
+fn lower_module_vir_functions<E>(args: LowerModuleVirArgs<'_, E>) -> Vec<VirFunction>
 where
     E: LoweringEntityLookup,
 {
     let LowerModuleVirArgs {
-        entities: _,
+        names,
+        entities,
         type_arena,
+        node_map,
         module_programs,
-        implements,
+        modules_with_errors,
+        type_table,
     } = args;
 
-    // Build implement-dispatch metadata (reads ImplementRegistry only).
-    let implement_dispatch = build_implement_dispatch(implements);
-
-    // Collect module metadata: constants and exports (reads TypeArena only).
-    let (module_constants, module_exports) = collect_module_metadata(type_arena);
-
-    LowerModuleVirResult {
-        output: ModuleVirOutput {
-            implement_dispatch,
-            module_constants,
-            module_exports,
-        },
+    let mut module_vir_functions = Vec::new();
+    lower_module_functions(LowerModuleFunctionsArgs {
         module_programs,
-    }
+        names,
+        entities,
+        type_arena,
+        node_map,
+        modules_with_errors,
+        vir_functions: &mut module_vir_functions,
+        type_table,
+    });
+    lower_module_type_methods(
+        module_programs,
+        names,
+        entities,
+        type_arena,
+        node_map,
+        modules_with_errors,
+        &mut module_vir_functions,
+        type_table,
+    );
+    lower_module_implement_block_methods(LowerModuleImplementBlockMethodsArgs {
+        module_programs,
+        names,
+        entities,
+        type_arena,
+        node_map,
+        modules_with_errors,
+        vir_functions: &mut module_vir_functions,
+        type_table,
+    });
+
+    module_vir_functions
 }
 
 // ---------------------------------------------------------------------------
@@ -272,11 +432,6 @@ where
 // ---------------------------------------------------------------------------
 
 /// Run file-specific VIR lowering passes and assemble the final VirProgram.
-///
-/// Includes both file-specific passes (top-level functions, test bodies, etc.)
-/// and type-table-dependent module passes (module global inits, module
-/// defaults, entity metadata, monomorph info) that must run after function
-/// lowering to preserve type interning order.
 fn lower_file_vir<E>(args: LowerFileVirArgs<'_, E>) -> LowerVirProgramOutput
 where
     E: LoweringEntityLookup,
@@ -297,10 +452,19 @@ where
         module_vir,
     } = args;
 
+    // Destructure module_vir up front so we can move fields independently.
+    let ModuleVirOutput {
+        implement_dispatch: module_implement_dispatch,
+        module_constants,
+        module_exports,
+        module_vir_functions,
+    } = module_vir;
+
     // -----------------------------------------------------------------------
-    // Function lowering (file + module, original interleaved order)
+    // Function lowering (file-level + cached module functions)
     // -----------------------------------------------------------------------
 
+    // File functions first, then module functions (preserves original ordering).
     let mut vir_functions = lower_top_level_functions(LowerTopLevelFunctionsArgs {
         program,
         interner,
@@ -311,16 +475,7 @@ where
         module_id,
         type_table,
     });
-    lower_module_functions(LowerModuleFunctionsArgs {
-        module_programs: &mut module_programs,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        modules_with_errors,
-        vir_functions: &mut vir_functions,
-        type_table,
-    });
+    vir_functions.extend(module_vir_functions);
 
     // -----------------------------------------------------------------------
     // Monomorphization (mixed pass)
@@ -359,7 +514,7 @@ where
     });
 
     // -----------------------------------------------------------------------
-    // Type methods and implement-block methods (file + module)
+    // Type methods and implement-block methods (file-level only)
     // -----------------------------------------------------------------------
 
     lower_top_level_type_methods(
@@ -374,16 +529,8 @@ where
         &mut vir_functions,
         type_table,
     );
-    lower_module_type_methods(
-        &mut module_programs,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        modules_with_errors,
-        &mut vir_functions,
-        type_table,
-    );
+    // Note: module type methods and module implement-block methods are now
+    // handled in the module phase (cached).
     lower_implement_block_methods(LowerImplementBlockMethodsArgs {
         program,
         interner,
@@ -392,16 +539,6 @@ where
         type_arena,
         node_map,
         module_id,
-        vir_functions: &mut vir_functions,
-        type_table,
-    });
-    lower_module_implement_block_methods(LowerModuleImplementBlockMethodsArgs {
-        module_programs: &mut module_programs,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        modules_with_errors,
         vir_functions: &mut vir_functions,
         type_table,
     });
@@ -574,9 +711,7 @@ where
     vir_field_default_inits.extend(module_vir_field_default_inits);
 
     // -----------------------------------------------------------------------
-    // Entity metadata and monomorph info (type-table-dependent, logically
-    // module-only — will move to Phase M once caching pre-populates the
-    // type table)
+    // Entity metadata and monomorph info
     // -----------------------------------------------------------------------
 
     let monomorph_info = populate_monomorph_info(entities, type_arena, type_table);
@@ -606,6 +741,104 @@ where
     // Assemble the final VirProgram
     // -----------------------------------------------------------------------
 
+    assemble_vir_program(AssembleVirProgramArgs {
+        vir_functions,
+        vir_monomorph_map,
+        vir_function_map,
+        vir_method_map,
+        generic_vir_functions,
+        generic_vir_map,
+        vir_tests,
+        vir_global_inits,
+        module_vir_global_inits,
+        vir_function_default_inits,
+        vir_method_default_inits,
+        vir_lambda_default_inits,
+        vir_field_default_inits,
+        vir_annotation_inits,
+        vir_module_bindings,
+        vir_module_module_bindings,
+        module_implement_dispatch,
+        module_constants,
+        module_exports,
+        monomorph_info,
+        entity_metadata,
+        module_interners,
+        type_table,
+        type_arena,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// VirProgram assembly (extracted to keep lower_file_vir under 80 lines)
+// ---------------------------------------------------------------------------
+
+struct AssembleVirProgramArgs<'a> {
+    vir_functions: Vec<VirFunction>,
+    vir_monomorph_map: FxHashMap<NameId, usize>,
+    vir_function_map: FxHashMap<FunctionId, usize>,
+    vir_method_map: FxHashMap<MethodId, usize>,
+    generic_vir_functions: Vec<VirFunction>,
+    generic_vir_map: FxHashMap<NameId, usize>,
+    vir_tests: Vec<vole_vir::func::VirTest>,
+    vir_global_inits: FxHashMap<vole_identity::Symbol, vole_vir::refs::VirRef>,
+    module_vir_global_inits:
+        FxHashMap<String, FxHashMap<vole_identity::Symbol, vole_vir::refs::VirRef>>,
+    vir_function_default_inits: FxHashMap<(FunctionId, usize), vole_vir::refs::VirRef>,
+    vir_method_default_inits: FxHashMap<(MethodId, usize), vole_vir::refs::VirRef>,
+    vir_lambda_default_inits: FxHashMap<(vole_identity::NodeId, usize), vole_vir::refs::VirRef>,
+    vir_field_default_inits: FxHashMap<vole_identity::FieldId, vole_vir::refs::VirRef>,
+    vir_annotation_inits: FxHashMap<vole_identity::FieldId, Vec<vole_vir::types::VirAnnotation>>,
+    vir_module_bindings: FxHashMap<
+        vole_identity::Symbol,
+        (ModuleId, vole_identity::Symbol, vole_identity::VirTypeId),
+    >,
+    vir_module_module_bindings: FxHashMap<
+        String,
+        FxHashMap<
+            vole_identity::Symbol,
+            (ModuleId, vole_identity::Symbol, vole_identity::VirTypeId),
+        >,
+    >,
+    module_implement_dispatch: VirImplementDispatch,
+    module_constants: FxHashMap<(ModuleId, NameId), vole_identity::ConstantValue>,
+    module_exports:
+        FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>,
+    monomorph_info: super::monomorph_info::PopulatedMonomorphInfo,
+    entity_metadata: vole_vir::entity_metadata::VirEntityMetadata,
+    module_interners: FxHashMap<String, Rc<Interner>>,
+    type_table: &'a mut VirTypeTable,
+    type_arena: &'a TypeArena,
+}
+
+fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutput {
+    let AssembleVirProgramArgs {
+        vir_functions,
+        vir_monomorph_map,
+        vir_function_map,
+        vir_method_map,
+        generic_vir_functions,
+        generic_vir_map,
+        vir_tests,
+        vir_global_inits,
+        module_vir_global_inits,
+        vir_function_default_inits,
+        vir_method_default_inits,
+        vir_lambda_default_inits,
+        vir_field_default_inits,
+        vir_annotation_inits,
+        vir_module_bindings,
+        vir_module_module_bindings,
+        module_implement_dispatch,
+        module_constants,
+        module_exports,
+        monomorph_info,
+        entity_metadata,
+        module_interners,
+        type_table,
+        type_arena,
+    } = args;
+
     let mut vir_program = VirProgram {
         type_table: std::mem::take(type_table),
         functions: vir_functions,
@@ -624,11 +857,11 @@ where
         annotation_inits: vir_annotation_inits,
         module_bindings: vir_module_bindings,
         module_module_bindings: vir_module_module_bindings,
-        module_constants: module_vir.module_constants,
-        module_exports: module_vir.module_exports,
+        module_constants,
+        module_exports,
         vir_monomorph_base: usize::MAX,
         entity_metadata,
-        implement_dispatch: module_vir.implement_dispatch,
+        implement_dispatch: module_implement_dispatch,
         free_monomorphs: monomorph_info.free_monomorphs,
         free_monomorphs_by_key: monomorph_info.free_monomorphs_by_key,
         class_method_monomorphs: monomorph_info.class_method_monomorphs,
