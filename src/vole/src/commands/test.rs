@@ -17,7 +17,9 @@ use super::common::{
     render_pipeline_error,
 };
 use crate::cli::{ColorMode, expand_paths, should_skip_path};
-use crate::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
+use crate::codegen::{
+    CompiledModules, Compiler, JitContext, JitOptions, LazyCompilationState, TestInfo,
+};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf,
     recover_from_signal, set_current_file, set_current_test, set_stdout_capture, set_test_jmp_buf,
@@ -659,7 +661,7 @@ fn run_source_tests_with_modules(
             .all(|module_path| modules.has_module(module_path))
     });
 
-    let (jit, compile_result, tests) = if can_use_cache {
+    let (jit, compile_result, tests, lazy_state) = if can_use_cache {
         let modules = compiled_modules.as_ref().unwrap();
         // Use pre-compiled modules (fast import path, no module codegen)
         let mut jit = JitContext::with_modules_and_options(modules, options);
@@ -673,7 +675,8 @@ fn run_source_tests_with_modules(
         let result = compiler.compile_program_only();
 
         let tests = compiler.take_tests();
-        (jit, result, tests)
+        // No lazy state in import path (modules already compiled)
+        (jit, result, tests, None)
     } else {
         // Fallback: no modules or cache population failed — compile everything
         let mut jit = JitContext::with_options(options);
@@ -682,7 +685,10 @@ fn run_source_tests_with_modules(
 
         let result = compiler.compile_program();
         let tests = compiler.take_tests();
-        (jit, result, tests)
+        // Extract lazy compilation state before the compiler is dropped.
+        // SAFETY: `analyzed` outlives execution (lives on caller's stack).
+        let lazy_state = unsafe { compiler.take_lazy_state(options) };
+        (jit, result, tests, lazy_state)
     };
 
     // Check compilation result
@@ -694,6 +700,12 @@ fn run_source_tests_with_modules(
     // Finalize only on successful compilation
     let mut jit = jit;
     jit.finalize()?;
+
+    // Activate lazy compilation state (if any) so compile_trigger can fire
+    // when JIT code calls a lazily-stubbed module function.
+    if let Some(state) = lazy_state {
+        state.activate();
+    }
 
     // Filter tests if a filter is provided
     let tests: Vec<_> = if let Some(pattern) = config.filter {
@@ -711,11 +723,15 @@ fn run_source_tests_with_modules(
 
         // Execute tests with progress output
         let results = execute_tests_with_progress(tests, &jit, path, config, Some(p));
+        let _lazy_state = LazyCompilationState::deactivate();
         return Ok(results);
     }
 
     // Execute tests (verbose mode - no progress line)
     let results = execute_tests_with_progress(tests, &jit, path, config, None);
+
+    // Deactivate lazy compilation state (cleanup)
+    let _lazy_state = LazyCompilationState::deactivate();
 
     Ok(results)
 }
@@ -764,7 +780,7 @@ fn run_source_tests_with_progress(
         JitOptions::debug()
     };
     let mut jit = JitContext::with_options(options);
-    let (compile_result, tests) = {
+    let (compile_result, tests, lazy_state) = {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
 
@@ -779,7 +795,10 @@ fn run_source_tests_with_progress(
         };
 
         let tests = compiler.take_tests();
-        (result, tests)
+        // Extract lazy compilation state before the compiler is dropped.
+        // SAFETY: `analyzed` outlives execution (lives on caller's stack).
+        let lazy_state = unsafe { compiler.take_lazy_state(options) };
+        (result, tests, lazy_state)
     };
 
     // Check compilation result
@@ -794,6 +813,12 @@ fn run_source_tests_with_progress(
     // Finalize only on successful compilation
     jit.finalize()?;
 
+    // Activate lazy compilation state (if any) so compile_trigger can fire
+    // when JIT code calls a lazily-stubbed module function.
+    if let Some(state) = lazy_state {
+        state.activate();
+    }
+
     // Filter tests if a filter is provided
     let tests = if let Some(pattern) = config.filter {
         tests
@@ -806,6 +831,9 @@ fn run_source_tests_with_progress(
 
     // Execute tests (stdin mode - no progress line)
     let results = execute_tests_with_progress(tests, &jit, path, config, None);
+
+    // Deactivate lazy compilation state (cleanup)
+    let _lazy_state = LazyCompilationState::deactivate();
 
     Ok(results)
 }

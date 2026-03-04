@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::cli::ColorMode;
-use crate::codegen::{AnalyzedProgramArgs, Compiler, JitContext, JitOptions};
+use crate::codegen::{AnalyzedProgramArgs, Compiler, JitContext, JitOptions, LazyCompilationState};
 use crate::errors::{
     CodegenError, LexerError, ParserError, WithExtraHelp, render_to_writer_terminal,
 };
@@ -368,28 +368,38 @@ pub struct RunOptions<'a> {
 /// `set_stdout_capture`/`set_stderr_capture`) before calling if needed.
 pub fn compile_and_run(analyzed: &AnalyzedProgram, opts: &RunOptions) -> Result<(), PipelineError> {
     // Codegen phase
-    let jit = {
+    let (jit, lazy_state) = {
         let _span = tracing::info_span!("codegen").entered();
         let mut jit = JitContext::with_options(opts.jit_options);
-        {
+        let lazy_state = {
             let mut compiler = Compiler::new(&mut jit, analyzed);
             compiler.set_source_file(opts.file_path);
             compiler.set_skip_tests(opts.skip_tests);
             if let Err(e) = compiler.compile_program() {
                 return Err(PipelineError::Codegen(e));
             }
-        }
+            // Extract lazy compilation state before the compiler is dropped.
+            // SAFETY: `analyzed` lives on the caller's stack and outlives execution.
+            unsafe { compiler.take_lazy_state(opts.jit_options) }
+        };
         if let Err(e) = jit.finalize() {
             return Err(PipelineError::Finalize(e));
         }
         tracing::debug!("compilation complete");
-        jit
+        (jit, lazy_state)
     };
+
+    // Activate lazy compilation state (if any) so compile_trigger can fire
+    // when JIT code calls a lazily-stubbed module function.
+    if let Some(state) = lazy_state {
+        state.activate();
+    }
 
     // Execute phase
     let fn_ptr = match jit.get_function_ptr("main") {
         Some(ptr) => ptr,
         None => {
+            LazyCompilationState::deactivate();
             return Err(PipelineError::NoMain {
                 file_path: opts.file_path.to_string(),
                 hint: suggest_main_function(&jit),
@@ -426,6 +436,11 @@ pub fn compile_and_run(analyzed: &AnalyzedProgram, opts: &RunOptions) -> Result<
     }
 
     clear_test_jmp_buf();
+
+    // Deactivate lazy compilation state (cleanup).
+    // The returned state (if any) is dropped here, freeing the dispatch table
+    // and any JitContexts created during lazy compilation.
+    let _lazy_state = LazyCompilationState::deactivate();
 
     Ok(())
 }
