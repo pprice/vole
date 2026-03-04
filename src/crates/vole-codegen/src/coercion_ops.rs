@@ -96,6 +96,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         args: &[Value],
     ) -> SmallVec<[Value; 8]> {
         let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
+
+        // Fast path: scan for the first type mismatch. Most calls need no
+        // coercion so we avoid allocating a SmallVec of expected types and
+        // the per-element push loop entirely.
+        let first_mismatch = {
+            let params = &self.builder.func.dfg.signatures[sig_ref].params;
+            args.iter()
+                .enumerate()
+                .position(|(i, &arg)| match params.get(i) {
+                    Some(p) => self.builder.func.dfg.value_type(arg) != p.value_type,
+                    None => false,
+                })
+        };
+
+        let Some(mismatch_idx) = first_mismatch else {
+            // All types match — just copy the args.
+            return SmallVec::from_slice(args);
+        };
+
+        // Slow path: snapshot expected types (releases immutable borrow on
+        // self.builder so coerce_cranelift_value can take &mut self), copy
+        // the already-matching prefix, then coerce from mismatch onward.
         let expected: SmallVec<[Type; 8]> = self.builder.func.dfg.signatures[sig_ref]
             .params
             .iter()
@@ -103,9 +125,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect();
 
         let mut coerced: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
-        for (i, &arg) in args.iter().enumerate() {
+        coerced.extend_from_slice(&args[..mismatch_idx]);
+        for (i, &arg) in args[mismatch_idx..].iter().enumerate() {
+            let idx = mismatch_idx + i;
             let actual_ty = self.builder.func.dfg.value_type(arg);
-            let val = match expected.get(i).copied() {
+            let val = match expected.get(idx).copied() {
                 Some(exp) if actual_ty != exp => self.coerce_cranelift_value(arg, actual_ty, exp),
                 _ => arg,
             };
