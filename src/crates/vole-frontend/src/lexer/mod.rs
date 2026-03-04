@@ -263,18 +263,25 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Skip whitespace (spaces, tabs, carriage returns) using direct byte access
+    /// Skip whitespace (spaces, tabs, carriage returns) using direct byte access.
+    /// Uses locals so the compiler keeps current/column in registers
+    /// instead of storing back to &mut self on every loop iteration.
     #[inline]
     fn skip_whitespace(&mut self) {
-        while self.current < self.bytes.len() {
-            match self.bytes[self.current] {
+        let bytes = self.bytes;
+        let mut pos = self.current;
+        let mut col = self.column;
+        while pos < bytes.len() {
+            match bytes[pos] {
                 b' ' | b'\t' | b'\r' => {
-                    self.current += 1;
-                    self.column += 1;
+                    pos += 1;
+                    col += 1;
                 }
                 _ => break,
             }
         }
+        self.current = pos;
+        self.column = col;
     }
 
     /// Advance to the next character and return it.
@@ -428,12 +435,19 @@ impl<'src> Lexer<'src> {
     }
 
     /// Skip a line comment (everything until newline or EOF) using byte scanning.
+    /// Uses locals so the compiler keeps current/column in registers
+    /// instead of storing back to &mut self on every loop iteration.
     #[inline]
     fn skip_line_comment(&mut self) {
-        while self.current < self.bytes.len() && self.bytes[self.current] != b'\n' {
-            self.current += 1;
-            self.column += 1;
+        let bytes = self.bytes;
+        let mut pos = self.current;
+        let mut col = self.column;
+        while pos < bytes.len() && bytes[pos] != b'\n' {
+            pos += 1;
+            col += 1;
         }
+        self.current = pos;
+        self.column = col;
     }
 
     /// Check if a Unicode character is banned from identifiers
