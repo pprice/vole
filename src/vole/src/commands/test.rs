@@ -630,8 +630,14 @@ fn run_source_tests_with_modules(
 
     // On cache miss, compile modules into the cache first so we can use the
     // fast import path for the main program (avoids double compilation).
+    // Always compile real function bodies for the cache (lazy_modules=false),
+    // because lazy stubs embed dispatch table pointers that would be freed
+    // when the temporary Compiler is dropped, and the compile_trigger
+    // callback infrastructure is not preserved through the cache path.
     if !can_use_cache && !analyzed.module_paths().is_empty() {
-        let mut modules_jit = JitContext::with_options(options);
+        let mut cache_options = options;
+        cache_options.lazy_modules = false;
+        let mut modules_jit = JitContext::with_options(cache_options);
         let compile_result = {
             let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
             modules_compiler.compile_modules_only()
