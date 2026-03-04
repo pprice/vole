@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::types::PlaceholderKind;
-use vole_identity::NameId;
+use vole_identity::{NameId, TypeDefId};
 
 use super::arena::TypeArena;
 use super::sema_type::*;
@@ -30,19 +30,117 @@ impl TypeArena {
             return ty;
         }
 
-        // Clone the interned type to release the borrow
-        match self.get(ty).clone() {
-            // Direct substitution for type parameters
-            SemaType::TypeParam(name_id) => subs.get(&name_id).copied().unwrap_or(ty),
+        // Borrow-free classification of the type. We match on a borrowed reference
+        // to extract only small Copy data (TypeIds, NameIds), then drop the borrow
+        // before making any recursive calls that need &mut self. This avoids cloning
+        // the entire SemaType (which includes heap-allocated SmallVecs) on every call.
+        enum SubstAction {
+            /// Return ty unchanged (leaf types, errors, modules, placeholders)
+            Unchanged,
+            /// Direct type-param substitution
+            TypeParam(NameId),
+            /// Single child: Array, RuntimeIterator, Optional(Array)
+            Array(TypeId),
+            RuntimeIterator(TypeId),
+            FixedArray {
+                element: TypeId,
+                size: usize,
+            },
+            /// Two children: Fallible
+            Fallible {
+                success: TypeId,
+                error: TypeId,
+            },
+            /// TypeIdVec children - must clone the vec
+            Union(TypeIdVec),
+            Tuple(TypeIdVec),
+            Function {
+                params: TypeIdVec,
+                ret: TypeId,
+                is_closure: bool,
+            },
+            Class {
+                type_def_id: TypeDefId,
+                type_args: TypeIdVec,
+            },
+            Struct {
+                type_def_id: TypeDefId,
+                type_args: TypeIdVec,
+            },
+            Interface {
+                type_def_id: TypeDefId,
+                type_args: TypeIdVec,
+            },
+            /// Heap-allocated structural - rare, clone the whole thing
+            Structural(Box<InternedStructural>),
+        }
 
-            // TypeParamRef doesn't substitute based on NameId
-            SemaType::TypeParamRef(_) => ty,
+        let action = match self.get(ty) {
+            SemaType::TypeParam(name_id) => SubstAction::TypeParam(*name_id),
+            SemaType::TypeParamRef(_) => SubstAction::Unchanged,
+            SemaType::Array(elem) => SubstAction::Array(*elem),
+            SemaType::RuntimeIterator(elem) => SubstAction::RuntimeIterator(*elem),
+            SemaType::FixedArray { element, size } => SubstAction::FixedArray {
+                element: *element,
+                size: *size,
+            },
+            SemaType::Fallible { success, error } => SubstAction::Fallible {
+                success: *success,
+                error: *error,
+            },
+            SemaType::Union(v) => SubstAction::Union(v.clone()),
+            SemaType::Tuple(v) => SubstAction::Tuple(v.clone()),
+            SemaType::Function {
+                params,
+                ret,
+                is_closure,
+            } => SubstAction::Function {
+                params: params.clone(),
+                ret: *ret,
+                is_closure: *is_closure,
+            },
+            SemaType::Class {
+                type_def_id,
+                type_args,
+            } => SubstAction::Class {
+                type_def_id: *type_def_id,
+                type_args: type_args.clone(),
+            },
+            SemaType::Struct {
+                type_def_id,
+                type_args,
+            } => SubstAction::Struct {
+                type_def_id: *type_def_id,
+                type_args: type_args.clone(),
+            },
+            SemaType::Interface {
+                type_def_id,
+                type_args,
+            } => SubstAction::Interface {
+                type_def_id: *type_def_id,
+                type_args: type_args.clone(),
+            },
+            SemaType::Structural(st) => SubstAction::Structural(st.clone()),
+            // Leaf types: no nested type parameters, return unchanged
+            SemaType::Primitive(_)
+            | SemaType::Handle
+            | SemaType::Void
+            | SemaType::Range
+            | SemaType::MetaType
+            | SemaType::Never
+            | SemaType::Unknown
+            | SemaType::Invalid { .. }
+            | SemaType::Error { .. }
+            | SemaType::Module(_)
+            | SemaType::Placeholder(_) => SubstAction::Unchanged,
+        };
 
-            // Recursive substitution for compound types.
-            // Each arm checks whether children actually changed and returns the
-            // original TypeId when they haven't, avoiding redundant intern() calls
-            // (which require hashing + structural SemaType::eq comparison).
-            SemaType::Array(elem) => {
+        // Now the borrow on self.types is released; we can call &mut self methods.
+        match action {
+            SubstAction::Unchanged => ty,
+            SubstAction::TypeParam(name_id) => subs.get(&name_id).copied().unwrap_or(ty),
+
+            SubstAction::Array(elem) => {
                 let new_elem = self.substitute(elem, subs);
                 if new_elem == elem {
                     return ty;
@@ -50,7 +148,32 @@ impl TypeArena {
                 self.array(new_elem)
             }
 
-            SemaType::Union(variants) => {
+            SubstAction::RuntimeIterator(elem) => {
+                let new_elem = self.substitute(elem, subs);
+                if new_elem == elem {
+                    return ty;
+                }
+                self.runtime_iterator(new_elem)
+            }
+
+            SubstAction::FixedArray { element, size } => {
+                let new_elem = self.substitute(element, subs);
+                if new_elem == element {
+                    return ty;
+                }
+                self.fixed_array(new_elem, size)
+            }
+
+            SubstAction::Fallible { success, error } => {
+                let new_success = self.substitute(success, subs);
+                let new_error = self.substitute(error, subs);
+                if new_success == success && new_error == error {
+                    return ty;
+                }
+                self.fallible(new_success, new_error)
+            }
+
+            SubstAction::Union(variants) => {
                 let new_variants: TypeIdVec =
                     variants.iter().map(|&v| self.substitute(v, subs)).collect();
                 if new_variants == variants {
@@ -59,7 +182,7 @@ impl TypeArena {
                 self.union(new_variants)
             }
 
-            SemaType::Tuple(elements) => {
+            SubstAction::Tuple(elements) => {
                 let new_elements: TypeIdVec =
                     elements.iter().map(|&e| self.substitute(e, subs)).collect();
                 if new_elements == elements {
@@ -68,7 +191,7 @@ impl TypeArena {
                 self.tuple(new_elements)
             }
 
-            SemaType::Function {
+            SubstAction::Function {
                 params,
                 ret,
                 is_closure,
@@ -82,7 +205,7 @@ impl TypeArena {
                 self.function(new_params, new_ret, is_closure)
             }
 
-            SemaType::Class {
+            SubstAction::Class {
                 type_def_id,
                 type_args,
             } => {
@@ -96,7 +219,7 @@ impl TypeArena {
                 self.class(type_def_id, new_args)
             }
 
-            SemaType::Struct {
+            SubstAction::Struct {
                 type_def_id,
                 type_args,
             } => {
@@ -110,7 +233,7 @@ impl TypeArena {
                 self.struct_type(type_def_id, new_args)
             }
 
-            SemaType::Interface {
+            SubstAction::Interface {
                 type_def_id,
                 type_args,
             } => {
@@ -124,32 +247,7 @@ impl TypeArena {
                 self.interface(type_def_id, new_args)
             }
 
-            SemaType::RuntimeIterator(elem) => {
-                let new_elem = self.substitute(elem, subs);
-                if new_elem == elem {
-                    return ty;
-                }
-                self.runtime_iterator(new_elem)
-            }
-
-            SemaType::FixedArray { element, size } => {
-                let new_elem = self.substitute(element, subs);
-                if new_elem == element {
-                    return ty;
-                }
-                self.fixed_array(new_elem, size)
-            }
-
-            SemaType::Fallible { success, error } => {
-                let new_success = self.substitute(success, subs);
-                let new_error = self.substitute(error, subs);
-                if new_success == success && new_error == error {
-                    return ty;
-                }
-                self.fallible(new_success, new_error)
-            }
-
-            SemaType::Structural(st) => {
+            SubstAction::Structural(st) => {
                 let new_fields: SmallVec<[(NameId, TypeId); 4]> = st
                     .fields
                     .iter()
@@ -169,19 +267,6 @@ impl TypeArena {
                 }
                 self.structural(new_fields, new_methods)
             }
-
-            // Types without nested type parameters - return unchanged
-            SemaType::Primitive(_)
-            | SemaType::Handle
-            | SemaType::Void
-            | SemaType::Range
-            | SemaType::MetaType
-            | SemaType::Never
-            | SemaType::Unknown
-            | SemaType::Invalid { .. }
-            | SemaType::Error { .. }
-            | SemaType::Module(_)
-            | SemaType::Placeholder(_) => ty,
         }
     }
 
