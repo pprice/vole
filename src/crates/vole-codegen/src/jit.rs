@@ -250,7 +250,7 @@ impl JitContext {
         if options.lazy_modules {
             builder.symbol(
                 "vole_compile_trigger",
-                crate::compiler::lazy::compile_trigger_placeholder as *const u8,
+                crate::compiler::lazy::compile_trigger as *const u8,
             );
         }
 

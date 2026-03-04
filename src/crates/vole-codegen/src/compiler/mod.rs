@@ -31,7 +31,7 @@ mod compile_tests;
 mod impl_dispatch;
 mod impl_monomorph;
 mod impls;
-pub(crate) mod lazy;
+pub mod lazy;
 mod monomorphization;
 mod program;
 mod signatures;
@@ -60,7 +60,7 @@ use crate::types::CodegenState;
 
 use crate::AnalyzedProgram;
 use crate::types::PendingMonomorph;
-use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeKey};
+use crate::{FunctionKey, FunctionRegistry, JitContext, JitOptions, RuntimeKey};
 use vole_identity::Symbol;
 use vole_identity::VirTypeId;
 use vole_identity::{ModuleId, NameId, TypeDefId, TypeId};
@@ -217,6 +217,31 @@ impl<'a> Compiler<'a> {
     /// Take the compiled test metadata, leaving an empty vec
     pub fn take_tests(&mut self) -> Vec<TestInfo> {
         std::mem::take(&mut self.tests)
+    }
+
+    /// Extract the lazy compilation state from this compiler.
+    ///
+    /// Returns `None` if lazy modules were not enabled or no stubs were generated.
+    /// The returned `LazyCompilationState` must be activated (via `activate()`)
+    /// before executing JIT code, and deactivated (via `deactivate()`) afterward.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the `AnalyzedProgram` reference (`analyzed`) outlives
+    /// the execution of JIT code. This is safe when the `AnalyzedProgram` is on the
+    /// stack and execution happens in the same scope.
+    pub unsafe fn take_lazy_state(
+        &mut self,
+        jit_options: JitOptions,
+    ) -> Option<lazy::LazyCompilationState> {
+        let dispatch_table = self.dispatch_table.take()?;
+        Some(unsafe {
+            lazy::LazyCompilationState::new(
+                dispatch_table,
+                self.analyzed as *const AnalyzedProgram,
+                jit_options,
+            )
+        })
     }
 
     /// Define a function and clear the JIT context.

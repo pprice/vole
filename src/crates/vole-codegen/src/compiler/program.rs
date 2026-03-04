@@ -620,6 +620,14 @@ impl Compiler<'_> {
             }
         }
 
+        // Populate func_name_to_idx so compile_trigger can map compiled
+        // function names back to their dispatch table slots.
+        for &(func_idx, _, ref display_name) in &stub_entries {
+            table
+                .func_name_to_idx
+                .insert(display_name.clone(), func_idx);
+        }
+
         if stub_entries.is_empty() {
             tracing::debug!("generate_lazy_stubs: no stubs needed");
             return Ok(());
@@ -631,11 +639,10 @@ impl Compiler<'_> {
         );
 
         // Import compile_trigger as a JIT function
-        let trigger_sig = self
+        let trigger_sig = self.jit.create_signature(&[types::I64], None);
+        let compile_trigger_func_id = self
             .jit
-            .create_signature(&[types::I64], None);
-        let compile_trigger_func_id =
-            self.jit.import_function("vole_compile_trigger", &trigger_sig);
+            .import_function("vole_compile_trigger", &trigger_sig);
 
         // Generate CLIF stubs for each undeclared module function.
         // We need to split jit fields to avoid borrowing conflicts:

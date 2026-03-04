@@ -37,6 +37,7 @@ pub use callable_registry::{
     CallableBackendPreference, CallableKey, CallableResolutionError, ResolvedCallable,
     resolve_callable_with_preference,
 };
+pub use compiler::lazy::LazyCompilationState;
 pub use compiler::{Compiler, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry};
 pub use intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, IntrinsicsRegistry};

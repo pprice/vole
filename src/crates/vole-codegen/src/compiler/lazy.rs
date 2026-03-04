@@ -10,13 +10,15 @@
 // Each stub then loads the real function pointer from the dispatch table
 // and tail-calls it via `call_indirect`.
 
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Module};
 use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::{AnalyzedProgram, JitContext, JitOptions};
 
 /// Dispatch table for lazy module codegen.
 ///
@@ -42,6 +44,16 @@ pub struct LazyDispatchTable {
     pub func_to_module: Vec<usize>,
     /// Module path to module index (index into `compiled_flags`).
     pub module_index: FxHashMap<String, usize>,
+    /// Function display_name to dispatch table func_idx.
+    /// Used by `compile_trigger` to map compiled function names back to
+    /// their dispatch table slots.
+    pub func_name_to_idx: FxHashMap<String, usize>,
+}
+
+impl Default for LazyDispatchTable {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LazyDispatchTable {
@@ -53,6 +65,7 @@ impl LazyDispatchTable {
             func_index: FxHashMap::default(),
             func_to_module: Vec::new(),
             module_index: FxHashMap::default(),
+            func_name_to_idx: FxHashMap::default(),
         }
     }
 
@@ -91,21 +104,176 @@ impl LazyDispatchTable {
     }
 }
 
-/// Placeholder `compile_trigger` function.
+/// Runtime state for lazy module compilation.
 ///
-/// This is registered as a JIT symbol so stubs can call it. The real
-/// implementation (vol-wsec) will compile the module on demand and
-/// fill in the dispatch table entries.
+/// Holds everything `compile_trigger` needs to compile modules on demand:
+/// the dispatch table, a reference to the analyzed program, JIT options,
+/// and bookkeeping for compiled JIT contexts.
+///
+/// # Lifecycle
+///
+/// 1. Built from `Compiler::take_lazy_state()` after stub generation.
+/// 2. Stored in the `LAZY_STATE` thread-local via `activate()`.
+/// 3. Accessed by `compile_trigger()` during JIT execution.
+/// 4. Removed from thread-local via `deactivate()` after execution.
+pub struct LazyCompilationState {
+    /// The dispatch table (fn_ptrs and compiled_flags).
+    pub dispatch_table: Box<LazyDispatchTable>,
+    /// Reference to the analyzed program (for module compilation).
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the `AnalyzedProgram` outlives execution.
+    /// This is safe in the current architecture because the `AnalyzedProgram`
+    /// lives on the stack in `run_source_tests_with_modules` / `run_source`
+    /// and execution happens in the same scope.
+    analyzed: *const AnalyzedProgram,
+    /// JIT options for creating new JitContexts during lazy compilation.
+    jit_options: JitOptions,
+    /// Module index -> module path (reverse of `dispatch_table.module_index`).
+    module_paths: Vec<String>,
+    /// Function display_name -> dispatch table func_idx.
+    /// Copied from the dispatch table for quick lookup during compilation.
+    func_name_to_idx: FxHashMap<String, usize>,
+    /// Compiled module JitContexts kept alive because their code is in use.
+    compiled_jits: Vec<JitContext>,
+}
+
+// SAFETY: LazyCompilationState contains `*const AnalyzedProgram` which is not
+// Send/Sync by default. The pointer is only dereferenced on the thread that
+// created it (via the thread-local LAZY_STATE), and the AnalyzedProgram is
+// guaranteed to outlive execution by the caller. The compiled_jits Vec
+// contains JitContexts with immutable finalized machine code.
+unsafe impl Send for LazyCompilationState {}
+
+impl LazyCompilationState {
+    /// Create a new `LazyCompilationState`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure `analyzed` outlives the execution of JIT code
+    /// (i.e., until `deactivate()` is called and all JIT code has finished).
+    pub unsafe fn new(
+        dispatch_table: Box<LazyDispatchTable>,
+        analyzed: *const AnalyzedProgram,
+        jit_options: JitOptions,
+    ) -> Self {
+        // Build module_paths: module_idx -> module_path
+        let mut module_paths = vec![String::new(); dispatch_table.module_index.len()];
+        for (path, &idx) in &dispatch_table.module_index {
+            module_paths[idx] = path.clone();
+        }
+
+        let func_name_to_idx = dispatch_table.func_name_to_idx.clone();
+
+        Self {
+            dispatch_table,
+            analyzed,
+            jit_options,
+            module_paths,
+            func_name_to_idx,
+            compiled_jits: Vec::new(),
+        }
+    }
+
+    /// Store this state in the thread-local for use by `compile_trigger`.
+    pub fn activate(self) {
+        LAZY_STATE.with(|cell| {
+            *cell.borrow_mut() = Some(self);
+        });
+    }
+
+    /// Remove and return the state from the thread-local.
+    /// Returns `None` if no state was active.
+    pub fn deactivate() -> Option<Self> {
+        LAZY_STATE.with(|cell| cell.borrow_mut().take())
+    }
+}
+
+thread_local! {
+    static LAZY_STATE: RefCell<Option<LazyCompilationState>> = const { RefCell::new(None) };
+}
+
+/// Compile-trigger callback invoked from JIT-compiled lazy stubs.
+///
+/// When a lazily-compiled module function is called for the first time,
+/// the stub calls this function with the module index. This function:
+///
+/// 1. Checks if the module is already compiled (double-check after the stub's check).
+/// 2. Creates a fresh `JitContext` and `Compiler`.
+/// 3. Compiles ALL module functions (not just the triggered module).
+/// 4. Extracts function pointers and patches the dispatch table.
+/// 5. Sets ALL compiled flags so subsequent calls are no-ops.
+/// 6. Keeps the new `JitContext` alive so function pointers remain valid.
 ///
 /// # Safety
 ///
-/// Called from JIT-compiled code. Panics because the real implementation
-/// is not yet available.
-pub extern "C" fn compile_trigger_placeholder(module_id: i64) {
-    panic!(
-        "INTERNAL: compile_trigger called for module_id={} but lazy compilation callback is not yet implemented (vol-wsec)",
-        module_id
-    );
+/// Called from JIT-compiled code via `extern "C"` ABI. Assumes `LAZY_STATE`
+/// has been activated via `LazyCompilationState::activate()`.
+pub extern "C" fn compile_trigger(module_idx: i64) {
+    LAZY_STATE.with(|cell| {
+        let mut state_opt = cell.borrow_mut();
+        let state = state_opt
+            .as_mut()
+            .expect("INTERNAL: compile_trigger called but LazyCompilationState not activated");
+
+        let module_idx = module_idx as usize;
+
+        // Double-check: the stub already checked, but another call may have
+        // compiled all modules between the stub's check and this point.
+        if state.dispatch_table.compiled_flags[module_idx].load(Ordering::Acquire) {
+            return;
+        }
+
+        // Compile ALL modules at once. Module functions share entities/types,
+        // so compiling them together is simpler and correct. The first call
+        // to any lazy module function pays the full cost; subsequent calls
+        // are no-ops because all compiled_flags are set.
+        let trigger_module = state
+            .module_paths
+            .get(module_idx)
+            .map(String::as_str)
+            .unwrap_or("<unknown>");
+        tracing::debug!(
+            module_idx,
+            trigger_module,
+            total_modules = state.module_paths.len(),
+            "compile_trigger: compiling all modules"
+        );
+        let analyzed = unsafe { &*state.analyzed };
+
+        // Create a new JIT context with the same options, but with lazy_modules
+        // disabled so compile_modules_only compiles real bodies (not stubs).
+        let mut lazy_off_options = state.jit_options;
+        lazy_off_options.lazy_modules = false;
+        let mut jit = JitContext::with_options(lazy_off_options);
+
+        let mut compiler = super::Compiler::new(&mut jit, analyzed);
+        compiler
+            .compile_modules_only()
+            .expect("INTERNAL: lazy module compilation failed");
+        jit.finalize()
+            .expect("INTERNAL: lazy module JIT finalization failed");
+
+        // Extract function pointers and update dispatch table slots.
+        for (name, &func_id) in &jit.func_ids {
+            if jit.defined_func_ids.contains(&func_id)
+                && let Some(&func_idx) = state.func_name_to_idx.get(name)
+            {
+                let ptr = jit.module.get_finalized_function(func_id);
+                state.dispatch_table.fn_ptrs[func_idx].store(ptr as u64, Ordering::Release);
+            }
+        }
+
+        // Mark ALL modules as compiled (we compiled everything).
+        for flag in &state.dispatch_table.compiled_flags {
+            flag.store(true, Ordering::Release);
+        }
+
+        // Keep the JitContext alive — its machine code is referenced by
+        // the dispatch table function pointers.
+        state.compiled_jits.push(jit);
+    });
 }
 
 /// Generate a CLIF stub function for a lazily-compiled module function.
@@ -136,7 +304,11 @@ pub fn generate_lazy_stub(
     module_idx: usize,
 ) -> CodegenResult<()> {
     // Get the signature of the target function (already declared)
-    let sig = jit_module.declarations().get_function_decl(func_id).signature.clone();
+    let sig = jit_module
+        .declarations()
+        .get_function_decl(func_id)
+        .signature
+        .clone();
 
     jit_ctx.func.signature = sig.clone();
 
@@ -164,11 +336,14 @@ pub fn generate_lazy_stub(
     let is_compiled = builder.ins().icmp(IntCC::NotEqual, flag_val, zero);
 
     // Branch: if compiled, jump to call_block; else jump to compile_block
-    builder.ins().brif(is_compiled, call_block, &[], compile_block, &[]);
+    builder
+        .ins()
+        .brif(is_compiled, call_block, &[], compile_block, &[]);
 
     // Compile block: call compile_trigger(module_idx), then fall through to call_block
     builder.switch_to_block(compile_block);
-    let compile_trigger_ref = jit_module.declare_func_in_func(compile_trigger_func_id, builder.func);
+    let compile_trigger_ref =
+        jit_module.declare_func_in_func(compile_trigger_func_id, builder.func);
     let module_id_val = builder.ins().iconst(types::I64, module_idx as i64);
     builder.ins().call(compile_trigger_ref, &[module_id_val]);
     builder.ins().jump(call_block, &[]);
@@ -196,14 +371,9 @@ pub fn generate_lazy_stub(
     builder.finalize();
 
     // Define the function in the JIT module
-    jit_module
-        .define_function(func_id, jit_ctx)
-        .map_err(|e| {
-            CodegenError::internal_with_context(
-                "failed to define lazy stub",
-                format!("{:?}", e),
-            )
-        })?;
+    jit_module.define_function(func_id, jit_ctx).map_err(|e| {
+        CodegenError::internal_with_context("failed to define lazy stub", format!("{:?}", e))
+    })?;
 
     jit_ctx.clear();
 
