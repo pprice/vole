@@ -279,18 +279,38 @@ impl Analyzer {
         } else {
             canonical_path.clone()
         };
-        tracing::debug!(import_path, %module_key, "analyze_module: creating module_id");
-        let module_id = self.name_table_mut().module_id(&module_key);
 
-        // Phase 3: Load, parse, and transform the module
-        let parsed = self.load_and_parse_module(import_path, span, module_id)?;
-
-        // Destructure ParsedModule so file_path can be moved independently
-        let ParsedModule {
-            program: module_program,
-            interner: mut module_interner,
-            file_path: module_file_path,
-        } = parsed;
+        // Phase 3: Check pre-parsed modules first, then fall back to load_and_parse_module.
+        let (module_program, mut module_interner, module_file_path, module_id) =
+            if let Some(pre_parsed) = self
+                .ctx
+                .pre_parsed_modules
+                .borrow_mut()
+                .remove(&canonical_path)
+            {
+                // Register the pre-parsed module's ModuleId in the name table so that
+                // later calls to name_table.module_id(&module_key) return the same id
+                // that was baked into the AST's NodeIds during parallel parsing.
+                self.name_table_mut()
+                    .register_module_id(&module_key, pre_parsed.module_id);
+                tracing::debug!(
+                    import_path,
+                    %module_key,
+                    ?pre_parsed.module_id,
+                    "analyze_module: using pre-parsed module"
+                );
+                (
+                    pre_parsed.program,
+                    pre_parsed.interner,
+                    PathBuf::from(&pre_parsed.file_path),
+                    pre_parsed.module_id,
+                )
+            } else {
+                tracing::debug!(import_path, %module_key, "analyze_module: creating module_id");
+                let module_id = self.name_table_mut().module_id(&module_key);
+                let parsed = self.load_and_parse_module(import_path, span, module_id)?;
+                (parsed.program, parsed.interner, parsed.file_path, module_id)
+            };
 
         // Phase 4: Collect declarations from the parsed module
         let decls = self.collect_module_declarations(&module_program, &module_interner, module_id);

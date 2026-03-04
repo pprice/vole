@@ -460,6 +460,34 @@ impl NameTable {
         self.module_lookup.get(path).copied()
     }
 
+    /// Register a pre-allocated `ModuleId` for the given path.
+    ///
+    /// Used when modules have been parsed in parallel with their own
+    /// `ModuleIdAllocator` and we need the `NameTable` to recognise those
+    /// IDs so that later calls to `module_id(path)` return the same value.
+    ///
+    /// If the id's index is beyond the current `modules` vec length,
+    /// placeholder entries are inserted to fill the gap.
+    ///
+    /// Panics (debug) if `path` is already registered with a *different* id.
+    pub fn register_module_id(&mut self, path: &str, id: ModuleId) {
+        if let Some(&existing) = self.module_lookup.get(path) {
+            debug_assert_eq!(
+                existing, id,
+                "register_module_id: path {:?} already registered with {:?}, cannot re-register as {:?}",
+                path, existing, id
+            );
+            return;
+        }
+        let idx = id.0 as usize;
+        // Extend the modules vec with placeholders if needed.
+        while self.modules.len() <= idx {
+            self.modules.push(String::new());
+        }
+        self.modules[idx] = path.to_string();
+        self.module_lookup.insert(path.to_string(), id);
+    }
+
     pub fn builtin_module(&mut self) -> ModuleId {
         self.module_id("")
     }

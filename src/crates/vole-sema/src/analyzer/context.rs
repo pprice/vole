@@ -3,6 +3,7 @@
 use crate::analysis_cache::ModuleCache;
 use crate::compilation_db::CompilationDb;
 use crate::entity_registry::EntityRegistry;
+use crate::module::parallel_parse::ParsedModule as ParallelParsedModule;
 use crate::node_map::NodeMap;
 use crate::resolve::ResolverEntityExt;
 use crate::type_arena::TypeId as ArenaTypeId;
@@ -132,6 +133,13 @@ pub(crate) struct AnalyzerContext {
     /// this table, eliminating merge_from + rewrite across sub-analyzer boundaries.
     /// Consumed via `AnalysisOutput` by facade.rs for the program's main type table.
     pub(crate) vir_type_table: RefCell<VirTypeTable>,
+    /// Pre-parsed modules from the parallel parse wavefront.
+    ///
+    /// Keyed by canonical file path (String). Each entry is consumed exactly
+    /// once via `HashMap::remove()` when `analyze_module()` processes an import
+    /// that matches the key. If the map is empty or the key is missing, the
+    /// analyzer falls back to the existing `load_and_parse_module()` path.
+    pub(crate) pre_parsed_modules: RefCell<FxHashMap<String, ParallelParsedModule>>,
 }
 
 impl AnalyzerContext {
@@ -154,6 +162,7 @@ impl AnalyzerContext {
             prelude_expr_data_merged: Cell::new(prelude_merged),
             well_known_cache: RefCell::new(WellKnownCache::default()),
             vir_type_table: RefCell::new(VirTypeTable::new()),
+            pre_parsed_modules: RefCell::new(FxHashMap::default()),
         }
     }
 
