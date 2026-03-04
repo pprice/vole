@@ -4,6 +4,7 @@
 // Defines Symbol, Span, and Interner as foundational primitives.
 
 use std::hash::{BuildHasher, Hash, Hasher};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
@@ -53,6 +54,65 @@ impl ModuleId {
 
     pub fn index(self) -> u32 {
         self.0
+    }
+}
+
+/// Thread-safe allocator for unique [`ModuleId`]s.
+///
+/// Uses an [`AtomicU32`] internally so that multiple threads (e.g. parallel
+/// parsers) can each obtain a distinct `ModuleId` without synchronization on a
+/// shared mutable reference.
+///
+/// ```
+/// use vole_identity::ModuleIdAllocator;
+///
+/// let alloc = ModuleIdAllocator::new();
+/// let a = alloc.next();
+/// let b = alloc.next();
+/// assert_ne!(a, b);
+/// ```
+pub struct ModuleIdAllocator {
+    next: AtomicU32,
+}
+
+impl ModuleIdAllocator {
+    /// Create a new allocator that starts at `ModuleId(0)`.
+    pub fn new() -> Self {
+        Self {
+            next: AtomicU32::new(0),
+        }
+    }
+
+    /// Create an allocator that starts at the given index.
+    ///
+    /// Useful when some module IDs have already been assigned (e.g. after
+    /// prelude loading) and the allocator must not reuse them.
+    pub fn starting_at(start: u32) -> Self {
+        Self {
+            next: AtomicU32::new(start),
+        }
+    }
+
+    /// Atomically allocate the next [`ModuleId`].
+    ///
+    /// Each call returns a unique id; safe to call from multiple threads.
+    pub fn next(&self) -> ModuleId {
+        let index = self.next.fetch_add(1, Ordering::Relaxed);
+        ModuleId::new(index)
+    }
+}
+
+impl Default for ModuleIdAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for ModuleIdAllocator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModuleIdAllocator")
+            .field("next", &self.next.load(Ordering::Relaxed))
+            .finish()
     }
 }
 
@@ -676,5 +736,47 @@ mod tests {
         // Primitives should be in the builtin module
         assert_eq!(names.module_of(names.primitives.i32), builtin);
         assert_eq!(names.module_of(names.primitives.string), builtin);
+    }
+
+    #[test]
+    fn module_id_allocator_sequential() {
+        let alloc = ModuleIdAllocator::new();
+        assert_eq!(alloc.next(), ModuleId::new(0));
+        assert_eq!(alloc.next(), ModuleId::new(1));
+        assert_eq!(alloc.next(), ModuleId::new(2));
+    }
+
+    #[test]
+    fn module_id_allocator_starting_at() {
+        let alloc = ModuleIdAllocator::starting_at(10);
+        assert_eq!(alloc.next(), ModuleId::new(10));
+        assert_eq!(alloc.next(), ModuleId::new(11));
+    }
+
+    #[test]
+    fn module_id_allocator_thread_safety() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let alloc = Arc::new(ModuleIdAllocator::new());
+        let mut handles = Vec::new();
+
+        for _ in 0..4 {
+            let alloc = Arc::clone(&alloc);
+            handles.push(thread::spawn(move || {
+                (0..100).map(|_| alloc.next()).collect::<Vec<_>>()
+            }));
+        }
+
+        let mut all_ids: Vec<ModuleId> = Vec::new();
+        for h in handles {
+            all_ids.extend(h.join().unwrap());
+        }
+
+        // All 400 IDs must be unique
+        let mut indices: Vec<u32> = all_ids.iter().map(|id| id.index()).collect();
+        indices.sort();
+        indices.dedup();
+        assert_eq!(indices.len(), 400);
     }
 }
