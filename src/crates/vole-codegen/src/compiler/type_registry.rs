@@ -352,23 +352,20 @@ impl Compiler<'_> {
         &mut self,
         type_def_id: TypeDefId,
     ) -> CodegenResult<()> {
-        let type_name_str = self
-            .analyzed
-            .display_name(self.analyzed.entity_type_name_id(type_def_id));
-        tracing::debug!(type_name = %type_name_str, "finalize_module_type_by_id called");
-
-        // Skip if already registered
+        // Skip if already registered — check first before any allocations.
         if self.state.type_metadata.contains_key(&type_def_id) {
-            tracing::debug!(type_name = %type_name_str, "Skipping - already registered in type_metadata");
             return Ok(());
         }
 
+        // Read the type definition once; extract all needed fields up front.
         let type_def = self.analyzed.get_type(type_def_id);
         let type_kind = type_def.type_kind();
         let is_class = type_def.is_class();
         let is_generic_type = type_def.has_type_params();
-
-        tracing::debug!(type_name = %type_name_str, type_kind, "finalizing module type by id");
+        let name_id = type_def.name_id;
+        let base_type_id = type_def.base_type_id;
+        let method_ids: Vec<MethodId> = type_def.methods.clone();
+        let static_method_ids: Vec<MethodId> = type_def.static_methods.clone();
 
         // Allocate type_id for classes; structs use 0
         let type_id = if is_class { alloc_type_id() } else { 0 };
@@ -385,30 +382,26 @@ impl Compiler<'_> {
         // Register instance methods using VIR metadata.
         // Generic types are compiled via monomorphized instances, so skip direct
         // method declaration here to avoid declaring functions that never compile.
-        let type_name_short = self
-            .analyzed
-            .name_table()
-            .last_segment_str(self.analyzed.entity_type_name_id(type_def_id))
-            .unwrap_or_else(|| type_name_str.clone());
-        let method_infos = if is_generic_type {
-            FxHashMap::default()
+        let (method_infos, type_name_short) = if is_generic_type {
+            (FxHashMap::default(), None)
         } else {
-            let method_ids: Vec<MethodId> = self.analyzed.get_type(type_def_id).methods.clone();
-            self.register_module_type_instance_methods(&method_ids, type_def_id, &type_name_short)?
+            let short = self
+                .analyzed
+                .name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_else(|| self.analyzed.display_name(name_id));
+            let infos =
+                self.register_module_type_instance_methods(&method_ids, type_def_id, &short)?;
+            (infos, Some(short))
         };
 
         // Register type metadata
-        let vole_type_id = self
-            .analyzed
-            .get_type(type_def_id)
-            .base_type_id
-            .ok_or_else(|| {
-                CodegenError::internal_with_context(
-                    "finalize_module_type_by_id: missing base_type_id from sema",
-                    type_kind.to_string(),
-                )
-            })?;
-        let name_id = self.analyzed.entity_type_name_id(type_def_id);
+        let vole_type_id = base_type_id.ok_or_else(|| {
+            CodegenError::internal_with_context(
+                "finalize_module_type_by_id: missing base_type_id from sema",
+                type_kind.to_string(),
+            )
+        })?;
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,
@@ -423,17 +416,16 @@ impl Compiler<'_> {
 
         // Register static methods for non-generic types.
         // Generic type statics are emitted from static-method monomorph instances.
-        if !is_generic_type {
-            let static_method_ids: Vec<MethodId> =
-                self.analyzed.get_type(type_def_id).static_methods.clone();
-            if !static_method_ids.is_empty() {
-                self.register_module_type_static_methods(
-                    &static_method_ids,
-                    type_def_id,
-                    &type_name_short,
-                )?;
+        if !is_generic_type
+            && !static_method_ids.is_empty() {
+                let short = type_name_short.unwrap_or_else(|| {
+                    self.analyzed
+                        .name_table()
+                        .last_segment_str(name_id)
+                        .unwrap_or_else(|| self.analyzed.display_name(name_id))
+                });
+                self.register_module_type_static_methods(&static_method_ids, type_def_id, &short)?;
             }
-        }
 
         Ok(())
     }
@@ -446,29 +438,18 @@ impl Compiler<'_> {
         &mut self,
         type_def_id: TypeDefId,
     ) -> CodegenResult<()> {
-        let type_name_str = self
-            .analyzed
-            .display_name(self.analyzed.entity_type_name_id(type_def_id));
-        tracing::debug!(type_name = %type_name_str, "finalize_module_sentinel_by_id called");
-
-        // Skip if already registered
+        // Skip if already registered — check first before any lookups.
         if self.state.type_metadata.contains_key(&type_def_id) {
-            tracing::debug!(type_name = %type_name_str, "Skipping - already registered in type_metadata");
             return Ok(());
         }
 
-        let vole_type_id = self
-            .analyzed
-            .get_type(type_def_id)
-            .base_type_id
-            .ok_or_else(|| {
-                CodegenError::internal(
-                    "finalize_module_sentinel_by_id: missing base_type_id from sema",
-                )
-            })?;
+        let type_def = self.analyzed.get_type(type_def_id);
+        let name_id = type_def.name_id;
+        let vole_type_id = type_def.base_type_id.ok_or_else(|| {
+            CodegenError::internal("finalize_module_sentinel_by_id: missing base_type_id from sema")
+        })?;
 
         // Sentinels are zero-field structs, use type_id 0 as a placeholder.
-        let name_id = self.analyzed.entity_type_name_id(type_def_id);
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,
