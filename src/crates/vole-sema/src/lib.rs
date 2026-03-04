@@ -44,7 +44,7 @@ pub use implement_registry::{
 };
 pub use lowering_lookup::LoweringEntityLookup;
 pub use memory_kind::MemoryKind;
-pub use module::{LoadError, ModuleInfo, ModuleLoader};
+pub use module::{LoadError, ModuleInfo, ModuleLoader, ParsedModule, parallel_parse};
 pub use node_map::NodeMap;
 pub use node_map::{
     CoercionKind, ItLambdaInfo, IterableKind, LambdaAnalysis, LambdaDefaults, MethodDispatchKind,

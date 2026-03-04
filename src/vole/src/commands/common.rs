@@ -20,7 +20,7 @@ use crate::runtime::{
     set_stderr_capture, set_stdout_capture, set_test_jmp_buf, take_stack_overflow,
     write_to_stderr_capture,
 };
-use crate::sema::{ModuleCache, TypeError, TypeWarning, optimize_all};
+use crate::sema::{ModuleCache, ModuleLoader, TypeError, TypeWarning, optimize_all};
 
 // Re-export AnalyzedProgram from codegen
 pub use crate::codegen::AnalyzedProgram;
@@ -243,6 +243,58 @@ pub fn compile_source(
         (program, interner)
     };
 
+    // Parallel parse phase: pre-parse all imported modules concurrently.
+    // Skipped for stdin, files with no imports, or when a shared module cache
+    // is active (multi-file mode like `vole test` — modules are already cached
+    // after the first file, and re-parsing would cause ModuleId conflicts).
+    let pre_parsed_modules = {
+        let entry_path = std::path::Path::new(file_path);
+        let has_imports = !crate::frontend::imports::extract_imports(&program).is_empty();
+        if has_imports && entry_path.exists() && module_cache.is_none() {
+            let _span = tracing::info_span!("parallel_parse").entered();
+
+            // Create a module loader matching what AnalyzerBuilder would create.
+            let mut loader = ModuleLoader::new();
+            let effective_root = if let Some(root) = project_root {
+                Some(root.to_path_buf())
+            } else {
+                entry_path
+                    .canonicalize()
+                    .ok()
+                    .map(|p| ModuleLoader::detect_project_root(&p))
+            };
+            if let Some(root) = effective_root {
+                loader.set_project_root(root);
+            }
+
+            // Use a high starting offset for module IDs to avoid conflicts
+            // with NameTable's sequential allocation (main=0, builtin=1, prelude modules, etc.).
+            let id_alloc = vole_identity::ModuleIdAllocator::starting_at(1000);
+            let results = crate::sema::parallel_parse(source, entry_path, &loader, &id_alloc);
+
+            // Convert to the format expected by AnalyzerContext: FxHashMap<String, ParsedModule>.
+            // Skip the entry file (already parsed above) and error entries.
+            let entry_canonical = entry_path
+                .canonicalize()
+                .unwrap_or_else(|_| entry_path.to_path_buf());
+            let mut pre_parsed = std::collections::HashMap::new();
+            for (path, result) in results {
+                if path == entry_canonical {
+                    continue; // Entry file already parsed above
+                }
+                if let Ok(parsed) = result {
+                    let key = path.to_string_lossy().to_string();
+                    pre_parsed.insert(key, parsed);
+                }
+                // Errors are silently dropped — sema will re-discover and report them
+            }
+            tracing::debug!(modules = pre_parsed.len(), "parallel parse complete");
+            pre_parsed
+        } else {
+            std::collections::HashMap::new()
+        }
+    };
+
     // Sema phase (type checking)
     let mut analyzer = {
         let _span = tracing::info_span!("sema").entered();
@@ -250,6 +302,9 @@ pub fn compile_source(
             crate::sema::AnalyzerBuilder::new(file_path).with_project_root(project_root);
         if let Some(cache) = module_cache {
             builder = builder.with_cache(cache);
+        }
+        if !pre_parsed_modules.is_empty() {
+            builder = builder.with_pre_parsed_modules(pre_parsed_modules);
         }
         let mut analyzer = builder.build();
         analyzer.set_skip_tests(skip_tests);

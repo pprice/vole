@@ -146,7 +146,11 @@ impl AnalyzerContext {
     /// Create a new context with the given db and optional cache.
     /// When a cache is provided, pre-merges all cached prelude metadata
     /// and module programs so that load_prelude_file can skip redundant clones.
-    pub(super) fn new(db: Rc<CompilationDb>, cache: Option<Rc<RefCell<ModuleCache>>>) -> Self {
+    pub(super) fn new(
+        db: Rc<CompilationDb>,
+        cache: Option<Rc<RefCell<ModuleCache>>>,
+        pre_parsed: FxHashMap<String, ParallelParsedModule>,
+    ) -> Self {
         let mut merged_node_map = NodeMap::new();
         let mut module_programs = FxHashMap::default();
         let prelude_merged =
@@ -162,7 +166,7 @@ impl AnalyzerContext {
             prelude_expr_data_merged: Cell::new(prelude_merged),
             well_known_cache: RefCell::new(WellKnownCache::default()),
             vir_type_table: RefCell::new(VirTypeTable::new()),
-            pre_parsed_modules: RefCell::new(FxHashMap::default()),
+            pre_parsed_modules: RefCell::new(pre_parsed),
         }
     }
 
@@ -194,6 +198,6 @@ impl AnalyzerContext {
 
     /// Create an empty context (for Default impl).
     pub(super) fn empty() -> Self {
-        Self::new(Rc::new(CompilationDb::new()), None)
+        Self::new(Rc::new(CompilationDb::new()), None, FxHashMap::default())
     }
 }

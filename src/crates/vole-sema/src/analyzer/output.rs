@@ -5,6 +5,7 @@ use crate::analysis_cache::ModuleCache;
 use crate::compilation_db::CompilationDb;
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::module::ModuleLoader;
+use crate::module::parallel_parse::ParsedModule as ParallelParsedModule;
 use crate::node_map::NodeMap;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
@@ -123,6 +124,7 @@ pub struct AnalyzerBuilder {
     project_root: Option<PathBuf>,
     auto_detect_root: bool,
     skip_tests: bool,
+    pre_parsed_modules: FxHashMap<String, ParallelParsedModule>,
 }
 
 impl AnalyzerBuilder {
@@ -134,6 +136,7 @@ impl AnalyzerBuilder {
             project_root: None,
             auto_detect_root: true,
             skip_tests: false,
+            pre_parsed_modules: FxHashMap::default(),
         }
     }
 
@@ -156,6 +159,22 @@ impl AnalyzerBuilder {
         if root.is_some() {
             self.auto_detect_root = false;
         }
+        self
+    }
+
+    /// Supply pre-parsed modules from the parallel parse wavefront.
+    ///
+    /// Each entry is keyed by canonical file path (String) and consumed
+    /// exactly once when `analyze_module()` encounters a matching import.
+    /// If the map is empty, the analyzer falls back to sequential parsing.
+    ///
+    /// Accepts `HashMap` (from std) so callers don't need a `rustc_hash` dependency;
+    /// the builder converts to `FxHashMap` internally.
+    pub fn with_pre_parsed_modules(
+        mut self,
+        modules: std::collections::HashMap<String, ParallelParsedModule>,
+    ) -> Self {
+        self.pre_parsed_modules = modules.into_iter().collect();
         self
     }
 
@@ -203,7 +222,11 @@ impl AnalyzerBuilder {
         }
 
         // Step 6: Create shared context and the analyzer
-        let ctx = Rc::new(AnalyzerContext::new(db, self.cache));
+        let ctx = Rc::new(AnalyzerContext::new(
+            db,
+            self.cache,
+            self.pre_parsed_modules,
+        ));
         let mut analyzer = Analyzer {
             ctx,
             module: ModuleContext {
