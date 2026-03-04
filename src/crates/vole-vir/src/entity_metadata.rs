@@ -99,7 +99,7 @@ pub fn compute_field_type_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> VirFie
 /// What kind of entity a type definition represents.
 ///
 /// Mirrors `sema::entity_defs::TypeDefKind` without depending on sema.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VirTypeDefKind {
     Interface,
     Class,
@@ -548,6 +548,11 @@ pub struct VirEntityMetadata {
     /// by `AnalyzedProgram::impl_type_name_id_from_type_id` as a fast-path
     /// before falling back to TypeArena inspection.
     impl_type_names: FxHashMap<TypeId, NameId>,
+    /// Pre-computed index: `(ModuleId, VirTypeDefKind)` → list of `TypeDefId`s.
+    ///
+    /// Populated eagerly during `insert_type_def()` so that
+    /// `module_type_defs_by_kind()` is O(1) instead of scanning all type defs.
+    type_defs_by_module_kind: FxHashMap<(ModuleId, VirTypeDefKind), Vec<TypeDefId>>,
     /// Implement block entries for the main program.
     ///
     /// Ordered by declaration order.  Codegen iterates these instead of
@@ -575,6 +580,10 @@ impl VirEntityMetadata {
     /// Also updates the `type_by_name` reverse-lookup map.
     pub fn insert_type_def(&mut self, type_def: VirTypeDef) {
         self.type_by_name.insert(type_def.name_id, type_def.id);
+        self.type_defs_by_module_kind
+            .entry((type_def.module, type_def.kind))
+            .or_default()
+            .push(type_def.id);
         self.type_defs.insert(type_def.id, type_def);
     }
 
@@ -1014,17 +1023,17 @@ impl VirEntityMetadata {
 impl VirEntityMetadata {
     /// Return type definitions declared in a specific module with the given kind.
     ///
-    /// Iterates all registered type definitions and returns those whose
-    /// `module` matches the given `module_id` and whose `kind` matches.
+    /// Uses a pre-computed `(ModuleId, VirTypeDefKind)` → `Vec<TypeDefId>`
+    /// index built during `insert_type_def()` for O(1) lookup.
     pub fn module_type_defs_by_kind(
         &self,
         module_id: ModuleId,
         kind: VirTypeDefKind,
     ) -> Vec<&VirTypeDef> {
-        self.type_defs
-            .values()
-            .filter(|td| td.module == module_id && td.kind == kind)
-            .collect()
+        self.type_defs_by_module_kind
+            .get(&(module_id, kind))
+            .map(|ids| ids.iter().filter_map(|id| self.type_defs.get(id)).collect())
+            .unwrap_or_default()
     }
 }
 
