@@ -107,6 +107,8 @@ pub struct JitOptions {
     pub loop_param_opt: bool,
     /// Capture CLIF IR text for each compiled function (for `inspect ir`)
     pub capture_ir: bool,
+    /// Lazy module codegen: defer compilation of module function bodies
+    pub lazy_modules: bool,
 }
 
 impl JitOptions {
@@ -117,6 +119,7 @@ impl JitOptions {
             disasm: false,
             loop_param_opt: true, // Enable loop optimization in all modes
             capture_ir: false,
+            lazy_modules: false,
         }
     }
 
@@ -127,6 +130,7 @@ impl JitOptions {
             disasm: false,
             loop_param_opt: true,
             capture_ir: false,
+            lazy_modules: false,
         }
     }
 
@@ -137,6 +141,7 @@ impl JitOptions {
             disasm: true,
             loop_param_opt: true, // Enable loop optimization for IR inspection
             capture_ir: false,
+            lazy_modules: false,
         }
     }
 }
@@ -164,11 +169,13 @@ pub struct JitContext {
     ir_output: Vec<(String, String)>,
     /// Functions that have been compiled (defined) in this JIT context.
     /// Used by `CompiledModules::new` to only extract pointers for compiled functions.
-    defined_func_ids: FxHashSet<FuncId>,
+    pub(crate) defined_func_ids: FxHashSet<FuncId>,
     /// Names of pre-compiled module functions registered as JIT symbols.
     /// Used to check if a function exists before importing it (e.g. array
     /// iterable methods that may not have been compiled for all element types).
     precompiled_symbol_names: FxHashSet<String>,
+    /// Lazy module codegen: defer compilation of module function bodies
+    pub lazy_modules: bool,
 }
 
 impl JitContext {
@@ -266,6 +273,7 @@ impl JitContext {
             ir_output: Vec::new(),
             defined_func_ids: FxHashSet::default(),
             precompiled_symbol_names,
+            lazy_modules: options.lazy_modules,
         };
 
         // Import runtime functions so they can be called

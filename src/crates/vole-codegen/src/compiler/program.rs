@@ -546,14 +546,18 @@ impl Compiler<'_> {
         self.compile_all_monomorphized_instances(false)?;
 
         // Pass 2: Compile all function bodies (cross-module calls now resolved)
-        for module_path in &module_paths {
-            self.compile_module_function_bodies(module_path)?;
-        }
+        // When lazy_modules is enabled, skip body compilation — functions are declared
+        // with signatures but compiled on demand later.
+        if !self.jit.lazy_modules {
+            for module_path in &module_paths {
+                self.compile_module_function_bodies(module_path)?;
+            }
 
-        // Compile any monomorphs that were lazily declared during module body compilation.
-        // No main-program AST is available here; all pending monomorphs should originate
-        // from module code.
-        self.compile_pending_monomorphs()?;
+            // Compile any monomorphs that were lazily declared during module body compilation.
+            // No main-program AST is available here; all pending monomorphs should originate
+            // from module code.
+            self.compile_pending_monomorphs()?;
+        }
 
         tracing::debug!("compile_module_functions complete");
         Ok(())
@@ -789,6 +793,10 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
             crate::generator::compile_generator_function(&gen_params, &mut codegen_ctx, &env)?;
+            // Track the wrapper function as defined so CompiledModules includes it.
+            // (CodegenCtx calls module.define_function() directly, bypassing
+            // JitContext::define_function() which normally updates defined_func_ids.)
+            self.jit.defined_func_ids.insert(jit_func_id);
             self.jit.clear();
             return Ok(());
         }
@@ -897,6 +905,8 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
             crate::generator::compile_generator_function(&gen_params, &mut codegen_ctx, &env)?;
+            // Track the wrapper function as defined (see module path comment above).
+            self.jit.defined_func_ids.insert(jit_func_id);
             self.jit.clear();
             return Ok(());
         }

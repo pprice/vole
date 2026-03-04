@@ -620,9 +620,48 @@ fn run_source_tests_with_modules(
         JitOptions::debug()
     };
 
+    // On cache miss, compile modules into the cache first so we can use the
+    // fast import path for the main program (avoids double compilation).
+    if !can_use_cache && !analyzed.module_paths().is_empty() {
+        let mut modules_jit = JitContext::with_options(options);
+        let compile_result = {
+            let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
+            modules_compiler.compile_modules_only()
+        };
+        match compile_result {
+            Ok(()) => {
+                let module_paths: Vec<String> = analyzed.module_paths();
+                if let Some(existing) = compiled_modules.as_mut() {
+                    if let Err(e) = existing.extend(modules_jit, module_paths) {
+                        tracing::warn!("Modules cache extension failed: {}", e);
+                    }
+                } else {
+                    match CompiledModules::new(modules_jit, module_paths) {
+                        Ok(modules) => *compiled_modules = Some(modules),
+                        Err(e) => {
+                            tracing::warn!("Modules finalization failed: {}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Modules compilation failed: {}", e);
+                std::mem::forget(modules_jit);
+            }
+        }
+    }
+
+    // Re-check cache after potential population above.
+    let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {
+        analyzed
+            .module_paths()
+            .iter()
+            .all(|module_path| modules.has_module(module_path))
+    });
+
     let (jit, compile_result, tests) = if can_use_cache {
         let modules = compiled_modules.as_ref().unwrap();
-        // Subsequent files: use pre-compiled modules
+        // Use pre-compiled modules (fast import path, no module codegen)
         let mut jit = JitContext::with_modules_and_options(modules, options);
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
@@ -636,57 +675,13 @@ fn run_source_tests_with_modules(
         let tests = compiler.take_tests();
         (jit, result, tests)
     } else {
-        // Cache miss: compile normally and grow the cache for future files
+        // Fallback: no modules or cache population failed — compile everything
         let mut jit = JitContext::with_options(options);
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
 
-        // Compile modules (this is the expensive part)
-        let modules_result = compiler.compile_modules_only();
-
-        // Compile main program
-        let result = if modules_result.is_ok() {
-            compiler.compile_program_only()
-        } else {
-            modules_result
-        };
-
+        let result = compiler.compile_program();
         let tests = compiler.take_tests();
-
-        // If successful, grow the compiled modules cache with any new modules.
-        // This avoids recompiling the same modules for subsequent test files.
-        if result.is_ok() && !analyzed.module_paths().is_empty() {
-            let mut modules_jit = JitContext::with_options(options);
-            let compile_result = {
-                let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
-                modules_compiler.compile_modules_only()
-            };
-            match compile_result {
-                Ok(()) => {
-                    let module_paths: Vec<String> = analyzed.module_paths();
-
-                    if let Some(existing) = compiled_modules.as_mut() {
-                        // Grow existing cache with new modules
-                        if let Err(e) = existing.extend(modules_jit, module_paths) {
-                            tracing::warn!("Modules cache extension failed: {}", e);
-                        }
-                    } else {
-                        // First time: create new cache
-                        match CompiledModules::new(modules_jit, module_paths) {
-                            Ok(modules) => *compiled_modules = Some(modules),
-                            Err(e) => {
-                                tracing::warn!("Modules finalization failed: {}", e);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Modules compilation failed: {}", e);
-                    std::mem::forget(modules_jit);
-                }
-            }
-        }
-
         (jit, result, tests)
     };
 
