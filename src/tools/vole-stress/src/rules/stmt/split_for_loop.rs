@@ -45,7 +45,7 @@ impl StmtRule for SplitForLoop {
 
         Some(format!(
             "let {} = \"{}\".split(\",\").collect()\n\
-             {}let mut {} = 0\n\
+             {}var {} = 0\n\
              {}for {} in {}.iter() {{\n\
              {}    {} = {} + {}.length()\n\
              {}}}",

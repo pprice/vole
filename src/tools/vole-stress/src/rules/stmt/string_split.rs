@@ -123,7 +123,7 @@ impl StmtRule for StringSplitFor {
 
         Some(format!(
             "let {} = {}.split({}).collect()\n\
-             let mut {} = \"\"\n\
+             var {} = \"\"\n\
              for {} in {}.iter() {{\n\
              {} = {} + {}\n\
              }}",

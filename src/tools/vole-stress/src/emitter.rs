@@ -1270,7 +1270,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     ///
     /// Generates a simple bounded loop pattern:
     /// ```vole
-    /// let mut i = 0
+    /// var i = 0
     /// while i < N {
     ///     yield <expr of elem_type>
     ///     i = i + 1

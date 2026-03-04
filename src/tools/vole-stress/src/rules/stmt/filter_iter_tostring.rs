@@ -58,7 +58,7 @@ impl StmtRule for FilterIterTostring {
 
         Some(format!(
             "let {} = {}.iter().filter((x) => x > {}).collect()\n\
-             {}let mut {} = \"\"\n\
+             {}var {} = \"\"\n\
              {}for {} in {}.iter() {{\n\
              {}    {} = {} + {}.to_string()\n\
              {}}}",

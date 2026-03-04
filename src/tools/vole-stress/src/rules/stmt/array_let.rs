@@ -1,7 +1,7 @@
 //! Rule: let-bind a small array literal.
 //!
 //! Produces `let localN = [elem1, elem2, elem3]` with 2-4 elements of a
-//! random primitive type. Optionally `let mut` for enabling push/index
+//! random primitive type. Optionally `var` for enabling push/index
 //! assignment operations. ~12% chance of large arrays (6-10 elements).
 
 use crate::emit::Emit;

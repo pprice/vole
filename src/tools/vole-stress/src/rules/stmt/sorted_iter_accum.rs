@@ -57,7 +57,7 @@ impl StmtRule for SortedIterAccum {
 
         Some(format!(
             "let {} = {}.iter().sorted().collect()\n\
-             {}let mut {} = {}\n\
+             {}var {} = {}\n\
              {}for {} in {}.iter() {{\n\
              {}    {} = {} + {}\n\
              {}}}",
