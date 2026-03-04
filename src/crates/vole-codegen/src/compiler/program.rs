@@ -200,12 +200,12 @@ impl Compiler<'_> {
         }
 
         // Register implement block methods from VIR metadata (pass 1).
-        for entry in self
+        let impl_blocks = self
             .analyzed
             .vir_program()
             .entity_metadata
-            .implement_blocks()
-        {
+            .implement_blocks();
+        for entry in impl_blocks {
             self.register_implement_block(entry)?;
         }
 

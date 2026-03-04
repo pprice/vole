@@ -519,18 +519,22 @@ impl Compiler<'_> {
                 continue;
             }
 
-            // During the module-only phase, skip instances whose substitutions
-            // reference program-defined types. Their implement-block methods
-            // (e.g. Color.hash()) aren't declared yet and compilation would fail.
-            // These are compiled later during the program phase.
+            // Determine module_path for interner selection
+            let class_module = self.analyzed.name_table().module_of(instance.class_name);
+
+            // During the module-only phase, skip instances whose class is
+            // defined in the main program or whose substitutions reference
+            // program-defined types. Their implement-block methods (e.g.
+            // `extend i64 with Describable`) aren't declared yet and
+            // compilation would fail. These are compiled later during the
+            // program phase.
             if !is_program_phase
-                && self.substitutions_depend_on_program_definitions(&instance.substitutions)
+                && (class_module == program_module
+                    || self.substitutions_depend_on_program_definitions(&instance.substitutions))
             {
                 continue;
             }
 
-            // Determine module_path for interner selection
-            let class_module = self.analyzed.name_table().module_of(instance.class_name);
             let module_path = if class_module == program_module {
                 None
             } else {
@@ -721,17 +725,21 @@ impl Compiler<'_> {
                 continue;
             }
 
-            // During the module-only phase, skip instances whose substitutions
-            // reference program-defined types. Their implement-block methods
-            // aren't declared yet and compilation would fail.
+            // Determine module_path for interner selection
+            let class_module = self.analyzed.name_table().module_of(instance.class_name);
+
+            // During the module-only phase, skip instances whose class is
+            // defined in the main program or whose substitutions reference
+            // program-defined types. Their implement-block methods aren't
+            // declared yet and compilation would fail. These are compiled
+            // later during the program phase.
             if !is_program_phase
-                && self.substitutions_depend_on_program_definitions(&instance.substitutions)
+                && (class_module == program_module
+                    || self.substitutions_depend_on_program_definitions(&instance.substitutions))
             {
                 continue;
             }
 
-            // Determine module_path for interner selection
-            let class_module = self.analyzed.name_table().module_of(instance.class_name);
             let module_path = if class_module == program_module {
                 None
             } else {
