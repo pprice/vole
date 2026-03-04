@@ -3,6 +3,7 @@
 pub mod ast;
 pub mod ast_display;
 pub mod errors;
+pub mod imports;
 pub mod intern;
 pub mod lexer;
 mod parse_decl;
