@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use super::lambda_search::find_lambda_in_program;
+use super::lambda_search::collect_lambdas_in_program;
 use crate::LoweringEntityLookup;
 use crate::{NodeMap, TypeArena};
-use vole_frontend::{Interner, Program};
+use vole_frontend::{Interner, LambdaExpr, Program};
 use vole_identity::{ModuleId, NameTable, NodeId, Span};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;
@@ -27,7 +27,7 @@ pub struct LowerLambdaDefaultInitsArgs<'a> {
 
 struct LowerSingleLambdaDefaultInitArgs<'a> {
     lambda_node_id: NodeId,
-    program: &'a Program,
+    lambda: &'a LambdaExpr,
     interner: &'a mut Interner,
     names: &'a NameTable,
     entities: &'a dyn LoweringEntityLookup,
@@ -67,11 +67,35 @@ pub fn lower_lambda_default_inits(
     let _ = main_module_ids.insert(names.main_module());
     main_module_ids.extend(tests_virtual_modules.values().copied());
 
+    // Partition lambda nodes by source: main program vs external modules.
+    let mut main_lambda_nodes = Vec::new();
+    // module_path -> Vec<NodeId>
+    let mut external_lambda_nodes: FxHashMap<String, Vec<NodeId>> = FxHashMap::default();
     for lambda_node_id in lambda_nodes {
         if main_module_ids.contains(&lambda_node_id.module) {
+            main_lambda_nodes.push(lambda_node_id);
+        } else {
+            let module_path = names.module_path(lambda_node_id.module).to_string();
+            if !modules_with_errors.contains(&module_path) {
+                external_lambda_nodes
+                    .entry(module_path)
+                    .or_default()
+                    .push(lambda_node_id);
+            }
+        }
+    }
+
+    // Batch: collect all lambdas from the main program in one walk, then do
+    // O(1) lookups per lambda node.
+    if !main_lambda_nodes.is_empty() {
+        let main_lambdas = collect_lambdas_in_program(program);
+        for lambda_node_id in main_lambda_nodes {
+            let Some(lambda) = main_lambdas.get(&lambda_node_id) else {
+                continue;
+            };
             lower_single_lambda_default_init(LowerSingleLambdaDefaultInitArgs {
                 lambda_node_id,
-                program,
+                lambda,
                 interner,
                 names,
                 entities,
@@ -80,28 +104,32 @@ pub fn lower_lambda_default_inits(
                 type_table,
                 map: &mut map,
             });
-            continue;
         }
+    }
 
-        let module_path = names.module_path(lambda_node_id.module).to_string();
-        if modules_with_errors.contains(&module_path) {
-            continue;
-        }
+    // For external modules: collect all lambdas per module in one walk each.
+    for (module_path, node_ids) in external_lambda_nodes {
         let Some((module_program, module_interner)) = module_programs.get_mut(&module_path) else {
             continue;
         };
         let module_interner = Rc::make_mut(module_interner);
-        lower_single_lambda_default_init(LowerSingleLambdaDefaultInitArgs {
-            lambda_node_id,
-            program: module_program,
-            interner: module_interner,
-            names,
-            entities,
-            node_map,
-            type_arena,
-            type_table,
-            map: &mut map,
-        });
+        let module_lambdas = collect_lambdas_in_program(module_program);
+        for lambda_node_id in node_ids {
+            let Some(lambda) = module_lambdas.get(&lambda_node_id) else {
+                continue;
+            };
+            lower_single_lambda_default_init(LowerSingleLambdaDefaultInitArgs {
+                lambda_node_id,
+                lambda,
+                interner: module_interner,
+                names,
+                entities,
+                node_map,
+                type_arena,
+                type_table,
+                map: &mut map,
+            });
+        }
     }
 
     map
@@ -113,7 +141,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
 
     let LowerSingleLambdaDefaultInitArgs {
         lambda_node_id,
-        program,
+        lambda,
         interner,
         names,
         entities,
@@ -122,10 +150,6 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         type_table,
         map,
     } = args;
-
-    let Some(lambda) = find_lambda_in_program(program, lambda_node_id) else {
-        return;
-    };
 
     let mut ctx = crate::vir_lower::LoweringCtx {
         node_map,
