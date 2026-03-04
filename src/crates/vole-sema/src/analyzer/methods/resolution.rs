@@ -703,8 +703,13 @@ impl Analyzer {
             tdef_id,
         );
 
-        // Pre-create RuntimeIterator<elem_type> so codegen can look it up.
+        // Pre-create RuntimeIterator<elem_type> and Optional<elem_type> so codegen
+        // can look them up. Codegen compiles ALL Iterable default methods for each
+        // concrete element type, including find/first/last/nth which return T?.
+        // Without pre-creating Optional<elem_type>, the VIR type table sweep cannot
+        // intern the bidirectional TypeId<->VirTypeId mapping that codegen requires.
         self.type_arena_mut().runtime_iterator(elem_type);
+        self.type_arena_mut().optional(elem_type);
 
         // Resolve via the interface fallback — same pattern used by primitive types (string,
         // range). This finds the Iterable default method, substitutes Self → object_type_id,

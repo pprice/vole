@@ -132,7 +132,8 @@ impl Cg<'_, '_, '_> {
             "sum" | "reduce" => Some(elem_type_id),
 
             // Methods returning T? (optional element): first, last, nth, find
-            // VIR type table contains all Optional types after recursive sweep.
+            // Optional<T> is pre-created in the TypeArena during sema analysis
+            // (alongside RuntimeIterator<T>) whenever an Iterable<T> impl is registered.
             "first" | "last" | "nth" | "find" => table.lookup_optional_sema(elem_type_id),
 
             // next() -> T | Done — return the T type directly
