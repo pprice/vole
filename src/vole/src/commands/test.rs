@@ -195,6 +195,8 @@ pub struct TestRunOptions<'a> {
     pub color: ColorMode,
     /// Use release optimizations
     pub release: bool,
+    /// Enable lazy module compilation
+    pub lazy: bool,
 }
 
 /// Internal configuration for test execution, reducing argument count across functions.
@@ -209,6 +211,8 @@ struct TestRunConfig<'a> {
     project_root: Option<&'a Path>,
     /// Use release optimizations
     release: bool,
+    /// Enable lazy module compilation
+    lazy: bool,
     /// Terminal color configuration
     colors: TermColors,
     /// Color mode for diagnostic rendering
@@ -349,6 +353,7 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
         quiet: options.quiet,
         project_root: options.project_root,
         release: options.release,
+        lazy: options.lazy,
         colors: TermColors::with_mode(options.color),
         color_mode: options.color,
     };
@@ -616,11 +621,12 @@ fn run_source_tests_with_modules(
             .all(|module_path| modules.has_module(module_path))
     });
 
-    let options = if config.release {
+    let mut options = if config.release {
         JitOptions::release()
     } else {
         JitOptions::debug()
     };
+    options.lazy_modules = config.lazy;
 
     // On cache miss, compile modules into the cache first so we can use the
     // fast import path for the main program (avoids double compilation).
@@ -774,11 +780,12 @@ fn run_source_tests_with_progress(
     };
 
     // Compile
-    let options = if config.release {
+    let mut options = if config.release {
         JitOptions::release()
     } else {
         JitOptions::debug()
     };
+    options.lazy_modules = config.lazy;
     let mut jit = JitContext::with_options(options);
     let (compile_result, tests, lazy_state) = {
         let mut compiler = Compiler::new(&mut jit, &analyzed);

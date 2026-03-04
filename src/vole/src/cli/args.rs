@@ -34,6 +34,10 @@ pub struct Cli {
     #[arg(long, global = true, hide = true)]
     pub release: bool,
 
+    /// Enable lazy module compilation (experimental)
+    #[arg(long, global = true, hide = true)]
+    pub lazy: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }

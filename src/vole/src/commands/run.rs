@@ -17,6 +17,7 @@ pub fn run_file(
     path: &Path,
     project_root: Option<&Path>,
     release: bool,
+    lazy: bool,
     color_mode: ColorMode,
 ) -> ExitCode {
     // Validate project root if provided
@@ -31,7 +32,7 @@ pub fn run_file(
         }
     }
 
-    match execute(path, project_root, release, color_mode) {
+    match execute(path, project_root, release, lazy, color_mode) {
         Ok(()) => ExitCode::SUCCESS,
         Err(_) => ExitCode::FAILURE,
     }
@@ -41,6 +42,7 @@ fn execute(
     path: &Path,
     project_root: Option<&Path>,
     release: bool,
+    lazy: bool,
     color_mode: ColorMode,
 ) -> Result<(), PipelineError> {
     // Read source from file or stdin
@@ -89,11 +91,12 @@ fn execute(
 
     // Codegen + execute phase
     replace_context(&format!("{} (compiling)", file_path));
-    let jit_options = if release {
+    let mut jit_options = if release {
         JitOptions::release()
     } else {
         JitOptions::debug()
     };
+    jit_options.lazy_modules = lazy;
 
     let run_opts = RunOptions {
         file_path: &file_path,

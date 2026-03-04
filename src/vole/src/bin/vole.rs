@@ -88,7 +88,9 @@ fn main() -> ExitCode {
     .expect("failed to parse arguments");
 
     match cli.command {
-        Commands::Run { file, root } => run_file(&file, root.as_deref(), cli.release, cli.color),
+        Commands::Run { file, root } => {
+            run_file(&file, root.as_deref(), cli.release, cli.lazy, cli.color)
+        }
         Commands::Check { paths } => check_files(&paths, cli.color),
         Commands::Test {
             paths,
@@ -109,6 +111,7 @@ fn main() -> ExitCode {
                 project_root: root.as_deref(),
                 color: cli.color,
                 release: cli.release,
+                lazy: cli.lazy,
             },
         ),
         Commands::Inspect {
@@ -149,7 +152,7 @@ fn main() -> ExitCode {
             check,
             stdout,
         } => format_files(&paths, FmtOptions { check, stdout }),
-        Commands::External(args) => handle_external_args(&args, cli.release, cli.color),
+        Commands::External(args) => handle_external_args(&args, cli.release, cli.lazy, cli.color),
     }
 }
 
@@ -203,6 +206,7 @@ fn is_stdout_tty() -> bool {
 fn handle_external_args(
     args: &[OsString],
     release: bool,
+    lazy: bool,
     color_mode: vole::cli::ColorMode,
 ) -> ExitCode {
     let first = args
@@ -220,5 +224,5 @@ fn handle_external_args(
         return ExitCode::FAILURE;
     }
 
-    run_file(&path, None, release, color_mode)
+    run_file(&path, None, release, lazy, color_mode)
 }
