@@ -557,9 +557,118 @@ impl Compiler<'_> {
             // No main-program AST is available here; all pending monomorphs should originate
             // from module code.
             self.compile_pending_monomorphs()?;
+        } else {
+            // Lazy mode: generate CLIF stubs for declared-but-not-defined module functions.
+            self.generate_lazy_stubs(&module_paths)?;
         }
 
         tracing::debug!("compile_module_functions complete");
+        Ok(())
+    }
+
+    /// Generate CLIF stub functions for all declared-but-not-defined module functions.
+    ///
+    /// When `lazy_modules=true`, Phase 2 is skipped. This method creates a dispatch
+    /// table mapping module functions to pointer slots and compiled flags, then
+    /// generates a small Cranelift stub for each function that:
+    /// 1. Checks the compiled flag
+    /// 2. Calls `compile_trigger(module_id)` if not compiled
+    /// 3. Loads the real function pointer from the dispatch table
+    /// 4. Tail-calls it via `call_indirect`
+    fn generate_lazy_stubs(&mut self, module_paths: &[String]) -> CodegenResult<()> {
+        use super::lazy::{LazyDispatchTable, generate_lazy_stub};
+
+        tracing::debug!("generate_lazy_stubs: building dispatch table");
+
+        // Build the dispatch table by iterating module functions that were
+        // declared (in func_ids) but not defined (not in defined_functions).
+        let mut table = Box::new(LazyDispatchTable::new());
+
+        // Collect (module_path, func_id, display_name) for each undeclared module function.
+        let mut stub_entries: Vec<(usize, cranelift_module::FuncId, String)> = Vec::new();
+
+        for module_path in module_paths {
+            let module_id = self.analyzed.module_id_or_main(module_path);
+            let module_idx = table.register_module(module_path);
+
+            // Find non-generic, non-external functions in this module
+            let func_defs: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_function_defs(module_id)
+                .into_iter()
+                .filter(|fd| !fd.is_generic && !fd.is_external)
+                .map(|fd| fd.name_id)
+                .collect();
+
+            for name_id in func_defs {
+                let display_name = self.analyzed.display_name(name_id);
+
+                // Look up the FuncId that was declared in Phase 1
+                let Some(&func_id) = self.jit.func_ids.get(&display_name) else {
+                    continue;
+                };
+
+                // Skip functions that are already defined (e.g. array iterable defaults)
+                if self.defined_functions.contains(&func_id) {
+                    continue;
+                }
+
+                let func_idx = table.register_function(func_id, module_idx);
+                stub_entries.push((func_idx, func_id, display_name));
+            }
+        }
+
+        if stub_entries.is_empty() {
+            tracing::debug!("generate_lazy_stubs: no stubs needed");
+            return Ok(());
+        }
+
+        tracing::debug!(
+            count = stub_entries.len(),
+            "generate_lazy_stubs: generating stubs"
+        );
+
+        // Import compile_trigger as a JIT function
+        let trigger_sig = self
+            .jit
+            .create_signature(&[types::I64], None);
+        let compile_trigger_func_id =
+            self.jit.import_function("vole_compile_trigger", &trigger_sig);
+
+        // Generate CLIF stubs for each undeclared module function.
+        // We need to split jit fields to avoid borrowing conflicts:
+        // generate_lazy_stub needs &mut module and &mut ctx, while we
+        // read from the table (which is separate).
+        for &(func_idx, func_id, _) in &stub_entries {
+            let module_idx = table.func_to_module[func_idx];
+            let compiled_flag_addr = table.compiled_flag_ptr(module_idx) as u64;
+            let fn_ptr_addr = table.fn_ptr_slot_ptr(func_idx) as u64;
+
+            generate_lazy_stub(
+                &mut self.jit.module,
+                &mut self.jit.ctx,
+                func_id,
+                compile_trigger_func_id,
+                compiled_flag_addr,
+                fn_ptr_addr,
+                module_idx,
+            )?;
+
+            self.defined_functions.insert(func_id);
+            self.jit.defined_func_ids.insert(func_id);
+        }
+
+        tracing::debug!(
+            modules = table.module_index.len(),
+            functions = table.fn_ptrs.len(),
+            "generate_lazy_stubs: dispatch table built"
+        );
+
+        // Store the dispatch table for later use by compile_trigger
+        self.dispatch_table = Some(table);
+
         Ok(())
     }
 

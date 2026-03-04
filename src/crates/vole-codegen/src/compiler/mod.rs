@@ -31,6 +31,7 @@ mod compile_tests;
 mod impl_dispatch;
 mod impl_monomorph;
 mod impls;
+pub(crate) mod lazy;
 mod monomorphization;
 mod program;
 mod signatures;
@@ -98,6 +99,9 @@ pub struct Compiler<'a> {
     /// Combined monomorph cache size at last abstract expansion.
     /// Used to early-exit when caches haven't grown.
     last_expansion_cache_size: usize,
+    /// Dispatch table for lazy module codegen.
+    /// Present only when `lazy_modules=true`. Heap-allocated for stable addresses.
+    dispatch_table: Option<Box<lazy::LazyDispatchTable>>,
 }
 
 impl<'a> Compiler<'a> {
@@ -130,6 +134,7 @@ impl<'a> Compiler<'a> {
             defined_functions: FxHashSet::default(),
             pending_monomorphs: Vec::new(),
             last_expansion_cache_size: 0,
+            dispatch_table: None,
         }
     }
 

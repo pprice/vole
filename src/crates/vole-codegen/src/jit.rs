@@ -246,6 +246,14 @@ impl JitContext {
             builder.symbol(&symbol_name, ptr);
         }
 
+        // Register lazy compilation trigger symbol when lazy_modules is enabled
+        if options.lazy_modules {
+            builder.symbol(
+                "vole_compile_trigger",
+                crate::compiler::lazy::compile_trigger_placeholder as *const u8,
+            );
+        }
+
         // Register pre-compiled module functions as external symbols
         let precompiled_symbol_names = if let Some(functions) = precompiled {
             let names: FxHashSet<String> = functions.keys().cloned().collect();
