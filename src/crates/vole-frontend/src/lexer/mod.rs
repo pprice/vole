@@ -388,19 +388,28 @@ impl<'src> Lexer<'src> {
     /// Scan an identifier or keyword (supports Unicode XID).
     /// Uses a byte-level fast path for ASCII identifier characters.
     fn identifier(&mut self) -> Token<'src> {
+        // Use locals so the compiler keeps current/column in registers
+        // instead of storing back to &mut self on every loop iteration.
+        let bytes = self.bytes;
+        let mut pos = self.current;
+        let mut col = self.column;
+
         // Fast ASCII loop: consume [a-zA-Z0-9_] bytes without UTF-8 decoding
-        while self.current < self.bytes.len() {
-            let b = self.bytes[self.current];
+        loop {
+            if pos >= bytes.len() {
+                break;
+            }
+            let b = bytes[pos];
             if b.is_ascii_alphanumeric() || b == b'_' {
-                self.current += 1;
-                self.column += 1;
+                pos += 1;
+                col += 1;
             } else if b >= UTF8_MULTIBYTE {
                 // Non-ASCII: decode and check Unicode XID
-                let remaining = &self.source[self.current..];
+                let remaining = &self.source[pos..];
                 let c = remaining.chars().next().expect("non-empty source slice");
                 if unicode_ident::is_xid_continue(c) && !Self::is_banned_unicode(c) {
-                    self.current += c.len_utf8();
-                    self.column += 1;
+                    pos += c.len_utf8();
+                    col += 1;
                 } else {
                     break;
                 }
@@ -408,6 +417,10 @@ impl<'src> Lexer<'src> {
                 break;
             }
         }
+
+        // Write back once
+        self.current = pos;
+        self.column = col;
 
         let text = &self.source[self.start..self.current];
         let ty = TokenType::keyword_type(text).unwrap_or(TokenType::Identifier);
