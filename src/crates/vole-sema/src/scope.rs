@@ -1,8 +1,12 @@
 // src/sema/scope.rs
 
 use crate::type_arena::TypeId;
-use rustc_hash::FxHashMap;
+use core::hash::BuildHasher;
+use hashbrown::hash_map::RawEntryMut;
+use rustc_hash::FxBuildHasher;
 use vole_frontend::{Span, Symbol};
+
+type VariableMap = hashbrown::HashMap<Symbol, Variable, FxBuildHasher>;
 
 #[derive(Debug, Clone)]
 pub struct Variable {
@@ -12,23 +16,42 @@ pub struct Variable {
 }
 
 /// Undo entry for restoring state when a scope is popped.
+///
+/// Each entry stores a pre-computed hash so that the undo loop can skip
+/// re-hashing the symbol (the hash computation was the dominant cost in
+/// the previous implementation).
 #[derive(Debug)]
 enum UndoEntry {
     /// Variable was newly inserted; remove it on pop.
-    Remove(Symbol),
+    Remove(Symbol, u64),
     /// Variable shadowed a previous value; restore it on pop.
-    Restore(Symbol, Variable),
+    Restore(Symbol, u64, Variable),
 }
 
 /// Flat scope: a single hash map for O(1) lookups, with an undo stack
 /// for scope push/pop. This avoids the linked-list parent chain walk
 /// that shows up as a hotspot in the analyzer.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Scope {
     /// All variables visible in the current scope (flattened).
-    variables: FxHashMap<Symbol, Variable>,
+    variables: VariableMap,
     /// Stack of undo entries per scope level. Each `push_scope` adds a new Vec.
     undo_stack: Vec<Vec<UndoEntry>>,
+}
+
+impl Default for Scope {
+    fn default() -> Self {
+        Self {
+            variables: VariableMap::with_hasher(FxBuildHasher),
+            undo_stack: Vec::new(),
+        }
+    }
+}
+
+/// Compute the FxHash for a symbol, matching what the hashmap would compute.
+#[inline(always)]
+fn hash_symbol(sym: &Symbol) -> u64 {
+    FxBuildHasher.hash_one(sym)
 }
 
 impl Scope {
@@ -39,11 +62,25 @@ impl Scope {
     }
 
     pub fn define(&mut self, name: Symbol, var: Variable) {
-        let prev = self.variables.insert(name, var);
+        let hash = hash_symbol(&name);
+        let prev = match self
+            .variables
+            .raw_entry_mut()
+            .from_key_hashed_nocheck(hash, &name)
+        {
+            RawEntryMut::Occupied(mut entry) => {
+                let old = std::mem::replace(entry.get_mut(), var);
+                Some(old)
+            }
+            RawEntryMut::Vacant(entry) => {
+                entry.insert_hashed_nocheck(hash, name, var);
+                None
+            }
+        };
         if let Some(undo_level) = self.undo_stack.last_mut() {
             match prev {
-                Some(old) => undo_level.push(UndoEntry::Restore(name, old)),
-                None => undo_level.push(UndoEntry::Remove(name)),
+                Some(old) => undo_level.push(UndoEntry::Restore(name, hash, old)),
+                None => undo_level.push(UndoEntry::Remove(name, hash)),
             }
         }
         // If undo_stack is empty, we're at the root scope — no undo needed.
@@ -59,11 +96,31 @@ impl Scope {
         // symbol within one scope level.
         for entry in undo_entries.into_iter().rev() {
             match entry {
-                UndoEntry::Remove(sym) => {
-                    self.variables.remove(&sym);
+                UndoEntry::Remove(sym, hash) => {
+                    // Use pre-computed hash to skip re-hashing during remove.
+                    if let RawEntryMut::Occupied(entry) = self
+                        .variables
+                        .raw_entry_mut()
+                        .from_key_hashed_nocheck(hash, &sym)
+                    {
+                        entry.remove();
+                    }
                 }
-                UndoEntry::Restore(sym, old_var) => {
-                    self.variables.insert(sym, old_var);
+                UndoEntry::Restore(sym, hash, old_var) => {
+                    // Use pre-computed hash to skip re-hashing during restore.
+                    match self
+                        .variables
+                        .raw_entry_mut()
+                        .from_key_hashed_nocheck(hash, &sym)
+                    {
+                        RawEntryMut::Occupied(mut entry) => {
+                            *entry.get_mut() = old_var;
+                        }
+                        RawEntryMut::Vacant(entry) => {
+                            // Should not happen in correct usage, but handle gracefully.
+                            entry.insert_hashed_nocheck(hash, sym, old_var);
+                        }
+                    }
                 }
             }
         }

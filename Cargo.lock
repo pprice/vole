@@ -1853,6 +1853,7 @@ dependencies = [
 name = "vole-sema"
 version = "2026.2.4"
 dependencies = [
+ "hashbrown 0.16.1",
  "miette",
  "rayon",
  "rustc-hash",
