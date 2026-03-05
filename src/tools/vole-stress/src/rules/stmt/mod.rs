@@ -58,6 +58,7 @@ mod for_in_match_accum;
 mod for_interpolation_concat;
 mod for_iter_when_string_body;
 mod for_length_indexed;
+mod for_multi_accum;
 mod for_push_collect;
 mod for_range_tostring_build;
 mod for_range_when_accum;
@@ -356,6 +357,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(for_in_match_accum::ForInMatchAccum),
         Box::new(for_push_collect::ForPushCollect),
         Box::new(for_length_indexed::ForLengthIndexed),
+        Box::new(for_multi_accum::ForMultiAccum),
         Box::new(iter_reduce_let::IterReduceLet),
         Box::new(for_reduce_pattern::ForReducePattern),
         Box::new(sorted_iter_accum::SortedIterAccum),
