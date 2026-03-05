@@ -31,6 +31,7 @@ mod method_interpolation;
 mod null_coalesce;
 mod optional_chaining;
 mod string_bool;
+mod string_chain;
 mod string_chars;
 mod string_concat;
 mod string_length;
@@ -66,6 +67,7 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         Box::new(string_length::StringLength),
         Box::new(string_bool::StringBool),
         Box::new(string_transform::StringTransform),
+        Box::new(string_chain::StringChain),
         Box::new(string_concat::StringConcat),
         Box::new(to_string::ToString),
         Box::new(is_expr::IsExpr),

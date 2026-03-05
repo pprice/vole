@@ -42,7 +42,7 @@ mod tests {
     fn registry_construction_succeeds() {
         let registry = RuleRegistry::new();
         assert_eq!(registry.stmt_rules.len(), 211);
-        assert_eq!(registry.expr_rules.len(), 39);
+        assert_eq!(registry.expr_rules.len(), 40);
     }
 
     #[test]
