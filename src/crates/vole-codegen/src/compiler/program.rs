@@ -70,6 +70,20 @@ impl Compiler<'_> {
 
     /// Compile a complete program
     pub fn compile_program(&mut self) -> CodegenResult<()> {
+        // Bail early if any modules had sema errors - their VIR may be missing
+        // and compiling their function bodies would panic.
+        if !self.analyzed.modules_with_errors().is_empty() {
+            let module_list: Vec<_> = self
+                .analyzed
+                .modules_with_errors()
+                .iter()
+                .cloned()
+                .collect();
+            return Err(CodegenError::internal_with_context(
+                "module(s) with type errors",
+                module_list.join(", "),
+            ));
+        }
         // Compile module functions first (before main program)
         self.compile_module_functions()?;
         self.compile_program_body()

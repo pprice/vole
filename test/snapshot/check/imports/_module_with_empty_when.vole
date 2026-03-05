@@ -1,0 +1,10 @@
+// Helper module with empty when blocks (used by import_module_with_errors.vole)
+func func1(param8: bool, param9: f32, param10: u8) -> i128 {
+    return when {
+        when {
+        } => when {
+            when {
+            } => "str39"
+        }
+    }
+}

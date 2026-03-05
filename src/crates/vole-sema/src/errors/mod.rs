@@ -878,6 +878,14 @@ pub enum SemanticError {
         #[label("duplicate annotation argument")]
         span: SourceSpan,
     },
+
+    #[error("imported module '{path}' contains errors")]
+    #[diagnostic(code(E2125), help("fix the errors in the imported module"))]
+    ModuleHasErrors {
+        path: String,
+        #[label("this import failed due to errors in the module")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

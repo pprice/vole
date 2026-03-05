@@ -320,10 +320,27 @@ impl Analyzer {
         let analyze_result = sub_analyzer.analyze(&module_program, &mut module_interner);
         if let Err(ref errors) = analyze_result {
             tracing::warn!(import_path, ?errors, "module analysis errors");
-            for err in errors {
-                if matches!(err.error, SemanticError::CircularImport { .. }) {
-                    self.diagnostics.errors.push(err.clone());
+            let has_circular = errors
+                .iter()
+                .any(|e| matches!(e.error, SemanticError::CircularImport { .. }));
+            if has_circular {
+                // Circular import errors reference the import site in the parent,
+                // so propagate them directly.
+                for err in errors {
+                    if matches!(err.error, SemanticError::CircularImport { .. }) {
+                        self.diagnostics.errors.push(err.clone());
+                    }
                 }
+            } else {
+                // Non-circular module errors have spans relative to the module file,
+                // so report a summary error at the import site in the parent file.
+                self.add_error(
+                    SemanticError::ModuleHasErrors {
+                        path: import_path.to_string(),
+                        span: span.into(),
+                    },
+                    span,
+                );
             }
             // Track this module as having errors so codegen can skip its function bodies.
             self.ctx

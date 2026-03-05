@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E2125]: imported module './_module_with_empty_when.vole' contains errors
+   ╭─[<path>/import_module_with_errors.vole:3:12]
+ 2 │ // should produce a clean E2125 error, not a codegen panic.
+ 3 │ let mod1 = import "./_module_with_empty_when.vole"
+   ·            ───────────────────┬───────────────────
+   ·                               ╰── this import failed due to errors in the module
+ 4 │ 
+   ╰────
+  help: fix the errors in the imported module

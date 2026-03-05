@@ -1,0 +1,6 @@
+// Regression: importing a module with sema errors (e.g. empty when blocks)
+// should produce a clean E2125 error, not a codegen panic.
+let mod1 = import "./_module_with_empty_when.vole"
+
+func main() {
+}
