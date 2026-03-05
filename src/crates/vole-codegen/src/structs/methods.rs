@@ -419,6 +419,7 @@ impl Cg<'_, '_, '_> {
                     method_name_str,
                     resolved,
                     dispatch.generic_monomorph.as_ref(),
+                    dispatch.resolved_call_args.as_deref(),
                 );
             }
             VirMethodDispatchKind::Builtin => {
@@ -954,13 +955,14 @@ impl Cg<'_, '_, '_> {
                     };
                 if let Some(elem_type_id) = elem_type_id
                     && let Some(iter_type_def) = self.name_table().well_known.iterator_type_def
-                        && let Some(derived) = self.derive_iterator_return_type(
-                            method_name_str,
-                            elem_type_id,
-                            iter_type_def,
-                        ) {
-                            return_type_id = derived;
-                        }
+                    && let Some(derived) = self.derive_iterator_return_type(
+                        method_name_str,
+                        elem_type_id,
+                        iter_type_def,
+                    )
+                {
+                    return_type_id = derived;
+                }
             }
         }
 

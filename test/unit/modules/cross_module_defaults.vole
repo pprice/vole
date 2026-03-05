@@ -45,4 +45,41 @@ tests "cross-module default parameters" {
         let result = lib.typed_default(25_u8, "hello")
         assert(result == 48.76_f64)
     }
+
+    test "named arg skipping first default" {
+        // Regression: cross-module named args that skip defaults crashed
+        // with misaligned pointer (bool 0x1 treated as string pointer).
+        let result = lib.greet_named(excited: true)
+        assert(result == "Hello, world!")
+    }
+
+    test "named arg - all provided by name" {
+        let result = lib.greet_named(name: "Vole", excited: true)
+        assert(result == "Hello, Vole!")
+    }
+
+    test "named arg - reversed order" {
+        let result = lib.greet_named(excited: false, name: "Rust")
+        assert(result == "Hello, Rust")
+    }
+
+    test "named arg - only first by name" {
+        let result = lib.greet_named(name: "Test")
+        assert(result == "Hello, Test")
+    }
+
+    test "named arg - three params skip first two" {
+        let result = lib.three_params(c: true)
+        assert(result == "x:0:yes")
+    }
+
+    test "named arg - three params skip middle" {
+        let result = lib.three_params(a: "hi", c: true)
+        assert(result == "hi:0:yes")
+    }
+
+    test "named arg - three params all named reversed" {
+        let result = lib.three_params(c: true, b: 42, a: "z")
+        assert(result == "z:42:yes")
+    }
 }

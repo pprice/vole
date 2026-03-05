@@ -16,3 +16,18 @@ func format_value(n: i64, prefix: string = "", suffix: string = "") -> string {
 func typed_default(param1: u8, param2: string = "") -> f64 {
     return 48.76_f64
 }
+
+func greet_named(name: string = "world", excited: bool = false) -> string {
+    if excited {
+        return "Hello, " + name + "!"
+    }
+    return "Hello, " + name
+}
+
+func three_params(a: string = "x", b: i64 = 0, c: bool = false) -> string {
+    let result = a + ":" + b.to_string()
+    if c {
+        return result + ":yes"
+    }
+    return result + ":no"
+}

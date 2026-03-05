@@ -29,6 +29,7 @@ impl Cg<'_, '_, '_> {
         method_name_str: &str,
         vir_resolution: &VirResolvedMethod,
         vir_generic_key: Option<&VirFunctionMonomorphKey>,
+        resolved_call_args: Option<&[Option<usize>]>,
     ) -> CodegenResult<CompiledValue> {
         let module_path = self
             .analyzed()
@@ -177,14 +178,145 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         // Handle sret convention for large struct returns (3+ flat slots).
-        let mut call_args = args;
         let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id)? {
-            call_args.insert(0, sret_ptr);
+            // When using named arg reordering, we build call_args from scratch below,
+            // so only prepend sret for the positional (non-named) path.
+            if resolved_call_args.is_none() {
+                let mut new_args = Vec::with_capacity(args.len() + 1);
+                new_args.push(sret_ptr);
+                new_args.extend_from_slice(&args);
+                // Replace args with sret-prepended version for positional path below.
+                // For the named-arg path, sret is prepended in the branch below.
+                return self.module_method_call_positional(
+                    func_ref,
+                    new_args,
+                    &expected_types,
+                    name_id,
+                    return_type_id,
+                    true,
+                    &mut rc_temps,
+                );
+            }
             true
         } else {
             false
         };
 
+        let user_param_offset = if is_sret { 1 } else { 0 };
+        let expected_user_params = expected_types.len() - user_param_offset;
+
+        // When named arguments are present, reorder args and fill defaults
+        // according to the sema-provided mapping.
+        if let Some(mapping) = resolved_call_args {
+            let sema_func_id = self.analyzed().function_id_by_name_id(name_id);
+            let arg_count = arg_source.len();
+
+            // Validate mapping: length must match expected params, and every
+            // provided arg index must be in range.
+            let mapping_valid = mapping.len() == expected_user_params && {
+                let mut seen = vec![false; arg_count];
+                let mut mapped = 0usize;
+                let mut ok = true;
+                for call_idx in mapping.iter().flatten().copied() {
+                    if call_idx >= arg_count || seen[call_idx] {
+                        ok = false;
+                        break;
+                    }
+                    seen[call_idx] = true;
+                    mapped += 1;
+                }
+                ok && mapped == arg_count
+            };
+
+            if mapping_valid {
+                let mut call_args: Vec<Value> = Vec::with_capacity(expected_types.len());
+
+                // Prepend sret pointer if needed.
+                if is_sret {
+                    let sret_ptr = self
+                        .alloc_sret_ptr(return_type_id)?
+                        .expect("INTERNAL: sret already checked");
+                    call_args.push(sret_ptr);
+                }
+
+                for (slot, opt_call_idx) in mapping.iter().enumerate() {
+                    let expected_ty = expected_types.get(slot + user_param_offset).copied();
+                    let val = if let Some(&call_arg_idx) = opt_call_idx.as_ref() {
+                        // This slot maps to a caller-provided arg (already compiled).
+                        let compiled = args[call_arg_idx];
+                        // The arg is already a raw Value; coerce to the signature type.
+                        if let Some(expected) = expected_ty {
+                            let actual = self.builder.func.dfg.value_type(compiled);
+                            self.coerce_cranelift_value(compiled, actual, expected)
+                        } else {
+                            compiled
+                        }
+                    } else {
+                        // This slot uses its default value.
+                        let sema_fid = sema_func_id.expect(
+                            "INTERNAL: named arg mapping with defaults but no sema function id",
+                        );
+                        let default_vir = self
+                            .function_default_vir_init(sema_fid, slot)
+                            .cloned()
+                            .ok_or_else(|| {
+                            CodegenError::internal_with_context(
+                                "missing VIR function default expression",
+                                format!("{sema_fid:?} param {slot}"),
+                            )
+                        })?;
+                        let compiled = self.compile_vir_expr(&default_vir)?;
+                        self.coerce_arg_to_sig_type(compiled, expected_ty)
+                    };
+                    call_args.push(val);
+                }
+
+                let call_inst = self.emit_call(func_ref, &call_args);
+
+                let result = if is_sret {
+                    let results = self.builder.inst_results(call_inst);
+                    self.compiled_with_ty(results[0], self.ptr_type(), return_type_id)
+                } else {
+                    self.call_result(call_inst, return_type_id)?
+                };
+                self.consume_rc_args(&mut rc_temps)?;
+                return Ok(result);
+            }
+            // If mapping is invalid, fall through to positional path.
+        }
+
+        // Positional path: args are already in order, just fill trailing defaults.
+        let mut call_args = args;
+        if is_sret {
+            let sret_ptr = self
+                .alloc_sret_ptr(return_type_id)?
+                .expect("INTERNAL: sret already checked");
+            call_args.insert(0, sret_ptr);
+        }
+        self.module_method_call_positional(
+            func_ref,
+            call_args,
+            &expected_types,
+            name_id,
+            return_type_id,
+            is_sret,
+            &mut rc_temps,
+        )
+    }
+
+    /// Positional argument path for module method calls: fills trailing defaults
+    /// for omitted parameters and emits the call.
+    #[allow(clippy::too_many_arguments)]
+    fn module_method_call_positional(
+        &mut self,
+        func_ref: cranelift_codegen::ir::FuncRef,
+        mut call_args: Vec<Value>,
+        expected_types: &[Type],
+        name_id: NameId,
+        return_type_id: TypeId,
+        is_sret: bool,
+        rc_temps: &mut [CompiledValue],
+    ) -> CodegenResult<CompiledValue> {
         let user_param_offset = if is_sret { 1 } else { 0 };
         let expected_user_params = expected_types.len() - user_param_offset;
 
@@ -233,7 +365,7 @@ impl Cg<'_, '_, '_> {
         } else {
             self.call_result(call_inst, return_type_id)?
         };
-        self.consume_rc_args(&mut rc_temps)?;
+        self.consume_rc_args(rc_temps)?;
         Ok(result)
     }
 
