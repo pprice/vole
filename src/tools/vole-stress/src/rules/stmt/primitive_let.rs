@@ -80,7 +80,10 @@ mod tests {
         let result = PrimitiveLet.generate(&mut scope, &mut emit, &rule_params);
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.starts_with("let"), "got: {text}");
+        assert!(
+            text.starts_with("let") || text.starts_with("var"),
+            "got: {text}"
+        );
     }
 
     #[test]

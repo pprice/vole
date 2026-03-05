@@ -187,6 +187,7 @@ mod try_let;
 mod tuple_let;
 mod union_match_let;
 mod variable_shadow;
+mod variable_shadow_type_change;
 mod when_array_iter;
 mod when_concat_arms;
 mod when_f64_cond;
@@ -293,6 +294,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(nested_when::NestedWhen),
         Box::new(multi_push::MultiPush),
         Box::new(variable_shadow::VariableShadow),
+        Box::new(variable_shadow_type_change::VariableShadowTypeChange),
         Box::new(iter_terminal_chain::IterTerminalChain),
         Box::new(when_string_method_conds::WhenStringMethodConds),
         Box::new(last_elem_access::LastElemAccess),
