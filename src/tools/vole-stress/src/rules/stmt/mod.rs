@@ -85,6 +85,7 @@ mod iter_enumerate_collect;
 mod iter_find_let;
 mod iter_in_when_arms;
 mod iter_map_filter_let;
+mod iter_map_interpolation;
 mod iter_method_map;
 mod iter_predicate_let;
 mod iter_reduce_let;
@@ -382,6 +383,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(string_iter_let::StringIterLet),
         Box::new(reiterate_let::ReiterateLet),
         Box::new(iter_map_filter_let::IterMapFilterLet),
+        Box::new(iter_map_interpolation::IterMapInterpolation),
         // -- Mutation rules from stmt/mod.rs (batch 12) ---------------------------
         Box::new(compound_assignment::CompoundAssignment),
         Box::new(reassignment::Reassignment),
