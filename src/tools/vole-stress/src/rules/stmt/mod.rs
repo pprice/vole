@@ -68,6 +68,7 @@ mod for_reduce_pattern;
 mod for_stmt;
 mod for_when_accum;
 mod for_when_accumulate;
+mod from_fn_iter;
 mod generic_closure_call;
 mod generic_closure_chain;
 mod generic_closure_iter;
@@ -358,6 +359,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(iter_take_skip_collect::IterTakeSkipCollect),
         Box::new(iter_enumerate_collect::IterEnumerateCollect),
         Box::new(iter_factory_let::IterFactoryLet),
+        Box::new(from_fn_iter::FromFnIter),
         Box::new(iter_find_let::IterFindLet),
         Box::new(iter_zip_collect::IterZipCollect),
         Box::new(array_length_guard::ArrayLengthGuard),
