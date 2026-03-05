@@ -1,0 +1,34 @@
+// Regression: cross-module when+if+for pattern that triggered a brif
+// argument mismatch in loop parameter optimization (vol-u6tq).
+//
+// The pattern: deeply nested `when` as a condition of `if`, followed
+// by a `for` loop with variable declarations.  The `when` arms produce
+// a float value, compared against another `when`-produced float.
+// The `if` body is empty so both branches of the generated brif land on
+// the for-loop header.  After CFG cleanup both brif destinations target
+// the same block; loop-param-opt must update *all* destinations, not
+// just the first.
+
+class Processor {
+    func process(param: string) -> i32 {
+        if (when {
+            false => 43.07_f64
+            true => (when {
+                true => 17.77_f64
+                _ => 34.54_f64
+            })
+            _ => when {
+                ((true || false) && (false || true) && false) => 89.55_f64
+                _ => 60.97_f64
+            }
+        } < (41.01_f64 + (when {
+            _ => 19.05_f64
+        }))) {
+        }
+        for i in 0..2 {
+            let len = param.length() < 7
+            var x: i64 = 893_i64
+        }
+        return 85_i32
+    }
+}

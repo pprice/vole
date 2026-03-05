@@ -395,6 +395,10 @@ fn remove_block_params(func: &mut Function, block: Block, indices_to_remove: &Fx
 }
 
 /// Update jump arguments to remove values at specified indices.
+///
+/// Handles the case where multiple destinations of the same instruction
+/// target the same block (e.g., `brif cond, blockN(...), blockN(...)` after
+/// CFG cleanup). All matching destinations are updated.
 fn update_jump_args(
     func: &mut Function,
     inst: cranelift_codegen::ir::Inst,
@@ -403,39 +407,36 @@ fn update_jump_args(
 ) {
     let dfg = &mut func.dfg;
 
-    // Get current arguments for the target block
+    // Get current arguments for the target block.
+    // Collect new args for ALL destinations that target our block,
+    // since brif can have both branches going to the same block.
     let destinations = dfg.insts[inst].branch_destination(&dfg.jump_tables, &dfg.exception_tables);
 
-    // Find which destination targets our block and collect its args
-    let mut dest_idx = None;
-    let mut new_args: Vec<Value> = Vec::new();
+    let mut updates: Vec<(usize, Vec<Value>)> = Vec::new();
 
     for (i, dest) in destinations.iter().enumerate() {
         if dest.block(&dfg.value_lists) == target_block {
-            dest_idx = Some(i);
             // Collect args, filtering out removed indices
-            new_args = dest
+            let new_args: Vec<Value> = dest
                 .args(&dfg.value_lists)
                 .enumerate()
                 .filter(|(idx, _)| !indices_to_remove.contains(idx))
                 .filter_map(|(_, arg)| arg.as_value())
                 .collect();
-            break;
+            updates.push((i, new_args));
         }
     }
 
-    let Some(dest_idx) = dest_idx else {
-        return;
-    };
+    // Now mutate: clear and repopulate args for each matching destination
+    for (dest_idx, new_args) in updates {
+        let destinations_mut =
+            dfg.insts[inst].branch_destination_mut(&mut dfg.jump_tables, &mut dfg.exception_tables);
+        let dest_mut = &mut destinations_mut[dest_idx];
 
-    // Now mutate: clear and repopulate args for this destination
-    let destinations_mut =
-        dfg.insts[inst].branch_destination_mut(&mut dfg.jump_tables, &mut dfg.exception_tables);
-    let dest_mut = &mut destinations_mut[dest_idx];
-
-    dest_mut.clear(&mut dfg.value_lists);
-    for val in new_args {
-        dest_mut.append_argument(val, &mut dfg.value_lists);
+        dest_mut.clear(&mut dfg.value_lists);
+        for val in new_args {
+            dest_mut.append_argument(val, &mut dfg.value_lists);
+        }
     }
 }
 

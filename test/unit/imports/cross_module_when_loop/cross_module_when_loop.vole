@@ -1,0 +1,26 @@
+// Regression test for vol-u6tq: brif argument mismatch in cross-module
+// compilation when deeply nested `when` in an `if` condition is followed
+// by a `for` loop.
+//
+// The bug: loop parameter optimization only updated the first brif
+// destination targeting a loop header, leaving the second with stale
+// argument counts.  This only manifested cross-module because standalone
+// compilation constant-folded the when/if away.
+let lib = import "./lib"
+
+tests "cross-module when + empty if + for loop (vol-u6tq)" {
+    test "Processor.process compiles and returns correct value" {
+        let p = lib.Processor {}
+        assert(p.process("hello") == 85)
+    }
+
+    test "Processor.process with long string" {
+        let p = lib.Processor {}
+        assert(p.process("a longer string value") == 85)
+    }
+
+    test "Processor.process with short string" {
+        let p = lib.Processor {}
+        assert(p.process("hi") == 85)
+    }
+}
