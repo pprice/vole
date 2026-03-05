@@ -262,8 +262,14 @@ fn rederive_expr(
             rederive_ref(value, table, ret_ty, entities);
         }
 
-        // Lambda
-        VirExpr::Lambda { body, .. } => rederive_body(body, table, ret_ty, entities),
+        // Lambda — use the lambda's own return type, not the enclosing function's.
+        VirExpr::Lambda { body, vir_ty, .. } => {
+            let lambda_ret_ty = table
+                .unwrap_function(*vir_ty)
+                .map(|(_, ret)| ret)
+                .unwrap_or(ret_ty);
+            rederive_body(body, table, lambda_ret_ty, entities);
+        }
 
         // Optional / null
         VirExpr::NullCoalesce { value, default, .. } => {

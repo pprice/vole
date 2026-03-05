@@ -1,0 +1,75 @@
+// Regression test for vol-ix0h: block-body lambda inside a generic void
+// function caused a Cranelift verifier error.  The bug was in
+// rederive_decisions (VIR monomorph) which passed the outer function's
+// return type (void) to the lambda body's ReturnConvention, overriding
+// the correct Scalar convention with Void.
+
+// Generic void function with block-body lambda
+func make_and_call<T>(t: T) {
+    let f = (a: i64) -> i64 => {
+        return a + 1
+    }
+    let result = f(10)
+    assert(result == 11)
+}
+
+// Generic void function returning through lambda capture
+func capture_and_call<T>(t: T) {
+    let offset = 100
+    let f = (a: i64) -> i64 => {
+        let sum = a + offset
+        return sum
+    }
+    assert(f(5) == 105)
+}
+
+// Generic void function with non-i64 lambda return
+func string_lambda_in_generic<T>(t: T) {
+    let f = (a: string) -> string => {
+        return "{a}!"
+    }
+    assert(f("hello") == "hello!")
+}
+
+// Generic function where lambda body uses the type parameter
+func lambda_uses_type_param<T>(t: T) -> T {
+    let f = (x: T) -> T => {
+        return x
+    }
+    return f(t)
+}
+
+// Nesting: generic void function with nested block-body lambdas
+func nested_lambdas<T>(t: T) {
+    let outer = (a: i64) -> i64 => {
+        let inner = (b: i64) -> i64 => {
+            return b * 2
+        }
+        return inner(a) + 1
+    }
+    assert(outer(3) == 7)
+}
+
+tests {
+    test "block-body lambda in generic void function" {
+        make_and_call(42)
+        make_and_call("hello")
+    }
+
+    test "capturing block-body lambda in generic void function" {
+        capture_and_call(true)
+    }
+
+    test "string-returning lambda in generic void function" {
+        string_lambda_in_generic(0)
+    }
+
+    test "lambda using type parameter in generic function" {
+        assert(lambda_uses_type_param(42) == 42)
+        assert(lambda_uses_type_param("hi") == "hi")
+    }
+
+    test "nested block-body lambdas in generic void function" {
+        nested_lambdas(0)
+    }
+}
