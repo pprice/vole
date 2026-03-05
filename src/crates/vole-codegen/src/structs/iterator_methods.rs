@@ -91,7 +91,7 @@ impl Cg<'_, '_, '_> {
     /// Used as a fallback when expression data is absent (interface default method bodies
     /// are not analyzed by sema). Returns None if the type can't be determined without
     /// expression data.
-    fn derive_iterator_return_type(
+    pub(crate) fn derive_iterator_return_type(
         &self,
         method_name: &str,
         elem_type_id: TypeId,

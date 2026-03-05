@@ -1,0 +1,87 @@
+// Regression test: calling Iterable default methods (.unique(), .sorted(), etc.)
+// on array/string parameters inside generic functions caused segfaults because
+// the return type contained an unsubstituted interface type parameter.
+// The monomorphized function's substitution map only covers its own type params
+// (e.g. T: IFace1), not the Iterable interface's T, so the Iterator<T> return
+// type was not converted to RuntimeIterator, causing vtable dispatch on a raw
+// iterator pointer.
+
+interface IFace1 {}
+class MyClass { field1: i32 }
+extend MyClass with IFace1 {}
+
+func generic_unique<T: IFace1>(t: T, arr: [i64]) -> [i64] {
+    return arr.unique().collect()
+}
+
+func generic_sorted<T: IFace1>(t: T, arr: [i64]) -> [i64] {
+    return arr.sorted().collect()
+}
+
+func generic_reverse<T: IFace1>(t: T, arr: [i64]) -> [i64] {
+    return arr.reverse().collect()
+}
+
+func generic_take<T: IFace1>(t: T, arr: [i64]) -> [i64] {
+    return arr.take(2).collect()
+}
+
+func generic_skip<T: IFace1>(t: T, arr: [i64]) -> [i64] {
+    return arr.skip(1).collect()
+}
+
+func generic_count<T: IFace1>(t: T, arr: [i64]) -> i64 {
+    return arr.count()
+}
+
+func generic_string_count<T: IFace1>(t: T, s: string) -> i64 {
+    return s.count()
+}
+
+func generic_string_take<T: IFace1>(t: T, s: string) -> [string] {
+    return s.take(3).collect()
+}
+
+tests "generic iterable dispatch" {
+    let mc = MyClass { field1: 1 }
+
+    test "array unique in generic" {
+        let result = generic_unique(mc, [1, 2, 2, 3])
+        assert(result.length() == 3)
+    }
+
+    test "array sorted in generic" {
+        let result = generic_sorted(mc, [3, 1, 2])
+        assert(result.length() == 3)
+    }
+
+    test "array reverse in generic" {
+        let result = generic_reverse(mc, [1, 2, 3])
+        assert(result.length() == 3)
+    }
+
+    test "array take in generic" {
+        let result = generic_take(mc, [1, 2, 3])
+        assert(result.length() == 2)
+    }
+
+    test "array skip in generic" {
+        let result = generic_skip(mc, [1, 2, 3])
+        assert(result.length() == 2)
+    }
+
+    test "array count in generic" {
+        let result = generic_count(mc, [1, 2, 3])
+        assert(result == 3)
+    }
+
+    test "string count in generic" {
+        let result = generic_string_count(mc, "hello")
+        assert(result == 5)
+    }
+
+    test "string take in generic" {
+        let result = generic_string_take(mc, "hello")
+        assert(result.length() == 3)
+    }
+}
