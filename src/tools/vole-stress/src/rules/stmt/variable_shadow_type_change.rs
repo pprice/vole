@@ -70,6 +70,8 @@ impl StmtRule for VariableShadowTypeChange {
         // Pick a single-step conversion.
         let (expr, dest_type) = generate_single(emit, var_name, *src_type)?;
 
+        // Remove the old entry so downstream rules don't see the stale type
+        scope.locals.retain(|(n, _, _)| n != var_name);
         scope.add_local(var_name.clone(), TypeInfo::Primitive(dest_type), false);
         Some(format!("let {} = {}", var_name, expr))
     }
@@ -177,6 +179,8 @@ fn generate_chain(
         _ => return None,
     };
 
+    // Remove the old entry so downstream rules don't see the stale type
+    scope.locals.retain(|(n, _, _)| n != var_name);
     scope.add_local(var_name.to_string(), TypeInfo::Primitive(dest_type), false);
     Some(format!("let {} = {}", var_name, expr))
 }
@@ -335,8 +339,8 @@ mod tests {
 
             if let Some(text) = VariableShadowTypeChange.generate(&mut scope, &mut emit, &params) {
                 assert!(text.starts_with("let n = "), "seed {seed}: {text}");
-                // Scope must have at least 2 entries (original + shadow).
-                assert!(scope.locals.len() >= 2, "seed {seed}: scope not updated");
+                // Scope should have exactly 1 entry (old removed, new added).
+                assert_eq!(scope.locals.len(), 1, "seed {seed}: scope not updated");
             }
         }
     }
