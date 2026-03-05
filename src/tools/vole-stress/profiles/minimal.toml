@@ -25,6 +25,7 @@ static_methods_per_struct = [0, 0]
 methods_per_interface = [0, 0]
 fields_per_error = [0, 0]
 params_per_function = [0, 2]
+many_params_probability = 0.0
 type_params_per_class = [0, 0]
 type_params_per_interface = [0, 0]
 type_params_per_function = [0, 0]

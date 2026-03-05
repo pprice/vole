@@ -57,6 +57,11 @@ pub struct PlanConfig {
     pub fields_per_error: (usize, usize),
     /// Number of parameters per function (range).
     pub params_per_function: (usize, usize),
+    /// Probability (0.0-1.0) that a function has many parameters (8-12).
+    /// Stresses calling conventions: SystemV passes first 6 integer args in
+    /// registers, the rest go on the stack. Only applies to non-generic
+    /// functions (generic + many-param is too complex for stress testing).
+    pub many_params_probability: f64,
     /// Number of type parameters per generic class (range).
     pub type_params_per_class: (usize, usize),
     /// Number of type parameters per generic interface (range).
@@ -135,6 +140,7 @@ impl Default for PlanConfig {
             methods_per_interface: (2, 3),
             fields_per_error: (1, 3),
             params_per_function: (1, 4),
+            many_params_probability: 0.12,
             type_params_per_class: (0, 2),
             type_params_per_interface: (0, 2),
             type_params_per_function: (0, 2),
@@ -605,7 +611,18 @@ fn plan_function<R: Rng>(
         vec![]
     };
 
-    let param_count = rng.gen_range(config.params_per_function.0..=config.params_per_function.1);
+    // Occasionally generate many-param functions (8-12 params) to stress
+    // calling conventions. SystemV passes the first 6 integer args in
+    // registers; extra args spill to the stack. Only for non-generic
+    // functions to keep the focus on calling-convention edge cases.
+    let many_params = type_params.is_empty()
+        && config.many_params_probability > 0.0
+        && rng.gen_bool(config.many_params_probability);
+    let param_count = if many_params {
+        rng.gen_range(8..=12)
+    } else {
+        rng.gen_range(config.params_per_function.0..=config.params_per_function.1)
+    };
     let mut params = Vec::new();
 
     for _ in 0..param_count {
@@ -658,7 +675,9 @@ fn plan_function<R: Rng>(
     // For non-generic functions, sometimes mark trailing primitive params as
     // having defaults (~20% chance per trailing param, scanning from the end).
     // This enables named-arg and default-arg call patterns.
-    if type_params.is_empty() && params.len() >= 2 {
+    // Skip for many-param functions: we want all args passed to stress
+    // the calling convention (register spill to stack).
+    if type_params.is_empty() && params.len() >= 2 && !many_params {
         mark_trailing_defaults(rng, &mut params);
     }
 
