@@ -48,7 +48,9 @@ impl StmtRule for VariableShadowTypeChange {
     }
 
     fn precondition(&self, scope: &Scope, _params: &Params) -> bool {
-        !shadowable_locals(scope).is_empty()
+        // Only at top level — nested blocks (if/while/for) scope the shadow,
+        // but our retain() removes the old entry globally, breaking outer refs.
+        scope.depth == 0 && !shadowable_locals(scope).is_empty()
     }
 
     fn generate(&self, scope: &mut Scope, emit: &mut Emit, _params: &Params) -> Option<String> {
