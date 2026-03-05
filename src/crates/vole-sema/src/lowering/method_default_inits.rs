@@ -27,6 +27,9 @@ pub struct LowerMethodDefaultInitsArgs<'a> {
 
 pub struct LowerModuleMethodDefaultInitsArgs<'a> {
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
+    /// Main program interner — used to re-intern string literal symbols so
+    /// they are resolvable from the main interner at codegen call sites.
+    pub main_interner: &'a mut Interner,
     pub names: &'a NameTable,
     pub entities: &'a dyn LoweringEntityLookup,
     pub node_map: &'a NodeMap,
@@ -80,6 +83,7 @@ pub fn lower_module_method_default_inits(
 ) -> FxHashMap<(MethodId, usize), VirRef> {
     let LowerModuleMethodDefaultInitsArgs {
         module_programs,
+        main_interner,
         names,
         entities,
         node_map,
@@ -107,6 +111,7 @@ pub fn lower_module_method_default_inits(
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
         };
+        let before_keys: Vec<(MethodId, usize)> = map.keys().copied().collect();
         lower_method_default_inits_in_decls(
             &program.declarations,
             module_id,
@@ -116,8 +121,31 @@ pub fn lower_module_method_default_inits(
             &mut ctx,
             &mut map,
         );
+
+        // Re-intern string literal symbols from this module's interner
+        // into the main interner (same rationale as function defaults).
+        let before_set: HashSet<(MethodId, usize)> = before_keys.into_iter().collect();
+        for (key, vir_ref) in map.iter_mut() {
+            if !before_set.contains(key) {
+                reintern_vir_string_literal(vir_ref, interner, main_interner);
+            }
+        }
     }
     map
+}
+
+/// Re-intern a `VirExpr::StringLiteral` symbol from `source_interner` into
+/// `target_interner`.
+fn reintern_vir_string_literal(
+    vir_ref: &mut VirRef,
+    source_interner: &Interner,
+    target_interner: &mut Interner,
+) {
+    use vole_vir::VirExpr;
+    if let VirExpr::StringLiteral(sym) = vir_ref.as_mut() {
+        let s = source_interner.resolve(*sym);
+        *sym = target_interner.intern(s);
+    }
 }
 
 /// Recursively lower method default parameter expressions in declarations.

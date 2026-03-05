@@ -1,0 +1,18 @@
+// Module with functions that have default parameter values.
+// Used by cross_module_defaults.vole to test cross-module calls with defaults.
+
+func greet(name: string, greeting: string = "Hello") -> string {
+    return greeting + ", " + name + "!"
+}
+
+func add(a: i64, b: i64 = 10) -> i64 {
+    return a + b
+}
+
+func format_value(n: i64, prefix: string = "", suffix: string = "") -> string {
+    return prefix + n.to_string() + suffix
+}
+
+func typed_default(param1: u8, param2: string = "") -> f64 {
+    return 48.76_f64
+}

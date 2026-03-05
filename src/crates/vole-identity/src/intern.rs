@@ -52,6 +52,11 @@ impl Interner {
         &self.strings[sym.index() as usize]
     }
 
+    /// Resolve a symbol, returning `None` if the index is out of bounds.
+    pub fn try_resolve(&self, sym: Symbol) -> Option<&str> {
+        self.strings.get(sym.index() as usize).map(|s| s.as_str())
+    }
+
     /// Returns the number of interned strings.
     pub fn len(&self) -> usize {
         self.strings.len()

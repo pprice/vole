@@ -635,9 +635,12 @@ where
             type_table,
         });
     // Module function defaults (type-table-dependent, logically module-only).
+    // Uses the main interner so that VIR StringLiteral symbols are resolvable
+    // from the main interner at codegen call sites (cross-module calls).
     let module_vir_function_default_inits =
         lower_module_function_default_inits(LowerModuleFunctionDefaultInitsArgs {
             module_programs: &mut module_programs,
+            main_interner: interner,
             names,
             entities,
             node_map,
@@ -659,9 +662,11 @@ where
         type_table,
     });
     // Module method defaults (type-table-dependent, logically module-only).
+    // Uses the main interner for the same cross-module re-interning reason.
     let module_vir_method_default_inits =
         lower_module_method_default_inits(LowerModuleMethodDefaultInitsArgs {
             module_programs: &mut module_programs,
+            main_interner: interner,
             names,
             entities,
             node_map,

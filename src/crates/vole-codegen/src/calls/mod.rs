@@ -674,7 +674,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Narrow/extend integer types or promote/demote floats to match the
     /// Cranelift signature parameter type.
-    fn coerce_arg_to_sig_type(
+    pub(crate) fn coerce_arg_to_sig_type(
         &mut self,
         compiled: CompiledValue,
         expected_ty: Option<Type>,

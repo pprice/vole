@@ -166,6 +166,16 @@ impl Cg<'_, '_, '_> {
             .codegen_ctx
             .jit_module()
             .declare_func_in_func(func_id, self.builder.func);
+
+        // Get expected parameter types from the function's Cranelift signature
+        // and fill in defaults for omitted parameters.
+        let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
+        let expected_types: Vec<Type> = self.builder.func.dfg.signatures[sig_ref]
+            .params
+            .iter()
+            .map(|p| p.value_type)
+            .collect();
+
         // Handle sret convention for large struct returns (3+ flat slots).
         let mut call_args = args;
         let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id)? {
@@ -174,6 +184,45 @@ impl Cg<'_, '_, '_> {
         } else {
             false
         };
+
+        let user_param_offset = if is_sret { 1 } else { 0 };
+        let expected_user_params = expected_types.len() - user_param_offset;
+
+        // If there are fewer provided args than expected, compile default expressions
+        if call_args.len() - user_param_offset < expected_user_params {
+            let sema_func_id = self.analyzed().function_id_by_name_id(name_id);
+            if let Some(sema_func_id) = sema_func_id {
+                let start_index = call_args.len() - user_param_offset;
+                for (idx, &expected_ty) in expected_types
+                    .iter()
+                    .enumerate()
+                    .take(expected_types.len())
+                    .skip(start_index + user_param_offset)
+                {
+                    // idx is the index into expected_types (includes sret offset);
+                    // the parameter slot in the function definition is idx - user_param_offset.
+                    let param_slot = idx - user_param_offset;
+                    let Some(default_vir) = self
+                        .function_default_vir_init(sema_func_id, param_slot)
+                        .cloned()
+                    else {
+                        if self
+                            .analyzed()
+                            .has_function_default_expr(sema_func_id, param_slot)
+                        {
+                            return Err(CodegenError::internal_with_context(
+                                "missing VIR function default expression",
+                                format!("{sema_func_id:?} param {param_slot}"),
+                            ));
+                        }
+                        continue;
+                    };
+                    let compiled = self.compile_vir_expr(&default_vir)?;
+                    let arg_value = self.coerce_arg_to_sig_type(compiled, Some(expected_ty));
+                    call_args.push(arg_value);
+                }
+            }
+        }
 
         let call_inst = self.emit_call(func_ref, &call_args);
 

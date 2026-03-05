@@ -1,0 +1,48 @@
+// Tests for cross-module function calls with default parameters.
+//
+// Regression test: cross-module calls with omitted default args previously
+// produced a Cranelift verifier error ("mismatched argument count") because
+// codegen did not fill in default values for the missing parameters.
+
+let lib = import "./cross_module_defaults_lib"
+
+tests "cross-module default parameters" {
+    test "all args provided" {
+        assert(lib.greet("World", "Hi") == "Hi, World!")
+    }
+
+    test "omit one defaulted arg" {
+        assert(lib.greet("World") == "Hello, World!")
+    }
+
+    test "numeric default - use default" {
+        assert(lib.add(5) == 15)
+    }
+
+    test "numeric default - override" {
+        assert(lib.add(5, 20) == 25)
+    }
+
+    test "multiple defaults - all provided" {
+        assert(lib.format_value(42, "$", " dollars") == "$42 dollars")
+    }
+
+    test "multiple defaults - omit last" {
+        assert(lib.format_value(42, "$") == "$42")
+    }
+
+    test "multiple defaults - omit all defaults" {
+        assert(lib.format_value(42) == "42")
+    }
+
+    test "mixed types with default - original repro" {
+        // This was the exact failure case: u8 param + string default
+        let result = lib.typed_default(25_u8)
+        assert(result == 48.76_f64)
+    }
+
+    test "mixed types with default - all args" {
+        let result = lib.typed_default(25_u8, "hello")
+        assert(result == 48.76_f64)
+    }
+}
