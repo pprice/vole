@@ -129,12 +129,11 @@ impl ExprRule for IterReduce {
                 TypeInfo::Primitive(PrimitiveType::String),
                 TypeInfo::Primitive(PrimitiveType::I64),
             ) => {
-                // Single-param map lambda: can use unparenthesized/it form
-                let map_lambda = emit_single_param_lambda(emit, "\"\" + x");
-                // Multi-param reduce lambda: always keep parens
+                // Cross-type map: must use .iter() (direct .map() is same-type only)
+                // and explicit lambda (it.to_string() doesn't infer return type)
                 Some(format!(
-                    "{}{}.map({}).reduce(\"\", (acc, s) => acc + s + \",\")",
-                    var_name, iter_prefix, map_lambda
+                    "{}.iter().map((x) => x.to_string()).reduce(\"\", (acc, s) => acc + s + \",\")",
+                    var_name
                 ))
             }
             _ => None,

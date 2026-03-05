@@ -5,7 +5,7 @@ use pretty::{Arena, DocAllocator, DocBuilder};
 use vole_frontend::Interner;
 use vole_frontend::ast::*;
 
-use super::expr::print_string_literal;
+use super::expr::{print_expr, print_string_literal};
 use super::{INDENT, print_func_body, print_return_type, print_type_expr, print_type_params};
 
 /// Groups arguments for printing a class-like body (class, struct).
@@ -74,10 +74,16 @@ fn print_param<'a>(
     param: &Param,
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
-    arena
+    let base = arena
         .text(interner.resolve(param.name).to_string())
         .append(arena.text(": "))
-        .append(print_type_expr(arena, &param.ty, interner))
+        .append(print_type_expr(arena, &param.ty, interner));
+    if let Some(default) = &param.default_value {
+        base.append(arena.text(" = "))
+            .append(print_expr(arena, default, interner))
+    } else {
+        base
+    }
 }
 
 /// Print an external block.
