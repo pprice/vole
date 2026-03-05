@@ -103,6 +103,7 @@ mod length_comparison;
 mod literal_method;
 mod manual_minmax;
 mod many_arm_match;
+mod many_param_call;
 mod many_params_call;
 mod map_tostring_reduce;
 mod match_array;
@@ -402,6 +403,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(break_continue::BreakContinue),
         Box::new(fn_param_call::FnParamCall),
         Box::new(many_params_call::ManyParamsCall),
+        Box::new(many_param_call::ManyParamCall),
         Box::new(nested_func_def::NestedFuncDef),
         Box::new(nested_func_calls::NestedFuncCalls),
         Box::new(bool_match_let::BoolMatchLet),
