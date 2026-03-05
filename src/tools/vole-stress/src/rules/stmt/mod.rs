@@ -163,6 +163,7 @@ mod string_match_let;
 mod string_method_let;
 mod string_predicate;
 mod string_replace;
+mod string_search_let;
 mod string_split;
 mod struct_copy;
 mod struct_destructure;
@@ -208,6 +209,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(string_char_at::StringCharAt),
         Box::new(string_split::StringSplitLet),
         Box::new(string_split::StringSplitFor),
+        Box::new(string_search_let::StringSearchLet),
         Box::new(interpolation_concat::InterpolationConcat),
         Box::new(range_tostring::RangeTostring),
         Box::new(range_when_accum::RangeWhenAccum),
