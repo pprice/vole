@@ -65,6 +65,7 @@ mod for_stmt;
 mod for_when_accumulate;
 mod generic_closure_chain;
 mod i32_boundary;
+mod i64_boundary;
 mod identity_arithmetic;
 mod if_stmt;
 mod iface_function_call;
@@ -219,6 +220,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(checked_arithmetic::CheckedArithmetic),
         Box::new(modulo_edge::ModuloEdge),
         Box::new(i32_boundary::I32Boundary),
+        Box::new(i64_boundary::I64Boundary),
         // -- Closure rules ------------------------------------------------------
         Box::new(closure_concat::ClosureConcat),
         Box::new(closure_capture::ClosureCapture),
