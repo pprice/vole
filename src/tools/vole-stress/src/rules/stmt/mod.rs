@@ -212,6 +212,7 @@ mod when_string_method_conds;
 mod when_struct_interpolation;
 mod when_tostring_arms;
 mod when_with_contains;
+mod while_complex_exit;
 mod while_false;
 mod while_stmt;
 mod while_string_build;
@@ -458,6 +459,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         // -- Control flow rules (batch 19) ----------------------------------------
         Box::new(if_stmt::IfStmt),
         Box::new(while_stmt::WhileStmt),
+        Box::new(while_complex_exit::WhileComplexExit),
         Box::new(for_stmt::ForStmt),
         Box::new(for_break_iter::ForBreakIter),
         Box::new(nested_for_loop::NestedForLoop),
