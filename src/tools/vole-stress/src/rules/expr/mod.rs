@@ -91,7 +91,8 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         Box::new(iter_map_collect::IterMapCollect),
         Box::new(iter_filter_collect::IterFilterCollect),
         Box::new(iter_chain_collect::IterChainCollect),
-        Box::new(iter_flat_map_collect::IterFlatMapCollect),
+        // flat_map crashes with null pointer in vole_array_iter_next_impl — disabled
+        // Box::new(iter_flat_map_collect::IterFlatMapCollect),
         Box::new(iter_first_last_nth::IterFirstLastNth),
     ]
 }
