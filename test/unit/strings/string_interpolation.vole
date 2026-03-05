@@ -121,6 +121,34 @@ tests "string interpolation" {
     }
 }
 
+// Regression: generic function monomorphized with multiple type args must
+// re-derive StringConversion per instance.  Previously the VIR template
+// captured the identity-analysis conversion (I64ToString for TypeParam)
+// and all instances inherited it, treating string/bool values as i64
+// (vol-vrjl).
+func interp_generic<T>(item: T) -> string {
+    return "value: {item}"
+}
+
+tests "generic interpolation" {
+    test "i64 first" {
+        let r = interp_generic(42)
+        assert(r == "value: 42")
+    }
+    test "string second" {
+        let r = interp_generic("hello")
+        assert(r == "value: hello")
+    }
+    test "bool third" {
+        let r = interp_generic(true)
+        assert(r == "value: true")
+    }
+    test "float" {
+        let r = interp_generic(3.14)
+        assert(r == "value: 3.14")
+    }
+}
+
 tests "raw strings" {
     test "basic" {
         let s = @"hello"

@@ -676,18 +676,29 @@ fn lower_interpolated_string(parts: &[StringPart], ctx: &mut LoweringCtx<'_>) ->
             StringPart::Literal(s) => VirStringPart::Literal(ctx.interner.intern(s)),
             StringPart::Expr(expr) => {
                 let value = lower_expr(expr, ctx);
-                let conversion = ctx
-                    .node_map
-                    .get_string_conversion(expr.id)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        if ctx.generic {
-                            let expr_ty = ctx.node_map.get_type(expr.id).unwrap_or(TypeId::UNKNOWN);
-                            StringConversion::Generic { type_id: expr_ty }
-                        } else {
-                            StringConversion::Identity
-                        }
-                    });
+                let conversion = if ctx.generic {
+                    // In generic mode, check if the expression type contains a
+                    // type parameter.  If so, the NodeMap's StringConversion was
+                    // derived from abstract TypeParam analysis (which falls
+                    // through to I64ToString) and is NOT valid for concrete
+                    // instantiations.  Emit StringConversion::Generic so the
+                    // VIR monomorphizer re-derives the correct conversion per
+                    // instance.
+                    let expr_ty = ctx.node_map.get_type(expr.id).unwrap_or(TypeId::UNKNOWN);
+                    if ctx.type_arena.contains_type_param(expr_ty) {
+                        StringConversion::Generic { type_id: expr_ty }
+                    } else {
+                        ctx.node_map
+                            .get_string_conversion(expr.id)
+                            .cloned()
+                            .unwrap_or(StringConversion::Generic { type_id: expr_ty })
+                    }
+                } else {
+                    ctx.node_map
+                        .get_string_conversion(expr.id)
+                        .cloned()
+                        .unwrap_or(StringConversion::Identity)
+                };
                 VirStringPart::Expr { value, conversion }
             }
         })
