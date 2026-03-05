@@ -1872,7 +1872,13 @@ fn plan_interface_params<R: Rng>(
                 && let Some(symbol) = module.get_symbol_mut(func_id)
                 && let SymbolKind::Function(ref mut info) = symbol.kind
             {
-                info.params.push(param);
+                // Insert before any params with defaults to avoid E2084.
+                let insert_pos = info
+                    .params
+                    .iter()
+                    .position(|p| p.has_default)
+                    .unwrap_or(info.params.len());
+                info.params.insert(insert_pos, param);
             }
         }
     }
