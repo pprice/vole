@@ -35,6 +35,7 @@ mod string_chars;
 mod string_concat;
 mod string_length;
 mod string_split;
+mod string_substring;
 mod string_transform;
 mod to_string;
 mod tuple_index;
@@ -94,5 +95,6 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         // flat_map crashes with null pointer in vole_array_iter_next_impl — disabled
         // Box::new(iter_flat_map_collect::IterFlatMapCollect),
         Box::new(iter_first_last_nth::IterFirstLastNth),
+        Box::new(string_substring::StringSubstring),
     ]
 }
