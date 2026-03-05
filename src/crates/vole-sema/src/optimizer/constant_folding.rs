@@ -531,6 +531,7 @@ impl<'a> ConstantFolder<'a> {
         };
 
         // Take ownership of the if-expression to extract the taken branch
+        let old_id = expr.id;
         let ExprKind::If(if_expr) = std::mem::replace(&mut expr.kind, ExprKind::Unreachable) else {
             unreachable!();
         };
@@ -552,6 +553,7 @@ impl<'a> ConstantFolder<'a> {
             }));
         }
 
+        self.propagate_string_conversion(old_id, expr.id);
         self.stats.branches_eliminated += 1;
         true
     }
@@ -574,6 +576,7 @@ impl<'a> ConstantFolder<'a> {
                 Some(cond) => match self.get_const_value(cond) {
                     Some(ConstValue::Bool(true)) => {
                         // This arm always matches; replace the whole when
+                        let old_id = expr.id;
                         let ExprKind::When(mut when) =
                             std::mem::replace(&mut expr.kind, ExprKind::Unreachable)
                         else {
@@ -582,6 +585,7 @@ impl<'a> ConstantFolder<'a> {
                         let arm = when.arms.swap_remove(i);
                         expr.id = arm.body.id;
                         expr.kind = arm.body.kind;
+                        self.propagate_string_conversion(old_id, expr.id);
                         self.stats.branches_eliminated += 1;
                         return true;
                     }
@@ -595,6 +599,7 @@ impl<'a> ConstantFolder<'a> {
                 },
                 None if all_prior_dead => {
                     // Wildcard arm and all prior arms are dead -- only this fires
+                    let old_id = expr.id;
                     let ExprKind::When(mut when) =
                         std::mem::replace(&mut expr.kind, ExprKind::Unreachable)
                     else {
@@ -603,6 +608,7 @@ impl<'a> ConstantFolder<'a> {
                     let arm = when.arms.swap_remove(i);
                     expr.id = arm.body.id;
                     expr.kind = arm.body.kind;
+                    self.propagate_string_conversion(old_id, expr.id);
                     self.stats.branches_eliminated += 1;
                     return true;
                 }
@@ -636,6 +642,29 @@ impl<'a> ConstantFolder<'a> {
         }
 
         false
+    }
+
+    /// When branch elimination replaces an expression node (e.g. a `when` or
+    /// `if`) with one of its sub-expressions, the replacement gets a new
+    /// `NodeId`.  Any sema annotations keyed on the *original* `NodeId` must
+    /// be carried over to the new one so that downstream passes (VIR lowering)
+    /// can still find them.
+    ///
+    /// Currently the only annotation that matters here is `StringConversion`
+    /// (used when the eliminated expression appears inside string
+    /// interpolation), but the same principle applies to any future annotation
+    /// keyed on the expression node.
+    fn propagate_string_conversion(
+        &mut self,
+        old_id: vole_frontend::NodeId,
+        new_id: vole_frontend::NodeId,
+    ) {
+        if old_id == new_id {
+            return;
+        }
+        if let Some(conv) = self.node_map.get_string_conversion(old_id).cloned() {
+            self.node_map.set_string_conversion(new_id, conv);
+        }
     }
 
     /// Recursively fold children of an expression.

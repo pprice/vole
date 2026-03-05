@@ -88,6 +88,37 @@ tests "string interpolation" {
         let s = "length: {arr.length()}"
         assert(s == "length: 5")
     }
+
+    // Regression: when expressions inside interpolation must convert their
+    // result to string, not pass raw integer values.  The constant folding
+    // optimizer replaces `when` with its arm body, changing the node ID and
+    // losing the StringConversion annotation (vol-ltjx).
+    test "i64 when in interpolation" {
+        let x = 10
+        let s = "result: {when {
+            x > 5 => x * 2
+            _ => 0
+        }}"
+        assert(s == "result: 20")
+    }
+
+    test "when in interpolation with wildcard arm" {
+        let x = 1
+        let s = "result: {when {
+            x > 100 => x
+            _ => x + 5
+        }}"
+        assert(s == "result: 6")
+    }
+
+    test "when in interpolation with string result" {
+        let x = true
+        let s = "flag: {when {
+            x => "yes"
+            _ => "no"
+        }}"
+        assert(s == "flag: yes")
+    }
 }
 
 tests "raw strings" {
