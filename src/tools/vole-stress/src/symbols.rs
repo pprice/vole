@@ -408,6 +408,16 @@ impl TypeInfo {
             TypeInfo::Iterator(elem) => TypeInfo::Iterator(Box::new(
                 elem.substitute_type_param(param_name, replacement),
             )),
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => TypeInfo::Function {
+                param_types: param_types
+                    .iter()
+                    .map(|t| t.substitute_type_param(param_name, replacement))
+                    .collect(),
+                return_type: Box::new(return_type.substitute_type_param(param_name, replacement)),
+            },
             _ => self.clone(),
         }
     }
@@ -425,6 +435,15 @@ impl TypeInfo {
             }
             TypeInfo::Fallible { success, error } => {
                 success.contains_type_param(param_name) || error.contains_type_param(param_name)
+            }
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => {
+                param_types
+                    .iter()
+                    .any(|t| t.contains_type_param(param_name))
+                    || return_type.contains_type_param(param_name)
             }
             _ => false,
         }

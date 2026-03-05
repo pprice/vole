@@ -105,6 +105,12 @@ pub struct PlanConfig {
     /// codegen paths (closure allocation, capture, RC of captured values).
     /// Only applies to non-generic functions.
     pub closure_return_probability: f64,
+    /// Probability (0.0-1.0) that a function is a "generic closure param" function.
+    /// These functions have a type parameter T, a T-typed parameter, and a closure
+    /// parameter that uses T (e.g. `(T) -> string`). The function body calls the
+    /// closure with the T-typed argument. This exercises the interaction between
+    /// generic monomorphization and closure parameter types.
+    pub generic_closure_param_fn_probability: f64,
     /// Number of sentinel types per module (range).
     pub sentinels_per_module: (usize, usize),
 }
@@ -146,6 +152,7 @@ impl Default for PlanConfig {
             interface_param_probability: 0.12,
             generic_closure_interface_fn_probability: 0.15,
             closure_return_probability: 0.12,
+            generic_closure_param_fn_probability: 0.12,
             sentinels_per_module: (1, 3),
         }
     }
@@ -389,6 +396,10 @@ fn plan_module_declarations<R: Rng>(
             && rng.gen_bool(config.generic_closure_interface_fn_probability)
         {
             plan_generic_closure_interface_fn(rng, table, names, module_id);
+        } else if config.generic_closure_param_fn_probability > 0.0
+            && rng.gen_bool(config.generic_closure_param_fn_probability)
+        {
+            plan_generic_closure_param_fn(rng, table, names, module_id);
         } else if config.closure_return_probability > 0.0
             && rng.gen_bool(config.closure_return_probability)
         {
@@ -757,6 +768,94 @@ fn plan_generic_closure_interface_fn<R: Rng>(
 
     // Return the matching array type so `.iter().map().filter().collect()` works
     let return_type = TypeInfo::Array(Box::new(elem_type));
+
+    let kind = SymbolKind::Function(FunctionInfo {
+        type_params,
+        params,
+        return_type,
+    });
+
+    table
+        .get_module_mut(module_id)
+        .map(|m| m.add_symbol(name, kind))
+        .unwrap_or(SymbolId(0))
+}
+
+/// Plan a "generic closure param" function declaration.
+///
+/// These functions have a type parameter T, a T-typed parameter, and a closure
+/// parameter whose signature uses T (e.g. `(T) -> string`). The function body
+/// calls the closure with the T-typed argument. This exercises the interaction
+/// between generic monomorphization and closure parameter types -- the compiler
+/// must correctly substitute T in the closure type when instantiating the
+/// generic function.
+///
+/// Example generated signatures:
+/// ```vole
+/// func apply<T>(item: T, f: (T) -> string) -> string
+/// func transform<T>(item: T, f: (T) -> i64) -> i64
+/// func check<T>(item: T, f: (T) -> bool) -> bool
+/// ```
+fn plan_generic_closure_param_fn<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    module_id: ModuleId,
+) -> SymbolId {
+    let name = names.next("func");
+
+    // Single type parameter T
+    let type_params = plan_type_params(names, 1);
+    let tp_name = type_params[0].name.clone();
+
+    // Pick the closure's return type: a primitive (string, i64, or bool)
+    let closure_return_prim = match rng.gen_range(0..3) {
+        0 => PrimitiveType::String,
+        1 => PrimitiveType::I64,
+        _ => PrimitiveType::Bool,
+    };
+    let closure_return_type = TypeInfo::Primitive(closure_return_prim);
+
+    // Build params: always include a T-typed param and a (T) -> RetType closure param
+    let mut params = Vec::new();
+
+    // Required: T-typed param
+    params.push(ParamInfo {
+        name: names.next("param"),
+        param_type: TypeInfo::TypeParam(tp_name.clone()),
+        has_default: false,
+    });
+
+    // Required: closure param (T) -> RetType
+    params.push(ParamInfo {
+        name: names.next("param"),
+        param_type: TypeInfo::Function {
+            param_types: vec![TypeInfo::TypeParam(tp_name.clone())],
+            return_type: Box::new(closure_return_type.clone()),
+        },
+        has_default: false,
+    });
+
+    // Optionally add 0-1 more random primitive params for variety
+    let extra_params = rng.gen_range(0..=1);
+    for _ in 0..extra_params {
+        params.push(ParamInfo {
+            name: names.next("param"),
+            param_type: TypeInfo::Primitive(PrimitiveType::random_expr_type(rng)),
+            has_default: false,
+        });
+    }
+
+    // Shuffle the params to vary signatures (Fisher-Yates shuffle)
+    let n = params.len();
+    for i in (1..n).rev() {
+        let j = rng.gen_range(0..=i);
+        params.swap(i, j);
+    }
+
+    // Return type matches the closure's return type so the function body
+    // can simply `return f(item)`.
+    let return_type = closure_return_type;
 
     let kind = SymbolKind::Function(FunctionInfo {
         type_params,
