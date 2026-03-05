@@ -34,6 +34,7 @@ mod closure_result_concat;
 mod closure_return_func;
 mod closure_struct_capture;
 mod closure_when_capture;
+mod closure_when_iter;
 mod comparison_chain;
 mod compound_assignment;
 mod compound_bool;
@@ -260,6 +261,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(closure_iter_capture::ClosureIterCapture),
         Box::new(closure_extend_method::ClosureExtendMethod),
         Box::new(closure_match_guard::ClosureMatchGuard),
+        Box::new(closure_when_iter::ClosureWhenIter),
         // -- Match rules --------------------------------------------------------
         Box::new(match_let::MatchLet),
         Box::new(match_method::MatchMethod),
