@@ -1605,8 +1605,17 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                     // Void return type is a placeholder for Self-returning methods
                     self.emit_self_method(method, &target_name, &target_fields);
                 } else {
-                    // Non-void return type: emit as a regular method
-                    self.emit_method(method);
+                    // Force expression-body syntax for getter methods in standalone
+                    // extend blocks to prevent infinite recursion: block bodies can
+                    // generate random statements that call the same method recursively.
+                    self.emit_line("");
+                    let params = self.format_params(&method.params);
+                    let return_type_str = self.format_return_type(&method.return_type);
+                    let expr = self.generate_return_expr(&method.return_type, &method.params);
+                    self.emit_line(&format!(
+                        "func {}({}){} => {}",
+                        method.name, params, return_type_str, expr
+                    ));
                 }
             }
         }
