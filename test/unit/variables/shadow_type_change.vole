@@ -1,0 +1,58 @@
+// Tests for variable shadowing with type changes.
+// Ensures constant propagation does not carry stale bindings across
+// shadow boundaries where the type changes.
+
+tests "shadow type change" {
+    test "int to string shadow" {
+        let x = 42
+        let x = x.to_string()
+        assert(x == "42")
+    }
+
+    test "string to int shadow" {
+        let s = "hello"
+        let s = s.length()
+        assert(s == 5)
+    }
+
+    test "int to bool shadow" {
+        let x = 1
+        let x = x > 0
+        assert(x == true)
+    }
+
+    test "chain of shadows with type changes" {
+        let v = 100
+        let v = v.to_string()
+        let v = v.length()
+        assert(v == 3)
+    }
+
+    test "shadow same type preserves propagation" {
+        let a = 10
+        let a = 20
+        assert(a == 20)
+    }
+
+    test "multiple shadows same name different types" {
+        let x = 1
+        let x = x + 1
+        let x = x.to_string()
+        let x = x.length()
+        assert(x == 1)
+    }
+
+    test "shadow with method call on original" {
+        let n = 99
+        let n = n.to_string()
+        assert(n == "99")
+        assert(n.length() == 2)
+    }
+
+    test "constant shadow then non-constant shadow" {
+        let x = 5
+        let y = x + 1
+        let x = y.to_string()
+        assert(x == "6")
+    }
+}

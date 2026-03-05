@@ -311,6 +311,11 @@ impl<'a> ConstantFolder<'a> {
                         && let Some(const_val) = self.get_const_value(expr)
                     {
                         self.constant_bindings.insert(let_stmt.name, const_val);
+                    } else {
+                        // Shadowed binding is not constant — remove any stale
+                        // constant entry so subsequent references don't get the
+                        // old value propagated (e.g. `let x = 42; let x = x.to_string()`).
+                        self.constant_bindings.remove(&let_stmt.name);
                     }
                 }
             }
@@ -430,6 +435,11 @@ impl<'a> ConstantFolder<'a> {
                         && let Some(const_val) = self.get_const_value(expr)
                     {
                         self.constant_bindings.insert(let_stmt.name, const_val);
+                    } else {
+                        // Shadowed binding is not constant — remove any stale
+                        // constant entry so subsequent references don't get the
+                        // old value propagated (e.g. `let x = 42; let x = x.to_string()`).
+                        self.constant_bindings.remove(&let_stmt.name);
                     }
                 }
             }
