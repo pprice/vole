@@ -30,6 +30,7 @@ mod match_expr;
 mod method_interpolation;
 mod null_coalesce;
 mod optional_chaining;
+mod static_type_method;
 mod string_bool;
 mod string_chain;
 mod string_chars;
@@ -100,5 +101,7 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         Box::new(iter_first_last_nth::IterFirstLastNth),
         Box::new(string_substring::StringSubstring),
         Box::new(string_lines_count::StringLinesCount),
+        // -- batch 5: static type methods --------------------------------------
+        Box::new(static_type_method::StaticTypeMethod),
     ]
 }
