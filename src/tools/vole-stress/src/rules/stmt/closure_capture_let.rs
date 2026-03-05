@@ -132,10 +132,7 @@ fn emit_numeric_capture(
                 body_parts.push(name.clone());
             }
             PrimitiveType::Bool => {
-                body_parts.push(format!(
-                    "when {{ {} => 1, _ => 0 }}",
-                    name,
-                ));
+                body_parts.push(format!("when {{ {} => 1, _ => 0 }}", name,));
             }
             PrimitiveType::String => {
                 // String in a numeric context: use its length
@@ -187,7 +184,13 @@ fn emit_numeric_capture(
         let indent = emit.indent_str();
         Some(format!(
             "let {} = (x: {}) -> {} => {}\n{}let {} = {}({})",
-            fn_name, closure_type_str, closure_type_str, body_expr, indent, result_name, fn_name,
+            fn_name,
+            closure_type_str,
+            closure_type_str,
+            body_expr,
+            indent,
+            result_name,
+            fn_name,
             arg,
         ))
     } else {
@@ -316,9 +319,11 @@ mod tests {
         let mut emit = test_emit(&mut rng, &resolved);
         let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
 
-        assert!(ClosureCaptureLet
-            .generate(&mut scope, &mut emit, &params)
-            .is_none());
+        assert!(
+            ClosureCaptureLet
+                .generate(&mut scope, &mut emit, &params)
+                .is_none()
+        );
     }
 
     #[test]
@@ -358,7 +363,10 @@ mod tests {
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(text.contains("=>"), "expected lambda, got: {text}");
-        assert!(text.contains("prefix"), "expected captured var, got: {text}");
+        assert!(
+            text.contains("prefix"),
+            "expected captured var, got: {text}"
+        );
     }
 
     #[test]

@@ -541,10 +541,40 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 ));
             }
 
+            // Test extend methods (from standalone implement blocks targeting this struct)
+            let extend_methods = self.collect_struct_extend_methods(symbol.id);
+            for method in &extend_methods {
+                let args = self.generate_test_args(&method.params);
+                match &method.return_type {
+                    TypeInfo::Void => {
+                        self.emit_line(&format!("instance.{}({})", method.name, args));
+                    }
+                    _ => {
+                        self.emit_line(&format!(
+                            "let _{}_result = instance.{}({})",
+                            method.name, method.name, args
+                        ));
+                    }
+                }
+            }
+
             self.indent -= 1;
             self.emit_line("}");
             self.emit_line("");
         }
+    }
+
+    /// Collect extend methods from standalone implement blocks targeting a struct.
+    fn collect_struct_extend_methods(&self, struct_sym_id: SymbolId) -> Vec<MethodInfo> {
+        let mut methods = Vec::new();
+        for symbol in self.module.implement_blocks() {
+            if let SymbolKind::ImplementBlock(ref info) = symbol.kind {
+                if info.interface.is_none() && info.target_type.1 == struct_sym_id {
+                    methods.extend(info.methods.iter().cloned());
+                }
+            }
+        }
+        methods
     }
 
     /// Generate test arguments for function/method parameters.
@@ -1534,16 +1564,15 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             .map(|s| s.name.clone())
             .unwrap_or_else(|| "UnknownType".to_string());
 
-        // Get target class fields for Self construction (used in standalone implement blocks)
+        // Get target fields for Self construction (used in standalone implement blocks).
+        // Handles both class and struct targets.
         let target_fields = self
             .table
             .get_symbol(info.target_type.0, info.target_type.1)
-            .and_then(|s| {
-                if let SymbolKind::Class(ref class_info) = s.kind {
-                    Some(class_info.fields.clone())
-                } else {
-                    None
-                }
+            .and_then(|s| match &s.kind {
+                SymbolKind::Class(class_info) => Some(class_info.fields.clone()),
+                SymbolKind::Struct(struct_info) => Some(struct_info.fields.clone()),
+                _ => None,
             })
             .unwrap_or_default();
 
@@ -1567,13 +1596,18 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 self.emit_method(method);
             }
         } else {
-            // Standalone extend block: extend Class { ... }
-            // Methods can use Self as return type
+            // Standalone extend block: extend Type { ... }
             self.emit_line(&format!("extend {} {{", target_name));
             self.indent += 1;
 
             for method in &info.methods {
-                self.emit_self_method(method, &target_name, &target_fields);
+                if matches!(method.return_type, TypeInfo::Void) {
+                    // Void return type is a placeholder for Self-returning methods
+                    self.emit_self_method(method, &target_name, &target_fields);
+                } else {
+                    // Non-void return type: emit as a regular method
+                    self.emit_method(method);
+                }
             }
         }
 

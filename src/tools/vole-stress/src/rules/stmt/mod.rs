@@ -172,6 +172,7 @@ mod string_search_let;
 mod string_split;
 mod struct_copy;
 mod struct_destructure;
+mod struct_extend_methods;
 mod struct_field_interpolation;
 mod struct_iter_fields;
 mod struct_let;
@@ -418,6 +419,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(string_method_let::StringMethodLet),
         Box::new(struct_field_interpolation::StructFieldInterpolation),
         Box::new(struct_iter_fields::StructIterFields),
+        Box::new(struct_extend_methods::StructExtendMethods),
         Box::new(closure_struct_capture::ClosureStructCapture),
         Box::new(iter_method_map::IterMethodMap),
         Box::new(range_iter_let::RangeIterLet),

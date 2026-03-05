@@ -263,6 +263,9 @@ pub fn plan<R: Rng>(rng: &mut R, config: &PlanConfig) -> SymbolTable {
     // Phase 7: Add standalone implement blocks with Self-returning methods
     plan_standalone_implement_blocks(rng, &mut table, &mut names, config);
 
+    // Phase 7.5: Add standalone extend blocks for structs
+    plan_struct_extend_blocks(rng, &mut table, &mut names, config);
+
     // Phase 8: Add interface-typed parameters to some non-generic functions.
     // Runs after implement blocks so we know which interfaces have concrete
     // implementing classes (needed for callers to construct valid arguments).
@@ -1811,6 +1814,99 @@ fn plan_standalone_implement_blocks<R: Rng>(
                 module.add_symbol(impl_name, kind);
             }
         }
+    }
+}
+
+/// Add standalone extend blocks with methods for structs.
+///
+/// Creates `extend StructName { ... }` blocks that add getter methods
+/// (returning i64 from field computations) and transformer methods
+/// (returning Self with modified fields) to existing structs.
+/// These are file-scoped methods, only callable within the same module.
+fn plan_struct_extend_blocks<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    config: &PlanConfig,
+) {
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
+
+        // Get structs with at least one field in this module
+        let structs: Vec<(SymbolId, String)> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.structs()
+                    .filter_map(|s| {
+                        if let SymbolKind::Struct(ref info) = s.kind {
+                            if !info.fields.is_empty() {
+                                Some((s.id, s.name.clone()))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if structs.is_empty() {
+            continue;
+        }
+
+        // ~30% chance per struct to get an extend block
+        for (struct_id, _struct_name) in &structs {
+            if !rng.gen_bool(0.30) {
+                continue;
+            }
+
+            // Generate 1-3 methods: mix of getters (i64) and transformers (Self)
+            let method_count = rng.gen_range(1..=3);
+            let mut methods = Vec::with_capacity(method_count);
+
+            for _ in 0..method_count {
+                if rng.gen_bool(0.5) {
+                    // Getter method: returns i64
+                    methods.push(plan_struct_getter_method(rng, names));
+                } else {
+                    // Transformer method: returns Self
+                    methods.push(plan_self_returning_method(rng, names, config));
+                }
+            }
+
+            let impl_name = names.next("structExt");
+
+            let kind = SymbolKind::ImplementBlock(ImplementBlockInfo {
+                interface: None,
+                target_type: (module_id, *struct_id),
+                methods,
+            });
+
+            if let Some(module) = table.get_module_mut(module_id) {
+                module.add_symbol(impl_name, kind);
+            }
+        }
+    }
+}
+
+/// Plan a getter method for a struct extend block.
+///
+/// Returns a method with no parameters (besides implicit self) that
+/// returns i64, suitable for field computation getters.
+fn plan_struct_getter_method<R: Rng>(rng: &mut R, names: &mut NameGen) -> MethodInfo {
+    let name = names.next("getter");
+    // Optionally add 0-1 parameters for parameterised getters
+    let param_count = rng.gen_range(0..=1);
+    let mut params = Vec::new();
+    for _ in 0..param_count {
+        params.push(plan_param(rng, names));
+    }
+    MethodInfo {
+        name,
+        params,
+        return_type: TypeInfo::Primitive(PrimitiveType::I64),
     }
 }
 

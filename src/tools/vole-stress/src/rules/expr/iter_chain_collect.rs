@@ -6,7 +6,6 @@
 //!
 //! Single-param lambdas use unparenthesized `x => body` 30% of the time
 //! and implicit `it` style 20% of the time.
-//! The `.iter()` calls are omitted 40% of the time (direct array method calls).
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
@@ -105,13 +104,9 @@ impl ExprRule for IterChainCollect {
         let (var1, _) = candidates[idx1];
         let (var2, _) = candidates[idx2];
 
-        // ~40%: use direct array method calls (no .iter())
-        let use_direct = emit.gen_bool(0.4);
-        let (v1_prefix, v2_iter) = if use_direct {
-            ("", format!("{}", var2))
-        } else {
-            (".iter()", format!("{}.iter()", var2))
-        };
+        // Always use .iter() — direct array .chain() causes misaligned pointer crash
+        let v1_prefix = ".iter()";
+        let v2_iter = format!("{}.iter()", var2);
 
         // Pick variant: plain chain (60%), filter (20%), map (20%)
         match emit.gen_range(0..10) {
