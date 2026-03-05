@@ -34,6 +34,7 @@ mod string_bool;
 mod string_chars;
 mod string_concat;
 mod string_length;
+mod string_lines_count;
 mod string_split;
 mod string_substring;
 mod string_transform;
@@ -96,5 +97,6 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         // Box::new(iter_flat_map_collect::IterFlatMapCollect),
         Box::new(iter_first_last_nth::IterFirstLastNth),
         Box::new(string_substring::StringSubstring),
+        Box::new(string_lines_count::StringLinesCount),
     ]
 }
