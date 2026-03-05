@@ -54,6 +54,7 @@ mod field_closure;
 mod filter_iter_tostring;
 mod fixed_array_let;
 mod fn_param_call;
+mod for_break_iter;
 mod for_each_stmt;
 mod for_in_match_accum;
 mod for_interpolation_concat;
@@ -446,6 +447,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(if_stmt::IfStmt),
         Box::new(while_stmt::WhileStmt),
         Box::new(for_stmt::ForStmt),
+        Box::new(for_break_iter::ForBreakIter),
         Box::new(nested_for_loop::NestedForLoop),
     ]
 }
