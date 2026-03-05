@@ -105,6 +105,7 @@ mod match_array_length;
 mod match_closure;
 mod match_closure_call;
 mod match_computation;
+mod match_guard_let;
 mod match_interpolation_length;
 mod match_iter;
 mod match_iter_terminal;
@@ -262,6 +263,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(match_iter::MatchIter),
         Box::new(match_method_result::MatchMethodResult),
         Box::new(many_arm_match::ManyArmMatch),
+        Box::new(match_guard_let::MatchGuardLet),
         // -- Let-binding rules --------------------------------------------------
         Box::new(dead_code::DeadCodeAssert),
         Box::new(while_false::WhileFalse),
