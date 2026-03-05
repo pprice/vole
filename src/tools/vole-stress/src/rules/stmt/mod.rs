@@ -180,6 +180,7 @@ mod try_let;
 mod tuple_let;
 mod union_match_let;
 mod variable_shadow;
+mod when_array_iter;
 mod when_concat_arms;
 mod when_f64_cond;
 mod when_iter_predicate;
@@ -339,6 +340,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(match_sorted_length::MatchSortedLength),
         Box::new(for_when_accumulate::ForWhenAccumulate),
         Box::new(for_iter_when_string_body::ForIterWhenStringBody),
+        Box::new(when_array_iter::WhenArrayIter),
         // -- Complex array loop rules (batch 9) ---------------------------------
         Box::new(iter_while_accum::IterWhileAccum),
         Box::new(for_in_match_accum::ForInMatchAccum),
