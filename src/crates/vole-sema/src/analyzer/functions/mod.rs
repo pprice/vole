@@ -568,27 +568,52 @@ impl Analyzer {
     ) -> Result<(), Vec<TypeError>> {
         use crate::implement_registry::ImplTypeId;
 
-        // Get the impl_type_id for looking up method signature
-        let impl_type_id = {
-            let arena = self.type_arena();
-            ImplTypeId::from_type_id(target_type_id, &arena, &self.entity_registry())
-        };
-        let Some(impl_type_id) = impl_type_id else {
-            return Ok(()); // Can't check if we can't identify the type
+        let method_name_id = self.method_name_id(method.name, interner);
+
+        // Try the ImplementRegistry first (global `extend Type with Interface` methods).
+        let impl_registry_result = {
+            let impl_type_id = {
+                let arena = self.type_arena();
+                ImplTypeId::from_type_id(target_type_id, &arena, &self.entity_registry())
+            };
+            impl_type_id.and_then(|id| {
+                let registry = self.implement_registry();
+                let method_impl = registry.get_method(&id, method_name_id)?;
+                Some((
+                    method_impl.func_type.params_id.clone(),
+                    method_impl.func_type.return_type_id,
+                ))
+            })
         };
 
-        // Get method signature from implement registry
-        let method_name_id = self.method_name_id(method.name, interner);
-        let (params_id, return_type_id) = {
-            let registry = self.implement_registry();
-            let method_impl = registry.get_method(&impl_type_id, method_name_id);
-            let Some(method_impl) = method_impl else {
-                return Ok(()); // Method not found in registry, skip
+        // Fall back to the EntityRegistry for file-scoped `extend Type { }` methods.
+        // These are only registered in EntityRegistry (not ImplementRegistry) because
+        // the ImplementRegistry has no module awareness for file-scope restrictions.
+        let (params_id, return_type_id) = if let Some(result) = impl_registry_result {
+            result
+        } else {
+            let type_def_id = self
+                .type_arena()
+                .unwrap_class_or_struct(target_type_id)
+                .map(|(id, _, _)| id);
+            let Some(type_def_id) = type_def_id else {
+                return Ok(()); // Can't identify the type
             };
-            (
-                method_impl.func_type.params_id.clone(),
-                method_impl.func_type.return_type_id,
-            )
+            let method_id = self
+                .entity_registry()
+                .find_method_on_type(type_def_id, method_name_id);
+            let Some(method_id) = method_id else {
+                return Ok(()); // Method not found in any registry, skip
+            };
+            let sig_id = {
+                let entities = self.entity_registry();
+                entities.get_method(method_id).signature_id
+            };
+            let arena = self.type_arena();
+            let Some((params, ret_ty, _is_closure)) = arena.unwrap_function(sig_id) else {
+                return Ok(()); // Can't unwrap function type
+            };
+            (params.clone(), ret_ty)
         };
 
         // Determine if we need to infer the return type

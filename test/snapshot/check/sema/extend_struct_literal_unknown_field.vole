@@ -1,0 +1,11 @@
+// Regression: file-scoped extend with struct literal referencing unknown fields.
+// Should report E2022 errors, not panic in VIR lowering.
+
+class Empty {
+}
+
+extend Empty {
+    func bad() -> Self {
+        return Empty { missing: true }
+    }
+}

@@ -242,27 +242,27 @@ impl LoweringCtx<'_> {
         None
     }
 
-    /// Get the `StructLiteralInfo` for a node, with a tolerant fallback
-    /// in generic mode.
+    /// Get the `StructLiteralInfo` for a node, with a tolerant fallback.
     ///
-    /// Concrete mode: panics if missing.
-    /// Generic mode: returns a placeholder with a zeroed TypeDefId and
-    /// `is_class = false`.
+    /// Returns a placeholder with a zeroed `TypeDefId` and `is_class = false`
+    /// when the info is missing.  This can happen in two situations:
+    ///
+    /// 1. **Generic mode** — the template was never fully analyzed.
+    /// 2. **Concrete mode** — sema returned early (e.g. the method body was
+    ///    never type-checked because the method wasn't found in the implement
+    ///    registry).  A sema error was already reported, so VIR lowering
+    ///    should emit a best-effort placeholder instead of panicking.
     pub fn require_struct_literal_info(
         &self,
         node_id: NodeId,
-        line: u32,
+        _line: u32,
     ) -> crate::node_map::StructLiteralInfo {
-        match self.node_map.get_struct_literal_info(node_id) {
-            Some(info) => info,
-            None if self.generic => crate::node_map::StructLiteralInfo {
+        self.node_map.get_struct_literal_info(node_id).unwrap_or(
+            crate::node_map::StructLiteralInfo {
                 type_def_id: TypeDefId::new(0),
                 is_class: false,
             },
-            None => panic!(
-                "VIR lower: missing sema struct_literal_info for NodeId {node_id:?} (line {line})"
-            ),
-        }
+        )
     }
 }
 

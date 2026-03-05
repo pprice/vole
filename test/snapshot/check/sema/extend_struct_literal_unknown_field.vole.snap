@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2022]: unknown field 'missing' in type 'Empty'
+    ╭─[<path>/extend_struct_literal_unknown_field.vole:9:24]
+  8 │     func bad() -> Self {
+  9 │         return Empty { missing: true }
+    ·                        ──────┬──────
+    ·                              ╰── no such field
+ 10 │     }
+    ╰────

@@ -1,0 +1,89 @@
+// Regression: file-scoped extend methods with struct-literal returns
+// Bug vol-tono: VIR lowering panicked on missing struct_literal_info
+// because check_implement_method skipped body analysis for file-scoped extends.
+
+class Pair {
+    a: i32,
+    b: i32,
+}
+
+extend Pair {
+    func swapped() -> Pair {
+        return Pair { a: self.b, b: self.a }
+    }
+
+    func with_a(new_a: i32) -> Pair {
+        return Pair { a: new_a, b: self.b }
+    }
+
+    func sum() -> i32 {
+        return self.a + self.b
+    }
+}
+
+class Triple {
+    x: i64,
+    y: i64,
+    z: i64,
+}
+
+extend Triple {
+    func rotated() -> Triple {
+        return Triple { x: self.y, y: self.z, z: self.x }
+    }
+}
+
+// Static method (no self) in file-scoped extend returning struct literal
+class Origin {
+    x: i32,
+    y: i32,
+}
+
+extend Origin {
+    func make(v: i32) -> Origin {
+        return Origin { x: v, y: v }
+    }
+}
+
+tests "file-scoped extend returning struct literal" {
+    test "extend method returns struct literal with field swap" {
+        let p = Pair { a: 1, b: 2 }
+        let s = p.swapped()
+        assert(s.a == 2)
+        assert(s.b == 1)
+    }
+
+    test "extend method returns struct literal with new field" {
+        let p = Pair { a: 1, b: 2 }
+        let p2 = p.with_a(99)
+        assert(p2.a == 99)
+        assert(p2.b == 2)
+    }
+
+    test "extend method chain with struct literal returns" {
+        let p = Pair { a: 10, b: 20 }
+        let p2 = p.swapped().swapped()
+        assert(p2.a == 10)
+        assert(p2.b == 20)
+    }
+
+    test "extend method returning non-struct-literal still works" {
+        let p = Pair { a: 3, b: 7 }
+        assert(p.sum() == 10)
+    }
+
+    test "extend with i64 fields returns struct literal" {
+        let t = Triple { x: 1, y: 2, z: 3 }
+        let r = t.rotated()
+        assert(r.x == 2)
+        assert(r.y == 3)
+        assert(r.z == 1)
+    }
+
+    test "static method in extend returns struct literal" {
+        let o = Origin { x: 0, y: 0 }
+        let o2 = o.make(42)
+        assert(o2.x == 42)
+        assert(o2.y == 42)
+    }
+}
