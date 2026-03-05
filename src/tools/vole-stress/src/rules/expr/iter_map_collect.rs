@@ -108,8 +108,12 @@ impl ExprRule for IterMapCollect {
 
         let body = generate_map_body(emit, src_elem, target_elem)?;
 
-        // ~40%: call .map() directly on the array (no .iter())
-        let use_direct = emit.gen_bool(0.4);
+        // ~40%: call .map() directly on the array (no .iter()), but only
+        // for same-type mappings. Vole's direct array `.map()` preserves
+        // the source element type, so cross-type mappings (e.g. i64→bool)
+        // must go through `.iter().map()` to change the element type.
+        let is_same_type = src_elem == target_elem;
+        let use_direct = is_same_type && emit.gen_bool(0.4);
         let lambda = emit_single_param_lambda(emit, &body);
         if use_direct {
             Some(format!("{}.map({}).collect()", var_name, lambda))
