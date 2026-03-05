@@ -114,7 +114,13 @@ impl ExprRule for IterMapCollect {
         // must go through `.iter().map()` to change the element type.
         let is_same_type = src_elem == target_elem;
         let use_direct = is_same_type && emit.gen_bool(0.4);
-        let lambda = emit_single_param_lambda(emit, &body);
+        // Cross-type maps must use explicit lambda — `it` form doesn't
+        // infer the return type correctly for method calls like it.length()
+        let lambda = if is_same_type {
+            emit_single_param_lambda(emit, &body)
+        } else {
+            format!("(x) => {}", body)
+        };
         if use_direct {
             Some(format!("{}.map({}).collect()", var_name, lambda))
         } else {
