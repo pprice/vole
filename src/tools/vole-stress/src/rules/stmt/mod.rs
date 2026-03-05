@@ -62,6 +62,7 @@ mod for_range_tostring_build;
 mod for_range_when_accum;
 mod for_reduce_pattern;
 mod for_stmt;
+mod for_when_accum;
 mod for_when_accumulate;
 mod generic_closure_chain;
 mod generic_closure_iter;
@@ -341,6 +342,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(array_length_zero_check::ArrayLengthZeroCheck),
         Box::new(match_sorted_length::MatchSortedLength),
         Box::new(for_when_accumulate::ForWhenAccumulate),
+        Box::new(for_when_accum::ForWhenAccum),
         Box::new(for_iter_when_string_body::ForIterWhenStringBody),
         Box::new(when_array_iter::WhenArrayIter),
         // -- Complex array loop rules (batch 9) ---------------------------------
