@@ -15,6 +15,7 @@ use crate::types::{CompiledValue, MethodInfo, method_name_id_by_str, type_metada
 use crate::union_layout;
 use vole_identity::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId, TypeId, VirTypeId};
+use vole_vir::types::VirType;
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
 /// Method slots start at index 1.
@@ -532,7 +533,17 @@ impl InterfaceVtableRegistry {
 
         // Check if concrete type is a function/closure (functional interfaces)
         if is_function_v(concrete_vir_ty, ctx) {
-            return self.compile_meta_getter_function(ctx, interface_name, concrete_vir_ty);
+            return self.compile_meta_getter_minimal(ctx, interface_name, concrete_vir_ty);
+        }
+
+        // Check for non-class/non-struct types (arrays, tuples, etc.) that can
+        // implement interfaces (e.g. arrays boxed as Iterator). These get a
+        // minimal meta getter with just the type name and no fields.
+        {
+            let vir_table = &ctx.analyzed().vir_program().type_table;
+            if !vir_table.is_class(concrete_vir_ty) && !vir_table.is_struct(concrete_vir_ty) {
+                return self.compile_meta_getter_minimal(ctx, interface_name, concrete_vir_ty);
+            }
         }
 
         // --- Class/struct path: full fields and constructor ---
@@ -728,12 +739,12 @@ impl InterfaceVtableRegistry {
         Ok(func_id)
     }
 
-    /// Compile a minimal meta getter for function/closure concrete types.
+    /// Compile a minimal meta getter for concrete types without fields.
     ///
-    /// Function types have no fields and no meaningful constructor, so this
-    /// produces a TypeMeta with name "function"/"closure", empty fields array,
-    /// and a stub constructor that panics with "cannot construct function type".
-    fn compile_meta_getter_function<C: VtableCtx>(
+    /// Used for functions, closures, arrays, tuples, and other non-class/non-struct
+    /// types that can implement interfaces. Produces a TypeMeta with just the type
+    /// name, empty fields array, and a stub constructor.
+    fn compile_meta_getter_minimal<C: VtableCtx>(
         &mut self,
         ctx: &mut C,
         interface_name: &str,
@@ -741,8 +752,7 @@ impl InterfaceVtableRegistry {
     ) -> CodegenResult<FuncId> {
         let ptr_type = ctx.ptr_type();
 
-        let is_closure = is_closure_v(concrete_vir_ty, ctx);
-        let type_name = if is_closure { "closure" } else { "function" };
+        let type_name = minimal_meta_type_name(concrete_vir_ty, ctx);
 
         let type_meta_info = resolve_reflection_meta(ctx)?;
 
@@ -763,7 +773,7 @@ impl InterfaceVtableRegistry {
         // Pre-declare string data before the FunctionBuilder.
         let name_data_id = {
             let (module, funcs) = ctx.jit_module_and_funcs();
-            declare_string_data(type_name, module, funcs)?
+            declare_string_data(&type_name, module, funcs)?
         };
 
         let getter_name = format!(
@@ -1766,6 +1776,30 @@ fn is_function_v<C: VtableCtx>(vir_ty: VirTypeId, ctx: &C) -> bool {
 #[inline]
 fn is_closure_v<C: VtableCtx>(vir_ty: VirTypeId, ctx: &C) -> bool {
     ctx.analyzed().vir_program().type_table.is_closure(vir_ty)
+}
+
+/// Derive a human-readable type name for the minimal meta getter.
+///
+/// For functions/closures returns "function"/"closure". For arrays, tuples,
+/// and other non-class/non-struct types returns a descriptive name.
+fn minimal_meta_type_name<C: VtableCtx>(vir_ty: VirTypeId, ctx: &C) -> String {
+    let vir_table = &ctx.analyzed().vir_program().type_table;
+    if is_closure_v(vir_ty, ctx) {
+        return "closure".to_string();
+    }
+    if is_function_v(vir_ty, ctx) {
+        return "function".to_string();
+    }
+    match vir_table.get(vir_ty) {
+        VirType::Array { .. } => "array".to_string(),
+        VirType::FixedArray { .. } => "array".to_string(),
+        VirType::Tuple { .. } => "tuple".to_string(),
+        VirType::Primitive(kind) => format!("{:?}", kind).to_lowercase(),
+        VirType::Optional { .. } => "optional".to_string(),
+        VirType::Union { .. } => "union".to_string(),
+        VirType::RuntimeIterator { .. } => "iterator".to_string(),
+        other => format!("{:?}", other),
+    }
 }
 
 /// Build the `InterfaceConcreteType` key from a VirTypeId.
