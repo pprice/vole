@@ -68,6 +68,7 @@ mod for_reduce_pattern;
 mod for_stmt;
 mod for_when_accum;
 mod for_when_accumulate;
+mod generic_closure_call;
 mod generic_closure_chain;
 mod generic_closure_iter;
 mod generic_iter_call;
@@ -246,6 +247,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(nested_closure::NestedClosure),
         Box::new(sentinel_closure::SentinelClosure),
         Box::new(field_closure::FieldClosure),
+        Box::new(generic_closure_call::GenericClosureCall),
         Box::new(generic_closure_chain::GenericClosureChain),
         Box::new(generic_closure_iter::GenericClosureIter),
         Box::new(generic_iter_call::GenericIterCall),

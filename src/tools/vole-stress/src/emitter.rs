@@ -1080,7 +1080,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.indent += 1;
             // Methods don't have their own type params (they use class type params),
             // but for now we pass empty to avoid complications with class type params.
-            self.emit_function_body(
+            // Module-level decls from methods are discarded (rules should use
+            // preconditions to avoid firing inside class methods).
+            let _module_decls = self.emit_function_body(
                 &method.return_type,
                 &method.params,
                 Some(&method.name),
@@ -1095,20 +1097,26 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn emit_function(&mut self, symbol: &Symbol) {
         if let SymbolKind::Function(ref info) = symbol.kind {
             self.emit_line("");
-            let header = self.format_function_header(&symbol.name, info);
 
             // Check if this function can use expression-body syntax
             if self.can_use_expr_body(&info.return_type)
                 && self.rng.gen_bool(self.config.expr_body_probability)
             {
                 // Expression-body syntax: func name(...) -> T => expr
+                let header = self.format_function_header(&symbol.name, info);
                 let expr = self.generate_return_expr(&info.return_type, &info.params);
                 self.emit_line(&format!("{} => {}", header, expr));
             } else {
                 // Block-body syntax: func name(...) -> T { ... }
+                //
+                // We generate the body first (into a buffer) so that any
+                // module-level declarations accumulated by rules can be
+                // emitted *before* the function header.
+                let saved_lines = std::mem::take(&mut self.output);
+                let header = self.format_function_header(&symbol.name, info);
                 self.emit_line(&format!("{} {{", header));
                 self.indent += 1;
-                self.emit_function_body(
+                let module_decls = self.emit_function_body(
                     &info.return_type,
                     &info.params,
                     Some(&symbol.name),
@@ -1117,6 +1125,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 );
                 self.indent -= 1;
                 self.emit_line("}");
+
+                // Splice module-level declarations before this function.
+                let func_lines = std::mem::replace(&mut self.output, saved_lines);
+                for decl in module_decls {
+                    self.emit_line("");
+                    self.emit_line(&decl);
+                }
+                self.output.push_str(&func_lines);
             }
         }
     }
@@ -1183,6 +1199,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         emit.generate_return_expr(return_type, &scope)
     }
 
+    /// Emit the body of a function, returning any module-level declarations
+    /// that statement rules accumulated (via [`Scope::add_module_decl`]).
+    ///
+    /// Callers are responsible for emitting the returned declarations at
+    /// module level (before the enclosing function definition).
     fn emit_function_body(
         &mut self,
         return_type: &TypeInfo,
@@ -1190,17 +1211,17 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         function_name: Option<&str>,
         type_params: &[TypeParam],
         function_sym_id: Option<SymbolId>,
-    ) {
+    ) -> Vec<String> {
         // Generator functions (returning Iterator<T>) get a special body with yield
         if let TypeInfo::Iterator(elem_type) = return_type {
             self.emit_generator_body(elem_type, params);
-            return;
+            return Vec::new();
         }
 
         // Never-returning functions (diverging) just call panic or unreachable
         if matches!(return_type, TypeInfo::Never) {
             self.emit_never_body();
-            return;
+            return Vec::new();
         }
 
         let mut scope = Scope::with_module(params, self.table, self.module.id);
@@ -1294,6 +1315,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         for line in lines {
             self.emit_line(&line);
         }
+
+        // Return any module-level declarations accumulated by rules.
+        std::mem::take(&mut scope.module_decls)
     }
 
     /// Emit a generator function body with a while loop and yield statements.

@@ -86,6 +86,14 @@ pub struct Scope<'a> {
     pub depth: usize,
     /// Maximum allowed nesting depth.
     pub max_depth: usize,
+    /// Module-level declarations accumulated by statement rules.
+    ///
+    /// Rules that need to emit helper functions at module level (e.g. generic
+    /// functions that cannot be nested because vole-fmt converts nested `func`
+    /// to lambdas which don't support type parameters) push their declarations
+    /// here.  The emitter drains this list and emits the declarations before
+    /// the enclosing function definition.
+    pub module_decls: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +127,7 @@ impl<'a> Scope<'a> {
             has_lowlevel_import: false,
             depth: 0,
             max_depth: 8,
+            module_decls: Vec::new(),
         }
     }
 
@@ -144,6 +153,7 @@ impl<'a> Scope<'a> {
             has_lowlevel_import: false,
             depth: 0,
             max_depth: 8,
+            module_decls: Vec::new(),
         }
     }
 }
@@ -236,6 +246,15 @@ impl Scope<'_> {
     /// Register a new local variable in this scope.
     pub fn add_local(&mut self, name: String, type_info: TypeInfo, is_mutable: bool) {
         self.locals.push((name, type_info, is_mutable));
+    }
+
+    /// Register a module-level declaration (emitted before the enclosing function).
+    ///
+    /// Use this for helper functions that must live at module level -- for
+    /// example generic `func<T>` definitions that vole-fmt would otherwise
+    /// convert to lambdas (which don't support type parameters).
+    pub fn add_module_decl(&mut self, decl: String) {
+        self.module_decls.push(decl);
     }
 }
 
