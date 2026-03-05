@@ -28,6 +28,7 @@ mod iter_sum;
 mod lambda_expr;
 mod match_expr;
 mod method_interpolation;
+mod nested_when_expr;
 mod null_coalesce;
 mod optional_chaining;
 mod static_type_method;
@@ -62,6 +63,7 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         // -- batch 1: control flow expressions ---------------------------------
         Box::new(if_expr::IfExpr),
         Box::new(when_expr::WhenExpr),
+        Box::new(nested_when_expr::NestedWhenExpr),
         // -- batch 1: array/string methods ------------------------------------
         Box::new(array_index::ArrayIndex),
         Box::new(array_length::ArrayLength),
