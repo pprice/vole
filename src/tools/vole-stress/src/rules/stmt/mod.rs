@@ -127,6 +127,7 @@ mod match_optional;
 mod match_sorted;
 mod match_sorted_length;
 mod match_string_length;
+mod match_string_value;
 mod match_to_string_arms;
 mod match_tostring_arms;
 mod match_when_arm;
@@ -269,6 +270,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(match_array::MatchArray),
         Box::new(match_array_length::MatchArrayLength),
         Box::new(match_string_length::MatchStringLength),
+        Box::new(match_string_value::MatchStringValue),
         Box::new(match_computation::MatchComputation),
         Box::new(match_closure::MatchClosure),
         Box::new(match_optional::MatchOptional),
