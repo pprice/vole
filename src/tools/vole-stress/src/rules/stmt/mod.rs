@@ -201,6 +201,7 @@ mod when_match_combo;
 mod when_replace_result;
 mod when_result_method;
 mod when_string_method_conds;
+mod when_struct_interpolation;
 mod when_tostring_arms;
 mod when_with_contains;
 mod while_false;
@@ -432,6 +433,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(string_interpolation_let::StringInterpolationLet),
         Box::new(string_method_let::StringMethodLet),
         Box::new(struct_field_interpolation::StructFieldInterpolation),
+        Box::new(when_struct_interpolation::WhenStructInterpolation),
         Box::new(struct_iter_fields::StructIterFields),
         Box::new(struct_extend_methods::StructExtendMethods),
         Box::new(closure_struct_capture::ClosureStructCapture),
