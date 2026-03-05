@@ -94,6 +94,7 @@ mod iter_terminal_chain;
 mod iter_while_accum;
 mod iter_zip_collect;
 mod lambda_let;
+mod large_tuple_let;
 mod last_elem_access;
 mod length_comparison;
 mod literal_method;
@@ -420,6 +421,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(struct_copy::StructCopy),
         Box::new(array_let::ArrayLet),
         Box::new(tuple_let::TupleLet),
+        Box::new(large_tuple_let::LargeTupleLet),
         Box::new(fixed_array_let::FixedArrayLet),
         Box::new(primitive_let::PrimitiveLet),
         // -- Match/when/union rules from match_stmts.rs (batch 17) --------------------
