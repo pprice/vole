@@ -119,6 +119,7 @@ mod method_call;
 mod modulo_edge;
 mod multi_arm_when;
 mod multi_push;
+mod negative_divmod;
 mod nested_closure;
 mod nested_for_loop;
 mod nested_func_def;
@@ -221,6 +222,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(modulo_edge::ModuloEdge),
         Box::new(i32_boundary::I32Boundary),
         Box::new(i64_boundary::I64Boundary),
+        Box::new(negative_divmod::NegativeDivmod),
         // -- Closure rules ------------------------------------------------------
         Box::new(closure_concat::ClosureConcat),
         Box::new(closure_capture::ClosureCapture),
