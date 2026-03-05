@@ -104,7 +104,7 @@ impl ExprRule for IterChainCollect {
         let (var1, _) = candidates[idx1];
         let (var2, _) = candidates[idx2];
 
-        // Always use .iter() — direct array .chain() causes misaligned pointer crash
+        // .iter() required: arrays are Iterable, not Iterator — .chain() param needs Iterator<T>
         let v1_prefix = ".iter()";
         let v2_iter = format!("{}.iter()", var2);
 

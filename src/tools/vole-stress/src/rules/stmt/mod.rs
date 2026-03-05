@@ -67,6 +67,7 @@ mod for_when_accum;
 mod for_when_accumulate;
 mod generic_closure_chain;
 mod generic_closure_iter;
+mod generic_iter_call;
 mod i32_boundary;
 mod i64_boundary;
 mod identity_arithmetic;
@@ -238,6 +239,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(field_closure::FieldClosure),
         Box::new(generic_closure_chain::GenericClosureChain),
         Box::new(generic_closure_iter::GenericClosureIter),
+        Box::new(generic_iter_call::GenericIterCall),
         Box::new(closure_class_call::ClosureClassCall),
         Box::new(closure_when_capture::ClosureWhenCapture),
         Box::new(match_closure_call::MatchClosureCall),
