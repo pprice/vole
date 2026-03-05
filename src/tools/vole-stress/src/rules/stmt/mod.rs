@@ -24,6 +24,7 @@ mod checked_arithmetic;
 mod class_destructure;
 mod class_let;
 mod closure_capture;
+mod closure_capture_let;
 mod closure_class_call;
 mod closure_concat;
 mod closure_result_concat;
@@ -217,6 +218,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         // -- Closure rules ------------------------------------------------------
         Box::new(closure_concat::ClosureConcat),
         Box::new(closure_capture::ClosureCapture),
+        Box::new(closure_capture_let::ClosureCaptureLet),
         Box::new(nested_closure::NestedClosure),
         Box::new(sentinel_closure::SentinelClosure),
         Box::new(field_closure::FieldClosure),

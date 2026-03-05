@@ -103,6 +103,7 @@ mod tests {
         let func_params = vec![ParamInfo {
             name: "arr".to_string(),
             param_type: TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            has_default: false,
         }];
         let table = SymbolTable::new();
         let mut scope = Scope::new(&func_params, &table);

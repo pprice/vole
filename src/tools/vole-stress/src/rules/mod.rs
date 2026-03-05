@@ -41,8 +41,8 @@ mod tests {
     #[test]
     fn registry_construction_succeeds() {
         let registry = RuleRegistry::new();
-        assert_eq!(registry.stmt_rules.len(), 180);
-        assert_eq!(registry.expr_rules.len(), 38);
+        assert_eq!(registry.stmt_rules.len(), 190);
+        assert_eq!(registry.expr_rules.len(), 37);
     }
 
     #[test]
