@@ -86,6 +86,7 @@ mod higher_order_closure;
 mod i32_boundary;
 mod i64_boundary;
 mod identity_arithmetic;
+mod if_iter_condition;
 mod if_stmt;
 mod iface_function_call;
 mod interface_let;
@@ -186,8 +187,8 @@ mod single_elem_range;
 mod sorted_collect;
 mod sorted_iter_accum;
 mod split_for_loop;
-mod static_call;
 mod split_transform;
+mod static_call;
 mod string_build_match;
 mod string_char_at;
 mod string_concat;
@@ -496,6 +497,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(lambda_let::LambdaLet),
         // -- Control flow rules (batch 19) ----------------------------------------
         Box::new(if_stmt::IfStmt),
+        Box::new(if_iter_condition::IfIterCondition),
         Box::new(while_stmt::WhileStmt),
         Box::new(while_complex_exit::WhileComplexExit),
         Box::new(for_stmt::ForStmt),
