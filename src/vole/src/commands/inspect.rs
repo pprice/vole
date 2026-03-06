@@ -301,11 +301,15 @@ fn inspect_vir(
     }
 
     // Print VIR test bodies
-    if include_tests {
+    if include_tests && !analyzed.vir_program().tests.is_empty() {
+        println!("tests {{");
         for test in &analyzed.vir_program().tests {
-            println!("// test \"{}\"", test.name);
-            print!("{}", printer.print_body(&test.body));
+            // Indent each line of the test output
+            for line in printer.print_test(test).lines() {
+                println!("  {line}");
+            }
         }
+        println!("}}");
     }
 }
 

@@ -74,6 +74,15 @@ impl<'a> VirPrinter<'a> {
         out
     }
 
+    /// Print a VIR test case with proper structure.
+    pub fn print_test(&self, test: &vole_vir::func::VirTest) -> String {
+        let mut out = String::new();
+        wln!(out, "test \"{}\" {{", test.name);
+        self.fmt_body(&test.body, &mut out, 1);
+        wln!(out, "}}");
+        out
+    }
+
     fn fmt_body(&self, body: &VirBody, out: &mut String, ind: usize) {
         for stmt in &body.stmts {
             self.fmt_stmt(stmt, out, ind);
