@@ -171,17 +171,26 @@ impl Cg<'_, '_, '_> {
         let value = self.compile_arg_from_source(arg_source, 0)?;
 
         let elem_vir = self.vir_query_unwrap_array_v(arr_obj.type_id);
-        let (tag_val, value_bits, _value) = if let Some(elem_vir) = elem_vir {
+        let (tag_val, value_bits, mut value) = if let Some(elem_vir) = elem_vir {
             self.prepare_dynamic_array_store_with_hint_v(value, elem_vir, None)?
         } else {
             self.prepare_dynamic_array_store_untyped(value)?
         };
+
+        // RC: inc borrowed RC elements so the array gets its own reference.
+        // Without this, the element's original binding and the array would
+        // share a single refcount, causing use-after-free when the binding's
+        // scope cleanup rc_dec's the value.
+        self.rc_inc_borrowed_for_container(&value)?;
 
         // Get the runtime function reference
         let push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
 
         // Call vole_array_push(arr_ptr, tag, value)
         self.emit_call(push_ref, &[arr_obj.value, tag_val, value_bits]);
+
+        // The element value is consumed into the array container.
+        value.mark_consumed();
 
         // Return void
         Ok(self.void_value())

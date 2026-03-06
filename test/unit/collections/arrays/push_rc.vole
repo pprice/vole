@@ -1,0 +1,65 @@
+// Regression tests for array push RC correctness.
+// push must rc_inc borrowed values so the array holds its own reference.
+
+tests "array push rc" {
+    test "push string concat from when arms" {
+        let nums = [10, 50]
+        var labels: [string] = []
+        for n in nums {
+            let desc = when {
+                n >= 50 => "high-" + n.to_string()
+                _ => "low-" + n.to_string()
+            }
+            labels.push(desc)
+        }
+        assert(labels[0] == "low-10")
+        assert(labels[1] == "high-50")
+    }
+
+    test "push string concat from when expr" {
+        var results: [string] = []
+        for i in [1, 2, 3] {
+            let s = when {
+                i > 1 => "big-" + i.to_string()
+                _ => "small-" + i.to_string()
+            }
+            results.push(s)
+        }
+        assert(results[0] == "small-1")
+        assert(results[1] == "big-2")
+        assert(results[2] == "big-3")
+    }
+
+    test "push string variable in loop" {
+        var arr: [string] = []
+        for i in [10, 20] {
+            let s = "val-" + i.to_string()
+            arr.push(s)
+        }
+        assert(arr[0] == "val-10")
+        assert(arr[1] == "val-20")
+    }
+
+    test "push string literal in loop" {
+        var arr: [string] = []
+        for _ in [1, 2] {
+            arr.push("hello")
+        }
+        assert(arr[0] == "hello")
+        assert(arr[1] == "hello")
+    }
+
+    test "multiple pushes same iteration" {
+        var arr: [string] = []
+        for i in [1, 2] {
+            let a = "a-" + i.to_string()
+            let b = "b-" + i.to_string()
+            arr.push(a)
+            arr.push(b)
+        }
+        assert(arr[0] == "a-1")
+        assert(arr[1] == "b-1")
+        assert(arr[2] == "a-2")
+        assert(arr[3] == "b-2")
+    }
+}
