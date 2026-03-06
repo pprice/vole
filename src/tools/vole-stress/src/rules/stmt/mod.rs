@@ -102,6 +102,7 @@ mod iter_map_interpolation;
 mod iter_method_map;
 mod iter_predicate_let;
 mod iter_reduce_let;
+mod iter_sorted_reverse;
 mod iter_struct_pipeline;
 mod iter_take_skip_collect;
 mod iter_terminal_chain;
@@ -383,6 +384,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(sorted_collect::SortedCollect),
         Box::new(reverse_collect::ReverseCollect),
         Box::new(iter_take_skip_collect::IterTakeSkipCollect),
+        Box::new(iter_sorted_reverse::IterSortedReverse),
         Box::new(iter_enumerate_collect::IterEnumerateCollect),
         Box::new(iter_factory_let::IterFactoryLet),
         Box::new(from_fn_iter::FromFnIter),
