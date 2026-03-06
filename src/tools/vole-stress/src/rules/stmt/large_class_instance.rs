@@ -103,12 +103,8 @@ fn emit_all_i64(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     let inst_name = scope.fresh_name();
     let sum_name = scope.fresh_name();
 
-    // Register inst as i64 (we don't have a class sym id to use for TypeInfo::Class)
-    scope.add_local(
-        inst_name.clone(),
-        TypeInfo::Primitive(PrimitiveType::I64),
-        false,
-    );
+    // Don't register inst_name in scope — it's a class instance, not i64.
+    // Other rules would misuse it (e.g. widening to i128).
 
     // Build sum expression: "inst.f1 + inst.f2 + ... + inst.fN"
     let sum_expr: String = (1..=num_fields)
@@ -163,12 +159,8 @@ fn emit_mixed(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
 
     let inst_name = scope.fresh_name();
 
-    // Register inst as i64 (best-effort; class sym id is not available)
-    scope.add_local(
-        inst_name.clone(),
-        TypeInfo::Primitive(PrimitiveType::I64),
-        false,
-    );
+    // Don't register inst_name in scope — it's a class instance, not i64.
+    // Other rules would misuse it (e.g. widening to i128).
 
     // Build sum of i64 fields
     let sum_expr: String = (1..=num_i64)
@@ -368,8 +360,8 @@ mod tests {
         let result = LargeClassInstance.generate(&mut scope, &mut emit, &params);
         assert!(result.is_some());
         assert!(
-            scope.locals.len() >= 2,
-            "expected at least 2 locals (inst + result), got {}",
+            scope.locals.len() >= 1,
+            "expected at least 1 local (sum result), got {}",
             scope.locals.len(),
         );
     }
