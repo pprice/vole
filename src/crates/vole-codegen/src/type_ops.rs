@@ -181,8 +181,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let table = self.vir_type_table();
         if vir_ty != VirTypeId::UNKNOWN && (vir_ty.raw() as usize) < table.len() {
             match table.get(vir_ty) {
-                // Optional<T> always has nil at tag 1 by VIR convention
-                VirType::Optional { .. } => return Some(1),
+                VirType::Optional { inner } => {
+                    let variants = table.expand_optional_variants(*inner);
+                    return variants.iter().position(|&id| id == VirTypeId::NIL);
+                }
                 VirType::Union { variants } => {
                     return variants.iter().position(|&id| id == VirTypeId::NIL);
                 }

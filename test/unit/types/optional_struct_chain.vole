@@ -1,0 +1,85 @@
+// Regression test: optional chaining and nil coalescing on struct types.
+//
+// Struct optionals use a different union variant ordering than class
+// optionals because struct VirTypeIds have different sort keys. A bug
+// caused find_nil_variant_vir to hardcode nil at tag 1 for all
+// Optional types, but expand_optional_variants could place nil at tag 0
+// for struct optionals, causing the nil check to misidentify non-nil
+// values as nil.
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+struct Info {
+    label: string,
+    count: i64,
+}
+
+func get_count(item: Info?) -> i64 {
+    return item?.count ?? -1
+}
+
+func get_x(p: Point?) -> i64 {
+    return p?.x ?? -1
+}
+
+func get_label(item: Info?) -> string {
+    return item?.label ?? "none"
+}
+
+tests "optional struct chaining" {
+    test "struct optional chain field - non-nil" {
+        let info = Info { label: "test", count: 42 }
+        let result = get_count(info)
+        assert(result == 42)
+    }
+
+    test "struct optional chain field - nil" {
+        let result = get_count(nil)
+        assert(result == -1)
+    }
+
+    test "struct optional chain i64 field - non-nil" {
+        let p = Point { x: 10, y: 20 }
+        let result = get_x(p)
+        assert(result == 10)
+    }
+
+    test "struct optional chain i64 field - nil" {
+        let result = get_x(nil)
+        assert(result == -1)
+    }
+
+    test "struct optional chain string field - non-nil" {
+        let info = Info { label: "hello", count: 0 }
+        let result = get_label(info)
+        assert(result == "hello")
+    }
+
+    test "struct optional chain string field - nil" {
+        let result = get_label(nil)
+        assert(result == "none")
+    }
+
+    test "inline struct optional chain" {
+        let item: Info? = Info { label: "inline", count: 99 }
+        let count = item?.count ?? -1
+        assert(count == 99)
+    }
+
+    test "nil coalescing on struct optional" {
+        let item: Info? = Info { label: "real", count: 7 }
+        let unwrapped = item ?? Info { label: "default", count: 0 }
+        assert(unwrapped.count == 7)
+        assert(unwrapped.label == "real")
+    }
+
+    test "nil coalescing on nil struct optional" {
+        let item: Info? = nil
+        let unwrapped = item ?? Info { label: "default", count: 0 }
+        assert(unwrapped.count == 0)
+        assert(unwrapped.label == "default")
+    }
+}
