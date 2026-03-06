@@ -111,6 +111,7 @@ mod length_comparison;
 mod literal_method;
 mod manual_minmax;
 mod many_arm_match;
+mod many_match_arms;
 mod many_param_call;
 mod many_params_call;
 mod map_tostring_reduce;
@@ -289,6 +290,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(match_iter::MatchIter),
         Box::new(match_method_result::MatchMethodResult),
         Box::new(many_arm_match::ManyArmMatch),
+        Box::new(many_match_arms::ManyMatchArms),
         Box::new(match_guard_let::MatchGuardLet),
         // -- Let-binding rules --------------------------------------------------
         Box::new(dead_code::DeadCodeAssert),
