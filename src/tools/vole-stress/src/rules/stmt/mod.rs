@@ -144,6 +144,7 @@ mod match_when_arm;
 mod method_call;
 mod modulo_edge;
 mod multi_arm_when;
+mod multi_interface_extend;
 mod multi_push;
 mod negative_divmod;
 mod nested_closure;
@@ -281,6 +282,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(closure_when_iter::ClosureWhenIter),
         Box::new(higher_order_closure::HigherOrderClosure),
         Box::new(closure_struct_method::ClosureStructMethod),
+        Box::new(multi_interface_extend::MultiInterfaceExtend),
         // -- Match rules --------------------------------------------------------
         Box::new(match_let::MatchLet),
         Box::new(match_method::MatchMethod),
