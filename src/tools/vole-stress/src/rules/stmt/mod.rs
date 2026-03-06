@@ -192,6 +192,7 @@ mod string_equality;
 mod string_interpolation_let;
 mod string_iter_let;
 mod string_length_edge;
+mod string_lines;
 mod string_match_let;
 mod string_method_let;
 mod string_predicate;
@@ -318,6 +319,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(string_replace::StringReplace),
         Box::new(nested_match::NestedMatch),
         Box::new(string_length_edge::StringLengthEdge),
+        Box::new(string_lines::StringLines),
         Box::new(range_check::RangeCheck),
         Box::new(assert_stmt::AssertStmt),
         Box::new(edge_case_for_loop::EdgeCaseForLoop),
