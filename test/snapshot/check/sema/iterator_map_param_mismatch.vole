@@ -1,0 +1,3 @@
+// vol-rh5c: .map() must reject lambda param type that doesn't match iterator element type.
+// .chars() returns Iterator<i32>, so the lambda param must be i32, not string.
+let r = "abc".chars().map((x: string) => x).collect()

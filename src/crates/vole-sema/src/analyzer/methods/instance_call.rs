@@ -265,11 +265,11 @@ impl Analyzer {
             return Ok(None);
         };
 
-        // Analyze lambda with only parameter type hints
+        // Analyze lambda with only parameter type hints (return type left open for inference)
         let arg_ty_id = if let ExprKind::Lambda(lambda) = &arg.kind {
             let param_only_expected = FunctionType {
                 is_closure: false,
-                params_id: input_params.into(),
+                params_id: input_params.clone().into(),
                 return_type_id: ArenaTypeId::INVALID,
             };
             let lambda_ty_id =
@@ -283,13 +283,36 @@ impl Analyzer {
             self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?
         };
 
-        // Extract the lambda's actual return type
-        let lambda_return = {
+        // Extract the lambda's actual parameter and return types
+        let (lambda_params, lambda_return) = {
             let arena = self.type_arena();
-            arena
-                .unwrap_function(arg_ty_id)
-                .map(|(_params, ret, _)| ret)
+            match arena.unwrap_function(arg_ty_id) {
+                Some((params, ret, _)) => (Some(params.to_vec()), Some(ret)),
+                None => (None, None),
+            }
         };
+
+        // Verify the lambda's parameter types match the expected types from the
+        // iterator element type. Without this check, a lambda like (x: string) => ...
+        // passed to Iterator<i32>.map() would silently pass sema and crash at runtime.
+        if let Some(lambda_params) = &lambda_params {
+            for (i, (&actual, &expected)) in
+                lambda_params.iter().zip(input_params.iter()).enumerate()
+            {
+                if !self.types_compatible_id(actual, expected, interner) {
+                    // Point to the specific lambda parameter span if available
+                    let error_span = if let ExprKind::Lambda(lambda) = &arg.kind
+                        && i < lambda.params.len()
+                    {
+                        lambda.params[i].span
+                    } else {
+                        arg.span
+                    };
+                    self.add_type_mismatch_id(expected, actual, error_span);
+                }
+            }
+        }
+
         Ok(lambda_return)
     }
 

@@ -1,0 +1,10 @@
+[stdout]
+
+[stderr]
+  × [E2001]: expected i32, found string
+   ╭─[<path>/iterator_map_param_mismatch.vole:3:28]
+ 2 │ // .chars() returns Iterator<i32>, so the lambda param must be i32, not string.
+ 3 │ let r = "abc".chars().map((x: string) => x).collect()
+   ·                            ┬
+   ·                            ╰── type mismatch
+   ╰────

@@ -1,0 +1,52 @@
+// Regression test for vol-rh5c: .map() must verify lambda parameter type
+// matches the iterator element type.
+//
+// Previously, "abc".chars().map((x: string) => x.to_upper()) would crash at
+// runtime because .chars() returns Iterator<i32> but the lambda declared x as
+// string. Sema now rejects the type mismatch.
+
+// Verify that correct usage still works:
+
+tests {
+    test "map with matching param type on i64 iterator" {
+        let result = [1, 2, 3].iter().map((x) => x * 2).collect()
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+        assert(result[2] == 6)
+    }
+
+    test "map with explicit matching i64 param" {
+        let result = [10, 20].iter().map((x: i64) => x + 1).collect()
+        assert(result[0] == 11)
+        assert(result[1] == 21)
+    }
+
+    test "filter with matching param type" {
+        let result = [1, 2, 3, 4].iter().filter((x) => x > 2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 3)
+        assert(result[1] == 4)
+    }
+
+    test "flat_map with matching param type" {
+        let result = [1, 2].iter().flat_map((x) => [x, x * 10]).collect()
+        assert(result.length() == 4)
+        assert(result[0] == 1)
+        assert(result[1] == 10)
+        assert(result[2] == 2)
+        assert(result[3] == 20)
+    }
+
+    test "chars map with correct i32 param" {
+        let codes = "ab".chars().map((c: i32) => c + 1).collect()
+        assert(codes[0] == 98)  // 'a' is 97, +1 = 98
+        assert(codes[1] == 99)  // 'b' is 98, +1 = 99
+    }
+
+    test "map with inferred param type" {
+        let result = [1, 2, 3].map((x) => x * 3).collect()
+        assert(result[0] == 3)
+        assert(result[1] == 6)
+        assert(result[2] == 9)
+    }
+}
