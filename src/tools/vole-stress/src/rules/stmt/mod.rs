@@ -78,6 +78,7 @@ mod generic_closure_iter;
 mod generic_interface_call;
 mod generic_iter_call;
 mod generic_struct_closure;
+mod higher_order_closure;
 mod i32_boundary;
 mod i64_boundary;
 mod identity_arithmetic;
@@ -270,6 +271,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(closure_extend_method::ClosureExtendMethod),
         Box::new(closure_match_guard::ClosureMatchGuard),
         Box::new(closure_when_iter::ClosureWhenIter),
+        Box::new(higher_order_closure::HigherOrderClosure),
         // -- Match rules --------------------------------------------------------
         Box::new(match_let::MatchLet),
         Box::new(match_method::MatchMethod),
