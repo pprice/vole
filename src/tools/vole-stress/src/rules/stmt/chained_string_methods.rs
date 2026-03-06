@@ -59,10 +59,12 @@ impl StmtRule for ChainedStringMethods {
         let chain_len = emit.random_in(4, 6);
         let mut chain = String::new();
         for _ in 0..chain_len {
-            match emit.gen_range(0..4) {
+            match emit.gen_range(0..6) {
                 0 => chain.push_str(".trim()"),
                 1 => chain.push_str(".to_lower()"),
                 2 => chain.push_str(".to_upper()"),
+                3 => chain.push_str(".trim_start()"),
+                4 => chain.push_str(".trim_end()"),
                 _ => {
                     let pair = REPLACE_PAIRS[emit.gen_range(0..REPLACE_PAIRS.len())];
                     chain.push_str(&format!(".replace(\"{}\", \"{}\")", pair.0, pair.1));
