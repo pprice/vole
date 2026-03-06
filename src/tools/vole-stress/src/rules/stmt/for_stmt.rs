@@ -200,7 +200,7 @@ fn gen_iterator(
 
 fn gen_chain_op(emit: &mut Emit, elem_prim: PrimitiveType, is_numeric: bool) -> String {
     if is_numeric {
-        match emit.gen_range(0..10) {
+        match emit.gen_range(0..14) {
             0..3 => {
                 let pred = gen_filter_pred(emit, elem_prim);
                 format!(".filter((x) => {})", pred)
@@ -210,13 +210,19 @@ fn gen_chain_op(emit: &mut Emit, elem_prim: PrimitiveType, is_numeric: bool) -> 
                 format!(".map((x) => {})", body)
             }
             6..8 => ".sorted()".to_string(),
+            8..10 => ".reverse()".to_string(),
+            10..11 => ".unique()".to_string(),
+            11..13 => {
+                let n = emit.random_in(1, 3);
+                format!(".skip({})", n)
+            }
             _ => {
                 let n = emit.random_in(1, 3);
                 format!(".take({})", n)
             }
         }
     } else {
-        match emit.gen_range(0..10) {
+        match emit.gen_range(0..12) {
             0..4 => {
                 let pred = gen_filter_pred(emit, elem_prim);
                 format!(".filter((x) => {})", pred)
@@ -225,6 +231,8 @@ fn gen_chain_op(emit: &mut Emit, elem_prim: PrimitiveType, is_numeric: bool) -> 
                 let body = gen_map_body(emit, elem_prim);
                 format!(".map((x) => {})", body)
             }
+            7..9 => ".reverse()".to_string(),
+            9..10 => ".unique()".to_string(),
             _ => {
                 let n = emit.random_in(1, 3);
                 format!(".take({})", n)
@@ -235,25 +243,35 @@ fn gen_chain_op(emit: &mut Emit, elem_prim: PrimitiveType, is_numeric: bool) -> 
 
 fn gen_second_chain_op(emit: &mut Emit, elem_prim: PrimitiveType, is_numeric: bool) -> String {
     if is_numeric {
-        match emit.gen_range(0..4) {
+        match emit.gen_range(0..6) {
             0 => {
                 let pred = gen_filter_pred(emit, elem_prim);
                 format!(".filter((x) => {})", pred)
             }
             1 => ".sorted()".to_string(),
             2 => ".reverse()".to_string(),
+            3 => ".unique()".to_string(),
+            4 => {
+                let n = emit.random_in(1, 3);
+                format!(".skip({})", n)
+            }
             _ => {
                 let n = emit.random_in(1, 3);
                 format!(".take({})", n)
             }
         }
     } else {
-        match emit.gen_range(0..3) {
+        match emit.gen_range(0..5) {
             0 => {
                 let pred = gen_filter_pred(emit, elem_prim);
                 format!(".filter((x) => {})", pred)
             }
             1 => ".reverse()".to_string(),
+            2 => ".unique()".to_string(),
+            3 => {
+                let n = emit.random_in(1, 3);
+                format!(".skip({})", n)
+            }
             _ => {
                 let n = emit.random_in(1, 3);
                 format!(".take({})", n)
