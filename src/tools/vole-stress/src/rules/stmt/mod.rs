@@ -211,6 +211,7 @@ mod variable_shadow;
 mod variable_shadow_type_change;
 mod when_array_iter;
 mod when_concat_arms;
+mod when_expr_in_call;
 mod when_f64_cond;
 mod when_iter_predicate;
 mod when_length_compare;
@@ -434,6 +435,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(match_iter_terminal::MatchIterTerminal),
         Box::new(match_array_elem::MatchArrayElem),
         Box::new(nested_when_let::NestedWhenLet),
+        Box::new(when_expr_in_call::WhenExprInCall),
         // -- SymbolTable-dependent rules (batch 15) -----------------------------------
         Box::new(raise_stmt::RaiseStmt),
         Box::new(try_let::TryLet),
