@@ -155,6 +155,7 @@ mod nested_when_let;
 mod nested_when_string;
 mod nth_let;
 mod numeric_to_string;
+mod optional_chain_call;
 mod optional_destructure_match;
 mod power_of_two_div;
 mod primitive_let;
@@ -458,6 +459,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(union_match_let::UnionMatchLet),
         Box::new(sentinel_union_let::SentinelUnionLet),
         Box::new(optional_destructure_match::OptionalDestructureMatch),
+        Box::new(optional_chain_call::OptionalChainCall),
         Box::new(match_on_method_result::MatchOnMethodResult),
         // -- Remaining let-binding rules (batch 18) -----------------------------------
         Box::new(string_interpolation_let::StringInterpolationLet),
