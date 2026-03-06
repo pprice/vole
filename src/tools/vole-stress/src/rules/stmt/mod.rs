@@ -101,6 +101,7 @@ mod iter_map_interpolation;
 mod iter_method_map;
 mod iter_predicate_let;
 mod iter_reduce_let;
+mod iter_struct_pipeline;
 mod iter_take_skip_collect;
 mod iter_terminal_chain;
 mod iter_while_accum;
@@ -469,6 +470,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(struct_iter_fields::StructIterFields),
         Box::new(struct_extend_methods::StructExtendMethods),
         Box::new(array_of_structs::ArrayOfStructs),
+        Box::new(iter_struct_pipeline::IterStructPipeline),
         Box::new(closure_struct_capture::ClosureStructCapture),
         Box::new(closure_struct_return::ClosureStructReturn),
         Box::new(iter_method_map::IterMethodMap),
