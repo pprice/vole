@@ -75,6 +75,7 @@ mod generic_closure_call;
 mod generic_closure_chain;
 mod generic_closure_iter;
 mod generic_iter_call;
+mod generic_struct_closure;
 mod i32_boundary;
 mod i64_boundary;
 mod identity_arithmetic;
@@ -256,6 +257,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(generic_closure_call::GenericClosureCall),
         Box::new(generic_closure_chain::GenericClosureChain),
         Box::new(generic_closure_iter::GenericClosureIter),
+        Box::new(generic_struct_closure::GenericStructClosure),
         Box::new(generic_iter_call::GenericIterCall),
         Box::new(closure_class_call::ClosureClassCall),
         Box::new(closure_when_capture::ClosureWhenCapture),
