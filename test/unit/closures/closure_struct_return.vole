@@ -1,0 +1,48 @@
+struct Point {
+    x: i64
+    y: i64
+}
+
+struct Triple {
+    a: i64
+    b: i64
+    c: i64
+}
+
+func apply_make(maker: (i64, i64) -> Point, a: i64, b: i64) -> Point {
+    return maker(a, b)
+}
+
+tests {
+    test "closure returning struct" {
+        let make_point = (a: i64, b: i64) => Point { x: a, y: b }
+        let p = make_point(10, 20)
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "closure returning struct passed as argument" {
+        let make_point = (a: i64, b: i64) => Point { x: a, y: b }
+        let p = apply_make(make_point, 3, 7)
+        assert(p.x == 3)
+        assert(p.y == 7)
+    }
+
+    test "closure returning struct with block body" {
+        let make_point = (a: i64, b: i64) => {
+            let sum = a + b
+            return Point { x: a, y: sum }
+        }
+        let p = make_point(5, 10)
+        assert(p.x == 5)
+        assert(p.y == 15)
+    }
+
+    test "closure returning struct with captures" {
+        let offset = 100
+        let make_point = (a: i64) => Point { x: a + offset, y: a * 2 }
+        let p = make_point(5)
+        assert(p.x == 105)
+        assert(p.y == 10)
+    }
+}

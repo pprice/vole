@@ -93,6 +93,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             } else if self.vir_query_unwrap_fallible(ret).is_some() {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // payload
+            } else if let Some(flat_count) = self.struct_flat_slot_count(ret) {
+                // Struct returns: match the lambda definition's convention
+                if flat_count <= crate::MAX_SMALL_STRUCT_FIELDS {
+                    for _ in 0..flat_count {
+                        sig.returns.push(AbiParam::new(types::I64));
+                    }
+                    // Pad to MAX_SMALL_STRUCT_FIELDS for consistent calling convention
+                    while sig.returns.len() < crate::MAX_SMALL_STRUCT_FIELDS {
+                        sig.returns.push(AbiParam::new(types::I64));
+                    }
+                } else {
+                    // Large struct: sret convention - hidden param after closure pointer
+                    sig.params.insert(1, AbiParam::new(self.ptr_type()));
+                    sig.returns.push(AbiParam::new(self.ptr_type()));
+                }
             } else {
                 sig.returns
                     .push(AbiParam::new(self.vir_query_type_to_cranelift(ret)));
@@ -169,6 +184,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             )?;
         }
 
+        // For large struct sret returns, allocate a return buffer and insert
+        // the sret pointer as the second argument (after closure ptr).
+        let sret_ptr = if let Some(flat_count) = self.struct_flat_slot_count(ret)
+            && flat_count > crate::MAX_SMALL_STRUCT_FIELDS
+        {
+            let total_size = (flat_count as u32) * 8;
+            let slot = self.alloc_stack(total_size);
+            let pt = self.ptr_type();
+            let ptr = self.builder.ins().stack_addr(pt, slot, 0);
+            args.insert(1, ptr);
+            Some(ptr)
+        } else {
+            None
+        };
+        let _ = sret_ptr; // used by result handling below
+
         let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
 
         let call_inst = self.emit_call_indirect(sig_ref, func_ptr, &args);
@@ -196,6 +227,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
             Ok(self.compiled_with_ty(ptr, ptr_type, ret))
+        } else if let Some(flat_count) = self.struct_flat_slot_count(ret) {
+            if flat_count <= crate::MAX_SMALL_STRUCT_FIELDS {
+                // Small struct: reconstruct from register values
+                let results_vec: Vec<Value> = results.to_vec();
+                self.reconstruct_struct_from_regs(&results_vec, ret)
+            } else {
+                // Large struct (sret): result[0] is already the pointer to our buffer
+                Ok(self.compiled_with_ty(results[0], self.ptr_type(), ret))
+            }
         } else {
             // If the return type is a union, the returned value is a pointer to callee's stack.
             // We need to copy the union data to our own stack to prevent it from being

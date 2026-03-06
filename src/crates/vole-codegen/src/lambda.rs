@@ -79,6 +79,23 @@ impl Cg<'_, '_, '_> {
         } else if self.vir_query_unwrap_fallible_v(return_vir_ty).is_some() {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // payload
+        } else if let Some(flat_count) = self.vir_struct_flat_slot_count(return_vir_ty) {
+            // Struct returns: small structs use multi-value return in registers,
+            // large structs use sret convention (handled elsewhere).
+            if flat_count <= crate::MAX_SMALL_STRUCT_FIELDS {
+                for _ in 0..flat_count {
+                    sig.returns.push(AbiParam::new(types::I64));
+                }
+                // Pad to MAX_SMALL_STRUCT_FIELDS for consistent calling convention
+                while sig.returns.len() < crate::MAX_SMALL_STRUCT_FIELDS {
+                    sig.returns.push(AbiParam::new(types::I64));
+                }
+            } else {
+                // Large struct: sret convention - hidden first param for return buffer
+                // Insert sret pointer after the closure pointer (params[0])
+                sig.params.insert(1, AbiParam::new(self.ptr_type()));
+                sig.returns.push(AbiParam::new(self.ptr_type()));
+            }
         } else {
             sig.returns.push(AbiParam::new(return_type));
         }
