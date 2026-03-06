@@ -1,0 +1,56 @@
+// Regression test for vol-f3oe: .sum() on [f64] inside a generic function
+// returned i64 instead of f64, causing Cranelift verifier errors.
+// The bug was that in monomorphized generic contexts, Iterable default
+// methods (sum, reduce, first, etc.) got their return type from the entity
+// registry which contained the unresolved interface type parameter T.
+// The fix uses the VIR dispatch metadata's substituted_return_type which
+// carries the correctly resolved concrete type.
+
+interface Checker {
+    func check(a: f64) -> bool
+}
+
+struct MyChecker {
+    x: i64,
+}
+
+extend MyChecker with Checker {
+    func check(a: f64) -> bool {
+        return a > 0.0
+    }
+}
+
+func process_sum<T: Checker>(p: T) -> f64 {
+    let arr = [1.0_f64, 2.0_f64, 3.0_f64]
+    let total = arr.sum()
+    return total * 2.0_f64
+}
+
+func process_first<T: Checker>(p: T) -> f64? {
+    let arr = [10.0_f64, 20.0_f64, 30.0_f64]
+    return arr.first()
+}
+
+func process_count<T: Checker>(p: T) -> i64 {
+    let arr = [1.0_f64, 2.0_f64, 3.0_f64]
+    return arr.count()
+}
+
+let checker = MyChecker { x: 42 }
+
+tests {
+    test "f64 array .sum() in generic function" {
+        let result = process_sum(checker)
+        assert(result == 12.0_f64)
+    }
+
+    test "f64 array .first() in generic function" {
+        let result = process_first(checker)
+        assert(result == 10.0_f64)
+    }
+
+    test "f64 array .count() in generic function" {
+        let result = process_count(checker)
+        assert(result == 3)
+    }
+}

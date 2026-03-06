@@ -894,21 +894,22 @@ impl Cg<'_, '_, '_> {
             (func_key, return_type_id, fb_param_ids)
         };
 
-        // In monomorphized contexts, method resolution already carries concrete
-        // return types. Prefer that over expression-cache lookups, which can be
-        // stale or collide across generic/module NodeIds.
-        let mut return_type_id = if self.substitutions.is_some() {
-            return_type_id
-        } else {
-            dispatch
-                .substituted_return_type
-                .map(|ty| {
-                    let v = self.try_substitute_type_v(ty);
-                    let table = self.vir_type_table();
-                    table.vir_to_type_id(v)
-                })
-                .unwrap_or(return_type_id)
-        };
+        // Prefer VIR dispatch's substituted_return_type when available. In both
+        // monomorphized and non-monomorphized contexts, the VIR metadata carries
+        // the fully-resolved concrete return type. The entity registry fallback
+        // (return_type_id from above) can contain unresolved interface type
+        // parameters — e.g. Iterable default methods like sum() -> T where T is
+        // the Iterable interface's type parameter, not the function's own type
+        // parameter. try_substitute_type can't resolve these because they're not
+        // in the function's substitution map.
+        let mut return_type_id = dispatch
+            .substituted_return_type
+            .map(|ty| {
+                let v = self.try_substitute_type_v(ty);
+                let table = self.vir_type_table();
+                table.vir_to_type_id(v)
+            })
+            .unwrap_or(return_type_id);
 
         // NOTE: RuntimeIterator conversion for Iterator<T> return types is handled
         // in the external method call paths above (which return early). Non-external
@@ -929,8 +930,10 @@ impl Cg<'_, '_, '_> {
         }
         if used_array_iterable_path || self.substitutions.is_some() {
             // Check if the return type still looks like an unresolved Iterator<T>
-            // (maybe_convert failed because the elem TypeId was unknown/unsubstituted).
-            // Derive the correct type from the receiver's concrete element type.
+            // (maybe_convert failed because the elem TypeId was unknown/unsubstituted),
+            // OR if the return type is still a type parameter (e.g. sum() -> T where T
+            // is the Iterable interface's element type, not the function's own type param).
+            // In both cases, derive the correct type from the receiver's concrete element type.
             let needs_derivation = {
                 let vir_ret = self.vir_lookup(return_type_id);
                 if let Some((type_def_id, _)) = self.vir_query_unwrap_interface_v(vir_ret) {
@@ -938,7 +941,11 @@ impl Cg<'_, '_, '_> {
                         .well_known
                         .is_iterator_type_def(type_def_id)
                 } else {
-                    false
+                    // Also derive when the return type is still a type parameter.
+                    // This handles non-Iterator-returning Iterable defaults like
+                    // sum() -> T, reduce() -> T, first() -> T?, etc. where the
+                    // Iterable interface's type parameter T was not resolved.
+                    self.vir_query_unwrap_type_param_v(vir_ret).is_some()
                 }
             };
             if needs_derivation {
