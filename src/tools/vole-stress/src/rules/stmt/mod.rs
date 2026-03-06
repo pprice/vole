@@ -107,6 +107,7 @@ mod iter_terminal_chain;
 mod iter_while_accum;
 mod iter_zip_collect;
 mod lambda_let;
+mod large_class_instance;
 mod large_tuple_let;
 mod last_elem_access;
 mod length_comparison;
@@ -446,6 +447,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(iface_function_call::IfaceFunctionCall),
         // -- Construction/destructuring rules (batch 16) ------------------------------
         Box::new(class_let::ClassLet),
+        Box::new(large_class_instance::LargeClassInstance),
         Box::new(struct_let::StructLet),
         Box::new(interface_let::InterfaceLet),
         Box::new(struct_destructure::StructDestructure),
