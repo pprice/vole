@@ -61,8 +61,8 @@ impl StmtRule for ManyParamCall {
 fn emit_sum(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     let num_params = emit.random_in(6, 10);
 
-    let fn_suffix = scope.fresh_name();
-    let fn_name = format!("sum_{}", fn_suffix);
+    let fn_id = emit.gen_range(10000..99999);
+    let fn_name = format!("sum_{}", fn_id);
 
     // Build parameter signature: "p0: i64, p1: i64, ..."
     let param_sig: String = (0..num_params)
@@ -113,8 +113,8 @@ const STRING_ARGS: &[&str] = &[
 fn emit_concat(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     let num_params = emit.random_in(6, 10);
 
-    let fn_suffix = scope.fresh_name();
-    let fn_name = format!("concat_{}", fn_suffix);
+    let fn_id = emit.gen_range(10000..99999);
+    let fn_name = format!("concat_{}", fn_id);
 
     // Build parameter signature: "p0: string, p1: string, ..."
     let param_sig: String = (0..num_params)

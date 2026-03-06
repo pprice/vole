@@ -143,8 +143,8 @@ fn emit_i64_variant(
     field0: &str,
     field1: &str,
 ) -> Option<String> {
-    let fn_suffix = scope.fresh_name();
-    let fn_name = format!("helper_{}", fn_suffix);
+    let fn_id = emit.gen_range(10000..99999);
+    let fn_name = format!("helper_{}", fn_id);
 
     // Module-level generic function declaration
     let decl = format!(
@@ -191,8 +191,8 @@ fn emit_string_variant(
     field0: &str,
     field1: &str,
 ) -> Option<String> {
-    let fn_suffix = scope.fresh_name();
-    let fn_name = format!("helper_{}", fn_suffix);
+    let fn_id = emit.gen_range(10000..99999);
+    let fn_name = format!("helper_{}", fn_id);
 
     // Module-level generic function declaration
     let decl = format!(

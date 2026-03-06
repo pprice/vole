@@ -80,8 +80,8 @@ fn emit_apply_twice(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     let prim = pick_apply_type(emit);
     let type_name = prim_type_name(prim);
 
-    let fn_suffix = scope.fresh_name();
-    let fn_name = format!("apply_twice_{}", fn_suffix);
+    let fn_id = emit.gen_range(10000..99999);
+    let fn_name = format!("apply_twice_{}", fn_id);
 
     // Module-level generic function declaration
     let decl = format!(
@@ -128,8 +128,8 @@ fn emit_transform(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     let prim = pick_transform_type(emit);
     let type_name = prim_type_name(prim);
 
-    let fn_suffix = scope.fresh_name();
-    let fn_name = format!("transform_{}", fn_suffix);
+    let fn_id = emit.gen_range(10000..99999);
+    let fn_name = format!("transform_{}", fn_id);
 
     // Module-level generic function declaration
     let decl = format!(
