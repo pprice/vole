@@ -10,6 +10,7 @@ mod array_index_assign;
 mod array_length_guard;
 mod array_length_zero_check;
 mod array_let;
+mod array_of_structs;
 mod array_push;
 mod array_uniform_ops;
 mod assert_stmt;
@@ -452,6 +453,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(when_struct_interpolation::WhenStructInterpolation),
         Box::new(struct_iter_fields::StructIterFields),
         Box::new(struct_extend_methods::StructExtendMethods),
+        Box::new(array_of_structs::ArrayOfStructs),
         Box::new(closure_struct_capture::ClosureStructCapture),
         Box::new(iter_method_map::IterMethodMap),
         Box::new(range_iter_let::RangeIterLet),
