@@ -187,6 +187,7 @@ mod sorted_collect;
 mod sorted_iter_accum;
 mod split_for_loop;
 mod static_call;
+mod split_transform;
 mod string_build_match;
 mod string_char_at;
 mod string_concat;
@@ -251,6 +252,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(string_char_at::StringCharAt),
         Box::new(string_split::StringSplitLet),
         Box::new(string_split::StringSplitFor),
+        Box::new(split_transform::SplitTransform),
         Box::new(string_search_let::StringSearchLet),
         Box::new(interpolation_concat::InterpolationConcat),
         Box::new(range_tostring::RangeTostring),
