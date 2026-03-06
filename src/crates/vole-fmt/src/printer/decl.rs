@@ -329,11 +329,16 @@ fn print_field_def<'a>(
     field: &FieldDef,
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
-    arena
+    let mut doc = arena
         .text(interner.resolve(field.name).to_string())
         .append(arena.text(": "))
-        .append(print_type_expr(arena, &field.ty, interner))
-        .append(arena.text(","))
+        .append(print_type_expr(arena, &field.ty, interner));
+    if let Some(default) = &field.default_value {
+        doc = doc
+            .append(arena.text(" = "))
+            .append(print_expr(arena, default, interner));
+    }
+    doc.append(arena.text(","))
 }
 
 /// Print an interface declaration.
