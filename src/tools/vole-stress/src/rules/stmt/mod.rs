@@ -55,6 +55,7 @@ mod empty_string_ops;
 mod f64_comparison_edge;
 mod f64_literal_ops;
 mod field_closure;
+mod field_default_construct;
 mod filter_iter_tostring;
 mod fixed_array_let;
 mod fn_param_call;
@@ -450,6 +451,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         // -- Construction/destructuring rules (batch 16) ------------------------------
         Box::new(class_let::ClassLet),
         Box::new(large_class_instance::LargeClassInstance),
+        Box::new(field_default_construct::FieldDefaultConstruct),
         Box::new(struct_let::StructLet),
         Box::new(interface_let::InterfaceLet),
         Box::new(struct_destructure::StructDestructure),
