@@ -42,6 +42,7 @@ mod comparison_chain;
 mod compound_assignment;
 mod compound_bool;
 mod dead_code;
+mod deep_optional_chain;
 mod discard_stmt;
 mod early_return;
 mod edge_case_for_loop;
@@ -473,6 +474,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(sentinel_union_let::SentinelUnionLet),
         Box::new(optional_destructure_match::OptionalDestructureMatch),
         Box::new(optional_chain_call::OptionalChainCall),
+        Box::new(deep_optional_chain::DeepOptionalChain),
         Box::new(match_on_method_result::MatchOnMethodResult),
         // -- Remaining let-binding rules (batch 18) -----------------------------------
         Box::new(string_interpolation_let::StringInterpolationLet),
