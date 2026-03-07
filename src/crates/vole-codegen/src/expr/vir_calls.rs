@@ -142,6 +142,12 @@ impl Cg<'_, '_, '_> {
     ///   handled by `call_result`.
     /// - Large structs (3+ flat slots): sret convention with a hidden first
     ///   parameter pointing to a caller-allocated return buffer.
+    ///
+    /// For generator functions, the func_registry return type is overridden
+    /// to `RuntimeIterator(T)` during pass 1 (via `override_generator_return_type`).
+    /// We use the func_registry's return type for interpreting the call result
+    /// so that downstream code sees the correct concrete type rather than the
+    /// sema-level `Iterator<T>` interface type.
     fn compile_vir_direct_call(
         &mut self,
         function_id: vole_identity::FunctionId,
@@ -159,19 +165,27 @@ impl Cg<'_, '_, '_> {
             .func_id(func_key)
             .ok_or_else(|| CodegenError::not_found("compiled function for VIR direct call", ""))?;
 
+        // Use the func_registry's return type if available (may differ from VIR
+        // type for generators, where pass 1 overrides it to RuntimeIterator(T)).
+        let callee_return_ty = self
+            .codegen_ctx
+            .funcs()
+            .return_type(func_key)
+            .unwrap_or(return_ty);
+
         let func_ref = self
             .codegen_ctx
             .jit_module()
             .declare_func_in_func(func_id, self.builder.func);
 
-        let is_sret = self.is_sret_struct_return(return_ty);
+        let is_sret = self.is_sret_struct_return(callee_return_ty);
 
         let (mut arg_values, mut rc_temps) = self.compile_vir_args(args)?;
 
         // For sret convention (large structs with 3+ flat slots), allocate a
         // stack buffer for the return value and prepend its pointer as the
         // first argument (hidden parameter).
-        if is_sret && let Some(sret_ptr) = self.alloc_sret_ptr(return_ty)? {
+        if is_sret && let Some(sret_ptr) = self.alloc_sret_ptr(callee_return_ty)? {
             arg_values.insert(0, sret_ptr);
         }
 
@@ -180,10 +194,10 @@ impl Cg<'_, '_, '_> {
         // For union returns, copy the value out of the callee's stack frame
         // BEFORE RC temp cleanup — rc_dec calls may clobber the callee's
         // return slot (same ordering as call_func_id_impl).
-        let union_copy = if !is_sret && self.vir_query_is_union(return_ty) {
+        let union_copy = if !is_sret && self.vir_query_is_union(callee_return_ty) {
             let results = self.builder.inst_results(call_inst);
             let src_ptr = results[0];
-            Some(self.copy_union_ptr_to_local(src_ptr, return_ty))
+            Some(self.copy_union_ptr_to_local(src_ptr, callee_return_ty))
         } else {
             None
         };
@@ -198,11 +212,11 @@ impl Cg<'_, '_, '_> {
         if is_sret {
             let results = self.builder.inst_results(call_inst);
             let ptr_type = self.ptr_type();
-            let result = self.compiled_with_ty(results[0], ptr_type, return_ty);
+            let result = self.compiled_with_ty(results[0], ptr_type, callee_return_ty);
             return Ok(self.mark_rc_owned(result));
         }
 
-        let result = self.call_result(call_inst, return_ty)?;
+        let result = self.call_result(call_inst, callee_return_ty)?;
         Ok(self.mark_rc_owned(result))
     }
 

@@ -253,7 +253,7 @@ impl LoweringCtx<'_> {
     /// - `CallTarget::Direct` for non-external direct functions
     /// - `CallTarget::Native` or `CallTarget::Intrinsic` for external functions
     /// - `None` for functions that need special codegen handling
-    ///   (generics, generators, defaults, interface/union params).
+    ///   (generics, defaults, interface/union params).
     fn try_resolve_call_target(
         &mut self,
         name_id: NameId,
@@ -263,12 +263,6 @@ impl LoweringCtx<'_> {
         let func_def = self.entities.get_function(func_id);
         // Only resolve non-generic functions — generic calls use GenericCall.
         if func_def.generic_info.is_some() {
-            return None;
-        }
-        // Skip generator functions — codegen overrides their return type to
-        // RuntimeIterator(T) and compiles them with special generator
-        // infrastructure.  The Direct call path doesn't account for this.
-        if func_def.generator_element_type.is_some() {
             return None;
         }
         // Skip functions with default parameters — when the call site
@@ -336,7 +330,7 @@ impl LoweringCtx<'_> {
     /// `CallTarget::Direct` emission.
     ///
     /// Returns `None` for functions that need special codegen handling
-    /// (generics, FFI, generators, defaults, interface/union params).
+    /// (generics, FFI, defaults, interface/union params).
     fn try_resolve_function_id(&self, name_id: NameId) -> Option<FunctionId> {
         let func_id = self.entities.function_by_name(name_id)?;
         let func_def = self.entities.get_function(func_id);
@@ -347,12 +341,6 @@ impl LoweringCtx<'_> {
         // Skip external (FFI) functions — they are resolved by
         // resolve_callee_target() which emits Native or Intrinsic targets.
         if func_def.is_external {
-            return None;
-        }
-        // Skip generator functions — codegen overrides their return type to
-        // RuntimeIterator(T) and compiles them with special generator
-        // infrastructure.  The Direct call path doesn't account for this.
-        if func_def.generator_element_type.is_some() {
             return None;
         }
         // Skip functions with default parameters — when the call site

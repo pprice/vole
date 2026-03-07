@@ -44,7 +44,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - **Functions with default parameters** — Direct doesn't fill defaults
     /// - **Functions returning struct types** — Direct doesn't handle sret
     /// - **Functions with interface/union params** — Direct doesn't box/coerce
-    /// - **Generator functions** — codegen overrides return type
     /// - **External/FFI functions** — not in func_registry by NameId
     /// - **Test-scoped local functions** — not in the main name table
     /// - **Sema-fallback monomorphized calls** — not in VIR instance index
