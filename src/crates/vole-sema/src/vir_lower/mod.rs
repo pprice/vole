@@ -253,7 +253,7 @@ impl LoweringCtx<'_> {
     /// - `CallTarget::Direct` for non-external direct functions
     /// - `CallTarget::Native` or `CallTarget::Intrinsic` for external functions
     /// - `None` for functions that need special codegen handling
-    ///   (generics, defaults, interface/union params).
+    ///   (generics, interface/union params).
     fn try_resolve_call_target(
         &mut self,
         name_id: NameId,
@@ -263,12 +263,6 @@ impl LoweringCtx<'_> {
         let func_def = self.entities.get_function(func_id);
         // Only resolve non-generic functions — generic calls use GenericCall.
         if func_def.generic_info.is_some() {
-            return None;
-        }
-        // Skip functions with default parameters — when the call site
-        // omits a defaulted argument, the Direct/Native path emits too few
-        // args.  Default filling happens in call_dispatch (Unresolved path).
-        if func_def.param_defaults.iter().any(|d| d.is_some()) {
             return None;
         }
         // External (FFI) functions: look up the native function info from
@@ -330,7 +324,7 @@ impl LoweringCtx<'_> {
     /// `CallTarget::Direct` emission.
     ///
     /// Returns `None` for functions that need special codegen handling
-    /// (generics, FFI, defaults, interface/union params).
+    /// (generics, FFI, interface/union params).
     fn try_resolve_function_id(&self, name_id: NameId) -> Option<FunctionId> {
         let func_id = self.entities.function_by_name(name_id)?;
         let func_def = self.entities.get_function(func_id);
@@ -341,12 +335,6 @@ impl LoweringCtx<'_> {
         // Skip external (FFI) functions — they are resolved by
         // resolve_callee_target() which emits Native or Intrinsic targets.
         if func_def.is_external {
-            return None;
-        }
-        // Skip functions with default parameters — when the call site
-        // omits a defaulted argument, the Direct path emits too few args.
-        // Default filling happens in call_dispatch (Unresolved path).
-        if func_def.param_defaults.iter().any(|d| d.is_some()) {
             return None;
         }
         // Skip functions with interface or union/optional parameters —

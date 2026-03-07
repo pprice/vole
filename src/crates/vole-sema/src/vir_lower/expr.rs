@@ -1333,9 +1333,10 @@ fn classify_single_field_coercion(
 ///    are classified via `resolve_intrinsic_target()`.
 ///
 /// 3. **Direct function calls** (same-module, cross-module, prelude) are
-///    classified via `resolve_callee_function()`, which skips functions
-///    with default params, struct returns, interface/union params, generators,
-///    or FFI linkage.
+///    classified via `resolve_callee_target()`, which skips functions
+///    with interface/union params.  Functions with default parameters
+///    are resolved to Direct/Native and their missing args are filled
+///    by `fill_default_args()`.
 ///
 /// 4. **Closure/captured/functional-interface variables** are classified via
 ///    `resolve_closure_variable_target()` using sema's `callee_var_type`.
@@ -1384,7 +1385,7 @@ fn lower_call(
     };
 
     // Lower argument expressions to VIR, handling implicit `it` lambdas.
-    let args: Vec<VirRef> = call_expr
+    let mut args: Vec<VirRef> = call_expr
         .args
         .iter()
         .map(|arg| lower_call_arg(arg.expr(), ctx))
@@ -1464,6 +1465,17 @@ fn lower_call(
         make_unresolved(resolved_call_args, lambda_defaults, monomorph_key)
     };
 
+    // For Direct and Native calls to functions with default parameters,
+    // fill missing args by lowering the default expressions from the
+    // entity registry.  This ensures the VIR Call node always has
+    // the full argument list — codegen never needs to look up defaults.
+    if matches!(
+        &target,
+        CallTarget::Direct { .. } | CallTarget::Native { .. } | CallTarget::Intrinsic { .. }
+    ) {
+        fill_default_args(callee_sym, &mut args, expr.id, ctx);
+    }
+
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     let result_is_fallible = !ctx.generic && ctx.type_arena.unwrap_fallible(ty).is_some();
@@ -1474,6 +1486,107 @@ fn lower_call(
         vir_ty,
         result_is_fallible,
     })
+}
+
+/// Fill missing default arguments for a resolved call.
+///
+/// When a function has default parameters and the call provides fewer
+/// arguments than the function expects, this fills in the missing args
+/// by lowering the default expressions from `FunctionDef.param_defaults`.
+///
+/// Handles two cases:
+/// - **Positional calls** (no `resolved_call_args`): appends defaults for
+///   the missing trailing slots.
+/// - **Named-arg calls** (with `resolved_call_args`): rebuilds the full
+///   positional arg list, using the mapping to reorder provided args and
+///   filling `None` slots with defaults.
+fn fill_default_args(
+    callee_sym: vole_identity::Symbol,
+    args: &mut Vec<VirRef>,
+    call_node_id: vole_identity::NodeId,
+    ctx: &mut LoweringCtx<'_>,
+) {
+    // Resolve the callee symbol to a FunctionId by walking same-module,
+    // cross-module, and prelude namespaces.
+    let func_id = find_function_id_for_callee(callee_sym, ctx);
+    let Some(func_id) = func_id else { return };
+    let func_def = ctx.entities.get_function(func_id);
+    let expected_params = func_def.signature.params_id.len();
+
+    // Check for named-arg mapping from sema.
+    let resolved_call_args = ctx
+        .node_map
+        .get_resolved_call_args(call_node_id)
+        .map(|m| m.to_vec());
+
+    if let Some(mapping) = resolved_call_args {
+        // Named-arg reordering (with possible defaults): rebuild the
+        // full positional arg list even if all args are provided, since
+        // the call-site order may differ from parameter order.
+        // mapping[slot] = Some(j) means use the j-th call-site arg;
+        // None means use the default expression.
+        let original_args = std::mem::take(args);
+        for (slot, opt) in mapping.iter().enumerate() {
+            if let Some(&call_idx) = opt.as_ref() {
+                if call_idx < original_args.len() {
+                    // Clone the VirRef (Box<VirExpr>) — each arg is used
+                    // at most once in a valid mapping.
+                    args.push(original_args[call_idx].clone());
+                }
+            } else if let Some(Some(default_expr)) = func_def.param_defaults.get(slot)
+                && ctx.node_map.get_type(default_expr.id).is_some() {
+                    args.push(lower_expr(default_expr, ctx));
+                }
+        }
+    } else if args.len() < expected_params {
+        // Simple positional case: append defaults for the missing
+        // trailing slots.
+        for slot in args.len()..expected_params {
+            if let Some(Some(default_expr)) = func_def.param_defaults.get(slot)
+                && ctx.node_map.get_type(default_expr.id).is_some() {
+                    args.push(lower_expr(default_expr, ctx));
+                }
+        }
+    }
+}
+
+/// Resolve a callee symbol to a `FunctionId`, searching same-module,
+/// cross-module, and prelude namespaces.
+///
+/// Returns `None` when the symbol doesn't map to a known function.
+fn find_function_id_for_callee(
+    callee_sym: vole_identity::Symbol,
+    ctx: &LoweringCtx<'_>,
+) -> Option<vole_identity::FunctionId> {
+    let callee_name = ctx.interner.try_resolve(callee_sym)?;
+
+    // Stage 1: same-module lookup.
+    if let Some(name_id) = ctx
+        .name_table
+        .name_id(ctx.module_id, &[callee_sym], ctx.interner)
+        && let Some(func_id) = ctx.entities.function_by_name(name_id) {
+            return Some(func_id);
+        }
+
+    // Stage 2: cross-module lookup via destructured import bindings.
+    if let Some(&(source_module_id, _export_sym)) =
+        ctx.cross_module.module_bindings.get(&callee_sym)
+        && let Some(source_name_id) = ctx.name_table.name_id_raw(source_module_id, &[callee_name])
+            && let Some(func_id) = ctx.entities.function_by_name(source_name_id) {
+                return Some(func_id);
+            }
+
+    // Stage 3: prelude module lookup.
+    for &prelude_module_id in &ctx.cross_module.prelude_module_ids {
+        if let Some(prelude_name_id) = ctx
+            .name_table
+            .name_id_raw(prelude_module_id, &[callee_name])
+            && let Some(func_id) = ctx.entities.function_by_name(prelude_name_id) {
+                return Some(func_id);
+            }
+    }
+
+    None
 }
 
 /// Try to build a `CallTarget::GenericCall` from the MonomorphKey on a call

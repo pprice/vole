@@ -41,7 +41,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// FunctionalInterface, GlobalClosure, GenericCall, VirDirect).  The
     /// following cases still fall through to Unresolved:
     ///
-    /// - **Functions with default parameters** — Direct doesn't fill defaults
     /// - **Functions returning struct types** — Direct doesn't handle sret
     /// - **Functions with interface/union params** — Direct doesn't box/coerce
     /// - **External/FFI functions** — not in func_registry by NameId
