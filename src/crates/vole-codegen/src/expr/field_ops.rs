@@ -24,10 +24,10 @@ use super::super::context::Cg;
 impl Cg<'_, '_, '_> {
     /// Compile a VIR `FieldLoad` expression.
     ///
-    /// When `storage` is resolved (`Direct` or `Heap`), uses the
-    /// pre-resolved slot and dispatch kind from sema lowering.
-    /// Falls back to the full arena lookup when `storage` is `ByName`
-    /// (module fields).
+    /// When `storage` is resolved (`Direct` or `Heap`), dispatches directly
+    /// to the struct or class field-load path using the pre-resolved slot
+    /// from sema/VIR lowering — no `vir_query_is_struct_v()` needed.
+    /// Falls back to `extract_field` (with arena lookup) for `ByName`.
     pub(crate) fn compile_vir_field_load(
         &mut self,
         object: &VirExpr,
@@ -36,22 +36,27 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let obj = self.compile_vir_expr(object)?;
 
-        // Resolved storage: use pre-resolved slot, only look up field type.
-        if let FieldStorage::Direct { slot } | FieldStorage::Heap { slot } = storage {
-            let field_name = self.interner().resolve(field);
-            let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
-            return self.extract_field(obj, slot as usize, field_type_id);
+        match storage {
+            FieldStorage::Direct { slot } => {
+                let field_name = self.interner().resolve(field);
+                let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
+                self.struct_field_load(obj.value, slot as usize, field_type_id, obj.type_id)
+            }
+            FieldStorage::Heap { slot } => {
+                let field_name = self.interner().resolve(field);
+                let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
+                self.heap_field_load(obj, slot as usize, field_type_id)
+            }
+            FieldStorage::Module { module_id } => {
+                self.try_module_field_load_by_id(obj, field, module_id)
+            }
+            FieldStorage::ByName => {
+                let field_name = self.interner().resolve(field);
+                let (slot, field_type_id) =
+                    self.vir_field_slot_and_type(obj.type_id, field_name)?;
+                self.extract_field(obj, slot, field_type_id)
+            }
         }
-
-        // Module field access with pre-resolved ModuleId.
-        if let FieldStorage::Module { module_id } = storage {
-            return self.try_module_field_load_by_id(obj, field, module_id);
-        }
-
-        // ByName fallback: full arena lookup for unresolved generic templates.
-        let field_name = self.interner().resolve(field);
-        let (slot, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
-        self.extract_field(obj, slot, field_type_id)
     }
 
     /// Compile a VIR `FieldStore` expression.

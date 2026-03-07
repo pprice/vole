@@ -102,6 +102,42 @@ impl Cg<'_, '_, '_> {
         Ok(cv)
     }
 
+    /// Load a field from a heap-allocated class instance at the given slot.
+    ///
+    /// Handles i128 wide types (2 consecutive slots), RC cleanup for
+    /// owned temporaries, and marks the result as borrowed when appropriate.
+    /// Unlike `extract_field`, does NOT query `vir_query_is_struct_v()` —
+    /// the caller has already determined the storage kind from the VIR node.
+    pub(crate) fn heap_field_load(
+        &mut self,
+        obj: CompiledValue,
+        slot: usize,
+        field_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let wide = self.vir_query_wide_type(field_type_id);
+        let mut cv = if let Some(wide) = wide {
+            let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
+            let wide_i128 = super::helpers::load_wide_field(self, get_func_ref, obj.value, slot);
+            wide.compiled_value_from_i128(self.builder, wide_i128, field_type_id)
+        } else {
+            let result_raw = self.get_field_cached(obj.value, slot as u32)?;
+            self.convert_field_value(result_raw, field_type_id)
+        };
+
+        // RC cleanup for owned temporaries (e.g. `obj.method().field`).
+        if obj.is_owned() && self.rc_state_v(obj.type_id).needs_cleanup() {
+            if self.rc_state(field_type_id).needs_cleanup() {
+                self.emit_rc_inc_for_type(cv.value, field_type_id)?;
+                cv.rc_lifecycle = RcLifecycle::Owned;
+            }
+            self.emit_rc_dec_for_type_v(obj.value, obj.type_id)?;
+        } else {
+            self.mark_borrowed_if_rc(&mut cv);
+        }
+
+        Ok(cv)
+    }
+
     /// Load a field from a struct pointer at the given slot.
     /// Uses flat layout: nested struct fields are stored inline and
     /// field offsets account for variable-size preceding fields.
