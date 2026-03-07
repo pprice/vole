@@ -181,8 +181,7 @@ impl LoweringCtx<'_> {
     /// `CallTarget::Direct` emission.
     ///
     /// Returns `None` for functions that need special codegen handling
-    /// (generics, FFI, generators, sret structs, defaults, interface/union
-    /// params).
+    /// (generics, FFI, generators, defaults, interface/union params).
     fn try_resolve_function_id(&self, name_id: NameId) -> Option<FunctionId> {
         let func_id = self.entities.function_by_name(name_id)?;
         let func_def = self.entities.get_function(func_id);
@@ -200,14 +199,6 @@ impl LoweringCtx<'_> {
         // RuntimeIterator(T) and compiles them with special generator
         // infrastructure.  The Direct call path doesn't account for this.
         if func_def.generator_element_type.is_some() {
-            return None;
-        }
-        // Skip functions returning struct types — codegen may use the sret
-        // calling convention (hidden first parameter for the return buffer)
-        // for structs with more than 2 flat fields.  The Direct call path
-        // doesn't emit the sret argument.
-        let ret_ty = func_def.signature.return_type_id;
-        if self.type_arena.is_struct(ret_ty) {
             return None;
         }
         // Skip functions with default parameters — when the call site

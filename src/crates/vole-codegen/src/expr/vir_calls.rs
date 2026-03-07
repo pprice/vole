@@ -136,6 +136,12 @@ impl Cg<'_, '_, '_> {
     /// Resolves the sema `FunctionId` to a Cranelift `FuncId` through the
     /// entity registry and function registry, compiles VIR arguments, and
     /// emits the call instruction.
+    ///
+    /// Handles struct return conventions:
+    /// - Small structs (1-2 flat slots): multi-value return in registers,
+    ///   handled by `call_result`.
+    /// - Large structs (3+ flat slots): sret convention with a hidden first
+    ///   parameter pointing to a caller-allocated return buffer.
     fn compile_vir_direct_call(
         &mut self,
         function_id: vole_identity::FunctionId,
@@ -158,13 +164,24 @@ impl Cg<'_, '_, '_> {
             .jit_module()
             .declare_func_in_func(func_id, self.builder.func);
 
-        let (arg_values, mut rc_temps) = self.compile_vir_args(args)?;
+        let is_sret = self.is_sret_struct_return(return_ty);
+
+        let (mut arg_values, mut rc_temps) = self.compile_vir_args(args)?;
+
+        // For sret convention (large structs with 3+ flat slots), allocate a
+        // stack buffer for the return value and prepend its pointer as the
+        // first argument (hidden parameter).
+        if is_sret
+            && let Some(sret_ptr) = self.alloc_sret_ptr(return_ty)? {
+                arg_values.insert(0, sret_ptr);
+            }
+
         let call_inst = self.emit_call(func_ref, &arg_values);
 
         // For union returns, copy the value out of the callee's stack frame
         // BEFORE RC temp cleanup — rc_dec calls may clobber the callee's
         // return slot (same ordering as call_func_id_impl).
-        let union_copy = if self.vir_query_is_union(return_ty) {
+        let union_copy = if !is_sret && self.vir_query_is_union(return_ty) {
             let results = self.builder.inst_results(call_inst);
             let src_ptr = results[0];
             Some(self.copy_union_ptr_to_local(src_ptr, return_ty))
@@ -177,6 +194,15 @@ impl Cg<'_, '_, '_> {
         if let Some(result) = union_copy {
             return Ok(result);
         }
+
+        // For sret, the returned value is the sret pointer we passed in.
+        if is_sret {
+            let results = self.builder.inst_results(call_inst);
+            let ptr_type = self.ptr_type();
+            let result = self.compiled_with_ty(results[0], ptr_type, return_ty);
+            return Ok(self.mark_rc_owned(result));
+        }
+
         let result = self.call_result(call_inst, return_ty)?;
         Ok(self.mark_rc_owned(result))
     }
