@@ -3,6 +3,7 @@
 // Lower test function bodies from AST to VIR.
 
 use crate::LoweringEntityLookup;
+use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{lower_stmts, lower_test_body};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
@@ -15,6 +16,7 @@ use vole_vir::type_table::VirTypeTable;
 /// Walks the program's `Decl::Tests` blocks (including nested ones) and
 /// lowers each `TestCase.body` to a `VirBody`.  Returns a list of `VirTest`
 /// entries for O(1) lookup during test compilation.
+#[allow(clippy::too_many_arguments)]
 pub fn lower_test_bodies(
     program: &Program,
     node_map: &NodeMap,
@@ -24,13 +26,14 @@ pub fn lower_test_bodies(
     names: &NameTable,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    implements: &ImplementRegistry,
 ) -> Vec<VirTest> {
     let mut tests = Vec::new();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
             lower_tests_decl_bodies(
                 tests_decl, node_map, interner, type_arena, entities, names, &mut tests,
-                type_table, module_id,
+                type_table, module_id, implements,
             );
         }
     }
@@ -49,6 +52,7 @@ fn lower_tests_decl_bodies(
     tests: &mut Vec<VirTest>,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    implements: &ImplementRegistry,
 ) {
     let scoped_let_stmts: Vec<vole_frontend::Stmt> = tests_decl
         .decls
@@ -75,6 +79,7 @@ fn lower_tests_decl_bodies(
             func_return_type: vole_identity::TypeId::VOID,
             captures: rustc_hash::FxHashSet::default(),
             cross_module: &empty_xmod,
+            implements,
         };
         lower_stmts(&scoped_let_stmts, &mut ctx).stmts
     };
@@ -90,6 +95,7 @@ fn lower_tests_decl_bodies(
             type_table,
             module_id,
             &empty_xmod,
+            implements,
         );
         if !scoped_let_vir_stmts.is_empty() {
             vir_body
@@ -107,7 +113,7 @@ fn lower_tests_decl_bodies(
         if let Decl::Tests(nested) = decl {
             lower_tests_decl_bodies(
                 nested, node_map, interner, type_arena, entities, names, tests, type_table,
-                module_id,
+                module_id, implements,
             );
         }
     }

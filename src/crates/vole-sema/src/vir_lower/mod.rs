@@ -22,10 +22,13 @@ use vole_identity::{
     VirTypeId,
 };
 
+use crate::implement_registry::ImplementRegistry;
 use crate::node_map::NodeMap;
 use crate::{EntityRegistry, TypeArena};
 
+use vole_vir::calls::{CallTarget, NativeAbi};
 use vole_vir::func::{ReturnAbi, VirBody, VirFunction};
+use vole_vir::intrinsics::IntrinsicKey;
 use vole_vir::type_table::VirTypeTable;
 
 use self::expr::lower_expr;
@@ -105,6 +108,13 @@ pub struct LoweringCtx<'a> {
     /// to `CallTarget::Direct` without falling through to codegen's
     /// `call_dispatch()`.
     pub cross_module: &'a CrossModuleCtx,
+
+    /// Implement registry for external function lookups.
+    ///
+    /// Used by `resolve_callee_target` to look up external (FFI) function
+    /// metadata (module path, native name) when `FunctionDef.is_external`
+    /// is true, enabling `CallTarget::Native` emission during VIR lowering.
+    pub implements: &'a ImplementRegistry,
 }
 
 impl LoweringCtx<'_> {
@@ -123,7 +133,67 @@ impl LoweringCtx<'_> {
 
     // -- Call resolution helpers ---------------------------------------------
 
-    /// Try to resolve a callee `Symbol` to a `FunctionId`.
+    /// Try to resolve a callee `Symbol` to a `CallTarget`.
+    ///
+    /// Resolution proceeds through three stages:
+    /// 1. Same-module: look up `(module_id, callee_sym)` in the name table.
+    /// 2. Cross-module: if the callee is a destructured import binding,
+    ///    look it up in the source module's namespace.
+    /// 3. Prelude: try each prelude module's namespace.
+    ///
+    /// Returns:
+    /// - `CallTarget::Direct` for non-external direct functions
+    /// - `CallTarget::Native` for FFI external functions
+    /// - `CallTarget::Intrinsic` for compiler-intrinsic external functions
+    /// - `None` when the symbol doesn't map to a directly-callable
+    ///   function (e.g. lambdas, closures, builtins, generics).
+    pub fn resolve_callee_target(&mut self, callee_sym: Symbol) -> Option<CallTarget> {
+        // Guard: if the symbol can't be resolved (e.g. UNKNOWN in tests),
+        // bail early to avoid panicking in name_table.name_id().
+        // Convert to owned String to avoid holding a borrow on interner
+        // while try_resolve_call_target needs &mut self for interning.
+        let callee_name = self.interner.try_resolve(callee_sym)?.to_string();
+
+        // Stage 1: same-module lookup.
+        let name_id = self
+            .name_table
+            .name_id(self.module_id, &[callee_sym], self.interner);
+        if let Some(name_id) = name_id
+            && let Some(target) = self.try_resolve_call_target(name_id, &callee_name)
+        {
+            return Some(target);
+        }
+
+        // Stage 2: cross-module lookup via destructured import bindings.
+        if let Some(&(source_module_id, _export_sym)) =
+            self.cross_module.module_bindings.get(&callee_sym)
+        {
+            // Look up the function in the source module's namespace using
+            // the callee name string (cross-interner safe via name_id_raw).
+            if let Some(source_name_id) = self
+                .name_table
+                .name_id_raw(source_module_id, &[&callee_name])
+                && let Some(target) = self.try_resolve_call_target(source_name_id, &callee_name)
+            {
+                return Some(target);
+            }
+        }
+
+        // Stage 3: prelude module lookup.
+        for &prelude_module_id in &self.cross_module.prelude_module_ids {
+            if let Some(prelude_name_id) = self
+                .name_table
+                .name_id_raw(prelude_module_id, &[&callee_name])
+                && let Some(target) = self.try_resolve_call_target(prelude_name_id, &callee_name)
+            {
+                return Some(target);
+            }
+        }
+
+        None
+    }
+
+    /// Try to resolve a callee `Symbol` to a `FunctionId` (direct calls only).
     ///
     /// Resolution proceeds through three stages:
     /// 1. Same-module: look up `(module_id, callee_sym)` in the name table.
@@ -177,6 +247,91 @@ impl LoweringCtx<'_> {
         None
     }
 
+    /// Try to resolve a `NameId` to a `CallTarget`.
+    ///
+    /// Returns:
+    /// - `CallTarget::Direct` for non-external direct functions
+    /// - `CallTarget::Native` or `CallTarget::Intrinsic` for external functions
+    /// - `None` for functions that need special codegen handling
+    ///   (generics, generators, defaults, interface/union params).
+    fn try_resolve_call_target(
+        &mut self,
+        name_id: NameId,
+        callee_name: &str,
+    ) -> Option<CallTarget> {
+        let func_id = self.entities.function_by_name(name_id)?;
+        let func_def = self.entities.get_function(func_id);
+        // Only resolve non-generic functions — generic calls use GenericCall.
+        if func_def.generic_info.is_some() {
+            return None;
+        }
+        // Skip generator functions — codegen overrides their return type to
+        // RuntimeIterator(T) and compiles them with special generator
+        // infrastructure.  The Direct call path doesn't account for this.
+        if func_def.generator_element_type.is_some() {
+            return None;
+        }
+        // Skip functions with default parameters — when the call site
+        // omits a defaulted argument, the Direct/Native path emits too few
+        // args.  Default filling happens in call_dispatch (Unresolved path).
+        if func_def.param_defaults.iter().any(|d| d.is_some()) {
+            return None;
+        }
+        // External (FFI) functions: look up the native function info from
+        // the implement registry and emit CallTarget::Native or Intrinsic.
+        if func_def.is_external {
+            return self.resolve_external_call_target(callee_name);
+        }
+        // Skip functions with interface or union/optional parameters —
+        // callers need implicit boxing/coercion that the Direct call path
+        // doesn't perform (the Unresolved path handles this via
+        // box_interface_value and union boxing in call_dispatch).
+        for &param_ty in func_def.signature.params_id.iter() {
+            if self.type_arena.is_interface(param_ty) || self.type_arena.is_union(param_ty) {
+                return None;
+            }
+        }
+        Some(CallTarget::Direct {
+            function_id: func_id,
+        })
+    }
+
+    /// Resolve an external (FFI) function to a `CallTarget::Native` or
+    /// `CallTarget::Intrinsic`.
+    ///
+    /// Looks up the external function info from the implement registry by
+    /// short name.  If the module path is "vole:compiler_intrinsic", the
+    /// function is a compiler intrinsic and is emitted as
+    /// `CallTarget::Intrinsic`.  Otherwise, it is emitted as
+    /// `CallTarget::Native` with the module path and native name interned
+    /// as `Symbol`s.
+    fn resolve_external_call_target(&mut self, callee_name: &str) -> Option<CallTarget> {
+        let ext_info = self.implements.get_external_func(callee_name)?;
+        let module_path_str = self
+            .name_table
+            .last_segment_str(ext_info.module_path)
+            .unwrap_or_default();
+        let native_name_str = self
+            .name_table
+            .last_segment_str(ext_info.native_name)
+            .unwrap_or_default();
+
+        // Compiler intrinsics (e.g., panic) are emitted as Intrinsic.
+        if module_path_str == "vole:compiler_intrinsic" {
+            let key = IntrinsicKey::try_from_name(&native_name_str)?;
+            return Some(CallTarget::Intrinsic { key, line: 0 });
+        }
+
+        // Regular FFI external functions → CallTarget::Native.
+        let module_path_sym = self.interner.intern(&module_path_str);
+        let native_name_sym = self.interner.intern(&native_name_str);
+        Some(CallTarget::Native {
+            module_path: module_path_sym,
+            native_name: native_name_sym,
+            abi: NativeAbi::Simple,
+        })
+    }
+
     /// Check whether a `FunctionId` (looked up by `NameId`) is eligible for
     /// `CallTarget::Direct` emission.
     ///
@@ -189,9 +344,8 @@ impl LoweringCtx<'_> {
         if func_def.generic_info.is_some() {
             return None;
         }
-        // Skip external (FFI) functions — they are declared through
-        // implement blocks or FFI registration, not the normal function
-        // declaration path, so they won't be in the func_registry by NameId.
+        // Skip external (FFI) functions — they are resolved by
+        // resolve_callee_target() which emits Native or Intrinsic targets.
         if func_def.is_external {
             return None;
         }
@@ -447,6 +601,7 @@ pub fn lower_function(
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
     cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -460,6 +615,7 @@ pub fn lower_function(
         func_return_type: return_type,
         captures: FxHashSet::default(),
         cross_module,
+        implements,
     };
     let params = param_types
         .iter()
@@ -511,6 +667,7 @@ pub fn lower_monomorphized_function(
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
     cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) -> VirFunction {
     debug_assert_concrete_types(param_types, return_type, type_arena, &name);
     let mut vir = lower_function(
@@ -527,6 +684,7 @@ pub fn lower_monomorphized_function(
         type_table,
         module_id,
         cross_module,
+        implements,
     );
     vir.mangled_name_id = Some(mangled_name_id);
     vir
@@ -553,6 +711,7 @@ pub fn lower_method(
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
     cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -566,6 +725,7 @@ pub fn lower_method(
         func_return_type: return_type,
         captures: FxHashSet::default(),
         cross_module,
+        implements,
     };
     let params = param_types
         .iter()
@@ -610,6 +770,7 @@ pub fn lower_interface_method(
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
     cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) -> Option<VirFunction> {
     let body_ast = method.body.as_ref()?;
     let mut ctx = LoweringCtx {
@@ -624,6 +785,7 @@ pub fn lower_interface_method(
         func_return_type: return_type,
         captures: FxHashSet::default(),
         cross_module,
+        implements,
     };
     let params = param_types
         .iter()
@@ -675,6 +837,7 @@ pub fn lower_generic_function(
     type_param_names: &[NameId],
     module_id: ModuleId,
     cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -688,6 +851,7 @@ pub fn lower_generic_function(
         func_return_type: return_type,
         captures: FxHashSet::default(),
         cross_module,
+        implements,
     };
     let params = param_types
         .iter()
@@ -746,6 +910,7 @@ fn debug_assert_concrete_types(
 /// Test bodies use the same `FuncBody` type as functions, so this delegates
 /// to `lower_func_body`.  Exposed as a public API so the lowering pipeline
 /// in `analyzed.rs` can lower test bodies alongside function bodies.
+#[allow(clippy::too_many_arguments)]
 pub fn lower_test_body(
     body: &FuncBody,
     node_map: &NodeMap,
@@ -756,6 +921,7 @@ pub fn lower_test_body(
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
     cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) -> VirBody {
     let mut ctx = LoweringCtx {
         node_map,
@@ -769,6 +935,7 @@ pub fn lower_test_body(
         func_return_type: TypeId::VOID,
         captures: FxHashSet::default(),
         cross_module,
+        implements,
     };
     lower_func_body(body, &mut ctx)
 }

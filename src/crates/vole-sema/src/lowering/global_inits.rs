@@ -14,6 +14,7 @@ use vole_vir::type_table::VirTypeTable;
 ///
 /// Iterates `Decl::Let` declarations and lowers each initializer expression
 /// using `lower_expr`. The resulting map is keyed by the binding's `Symbol`.
+#[allow(clippy::too_many_arguments)]
 pub fn lower_global_inits(
     program: &Program,
     interner: &mut Interner,
@@ -28,6 +29,7 @@ pub fn lower_global_inits(
     use crate::vir_lower::expr::lower_expr;
 
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = crate::implement_registry::ImplementRegistry::new();
     let mut ctx = LoweringCtx {
         node_map,
         interner,
@@ -40,6 +42,7 @@ pub fn lower_global_inits(
         func_return_type: vole_identity::TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
         cross_module: &empty_xmod,
+        implements: &empty_impl,
     };
 
     let mut map = FxHashMap::default();
@@ -83,6 +86,7 @@ pub fn lower_module_global_inits(
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
         let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+        let empty_impl = crate::implement_registry::ImplementRegistry::new();
         let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
             interner,
@@ -95,6 +99,7 @@ pub fn lower_module_global_inits(
             func_return_type: vole_identity::TypeId::VOID,
             captures: rustc_hash::FxHashSet::default(),
             cross_module: &empty_xmod,
+            implements: &empty_impl,
         };
 
         let mut map = FxHashMap::default();

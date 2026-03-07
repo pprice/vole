@@ -34,6 +34,7 @@ fn lower_empty_block_function() {
         &mut type_table,
         name_table.main_module(),
         empty_cross_module(),
+        empty_implements(),
     );
 
     assert_eq!(vir.id, dummy_func_id());
@@ -68,6 +69,7 @@ fn lower_block_function_lowers_control_flow() {
         &mut type_table,
         name_table.main_module(),
         empty_cross_module(),
+        empty_implements(),
     );
 
     assert_eq!(vir.body.stmts.len(), 2);
@@ -108,6 +110,7 @@ fn lower_expr_body_function_sets_trailing() {
         &mut type_table,
         name_table.main_module(),
         empty_cross_module(),
+        empty_implements(),
     );
 
     assert!(vir.body.stmts.is_empty());
@@ -148,6 +151,7 @@ fn lower_preserves_params_and_return_type() {
         &mut type_table,
         name_table.main_module(),
         empty_cross_module(),
+        empty_implements(),
     );
 
     assert_eq!(vir.params.len(), 2);
@@ -225,6 +229,7 @@ fn lower_monomorphized_with_concrete_types() {
         &mut type_table,
         name_table.main_module(),
         empty_cross_module(),
+        empty_implements(),
     );
 
     assert_eq!(vir.name, "identity__mono_0");
@@ -260,6 +265,7 @@ fn lower_monomorphized_expr_body() {
         &mut type_table,
         name_table.main_module(),
         empty_cross_module(),
+        empty_implements(),
     );
 
     assert_eq!(vir.name, "to_bool__mono_0");
@@ -299,6 +305,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
         &mut type_table,
         name_table.main_module(),
         empty_cross_module(),
+        empty_implements(),
     );
 }
 
@@ -331,6 +338,7 @@ fn lower_monomorphized_rejects_type_param_in_return() {
         &mut type_table,
         name_table.main_module(),
         empty_cross_module(),
+        empty_implements(),
     );
 }
 

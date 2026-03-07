@@ -1434,8 +1434,16 @@ fn lower_call(
             .unwrap_or_else(|| make_unresolved(resolved_call_args, lambda_defaults, monomorph_key))
     } else if let Some(intrinsic) = resolve_intrinsic_target(expr, callee_sym, ctx) {
         intrinsic
-    } else if let Some(function_id) = ctx.resolve_callee_function(callee_sym) {
-        CallTarget::Direct { function_id }
+    } else if let Some(target) = ctx.resolve_callee_target(callee_sym) {
+        // Fix up the line number for intrinsic targets (resolve_callee_target
+        // returns line: 0 since it doesn't have span context).
+        match target {
+            CallTarget::Intrinsic { key, .. } => CallTarget::Intrinsic {
+                key,
+                line: expr.span.line,
+            },
+            other => other,
+        }
     } else if let Some(closure_target) = resolve_closure_variable_target(
         expr.id,
         callee_sym,

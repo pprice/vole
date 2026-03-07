@@ -171,10 +171,9 @@ impl Cg<'_, '_, '_> {
         // For sret convention (large structs with 3+ flat slots), allocate a
         // stack buffer for the return value and prepend its pointer as the
         // first argument (hidden parameter).
-        if is_sret
-            && let Some(sret_ptr) = self.alloc_sret_ptr(return_ty)? {
-                arg_values.insert(0, sret_ptr);
-            }
+        if is_sret && let Some(sret_ptr) = self.alloc_sret_ptr(return_ty)? {
+            arg_values.insert(0, sret_ptr);
+        }
 
         let call_inst = self.emit_call(func_ref, &arg_values);
 

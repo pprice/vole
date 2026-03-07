@@ -4,6 +4,7 @@ use std::rc::Rc;
 use rustc_hash::FxHashMap;
 
 use crate::LoweringEntityLookup;
+use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
@@ -291,6 +292,7 @@ pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>)
             .collect();
 
         let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+        let empty_impl = ImplementRegistry::new();
         let vir = lower_method(
             method,
             method_id,
@@ -305,6 +307,7 @@ pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>)
             type_table,
             module_id,
             &empty_xmod,
+            &empty_impl,
         );
         vir_functions.push(vir);
     }
@@ -350,6 +353,7 @@ pub fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>)
     };
 
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = ImplementRegistry::new();
     for (method, method_id, method_def) in resolved {
         let method_name_str = interner.resolve(method.name);
         let display_name = format!("{}::{}", type_name_str, method_name_str);
@@ -372,6 +376,7 @@ pub fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>)
             type_table,
             module_id,
             &empty_xmod,
+            &empty_impl,
         ) {
             vir_functions.push(vir);
         }
@@ -436,6 +441,7 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
             .collect();
 
         let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+        let empty_impl = ImplementRegistry::new();
         if let Some(vir) = lower_interface_method(
             iface_method,
             impl_method_id,
@@ -450,6 +456,7 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
             type_table,
             module_id,
             &empty_xmod,
+            &empty_impl,
         ) {
             vir_functions.push(vir);
         }

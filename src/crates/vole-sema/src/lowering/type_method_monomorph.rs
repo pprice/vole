@@ -5,6 +5,7 @@ use rustc_hash::FxHashMap;
 
 use super::monomorph_functions::body_has_sema_data;
 use crate::LoweringEntityLookup;
+use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
@@ -204,6 +205,7 @@ fn lower_class_method_monomorph_vir(
         .map(|(p, &ty)| (p.name, ty))
         .collect();
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = ImplementRegistry::new();
     let mut vir = lower_method(
         method,
         MethodId::new(0),
@@ -218,6 +220,7 @@ fn lower_class_method_monomorph_vir(
         type_table,
         module_id,
         &empty_xmod,
+        &empty_impl,
     );
     // Monomorphized method instances are looked up via mangled name map, not MethodId.
     vir.method_id = None;
@@ -248,6 +251,7 @@ fn lower_static_method_monomorph_vir(
         .map(|(p, &ty)| (p.name, ty))
         .collect();
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = ImplementRegistry::new();
     let mut vir = lower_interface_method(
         method,
         MethodId::new(0),
@@ -262,6 +266,7 @@ fn lower_static_method_monomorph_vir(
         type_table,
         module_id,
         &empty_xmod,
+        &empty_impl,
     )?;
     // Monomorphized method instances are looked up via mangled name map, not MethodId.
     vir.method_id = None;

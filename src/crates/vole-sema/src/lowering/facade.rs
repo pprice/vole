@@ -208,6 +208,7 @@ where
             module_exports,
             module_vir_functions,
         },
+        implements,
     })
 }
 
@@ -368,6 +369,7 @@ where
     generic_vir_functions: Vec<(NameId, VirFunction)>,
     type_table: &'a mut VirTypeTable,
     module_vir: ModuleVirOutput,
+    implements: &'a ImplementRegistry,
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +454,7 @@ where
         generic_vir_functions,
         type_table,
         module_vir,
+        implements,
     } = args;
 
     // Destructure module_vir up front so we can move fields independently.
@@ -500,6 +503,7 @@ where
         module_id,
         type_table,
         cross_module: &cross_module_ctx,
+        implements,
     });
     vir_functions.extend(module_vir_functions);
 
@@ -617,7 +621,7 @@ where
     // -----------------------------------------------------------------------
 
     let vir_tests = lower_test_bodies(
-        program, node_map, interner, type_arena, entities, names, type_table, module_id,
+        program, node_map, interner, type_arena, entities, names, type_table, module_id, implements,
     );
     let vir_global_inits = lower_global_inits(
         program, interner, node_map, type_arena, entities, names, type_table, module_id,

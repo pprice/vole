@@ -5,6 +5,7 @@ use rustc_hash::FxHashMap;
 
 use super::implement_blocks::{collect_default_method_ids, find_interface_method_ast};
 use crate::LoweringEntityLookup;
+use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program, Symbol};
@@ -199,6 +200,7 @@ pub fn lower_type_methods(
     }
 
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = ImplementRegistry::new();
     for (method, mid, method_def) in resolved_statics {
         let method_name_str = interner.resolve(method.name);
         let display_name = format!("{}::{}", type_name_str, method_name_str);
@@ -221,6 +223,7 @@ pub fn lower_type_methods(
             type_table,
             module_id,
             &empty_xmod,
+            &empty_impl,
         ) {
             vir_functions.push(vir);
         }
@@ -286,6 +289,7 @@ pub fn lower_type_default_methods(
             .collect();
 
         let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+        let empty_impl = ImplementRegistry::new();
         if let Some(vir) = lower_interface_method(
             iface_method,
             impl_method_id,
@@ -300,6 +304,7 @@ pub fn lower_type_default_methods(
             type_table,
             module_id,
             &empty_xmod,
+            &empty_impl,
         ) {
             vir_functions.push(vir);
         }
@@ -340,6 +345,7 @@ fn lower_single_method(
         .collect();
 
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = ImplementRegistry::new();
     let vir = lower_method(
         method,
         method_id,
@@ -354,6 +360,7 @@ fn lower_single_method(
         type_table,
         module_id,
         &empty_xmod,
+        &empty_impl,
     );
     vir_functions.push(vir);
 }

@@ -132,17 +132,14 @@ pub enum CallTarget {
     /// A call that could not be fully classified during VIR lowering.
     ///
     /// Lowering classifies many call patterns into concrete `CallTarget`
-    /// variants (Direct, Intrinsic, ClosureVariable, CapturedClosure,
+    /// variants (Direct, Native, Intrinsic, ClosureVariable, CapturedClosure,
     /// FunctionalInterface, GlobalClosure, GenericCall).  The following
     /// cases still produce Unresolved:
     ///
     /// - Functions with default parameters, struct returns, interface/union
     ///   params, or generator return types (rejected by `try_resolve_function_id`)
-    /// - External/FFI functions (not in func_registry by NameId)
     /// - Test-scoped local functions (not in the main name table)
     /// - Sema-fallback monomorphized calls (not in VIR instance index)
-    /// - Module bindings (destructured imports targeting FFI/generic externals)
-    /// - Prelude external functions (panic, etc.)
     /// - All calls in generic templates (resolved during VIR monomorphization
     ///   or kept as Unresolved for codegen's sema-fallback path)
     ///

@@ -10,6 +10,7 @@ use super::implement_blocks::{
 };
 use super::type_methods::{lower_type_default_methods, lower_type_methods};
 use crate::LoweringEntityLookup;
+use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::lower_function;
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
@@ -110,6 +111,7 @@ fn lower_tests_decl_type_methods(
                         .map(|(p, &ty)| (p.name, ty))
                         .collect();
                     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+                    let empty_impl = ImplementRegistry::new();
                     let vir = lower_function(
                         func,
                         func_id,
@@ -124,6 +126,7 @@ fn lower_tests_decl_type_methods(
                         type_table,
                         main_module_id,
                         &empty_xmod,
+                        &empty_impl,
                     );
                     vir_functions.push(vir);
                 }

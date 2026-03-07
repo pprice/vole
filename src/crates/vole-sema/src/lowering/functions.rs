@@ -4,6 +4,7 @@ use std::rc::Rc;
 use rustc_hash::FxHashMap;
 
 use crate::LoweringEntityLookup;
+use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{CrossModuleCtx, lower_function};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
@@ -21,6 +22,7 @@ pub struct LowerTopLevelFunctionsArgs<'a> {
     pub module_id: ModuleId,
     pub type_table: &'a mut VirTypeTable,
     pub cross_module: &'a CrossModuleCtx,
+    pub implements: &'a ImplementRegistry,
 }
 
 pub struct LowerModuleFunctionsArgs<'a> {
@@ -63,6 +65,7 @@ pub fn lower_top_level_functions(args: LowerTopLevelFunctionsArgs<'_>) -> Vec<Vi
         module_id,
         type_table,
         cross_module,
+        implements,
     } = args;
 
     // Collect (func_decl, func_id, func_def) tuples first while interner is
@@ -113,6 +116,7 @@ pub fn lower_top_level_functions(args: LowerTopLevelFunctionsArgs<'_>) -> Vec<Vi
             type_table,
             module_id,
             cross_module,
+            implements,
         );
         vir_functions.push(vir);
     }
@@ -198,6 +202,7 @@ fn lower_module_program_functions(args: LowerModuleProgramFunctionsArgs<'_>) {
     };
 
     let empty_xmod = CrossModuleCtx::empty();
+    let empty_impl = ImplementRegistry::new();
     for (func, func_id, func_def) in resolved {
         let param_types: Vec<_> = func
             .params
@@ -220,6 +225,7 @@ fn lower_module_program_functions(args: LowerModuleProgramFunctionsArgs<'_>) {
             type_table,
             module_id,
             &empty_xmod,
+            &empty_impl,
         );
         vir_functions.push(vir);
     }

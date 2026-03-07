@@ -5,6 +5,7 @@ use rustc_hash::FxHashMap;
 
 use crate::LoweringEntityLookup;
 use crate::generic::MonomorphInstance;
+use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::lower_monomorphized_function;
 use crate::{NodeMap, TypeArena};
 use vole_frontend::ast::{FuncBody, Stmt};
@@ -147,6 +148,7 @@ fn lower_single_monomorph(args: LowerSingleMonomorphArgs<'_>) {
     let mangled_name = names.display(instance.mangled_name);
     let module_id = names.module_of(instance.original_name);
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = ImplementRegistry::new();
     let vir = lower_monomorphized_function(
         func,
         func_id,
@@ -162,6 +164,7 @@ fn lower_single_monomorph(args: LowerSingleMonomorphArgs<'_>) {
         type_table,
         module_id,
         &empty_xmod,
+        &empty_impl,
     );
     vir_functions.push(vir);
 }
@@ -234,6 +237,7 @@ fn lower_module_monomorph(args: LowerModuleMonomorphArgs<'_>) {
         .collect();
     let mangled_name = names.display(instance.mangled_name);
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = ImplementRegistry::new();
     let vir = lower_monomorphized_function(
         func,
         func_id,
@@ -249,6 +253,7 @@ fn lower_module_monomorph(args: LowerModuleMonomorphArgs<'_>) {
         type_table,
         module_id,
         &empty_xmod,
+        &empty_impl,
     );
     vir_functions.push(vir);
 }

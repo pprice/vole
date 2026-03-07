@@ -159,6 +159,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
     } = args;
 
     let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
+    let empty_impl = crate::implement_registry::ImplementRegistry::new();
     let mut ctx = crate::vir_lower::LoweringCtx {
         node_map,
         interner,
@@ -171,6 +172,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         func_return_type: vole_identity::TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
         cross_module: &empty_xmod,
+        implements: &empty_impl,
     };
 
     for (slot, param) in lambda.params.iter().enumerate() {

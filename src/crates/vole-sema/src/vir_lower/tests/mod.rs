@@ -129,6 +129,13 @@ fn empty_cross_module() -> &'static super::CrossModuleCtx {
     CTX.get_or_init(super::CrossModuleCtx::empty)
 }
 
+/// Leaked empty implement registry for tests.
+fn empty_implements() -> &'static crate::implement_registry::ImplementRegistry {
+    use std::sync::OnceLock;
+    static REG: OnceLock<crate::implement_registry::ImplementRegistry> = OnceLock::new();
+    REG.get_or_init(crate::implement_registry::ImplementRegistry::new)
+}
+
 /// Create a `LoweringCtx` from test fixtures (concrete mode).
 ///
 /// This is a convenience helper that bundles the common test parameters.
@@ -152,6 +159,7 @@ fn make_ctx<'a>(
         func_return_type: TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
         cross_module: empty_cross_module(),
+        implements: empty_implements(),
     }
 }
 
@@ -178,5 +186,6 @@ fn make_generic_ctx<'a>(
         func_return_type: TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
         cross_module: empty_cross_module(),
+        implements: empty_implements(),
     }
 }
