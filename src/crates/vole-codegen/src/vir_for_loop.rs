@@ -71,6 +71,7 @@ impl Cg<'_, '_, '_> {
             VirIterKind::Range => self.compile_vir_for_range(vir_for),
             VirIterKind::Array { .. } => self.compile_vir_for_array(vir_for),
             VirIterKind::String
+            | VirIterKind::RuntimeIterator { .. }
             | VirIterKind::IteratorInterface { .. }
             | VirIterKind::CustomIterator { .. }
             | VirIterKind::CustomIterable { .. } => self.compile_vir_for_runtime_iter(vir_for),
@@ -372,6 +373,9 @@ impl Cg<'_, '_, '_> {
                 self.enter_iter_rc_scope(&iter, Some(&string_val));
                 Ok((iter_val, VirTypeId::STRING, true))
             }
+            VirIterKind::RuntimeIterator { elem_type, .. } => {
+                self.setup_runtime_iterator_iter(vir_for, *elem_type)
+            }
             VirIterKind::IteratorInterface { elem_type, .. } => {
                 self.setup_iterator_interface_iter(vir_for, *elem_type)
             }
@@ -390,25 +394,38 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Set up a for-loop over an Iterator interface value.
+    /// Set up a for-loop over a direct `RuntimeIterator` value.
+    ///
+    /// The iterable is already a `RuntimeIterator<T>` — pass it through
+    /// without any wrapping or boxing.
+    fn setup_runtime_iterator_iter(
+        &mut self,
+        vir_for: &VirFor,
+        elem_type: VirTypeId,
+    ) -> CodegenResult<(Value, VirTypeId, bool)> {
+        let elem_vir = self.try_substitute_type_v(elem_type);
+        let iter = self.compile_vir_expr(&vir_for.iterable)?;
+        self.enter_iter_rc_scope(&iter, None);
+        Ok((iter.value, elem_vir, false))
+    }
+
+    /// Set up a for-loop over an `Iterator<T>` interface value.
+    ///
+    /// Wraps the interface via `InterfaceIter` into a `RuntimeIterator`.
     fn setup_iterator_interface_iter(
         &mut self,
         vir_for: &VirFor,
         hint_elem_type: VirTypeId,
     ) -> CodegenResult<(Value, VirTypeId, bool)> {
         let hint = self.try_substitute_type_v(hint_elem_type);
-        let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
-        let (elem_vir, is_interface_iter) =
-            if let Some(elem_vir) = self.vir_query_unwrap_runtime_iterator_v(iter.type_id) {
-                (elem_vir, false)
-            } else if let Some((_, type_args)) = self.vir_query_unwrap_interface_v(iter.type_id) {
-                (type_args.first().copied().unwrap_or(hint), true)
+        let iface = self.compile_vir_expr(&vir_for.iterable)?;
+        let elem_vir =
+            if let Some((_, type_args)) = self.vir_query_unwrap_interface_v(iface.type_id) {
+                type_args.first().copied().unwrap_or(hint)
             } else {
-                (hint, false)
+                hint
             };
-        if is_interface_iter {
-            iter = self.wrap_interface_iter_v(iter, elem_vir)?;
-        }
+        let iter = self.wrap_interface_iter_v(iface, elem_vir)?;
         self.enter_iter_rc_scope(&iter, None);
         Ok((iter.value, elem_vir, false))
     }

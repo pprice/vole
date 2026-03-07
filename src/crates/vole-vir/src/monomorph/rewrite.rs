@@ -1062,6 +1062,13 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
             union_storage: *union_storage,
         },
         VirIterKind::String => VirIterKind::String,
+        VirIterKind::RuntimeIterator {
+            elem_type,
+            vir_elem_type,
+        } => VirIterKind::RuntimeIterator {
+            elem_type: ctx.remap(*elem_type),
+            vir_elem_type: ctx.remap(*vir_elem_type),
+        },
         VirIterKind::IteratorInterface {
             elem_type,
             vir_elem_type,

@@ -155,7 +155,12 @@ fn classify_let_storage(ty: TypeId, init_ty: TypeId, ctx: &mut LoweringCtx<'_>) 
         let tag_hint = compute_union_tag_hint(ty, init_ty, ctx);
         LetStorageHint::Union { tag_hint }
     } else if ctx.type_arena.is_interface(ty) {
-        LetStorageHint::Interface
+        // RuntimeIterator implements Iterator dispatch directly; skip boxing.
+        if !ctx.generic && ctx.type_arena.is_runtime_iterator(init_ty) {
+            LetStorageHint::RuntimeIterator
+        } else {
+            LetStorageHint::Interface
+        }
     } else if ctx.type_arena.is_numeric(ty) {
         LetStorageHint::Numeric
     } else {
@@ -325,10 +330,26 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
             }
         }
         Some(IterableKind::String) => VirIterKind::String,
-        Some(IterableKind::IteratorInterface { elem_type }) => VirIterKind::IteratorInterface {
-            elem_type: ctx.translate(elem_type),
-            vir_elem_type: ctx.translate(elem_type),
-        },
+        Some(IterableKind::IteratorInterface { elem_type }) => {
+            // Sema conflates RuntimeIterator and Iterator<T> interface under
+            // IteratorInterface.  Distinguish them by checking the iterable
+            // expression's sema type so codegen reads the decision.
+            let iter_ty = ctx
+                .node_map
+                .get_type(for_stmt.iterable.id)
+                .unwrap_or(TypeId::UNKNOWN);
+            if !ctx.generic && ctx.type_arena.is_runtime_iterator(iter_ty) {
+                VirIterKind::RuntimeIterator {
+                    elem_type: ctx.translate(elem_type),
+                    vir_elem_type: ctx.translate(elem_type),
+                }
+            } else {
+                VirIterKind::IteratorInterface {
+                    elem_type: ctx.translate(elem_type),
+                    vir_elem_type: ctx.translate(elem_type),
+                }
+            }
+        }
         Some(IterableKind::CustomIterator { elem_type }) => VirIterKind::CustomIterator {
             elem_type: ctx.translate(elem_type),
             vir_elem_type: ctx.translate(elem_type),
@@ -369,7 +390,8 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
         VirIterKind::Range => ctx.translate(TypeId::I64),
         VirIterKind::Array { elem_type, .. } => elem_type,
         VirIterKind::String => ctx.translate(TypeId::STRING),
-        VirIterKind::IteratorInterface { elem_type, .. }
+        VirIterKind::RuntimeIterator { elem_type, .. }
+        | VirIterKind::IteratorInterface { elem_type, .. }
         | VirIterKind::CustomIterator { elem_type, .. }
         | VirIterKind::CustomIterable { elem_type, .. }
         | VirIterKind::Generic { elem_type, .. } => elem_type,

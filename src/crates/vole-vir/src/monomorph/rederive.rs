@@ -585,6 +585,7 @@ fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
         VirIterKind::Generic { .. }
         | VirIterKind::Range
         | VirIterKind::String
+        | VirIterKind::RuntimeIterator { .. }
         | VirIterKind::IteratorInterface { .. }
         | VirIterKind::CustomIterator { .. }
         | VirIterKind::CustomIterable { .. } => {
@@ -1166,7 +1167,15 @@ fn rederive_let_storage(
                 _ => LetStorageHint::Union { tag_hint: None },
             }
         }
-        VirType::Interface { .. } => LetStorageHint::Interface,
+        VirType::Interface { .. } => {
+            // If the existing hint is already RuntimeIterator (pre-classified
+            // by sema lowering), preserve it.
+            if matches!(existing, LetStorageHint::RuntimeIterator) {
+                LetStorageHint::RuntimeIterator
+            } else {
+                LetStorageHint::Interface
+            }
+        }
         VirType::Primitive(p) if p.is_numeric() => LetStorageHint::Numeric,
         _ => LetStorageHint::Scalar,
     }

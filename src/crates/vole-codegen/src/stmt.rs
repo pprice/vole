@@ -73,19 +73,26 @@ impl Cg<'_, '_, '_> {
                     // proper calling convention.
                     (init.value, init.type_id)
                 }
+                LetStorageHint::RuntimeIterator => {
+                    // RuntimeIterator implements Iterator dispatch directly;
+                    // pass through without interface boxing.
+                    (init.value, init.type_id)
+                }
                 _ => (init.value, declared_vir),
             }
         } else {
             (init.value, init.type_id)
         };
 
-        // Box value if assigning to interface type
+        // Box value if assigning to interface type.
+        // RuntimeIterator storage hint skips this entirely (pre-classified by
+        // sema lowering).  The `is_runtime_iterator` fallback covers the
+        // monomorphization rederive path where the hint may be Interface
+        // even though the init value is a RuntimeIterator.
         if let Some(declared_vir) = declared_vir_opt
             && storage == LetStorageHint::Interface
         {
             let is_final_interface = self.vir_query_is_interface_v(final_vir_ty);
-            // RuntimeIterator is an internal concrete type that implements Iterator
-            // dispatch directly via runtime_iterator_method; skip interface boxing.
             let is_runtime_iterator = self.vir_query_is_runtime_iterator_v(final_vir_ty);
 
             if !is_final_interface && !is_runtime_iterator {

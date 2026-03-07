@@ -153,6 +153,11 @@ pub enum LetStorageHint {
     /// The binding type is an interface — concrete values are boxed to an
     /// interface pointer (vtable + data).
     Interface,
+    /// The init expression is a `RuntimeIterator` assigned to an
+    /// interface-typed binding.  Codegen passes the value through without
+    /// boxing because `RuntimeIterator` implements `Iterator` dispatch
+    /// directly via `runtime_iterator_method`.
+    RuntimeIterator,
     /// The binding type is numeric — init values may need widening or
     /// narrowing (e.g. `i32 → i64`, `f32 → f64`).
     Numeric,
@@ -262,11 +267,11 @@ pub struct VirFor {
 
 /// The iteration strategy for a `VirFor` loop.
 ///
-/// Sema distinguishes six `IterableKind` variants; VIR maps them to five
-/// `VirIterKind` variants.  `IteratorInterface` and `CustomIterator` are
-/// kept separate because their setup differs (interface wrapping vs
-/// boxing + wrapping), while `CustomIterable` has its own variant because
-/// codegen must call `.iter()` before wrapping.
+/// Sema distinguishes six `IterableKind` variants; VIR maps them to seven
+/// `VirIterKind` variants.  The sema `IteratorInterface` kind is split
+/// into `RuntimeIterator` (direct pass-through) and `IteratorInterface`
+/// (needs `InterfaceIter` wrapping) so codegen reads the decision rather
+/// than re-detecting the iterator type.
 #[derive(Debug, Clone)]
 pub enum VirIterKind {
     /// Iterate over a numeric range.
@@ -284,11 +289,20 @@ pub enum VirIterKind {
     /// Iterate over the characters of a string.
     String,
 
-    /// Iterate via an `Iterator<T>` interface or `RuntimeIterator` value.
+    /// Iterate via a direct `RuntimeIterator` value (pass-through).
     ///
-    /// The compiled iterable may be a direct `RuntimeIterator` (pass through)
-    /// or an `Iterator<T>` interface (needs `InterfaceIter` wrapping).
-    /// Codegen inspects the compiled value's type to choose the path.
+    /// The iterable is already a `RuntimeIterator<T>` — codegen enters the
+    /// iter-next loop directly without any wrapping or boxing.
+    RuntimeIterator {
+        elem_type: VirTypeId,
+        vir_elem_type: VirTypeId,
+    },
+
+    /// Iterate via an `Iterator<T>` interface value.
+    ///
+    /// The iterable is a boxed `Iterator<T>` interface pointer.  Codegen
+    /// wraps it via `InterfaceIter` into a `RuntimeIterator` before entering
+    /// the iter-next loop.
     IteratorInterface {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,

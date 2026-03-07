@@ -196,6 +196,9 @@ impl<'a> VirPrinter<'a> {
             VirIterKind::Range => "range".to_string(),
             VirIterKind::Array { elem_type, .. } => format!("array<{}>", self.ty(*elem_type)),
             VirIterKind::String => "string".to_string(),
+            VirIterKind::RuntimeIterator { elem_type, .. } => {
+                format!("runtime_iterator<{}>", self.ty(*elem_type))
+            }
             VirIterKind::IteratorInterface { elem_type, .. } => {
                 format!("iterator<{}>", self.ty(*elem_type))
             }
