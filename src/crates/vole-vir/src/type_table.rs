@@ -54,6 +54,12 @@ pub struct VirTypeTable {
     /// Whether the *original sema type* was a closure is tracked here so
     /// codegen can distinguish them (e.g. for vtable keys and display names).
     closure_ids: FxHashSet<VirTypeId>,
+    /// Cached `TypeDefId` for each interned type, indexed by `VirTypeId`.
+    ///
+    /// Populated during interning from `VirType` variants that carry a
+    /// `TypeDefId` directly (Class, Struct, Interface, Error).  `None` for
+    /// types without an inherent `TypeDefId` (primitives, arrays, etc.).
+    type_def_ids: Vec<Option<TypeDefId>>,
 }
 
 impl VirTypeTable {
@@ -71,6 +77,7 @@ impl VirTypeTable {
             vir_to_type_id: FxHashMap::default(),
             sentinel_ids: FxHashSet::default(),
             closure_ids: FxHashSet::default(),
+            type_def_ids: Vec::new(),
         };
         table.populate_reserved();
         table.populate_reserved_type_id_map();
@@ -96,9 +103,11 @@ impl VirTypeTable {
             return existing;
         }
         let id = VirTypeId::from_raw(self.types.len() as u32);
+        let cached_def = extract_type_def_id(&ty);
         self.intern_map.insert(ty.clone(), id);
         self.types.push(ty);
         self.layouts.push(layout);
+        self.type_def_ids.push(cached_def);
         id
     }
 
@@ -252,6 +261,17 @@ impl VirTypeTable {
 // ---------------------------------------------------------------------------
 
 impl VirTypeTable {
+    // -- Cached TypeDefId accessor -------------------------------------------
+
+    /// Return the `TypeDefId` embedded in this type, if any.
+    ///
+    /// Cached at interning time for `Class`, `Struct`, `Interface`, and
+    /// `Error` variants.  Returns `None` for all other type kinds.
+    #[inline]
+    pub fn type_def_id(&self, id: VirTypeId) -> Option<TypeDefId> {
+        self.type_def_ids[id.raw() as usize]
+    }
+
     // -- Unwrap methods (extract structural data from compound types) --------
 
     /// Extract the variant list from a `Union` type.
@@ -519,6 +539,20 @@ impl VirTypeTable {
     }
 }
 
+/// Extract the `TypeDefId` directly embedded in a `VirType`, if any.
+///
+/// Returns `Some(def)` for `Class`, `Struct`, `Interface`, and `Error`
+/// variants; `None` for all others.
+fn extract_type_def_id(ty: &VirType) -> Option<TypeDefId> {
+    match ty {
+        VirType::Class { def, .. }
+        | VirType::Struct { def, .. }
+        | VirType::Interface { def, .. }
+        | VirType::Error { def } => Some(*def),
+        _ => None,
+    }
+}
+
 /// Remap VirTypeId references inside a VirType using a mapping.
 ///
 /// Compound types (Array, Tuple, etc.) contain inner VirTypeIds that must
@@ -731,10 +765,12 @@ impl VirTypeTable {
             "VirTypeTable: reserved entry mismatch at index {}",
             expected.raw()
         );
+        let cached_def = extract_type_def_id(&ty);
         // Always overwrite: last writer wins for shared VirType values.
         self.intern_map.insert(ty.clone(), id);
         self.types.push(ty);
         self.layouts.push(Some(layout));
+        self.type_def_ids.push(cached_def);
     }
 
     /// Populate all reserved primitive and special type entries.
@@ -956,6 +992,7 @@ impl VirTypeTable {
         };
         self.intern_map.insert(new_type.clone(), id);
         self.types[idx] = new_type;
+        self.type_def_ids[idx] = Some(def);
     }
 }
 

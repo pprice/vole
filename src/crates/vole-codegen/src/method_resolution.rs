@@ -10,13 +10,20 @@ use vole_vir::types::{VirPrimitiveKind, VirType};
 
 /// VIR-native variant: extract `TypeDefId` from a `VirTypeId`.
 ///
-/// Handles primitives (via NameTable), class/struct/interface/error (direct
-/// `TypeDefId`), Handle (via NameTable), and Array (via `array_type_name_id`).
+/// For Class, Struct, Interface, and Error types the `TypeDefId` is returned
+/// from the type table's cached lookup (populated at interning time).
+/// Primitives, Handle, and Array require NameTable/VirProgram resolution.
 pub(crate) fn get_type_def_id_from_vir_type_id(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
     analyzed: &VirProgram,
 ) -> Option<TypeDefId> {
+    // Fast path: types whose TypeDefId was cached during interning
+    // (Class, Struct, Interface, Error).
+    if let Some(def) = table.type_def_id(vir_ty) {
+        return Some(def);
+    }
+
     let name_table = analyzed.name_table();
 
     // F128 is stored as VirType::Unknown in the type table but has a reserved VirTypeId.
@@ -24,7 +31,7 @@ pub(crate) fn get_type_def_id_from_vir_type_id(
         return analyzed.try_type_def_id(name_table.primitives.f128);
     }
 
-    // Check primitives and structured types
+    // Primitives and Array require NameTable lookup.
     let primitive_name_id = match table.get(vir_ty) {
         VirType::Primitive(kind) => match kind {
             VirPrimitiveKind::I8 => Some(name_table.primitives.i8),
@@ -44,10 +51,6 @@ pub(crate) fn get_type_def_id_from_vir_type_id(
                 return analyzed.try_type_def_id(name_table.primitives.handle);
             }
         },
-        VirType::Class { def, .. }
-        | VirType::Struct { def, .. }
-        | VirType::Interface { def, .. }
-        | VirType::Error { def } => return Some(*def),
         VirType::Array { .. } => {
             let name_id = analyzed.array_type_name_id()?;
             return analyzed.try_type_def_id(name_id);
