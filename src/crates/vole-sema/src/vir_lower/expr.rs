@@ -1453,6 +1453,13 @@ fn lower_call(
                 .collect(),
         )
     });
+    // Grab the raw sema-side type keys from the MonomorphKey (before VIR
+    // type table translation) for generic external function resolution.
+    let sema_type_keys: Option<Vec<_>> = ctx
+        .node_map
+        .get_generic(expr.id)
+        .map(|key| key.type_keys.clone());
+
     let make_unresolved = |rca, ld, mk| CallTarget::Unresolved {
         callee_sym,
         call_node_id: expr.id,
@@ -1476,6 +1483,11 @@ fn lower_call(
             },
             other => other,
         }
+    } else if let Some(ref sema_keys) = sema_type_keys
+        && let Some(target) =
+            ctx.resolve_generic_external_callee(callee_sym, sema_keys, expr.span.line)
+    {
+        target
     } else if let Some(closure_target) = resolve_closure_variable_target(
         expr.id,
         callee_sym,

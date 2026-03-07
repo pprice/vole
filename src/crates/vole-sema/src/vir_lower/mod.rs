@@ -315,6 +315,100 @@ impl LoweringCtx<'_> {
         })
     }
 
+    /// Try to resolve a generic external function call to a `CallTarget`.
+    ///
+    /// When a call has a `MonomorphKey` (concrete type arguments) and the
+    /// callee is a generic external function registered in the implement
+    /// registry, this resolves it to either:
+    /// - `CallTarget::Intrinsic` (compiler intrinsic via type mapping)
+    /// - `CallTarget::Native` (regular FFI via type mapping)
+    ///
+    /// The concrete types from `sema_type_keys` (raw TypeIds from NodeMap's
+    /// MonomorphKey) are matched against the type mappings to determine the
+    /// intrinsic key.
+    ///
+    /// Returns `None` when the callee isn't a generic external, or when
+    /// the type mapping doesn't resolve to a known intrinsic.
+    pub fn resolve_generic_external_callee(
+        &mut self,
+        callee_sym: Symbol,
+        sema_type_keys: &[VirTypeId],
+        line: u32,
+    ) -> Option<CallTarget> {
+        let callee_name = self.interner.try_resolve(callee_sym)?.to_string();
+
+        // Look up the function across same-module, cross-module, and prelude
+        // namespaces to check if it's a generic external.
+        let name_id = self.find_generic_external_name_id(callee_sym, &callee_name)?;
+        let func_id = self.entities.function_by_name(name_id)?;
+        let func_def = self.entities.get_function(func_id);
+        if !func_def.is_external || func_def.generic_info.is_none() {
+            return None;
+        }
+
+        // Look up the generic external info from the implement registry.
+        let generic_ext = self.implements.get_generic_external(&callee_name)?;
+        let module_path_str = self
+            .name_table
+            .last_segment_str(generic_ext.module_path)
+            .unwrap_or_default();
+
+        // Resolve the intrinsic key from the concrete types in the monomorph key.
+        let intrinsic_key =
+            resolve_intrinsic_key_from_type_mappings(&generic_ext.type_mappings, sema_type_keys)?;
+
+        // Try to classify as a compiler intrinsic first.
+        if let Some(key) = IntrinsicKey::try_from_name(&intrinsic_key) {
+            return Some(CallTarget::Intrinsic { key, line });
+        }
+
+        // Fall back to a Native call — the intrinsic_key IS the native
+        // function name in the runtime module.
+        let module_path_sym = self.interner.intern(&module_path_str);
+        let native_name_sym = self.interner.intern(&intrinsic_key);
+        Some(CallTarget::Native {
+            module_path: module_path_sym,
+            native_name: native_name_sym,
+            abi: NativeAbi::Simple,
+        })
+    }
+
+    /// Find the `NameId` for a callee that might be a generic external function.
+    ///
+    /// Searches same-module, cross-module, and prelude namespaces, returning
+    /// the first match.  Used by `resolve_generic_external_callee`.
+    fn find_generic_external_name_id(
+        &self,
+        callee_sym: Symbol,
+        callee_name: &str,
+    ) -> Option<NameId> {
+        // Stage 1: same-module.
+        if let Some(name_id) = self
+            .name_table
+            .name_id(self.module_id, &[callee_sym], self.interner)
+        {
+            return Some(name_id);
+        }
+        // Stage 2: cross-module.
+        if let Some(&(source_module_id, _)) = self.cross_module.module_bindings.get(&callee_sym)
+            && let Some(name_id) = self
+                .name_table
+                .name_id_raw(source_module_id, &[callee_name])
+            {
+                return Some(name_id);
+            }
+        // Stage 3: prelude.
+        for &prelude_module_id in &self.cross_module.prelude_module_ids {
+            if let Some(name_id) = self
+                .name_table
+                .name_id_raw(prelude_module_id, &[callee_name])
+            {
+                return Some(name_id);
+            }
+        }
+        None
+    }
+
     /// Check whether a `FunctionId` (looked up by `NameId`) is eligible for
     /// `CallTarget::Direct` emission.
     ///
@@ -939,4 +1033,57 @@ pub fn lower_stmts(stmts: &[vole_frontend::ast::Stmt], ctx: &mut LoweringCtx<'_>
 /// occupies 2 consecutive slots in class instance storage.
 fn is_wide_sema_type(type_id: TypeId) -> bool {
     matches!(type_id, TypeId::I128 | TypeId::F128)
+}
+
+/// Resolve an intrinsic key from type mappings and concrete monomorph types.
+///
+/// Matches the concrete type keys (from the sema-side `MonomorphKey`) against
+/// the `TypeMappingEntry` list.  Resolution order:
+/// 1. Exact type arm (`Type => "key"`) — requires exactly one match.
+/// 2. Default arm (`default => "key"`) — fallback when no exact match.
+///
+/// Returns `None` when no mapping matches or when there are ambiguous matches.
+fn resolve_intrinsic_key_from_type_mappings(
+    type_mappings: &[crate::implement_registry::TypeMappingEntry],
+    sema_type_keys: &[VirTypeId],
+) -> Option<String> {
+    use crate::implement_registry::TypeMappingKind;
+
+    // Collect the concrete TypeIds from the monomorph key's type_keys.
+    // In sema, VirTypeIds encode raw TypeIds via VirTypeId::from_type_id().
+    let concrete_types: std::collections::HashSet<TypeId> = sema_type_keys
+        .iter()
+        .map(|vir_ty| vir_ty.to_type_id_raw())
+        .collect();
+
+    let mut default_key = None;
+    let mut exact_match = None;
+    let mut exact_count = 0;
+
+    for mapping in type_mappings {
+        match &mapping.kind {
+            TypeMappingKind::Exact(type_id) => {
+                if concrete_types.contains(type_id) {
+                    exact_match = Some(mapping.intrinsic_key.clone());
+                    exact_count += 1;
+                }
+            }
+            TypeMappingKind::Default => {
+                default_key = Some(mapping.intrinsic_key.clone());
+            }
+        }
+    }
+
+    // Exactly one exact match — use it.
+    if exact_count == 1 {
+        return exact_match;
+    }
+
+    // Ambiguous (multiple exact matches) — bail and let codegen handle it.
+    if exact_count > 1 {
+        return None;
+    }
+
+    // No exact match — use the default if available.
+    default_key
 }

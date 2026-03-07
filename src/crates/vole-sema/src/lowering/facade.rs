@@ -621,7 +621,16 @@ where
     // -----------------------------------------------------------------------
 
     let vir_tests = lower_test_bodies(
-        program, node_map, interner, type_arena, entities, names, type_table, module_id, implements,
+        program,
+        node_map,
+        interner,
+        type_arena,
+        entities,
+        names,
+        type_table,
+        module_id,
+        &cross_module_ctx,
+        implements,
     );
     let vir_global_inits = lower_global_inits(
         program, interner, node_map, type_arena, entities, names, type_table, module_id,

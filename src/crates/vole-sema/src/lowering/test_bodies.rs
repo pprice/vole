@@ -26,14 +26,24 @@ pub fn lower_test_bodies(
     names: &NameTable,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &crate::vir_lower::CrossModuleCtx,
     implements: &ImplementRegistry,
 ) -> Vec<VirTest> {
     let mut tests = Vec::new();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
             lower_tests_decl_bodies(
-                tests_decl, node_map, interner, type_arena, entities, names, &mut tests,
-                type_table, module_id, implements,
+                tests_decl,
+                node_map,
+                interner,
+                type_arena,
+                entities,
+                names,
+                &mut tests,
+                type_table,
+                module_id,
+                cross_module,
+                implements,
             );
         }
     }
@@ -52,6 +62,7 @@ fn lower_tests_decl_bodies(
     tests: &mut Vec<VirTest>,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &crate::vir_lower::CrossModuleCtx,
     implements: &ImplementRegistry,
 ) {
     let scoped_let_stmts: Vec<vole_frontend::Stmt> = tests_decl
@@ -63,7 +74,6 @@ fn lower_tests_decl_bodies(
             _ => None,
         })
         .collect();
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
     let scoped_let_vir_stmts = if scoped_let_stmts.is_empty() {
         Vec::new()
     } else {
@@ -78,7 +88,7 @@ fn lower_tests_decl_bodies(
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
             captures: rustc_hash::FxHashSet::default(),
-            cross_module: &empty_xmod,
+            cross_module,
             implements,
         };
         lower_stmts(&scoped_let_stmts, &mut ctx).stmts
@@ -94,7 +104,7 @@ fn lower_tests_decl_bodies(
             names,
             type_table,
             module_id,
-            &empty_xmod,
+            cross_module,
             implements,
         );
         if !scoped_let_vir_stmts.is_empty() {
@@ -112,8 +122,17 @@ fn lower_tests_decl_bodies(
     for decl in &tests_decl.decls {
         if let Decl::Tests(nested) = decl {
             lower_tests_decl_bodies(
-                nested, node_map, interner, type_arena, entities, names, tests, type_table,
-                module_id, implements,
+                nested,
+                node_map,
+                interner,
+                type_arena,
+                entities,
+                names,
+                tests,
+                type_table,
+                module_id,
+                cross_module,
+                implements,
             );
         }
     }

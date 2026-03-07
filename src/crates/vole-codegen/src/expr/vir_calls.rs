@@ -521,6 +521,9 @@ impl Cg<'_, '_, '_> {
     ///
     /// Resolves the module/function symbols, looks up the `NativeFunction` in
     /// the runtime registry, compiles VIR args, and emits the indirect call.
+    ///
+    /// For functions returning `Iterator<T>`, the return type is converted to
+    /// `RuntimeIterator<T>` so downstream code sees the concrete iterator type.
     fn compile_vir_native_call(
         &mut self,
         module_path: vole_identity::Symbol,
@@ -539,8 +542,16 @@ impl Cg<'_, '_, '_> {
             })?
             .clone();
 
-        // Compile VIR args and coerce to the expected native parameter types
-        let (arg_values, mut rc_temps) = self.compile_vir_args(args)?;
+        // Convert Iterator<T> return types to RuntimeIterator<T> so that
+        // downstream code (method calls on the result, RC tracking, etc.)
+        // sees the concrete iterator type rather than the interface.
+        let return_ty = self.maybe_convert_iterator_return_type(return_ty);
+
+        // Compile VIR args and coerce to the expected native parameter types.
+        // RC temps are intentionally NOT consumed: the native function takes
+        // ownership of any RC-managed values (closures, strings, etc.) passed
+        // to it — matching the old `call_native_external` behaviour.
+        let (arg_values, _rc_temps) = self.compile_vir_args(args)?;
         let expected_types: Vec<Type> = native_func
             .signature
             .params
@@ -557,12 +568,12 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         let call_inst = self.call_native_indirect(&native_func, &coerced);
-        self.consume_rc_args(&mut rc_temps)?;
 
         if native_func.signature.return_type == NativeType::Nil {
             return Ok(self.void_value());
         }
-        self.native_call_result(call_inst, &native_func, return_ty)
+        let result = self.native_call_result(call_inst, &native_func, return_ty)?;
+        Ok(self.mark_rc_owned(result))
     }
 
     /// Compile an unresolved call by delegating to `call_dispatch()`.
