@@ -374,6 +374,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::I64,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::Call {
@@ -423,6 +424,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::I64,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::Call {
@@ -465,6 +467,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::I64,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::If {
@@ -529,6 +532,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::VOID,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::Lambda {

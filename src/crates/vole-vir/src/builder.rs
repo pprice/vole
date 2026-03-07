@@ -6,7 +6,7 @@ use vole_identity::{FunctionId, Symbol, VirTypeId};
 
 use crate::calls::CallTarget;
 use crate::expr::{CoerceKind, FieldStorage, VirBinOp, VirExpr, VirRcCleanup, VirUnOp};
-use crate::func::{VirBody, VirFunction};
+use crate::func::{ReturnAbi, VirBody, VirFunction};
 use crate::monomorph::rederive::classify_rc_cleanup;
 use crate::refs::VirRef;
 use crate::stmt::{AssignTarget, VirStmt};
@@ -303,6 +303,7 @@ impl VirBuilder {
         params: Vec<(Symbol, VirTypeId, VirTypeId)>,
         return_ty: VirTypeId,
         body: VirBody,
+        table: &VirTypeTable,
     ) -> VirFunction {
         VirFunction {
             id,
@@ -310,6 +311,7 @@ impl VirBuilder {
             params,
             return_type: return_ty,
             vir_return_type: return_ty,
+            return_abi: ReturnAbi::classify(return_ty, table),
             body,
             mangled_name_id: None,
             method_id: None,
@@ -432,8 +434,15 @@ mod tests {
         let ret = b.build_return(Some(load), crate::stmt::ReturnConvention::Scalar);
 
         let body = b.build_body(vec![let_stmt, ret], None);
-        let func =
-            VirBuilder::new().finish(dummy_function_id(), "test_fn".into(), vec![], ty, body);
+        let table = crate::type_table::VirTypeTable::new();
+        let func = VirBuilder::new().finish(
+            dummy_function_id(),
+            "test_fn".into(),
+            vec![],
+            ty,
+            body,
+            &table,
+        );
 
         assert_eq!(func.name, "test_fn");
         assert_eq!(func.body.stmts.len(), 2);

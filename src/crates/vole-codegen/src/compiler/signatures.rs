@@ -5,6 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use super::Compiler;
 use crate::types::vir_conversions::{vir_is_wide, vir_type_to_cranelift};
 use vole_identity::{FunctionId, MethodId, NameId, TypeId, VirTypeId};
+use vole_vir::func::ReturnAbi;
 use vole_vir::types::VirType;
 
 /// SmallVec for function parameters - most functions have <= 8 params
@@ -174,10 +175,12 @@ impl Compiler<'_> {
             SelfParam::Pointer => VirSelfParam::Pointer,
             SelfParam::TypedId(type_id) => VirSelfParam::Typed(self.vir_lookup(type_id)),
         };
+        let abi = ReturnAbi::classify(method_def.return_type, self.vir_type_table());
         self.build_signature_from_vir_types(
             &method_def.param_types,
             method_def.return_type,
             vir_self_param,
+            abi,
         )
     }
 
@@ -230,7 +233,8 @@ impl Compiler<'_> {
     ) -> Option<Signature> {
         let (subst_params, subst_ret) =
             self.substitute_method_vir_types(param_vir_types, return_vir_type, self_vir_ty, subs)?;
-        Some(self.build_signature_from_vir_types(&subst_params, subst_ret, self_param))
+        let abi = ReturnAbi::classify(subst_ret, self.vir_type_table());
+        Some(self.build_signature_from_vir_types(&subst_params, subst_ret, self_param, abi))
     }
 
     // ========================================================================
@@ -240,14 +244,14 @@ impl Compiler<'_> {
     /// Build a Cranelift signature from VIR types.
     ///
     /// VIR equivalent of [`build_signature_from_type_ids`](Self::build_signature_from_type_ids).
-    /// Reads the VirTypeTable for type conversion and fallible detection,
-    /// falling back to sema TypeId only for struct flat-slot counting (which
-    /// depends on EntityRegistry field types not yet in VIR).
+    /// The `return_abi` hint drives fallible/wide dispatch; struct returns
+    /// still fall through to entity-registry slot counting.
     pub fn build_signature_from_vir_types(
         &self,
         param_vir_types: &[VirTypeId],
         return_vir_type: VirTypeId,
         self_param: VirSelfParam,
+        return_abi: ReturnAbi,
     ) -> Signature {
         let table = self.vir_type_table();
         let ptr = self.pointer_type;
@@ -266,38 +270,40 @@ impl Compiler<'_> {
             cranelift_params.push(vir_type_to_cranelift(vir_ty, table, ptr));
         }
 
-        // Check for fallible return type via VirType variant
-        if let VirType::Fallible { success, .. } = table.get(return_vir_type) {
-            if vir_is_wide(*success, table) {
+        // Dispatch on pre-computed return ABI convention
+        match return_abi {
+            ReturnAbi::WideFallible => {
                 // Wide fallible (i128 success): (tag, low, high)
-                return self.jit.create_signature_multi_return(
+                self.jit.create_signature_multi_return(
                     &cranelift_params,
                     &[types::I64, types::I64, types::I64],
-                );
+                )
             }
-            // Fallible: (tag, payload)
-            return self
-                .jit
-                .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64]);
+            ReturnAbi::Fallible => {
+                // Fallible: (tag, payload)
+                self.jit
+                    .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64])
+            }
+            ReturnAbi::Void | ReturnAbi::Single | ReturnAbi::Wide => {
+                // Struct return: still uses entity-registry flat-slot counting
+                if matches!(table.get(return_vir_type), VirType::Struct { .. })
+                    && let Some(field_count) =
+                        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+                            return_vir_type,
+                            table,
+                            self.analyzed,
+                        )
+                {
+                    return self.build_struct_return_sig(&cranelift_params, field_count);
+                }
+
+                // Normal return (filter out void)
+                let ret = (return_abi != ReturnAbi::Void)
+                    .then(|| vir_type_to_cranelift(return_vir_type, table, ptr));
+
+                self.jit.create_signature(&cranelift_params, ret)
+            }
         }
-
-        // Struct return: still uses sema TypeId for flat-slot counting
-        // (EntityRegistry lookups come from TypeDefId in VirTypeTable).
-        if matches!(table.get(return_vir_type), VirType::Struct { .. })
-            && let Some(field_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
-                return_vir_type,
-                table,
-                self.analyzed,
-            )
-        {
-            return self.build_struct_return_sig(&cranelift_params, field_count);
-        }
-
-        // Normal return (filter out void)
-        let ret = (return_vir_type != VirTypeId::VOID)
-            .then(|| vir_type_to_cranelift(return_vir_type, table, ptr));
-
-        self.jit.create_signature(&cranelift_params, ret)
     }
 
     /// Build a Cranelift signature from a [`VirFunction`](vole_vir::func::VirFunction).
@@ -319,6 +325,7 @@ impl Compiler<'_> {
             &param_vir_types,
             vir_func.vir_return_type,
             VirSelfParam::None,
+            vir_func.return_abi,
         )
     }
 
@@ -341,6 +348,7 @@ impl Compiler<'_> {
             &param_vir_types,
             vir_func.vir_return_type,
             VirSelfParam::None,
+            vir_func.return_abi,
         )
     }
 

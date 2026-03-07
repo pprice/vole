@@ -791,10 +791,12 @@ impl Compiler<'_> {
                     )
                 });
 
+            let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
             let sig = self.build_signature_from_vir_types(
                 &subst_param_virs,
                 return_vir_ty,
                 VirSelfParam::Typed(self_vir_ty),
+                abi,
             );
             self.jit.ctx.func.signature = sig;
 
@@ -1010,10 +1012,12 @@ impl Compiler<'_> {
                     continue; // return type unresolvable for this elem_type; skip
                 };
 
+                let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
                 let sig = self.build_signature_from_vir_types(
                     &subst_param_virs,
                     return_vir_ty,
                     VirSelfParam::Typed(self_vir_ty),
+                    abi,
                 );
 
                 // Declare JIT function with the mangled name and register in func_registry

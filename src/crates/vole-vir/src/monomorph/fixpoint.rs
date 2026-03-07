@@ -528,6 +528,7 @@ mod tests {
             params: vec![(sym(1), type_id(10), param_vir_ty)],
             return_type: type_id(10),
             vir_return_type: param_vir_ty,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::LocalLoad {
@@ -554,6 +555,7 @@ mod tests {
             params: vec![],
             return_type: type_id(20),
             vir_return_type: result_vir_ty,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::Call {
@@ -629,6 +631,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::I64,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::IntLiteral {
@@ -666,6 +669,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::I64,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::If {
@@ -719,6 +723,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::VOID,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::Lambda {
@@ -762,6 +767,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::VOID,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: None,
@@ -786,6 +792,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::VOID,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: None,
@@ -917,6 +924,7 @@ mod tests {
             params: vec![(sym(1), type_id(10), param_vir_ty)],
             return_type: type_id(10),
             vir_return_type: param_vir_ty,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::Call {
@@ -968,6 +976,7 @@ mod tests {
             params: vec![],
             return_type: type_id(10),
             vir_return_type: VirTypeId::I64,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::IntLiteral {
@@ -1004,6 +1013,7 @@ mod tests {
             params: vec![(sym(1), type_id(10), param_vir_ty)],
             return_type: type_id(20),
             vir_return_type: array_of_param,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::ArrayLiteral {
@@ -1117,6 +1127,7 @@ mod tests {
             params: vec![(sym(1), type_id(10), param_vir_ty)],
             return_type: type_id(20),
             vir_return_type: opt_of_param,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::LocalLoad {

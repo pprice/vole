@@ -155,6 +155,12 @@ pub struct VirFieldInfo {
     pub vir_ty: VirTypeId,
     /// How the field is stored in memory (inline vs. heap-indirect).
     pub storage: FieldStorage,
+    /// Number of physical register slots this field occupies.
+    ///
+    /// 1 for most types, 2 for wide types (i128, f128).  Computed during
+    /// VIR lowering so codegen can build physical slot maps without
+    /// re-querying type width.
+    pub physical_slots: u8,
 }
 
 /// Physical layout of a tagged union in VIR.

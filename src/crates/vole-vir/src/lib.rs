@@ -47,7 +47,7 @@ pub use expr::{
     VirRcCleanup, VirRecordFieldBinding, VirResolvedMethod, VirStaticMethodMonomorphKey,
     VirStringPart, VirTupleBinding, VirUnOp,
 };
-pub use func::{VirBody, VirFunction, VirTest};
+pub use func::{ReturnAbi, VirBody, VirFunction, VirTest};
 pub use implement_dispatch::{
     VirExternalFuncInfo, VirFuncSignature, VirGenericExternalInfo, VirImplementDispatch,
     VirMethodImplInfo, VirTypeMappingEntry, VirTypeMappingKind,

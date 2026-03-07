@@ -13,7 +13,7 @@ use vole_identity::{StringConversion, Symbol, UnionStorageKind, VirTypeId};
 
 use crate::entity_metadata::VirEntityMetadata;
 use crate::expr::{FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
-use crate::func::{VirBody, VirFunction};
+use crate::func::{ReturnAbi, VirBody, VirFunction};
 use crate::refs::VirRef;
 use crate::stmt::{LetStorageHint, ReturnConvention, VirDestructurePattern, VirIterKind, VirStmt};
 use crate::type_table::VirTypeTable;
@@ -44,6 +44,9 @@ pub fn rederive_decisions(
     table: &VirTypeTable,
     entities: &VirEntityMetadata,
 ) {
+    // Recompute return ABI from now-concrete return type.
+    func.return_abi = ReturnAbi::classify(func.vir_return_type, table);
+
     let ret_ty = func.vir_return_type;
     rederive_body(&mut func.body, table, ret_ty, entities);
 }
@@ -1214,6 +1217,7 @@ mod tests {
             params: vec![],
             return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::VOID,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(expr)),
@@ -1232,6 +1236,7 @@ mod tests {
             params: vec![],
             return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::VOID,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts,
                 trailing: None,
@@ -1916,6 +1921,7 @@ mod tests {
             params: vec![(sym(1), type_id(10), param_id)],
             return_type: type_id(20),
             vir_return_type: VirTypeId::STRING,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::InterpolatedString {
@@ -1977,6 +1983,7 @@ mod tests {
             params: vec![(sym(1), type_id(10), param_id)],
             return_type: type_id(20),
             vir_return_type: VirTypeId::BOOL,
+            return_abi: crate::func::ReturnAbi::Single,
             body: VirBody {
                 stmts: vec![],
                 trailing: Some(Box::new(VirExpr::Match {

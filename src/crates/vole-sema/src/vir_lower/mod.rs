@@ -24,7 +24,7 @@ use vole_identity::{
 use crate::node_map::NodeMap;
 use crate::{EntityRegistry, TypeArena};
 
-use vole_vir::func::{VirBody, VirFunction};
+use vole_vir::func::{ReturnAbi, VirBody, VirFunction};
 use vole_vir::type_table::VirTypeTable;
 
 use self::expr::lower_expr;
@@ -390,6 +390,7 @@ pub fn lower_function(
         })
         .collect();
     let vir_return_type = ctx.translate(return_type);
+    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table);
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: func_id,
@@ -397,6 +398,7 @@ pub fn lower_function(
         params,
         return_type: vir_return_type,
         vir_return_type,
+        return_abi,
         body,
         mangled_name_id: None,
         method_id: None,
@@ -489,6 +491,7 @@ pub fn lower_method(
         })
         .collect();
     let vir_return_type = ctx.translate(return_type);
+    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table);
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
@@ -496,6 +499,7 @@ pub fn lower_method(
         params,
         return_type: vir_return_type,
         vir_return_type,
+        return_abi,
         body,
         mangled_name_id: None,
         method_id: Some(method_id),
@@ -542,6 +546,7 @@ pub fn lower_interface_method(
         })
         .collect();
     let vir_return_type = ctx.translate(return_type);
+    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table);
     let body = lower_func_body(body_ast, &mut ctx);
     Some(VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
@@ -549,6 +554,7 @@ pub fn lower_interface_method(
         params,
         return_type: vir_return_type,
         vir_return_type,
+        return_abi,
         body,
         mangled_name_id: None,
         method_id: Some(method_id),
@@ -601,6 +607,10 @@ pub fn lower_generic_function(
         })
         .collect();
     let vir_return_type = ctx.translate(return_type);
+    // For generic templates, return type may contain type parameters;
+    // classify with best-effort (defaults to Single for unknown layouts).
+    // rederive_decisions will recompute after monomorphization.
+    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table);
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: func_id,
@@ -608,6 +618,7 @@ pub fn lower_generic_function(
         params,
         return_type: vir_return_type,
         vir_return_type,
+        return_abi,
         body,
         mangled_name_id: None,
         method_id: None,
