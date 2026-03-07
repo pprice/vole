@@ -821,6 +821,17 @@ fn rewrite_call_target(target: &CallTarget, ctx: &RewriteCtx) -> CallTarget {
             resolved_call_args: resolved_call_args.clone(),
             lambda_defaults: *lambda_defaults,
         },
+        CallTarget::FunctionalInterface {
+            var_name,
+            vir_type,
+            interface_type_def_id,
+            method_id,
+        } => CallTarget::FunctionalInterface {
+            var_name: *var_name,
+            vir_type: ctx.remap(*vir_type),
+            interface_type_def_id: *interface_type_def_id,
+            method_id: *method_id,
+        },
         other => other.clone(),
     }
 }

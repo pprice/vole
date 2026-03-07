@@ -2,7 +2,7 @@
 //
 // Call target descriptors for VIR function calls.
 
-use vole_identity::{FunctionId, MonomorphKey, NodeId, Symbol, VirTypeId};
+use vole_identity::{FunctionId, MethodId, MonomorphKey, NodeId, Symbol, TypeDefId, VirTypeId};
 
 use crate::intrinsics::IntrinsicKey;
 
@@ -63,6 +63,43 @@ pub enum CallTarget {
         resolved_call_args: Option<Vec<Option<usize>>>,
         /// Lambda parameter defaults from sema.
         lambda_defaults: Option<LambdaDefaultsInfo>,
+    },
+
+    /// A call to a local variable that holds a functional interface value.
+    ///
+    /// Emitted when VIR lowering detects that the callee identifier is a
+    /// local variable whose type is a single-method interface (a "functional
+    /// interface").  Codegen loads the variable, performs vtable dispatch on
+    /// the interface's single method.
+    FunctionalInterface {
+        /// The variable name symbol (used to look up the Cranelift `Variable`).
+        var_name: Symbol,
+        /// The VIR type of the variable (the interface type, not the method's
+        /// function type).
+        vir_type: VirTypeId,
+        /// The `TypeDefId` of the interface (for vtable/method lookup).
+        interface_type_def_id: TypeDefId,
+        /// The `MethodId` of the single callable method on the interface.
+        method_id: MethodId,
+    },
+
+    /// A call to a global variable that holds a closure/function or functional
+    /// interface value.
+    ///
+    /// Emitted when VIR lowering detects that the callee identifier is a
+    /// global variable (not a locally-scoped variable or declared function).
+    /// Codegen compiles the global's VIR initializer, then dispatches as
+    /// either a closure call or a functional interface call depending on the
+    /// global's declared type.
+    GlobalClosure {
+        /// The global variable name symbol.
+        var_name: Symbol,
+        /// Pre-resolved named-argument reordering mapping from sema.
+        resolved_call_args: Option<Vec<Option<usize>>>,
+        /// Lambda parameter defaults from sema.
+        lambda_defaults: Option<LambdaDefaultsInfo>,
+        /// MonomorphKey for generic function calls through the global.
+        monomorph_key: Option<MonomorphKey>,
     },
 
     /// A call to a native (FFI) function.

@@ -255,7 +255,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// initializer, `None` otherwise.
     /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     /// `call_expr_id` is used as a placeholder for default param lookup in closure calls.
-    fn try_call_global(
+    pub(crate) fn try_call_global(
         &mut self,
         callee_sym: Symbol,
         arg_source: &ArgSource<'_>,

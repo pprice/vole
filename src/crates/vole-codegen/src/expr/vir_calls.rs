@@ -11,7 +11,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, native_type_to_cranelift};
 use crate::union_layout;
 
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::{MethodId, TypeDefId, TypeId, VirTypeId};
 use vole_runtime::native_registry::NativeType;
 use vole_vir::{CallTarget, VirRef};
 
@@ -81,6 +81,33 @@ impl Cg<'_, '_, '_> {
                 *lambda_defaults,
                 ty,
             ),
+            CallTarget::FunctionalInterface {
+                var_name,
+                vir_type,
+                interface_type_def_id,
+                method_id,
+            } => self.compile_vir_functional_interface_call(
+                *var_name,
+                *vir_type,
+                *interface_type_def_id,
+                *method_id,
+                args,
+            ),
+            CallTarget::GlobalClosure {
+                var_name,
+                resolved_call_args,
+                lambda_defaults,
+                monomorph_key,
+            } => {
+                self.vir_monomorph_key = monomorph_key.clone();
+                self.compile_vir_global_closure_call(
+                    *var_name,
+                    args,
+                    resolved_call_args.as_deref(),
+                    *lambda_defaults,
+                    ty,
+                )
+            }
             CallTarget::Unresolved {
                 callee_sym,
                 call_node_id,
@@ -589,6 +616,86 @@ impl Cg<'_, '_, '_> {
         self.vir_resolved_call_args = None;
         self.vir_lambda_defaults = None;
         result.map(|r| self.mark_rc_owned(r))
+    }
+
+    /// Compile a call to a local variable that holds a functional interface
+    /// value (`CallTarget::FunctionalInterface`).
+    ///
+    /// Loads the variable from `vars`, looks up the interface's single
+    /// callable method, and dispatches via vtable.
+    fn compile_vir_functional_interface_call(
+        &mut self,
+        var_name: vole_identity::Symbol,
+        vir_type: VirTypeId,
+        interface_type_def_id: TypeDefId,
+        method_id: MethodId,
+        args: &[VirRef],
+    ) -> CodegenResult<CompiledValue> {
+        let (var, var_vir_ty) = self.vars.get(&var_name).copied().ok_or_else(|| {
+            CodegenError::not_found(
+                "functional interface variable",
+                self.interner().resolve(var_name),
+            )
+        })?;
+        let value = self.builder.use_var(var);
+        let use_vir_ty = if self.vir_query_is_interface_v(var_vir_ty) {
+            var_vir_ty
+        } else {
+            vir_type
+        };
+        let obj = CompiledValue::new(value, self.cranelift_type_v(use_vir_ty), use_vir_ty);
+
+        let method = self.analyzed().method_def(method_id);
+        let func_type_id = method.signature_id;
+        let method_name_id = method.name_id;
+
+        let arg_source = crate::structs::methods::ArgSource(args);
+        let result = self.interface_dispatch_call_args_by_type_def_id(
+            &obj,
+            &arg_source,
+            interface_type_def_id,
+            method_name_id,
+            func_type_id,
+        )?;
+        Ok(self.mark_rc_owned(result))
+    }
+
+    /// Compile a call to a global variable that holds a closure or functional
+    /// interface value (`CallTarget::GlobalClosure`).
+    ///
+    /// Compiles the global's VIR-lowered initializer, then dispatches as
+    /// either a closure call or a functional interface call depending on the
+    /// global's declared type.
+    fn compile_vir_global_closure_call(
+        &mut self,
+        var_name: vole_identity::Symbol,
+        args: &[VirRef],
+        resolved_call_args: Option<&[Option<usize>]>,
+        lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
+        return_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let arg_source = crate::structs::methods::ArgSource(args);
+        let placeholder_node_id = vole_identity::NodeId::new(vole_identity::ModuleId::new(0), 0);
+
+        // Stash VIR-resolved named-arg mapping and lambda defaults.
+        self.vir_resolved_call_args = resolved_call_args.map(|m| m.to_vec());
+        self.vir_lambda_defaults = lambda_defaults;
+        self.vir_call_return_type = Some(return_ty);
+
+        let result = self.try_call_global(var_name, &arg_source, placeholder_node_id)?;
+
+        self.vir_resolved_call_args = None;
+        self.vir_lambda_defaults = None;
+        self.vir_monomorph_key = None;
+        self.vir_call_return_type = None;
+
+        match result {
+            Some(r) => Ok(self.mark_rc_owned(r)),
+            None => Err(CodegenError::not_found(
+                "global closure/function",
+                self.interner().resolve(var_name),
+            )),
+        }
     }
 
     // =====================================================================

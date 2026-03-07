@@ -194,6 +194,12 @@ impl Analyzer {
                         && let Some(func_type) =
                             self.get_functional_interface_type_by_type_def_id(type_def_id)
                     {
+                        // Annotate: callee is a functional-interface-typed variable
+                        // (for VIR lowering to emit CallTarget::FunctionalInterface).
+                        self.results
+                            .node_map
+                            .set_callee_var_type(expr.id, var_type_id);
+
                         // Calling a functional interface - treat like a closure call
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();

@@ -1409,6 +1409,14 @@ fn lower_call(
         ctx,
     ) {
         closure_target
+    } else if let Some(global_target) = resolve_global_closure_target(
+        callee_sym,
+        &resolved_call_args,
+        &lambda_defaults,
+        &monomorph_key,
+        ctx,
+    ) {
+        global_target
     } else {
         make_unresolved(resolved_call_args, lambda_defaults, monomorph_key)
     };
@@ -1487,11 +1495,13 @@ fn resolve_intrinsic_target(
     Some(CallTarget::Intrinsic { key, line })
 }
 
-/// Try to classify a call as a closure variable or captured closure call.
+/// Try to classify a call as a closure variable, captured closure, or
+/// functional interface call.
 ///
 /// When sema has annotated the call node with `callee_var_type` (indicating
-/// the callee is a function-typed variable rather than a declared function),
-/// returns the appropriate `CallTarget` variant:
+/// the callee is a function-typed or interface-typed variable rather than a
+/// declared function), returns the appropriate `CallTarget` variant:
+/// - `FunctionalInterface`: callee has a single-method interface type
 /// - `CapturedClosure`: callee symbol is in the current function's captures
 /// - `ClosureVariable`: callee is a local variable with function type
 ///
@@ -1505,6 +1515,20 @@ fn resolve_closure_variable_target(
 ) -> Option<CallTarget> {
     let callee_type = ctx.node_map.get_callee_var_type(call_expr_id)?;
     let vir_type = ctx.translate(callee_type);
+
+    // Check if the callee is a functional interface (single-method interface).
+    // Sema sets callee_var_type to the interface type for these.
+    if let Some((type_def_id, _)) = ctx.type_arena.unwrap_interface(callee_type)
+        && let Some(method_id) = ctx.entities.is_functional(type_def_id)
+    {
+        return Some(CallTarget::FunctionalInterface {
+            var_name: callee_sym,
+            vir_type,
+            interface_type_def_id: type_def_id,
+            method_id,
+        });
+    }
+
     if ctx.captures.contains(&callee_sym) {
         Some(CallTarget::CapturedClosure {
             var_name: callee_sym,
@@ -1520,6 +1544,35 @@ fn resolve_closure_variable_target(
             lambda_defaults: *lambda_defaults,
         })
     }
+}
+
+/// Try to classify a call as a global closure or global functional interface.
+///
+/// When the callee symbol maps to a registered global variable (via the
+/// entity registry), returns `CallTarget::GlobalClosure`.  Codegen will
+/// compile the global's VIR initializer and dispatch as closure or
+/// functional interface depending on the global's declared type.
+///
+/// Returns `None` when the callee is not a global variable.
+fn resolve_global_closure_target(
+    callee_sym: vole_identity::Symbol,
+    resolved_call_args: &Option<Vec<Option<usize>>>,
+    lambda_defaults: &Option<LambdaDefaultsInfo>,
+    monomorph_key: &Option<MonomorphKey>,
+    ctx: &LoweringCtx<'_>,
+) -> Option<CallTarget> {
+    // Guard: bail if symbol can't be resolved (e.g. UNKNOWN in tests).
+    let _callee_name = ctx.interner.try_resolve(callee_sym)?;
+    let name_id = ctx
+        .name_table
+        .name_id(ctx.module_id, &[callee_sym], ctx.interner)?;
+    let _global_id = ctx.entities.global_by_name(name_id)?;
+    Some(CallTarget::GlobalClosure {
+        var_name: callee_sym,
+        resolved_call_args: resolved_call_args.clone(),
+        lambda_defaults: *lambda_defaults,
+        monomorph_key: monomorph_key.clone(),
+    })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.

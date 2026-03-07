@@ -621,6 +621,21 @@ impl<'a> VirPrinter<'a> {
             CallTarget::CapturedClosure { var_name, .. } => {
                 w!(out, "captured_closure({})(", self.sym(*var_name));
             }
+            CallTarget::FunctionalInterface {
+                var_name,
+                interface_type_def_id,
+                ..
+            } => {
+                w!(
+                    out,
+                    "functional_iface({}, iface={:?})(",
+                    self.sym(*var_name),
+                    interface_type_def_id
+                );
+            }
+            CallTarget::GlobalClosure { var_name, .. } => {
+                w!(out, "global_closure({})(", self.sym(*var_name));
+            }
             CallTarget::Unresolved {
                 callee_sym,
                 line,
