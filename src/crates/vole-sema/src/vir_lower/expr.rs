@@ -1534,18 +1534,20 @@ fn fill_default_args(
                     args.push(original_args[call_idx].clone());
                 }
             } else if let Some(Some(default_expr)) = func_def.param_defaults.get(slot)
-                && ctx.node_map.get_type(default_expr.id).is_some() {
-                    args.push(lower_expr(default_expr, ctx));
-                }
+                && ctx.node_map.get_type(default_expr.id).is_some()
+            {
+                args.push(lower_expr(default_expr, ctx));
+            }
         }
     } else if args.len() < expected_params {
         // Simple positional case: append defaults for the missing
         // trailing slots.
         for slot in args.len()..expected_params {
             if let Some(Some(default_expr)) = func_def.param_defaults.get(slot)
-                && ctx.node_map.get_type(default_expr.id).is_some() {
-                    args.push(lower_expr(default_expr, ctx));
-                }
+                && ctx.node_map.get_type(default_expr.id).is_some()
+            {
+                args.push(lower_expr(default_expr, ctx));
+            }
         }
     }
 }
@@ -1564,26 +1566,29 @@ fn find_function_id_for_callee(
     if let Some(name_id) = ctx
         .name_table
         .name_id(ctx.module_id, &[callee_sym], ctx.interner)
-        && let Some(func_id) = ctx.entities.function_by_name(name_id) {
-            return Some(func_id);
-        }
+        && let Some(func_id) = ctx.entities.function_by_name(name_id)
+    {
+        return Some(func_id);
+    }
 
     // Stage 2: cross-module lookup via destructured import bindings.
     if let Some(&(source_module_id, _export_sym)) =
         ctx.cross_module.module_bindings.get(&callee_sym)
         && let Some(source_name_id) = ctx.name_table.name_id_raw(source_module_id, &[callee_name])
-            && let Some(func_id) = ctx.entities.function_by_name(source_name_id) {
-                return Some(func_id);
-            }
+        && let Some(func_id) = ctx.entities.function_by_name(source_name_id)
+    {
+        return Some(func_id);
+    }
 
     // Stage 3: prelude module lookup.
     for &prelude_module_id in &ctx.cross_module.prelude_module_ids {
         if let Some(prelude_name_id) = ctx
             .name_table
             .name_id_raw(prelude_module_id, &[callee_name])
-            && let Some(func_id) = ctx.entities.function_by_name(prelude_name_id) {
-                return Some(func_id);
-            }
+            && let Some(func_id) = ctx.entities.function_by_name(prelude_name_id)
+        {
+            return Some(func_id);
+        }
     }
 
     None

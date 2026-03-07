@@ -253,7 +253,7 @@ impl LoweringCtx<'_> {
     /// - `CallTarget::Direct` for non-external direct functions
     /// - `CallTarget::Native` or `CallTarget::Intrinsic` for external functions
     /// - `None` for functions that need special codegen handling
-    ///   (generics, interface/union params).
+    ///   (generics).
     fn try_resolve_call_target(
         &mut self,
         name_id: NameId,
@@ -270,15 +270,10 @@ impl LoweringCtx<'_> {
         if func_def.is_external {
             return self.resolve_external_call_target(callee_name);
         }
-        // Skip functions with interface or union/optional parameters —
-        // callers need implicit boxing/coercion that the Direct call path
-        // doesn't perform (the Unresolved path handles this via
-        // box_interface_value and union boxing in call_dispatch).
-        for &param_ty in func_def.signature.params_id.iter() {
-            if self.type_arena.is_interface(param_ty) || self.type_arena.is_union(param_ty) {
-                return None;
-            }
-        }
+        // Interface/union parameters are handled by codegen's
+        // compile_vir_args_coerced(), which coerces each argument
+        // against the callee's declared parameter type (interface
+        // boxing, union wrapping).
         Some(CallTarget::Direct {
             function_id: func_id,
         })
@@ -324,7 +319,7 @@ impl LoweringCtx<'_> {
     /// `CallTarget::Direct` emission.
     ///
     /// Returns `None` for functions that need special codegen handling
-    /// (generics, FFI, interface/union params).
+    /// (generics, FFI).
     fn try_resolve_function_id(&self, name_id: NameId) -> Option<FunctionId> {
         let func_id = self.entities.function_by_name(name_id)?;
         let func_def = self.entities.get_function(func_id);
@@ -337,15 +332,9 @@ impl LoweringCtx<'_> {
         if func_def.is_external {
             return None;
         }
-        // Skip functions with interface or union/optional parameters —
-        // callers need implicit boxing/coercion that the Direct call path
-        // doesn't perform (the Unresolved path handles this via
-        // box_interface_value and union boxing in call_dispatch).
-        for &param_ty in func_def.signature.params_id.iter() {
-            if self.type_arena.is_interface(param_ty) || self.type_arena.is_union(param_ty) {
-                return None;
-            }
-        }
+        // Interface/union parameters are handled by codegen's
+        // compile_vir_args_coerced(), which coerces each argument
+        // against the callee's declared parameter type.
         Some(func_id)
     }
 

@@ -1,0 +1,101 @@
+// Test: direct call coercion for interface/union/optional parameters
+// Verifies that functions with interface, union, and optional parameters
+// can be resolved as Direct calls in VIR lowering (not Unresolved).
+// The caller must box/coerce arguments to match the callee's parameter types.
+
+interface Greeter {
+    func greet() -> string
+}
+
+class Dog implements Greeter {
+    name: string,
+
+    func greet() -> string {
+        return "woof from " + self.name
+    }
+}
+
+class Cat implements Greeter {
+    name: string,
+
+    func greet() -> string {
+        return "meow from " + self.name
+    }
+}
+
+// Function taking an interface param — caller must box the concrete class
+func greet_animal(g: Greeter) -> string {
+    return g.greet()
+}
+
+// Function taking a union param — caller must wrap the narrow value
+func describe_value(v: i64 | string) -> string {
+    return match v {
+        _ if (v is i64) => "number"
+        _ => "text"
+    }
+}
+
+// Function taking an optional param — caller must wrap in optional union
+func maybe_length(s: string?) -> i64 {
+    return match s {
+        _ if (s is string) => (s as! string).length()
+        _ => -1
+    }
+}
+
+// Function taking two interface params
+func greet_both(a: Greeter, b: Greeter) -> string {
+    return a.greet() + " and " + b.greet()
+}
+
+// Function with a mix of normal and interface params
+func greet_with_prefix(prefix: string, g: Greeter) -> string {
+    return prefix + ": " + g.greet()
+}
+
+tests "direct call with interface params" {
+    test "concrete class passed to interface param" {
+        let result = greet_animal(Dog { name: "Rex" })
+        assert(result == "woof from Rex")
+    }
+
+    test "different concrete class passed to interface param" {
+        let result = greet_animal(Cat { name: "Whiskers" })
+        assert(result == "meow from Whiskers")
+    }
+
+    test "two interface params" {
+        let result = greet_both(Dog { name: "Rex" }, Cat { name: "Whiskers" })
+        assert(result == "woof from Rex and meow from Whiskers")
+    }
+
+    test "mixed normal and interface params" {
+        let result = greet_with_prefix("Hello", Dog { name: "Rex" })
+        assert(result == "Hello: woof from Rex")
+    }
+}
+
+tests "direct call with union params" {
+    test "i64 passed to union param" {
+        let result = describe_value(42)
+        assert(result == "number")
+    }
+
+    test "string passed to union param" {
+        let result = describe_value("hello")
+        assert(result == "text")
+    }
+}
+
+tests "direct call with optional params" {
+    test "string passed to optional param" {
+        let result = maybe_length("hello")
+        assert(result == 5)
+    }
+
+    test "nil passed to optional param" {
+        let result = maybe_length(nil)
+        assert(result == -1)
+    }
+}

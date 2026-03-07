@@ -159,6 +159,7 @@ impl Cg<'_, '_, '_> {
         // than `full_name_id` so the lookup matches the JIT registration.
         let func_def = self.analyzed().function_def(function_id);
         let name_id = func_def.name_id;
+        let param_type_ids = func_def.sema_param_types.clone();
         let func_key = self.funcs().intern_name_id(name_id);
         let func_id = self
             .funcs_ref()
@@ -180,7 +181,11 @@ impl Cg<'_, '_, '_> {
 
         let is_sret = self.is_sret_struct_return(callee_return_ty);
 
-        let (mut arg_values, mut rc_temps) = self.compile_vir_args(args)?;
+        // Compile arguments with coercion: when the callee declares an
+        // interface or union parameter, the caller must box/wrap the
+        // concrete argument value to match.
+        let (mut arg_values, mut rc_temps) =
+            self.compile_vir_args_coerced(args, &param_type_ids)?;
 
         // For sret convention (large structs with 3+ flat slots), allocate a
         // stack buffer for the return value and prepend its pointer as the
@@ -766,6 +771,37 @@ impl Cg<'_, '_, '_> {
                 rc_temps.push(compiled);
             }
             values.push(compiled.value);
+        }
+        Ok((values, rc_temps))
+    }
+
+    /// Compile VIR args with type coercion against the callee's parameter types.
+    ///
+    /// For each argument, if the callee declares an interface or union parameter,
+    /// the compiled value is coerced (interface-boxed or union-wrapped) before
+    /// being passed to the call.  This enables `CallTarget::Direct` for functions
+    /// whose parameters require implicit boxing/coercion.
+    fn compile_vir_args_coerced(
+        &mut self,
+        args: &[VirRef],
+        param_type_ids: &[TypeId],
+    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
+        let mut values = Vec::with_capacity(args.len());
+        let mut rc_temps = Vec::new();
+        for (i, arg) in args.iter().enumerate() {
+            let compiled = self.compile_vir_expr(arg)?;
+            if compiled.is_owned() {
+                rc_temps.push(compiled);
+            }
+            // Coerce the argument to match the declared parameter type
+            // (e.g., box a concrete class to an interface, wrap a narrow
+            // value into a union).
+            let coerced = if let Some(&param_ty) = param_type_ids.get(i) {
+                self.coerce_to_type_id(compiled, param_ty)?
+            } else {
+                compiled
+            };
+            values.push(coerced.value);
         }
         Ok((values, rc_temps))
     }
