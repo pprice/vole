@@ -396,17 +396,18 @@ fn resolve_call_target(target: &mut CallTarget, ctx: &ResolveCtx<'_>) {
             ..
         } => {
             if let Some(entity_metadata) = ctx.entity_metadata
-                && let Some(function_id) = entity_metadata.function_by_name(key.func_name) {
-                    let instance = MonomorphInstance {
-                        function_id,
-                        type_args: key.type_keys.clone(),
+                && let Some(function_id) = entity_metadata.function_by_name(key.func_name)
+            {
+                let instance = MonomorphInstance {
+                    function_id,
+                    type_args: key.type_keys.clone(),
+                };
+                if let Some(&func_idx) = ctx.index.get(&instance) {
+                    *target = CallTarget::VirDirect {
+                        function_index: func_idx,
                     };
-                    if let Some(&func_idx) = ctx.index.get(&instance) {
-                        *target = CallTarget::VirDirect {
-                            function_index: func_idx,
-                        };
-                    }
                 }
+            }
         }
         _ => {}
     }

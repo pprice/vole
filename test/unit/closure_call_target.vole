@@ -1,0 +1,22 @@
+// Test: closure variable and captured closure call targets
+// Verifies that VIR lowering emits ClosureVariable and CapturedClosure
+// instead of Unresolved for function-typed identifier calls.
+
+tests {
+  test "closure variable call" {
+    let add = (a: i64, b: i64) => a + b
+    assert(add(2, 3) == 5)
+  }
+
+  test "captured closure call" {
+    let mul = (a: i64, b: i64) => a * b
+    let apply = (x: i64, y: i64) => mul(x, y)
+    assert(apply(3, 4) == 12)
+  }
+
+  test "closure variable passed as param" {
+    let double = (x: i64) => x * 2
+    let apply_fn = (f: (i64) -> i64, x: i64) => f(x)
+    assert(apply_fn(double, 5) == 10)
+  }
+}

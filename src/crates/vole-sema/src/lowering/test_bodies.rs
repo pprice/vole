@@ -72,6 +72,7 @@ fn lower_tests_decl_bodies(
             module_id,
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
+            captures: rustc_hash::FxHashSet::default(),
         };
         lower_stmts(&scoped_let_stmts, &mut ctx).stmts
     };

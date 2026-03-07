@@ -805,36 +805,42 @@ fn lower_lambda(
 ) -> VirRef {
     let params: Vec<_> = lambda.params.iter().map(|p| p.name).collect();
 
-    // Save and restore func_return_type around lambda body lowering.
-    // Without this, any `return` inside the lambda would be classified
-    // using the outer function's return type rather than the lambda's.
+    // Extract captures from sema's lambda analysis (needed both for the
+    // VirExpr::Lambda output and for populating ctx.captures).
+    let capture_names: Vec<_> = ctx
+        .node_map
+        .get_lambda_analysis(expr.id)
+        .map(|a| a.captures.iter().map(|c| c.name).collect())
+        .unwrap_or_default();
+
+    // Save and restore func_return_type and captures around lambda body
+    // lowering.  Without func_return_type save/restore, any `return` inside
+    // the lambda would be classified using the outer function's return type.
+    // The captures set lets call lowering distinguish CapturedClosure from
+    // ClosureVariable for function-typed identifiers.
     let saved_return_type = ctx.func_return_type;
+    let saved_captures =
+        std::mem::replace(&mut ctx.captures, capture_names.iter().copied().collect());
     if let Some((_, ret, _)) = ctx.type_arena.unwrap_function(ty) {
         ctx.func_return_type = ret;
     }
     let body = lower_func_body(&lambda.body, ctx);
     ctx.func_return_type = saved_return_type;
+    ctx.captures = saved_captures;
 
-    // Extract captures from sema's lambda analysis.
+    // Build VIR captures from the names.
     // Capture types are not tracked in sema's Capture struct, so we use
     // TypeId::UNKNOWN / VirTypeId::UNKNOWN as placeholders.
-    let captures = ctx
-        .node_map
-        .get_lambda_analysis(expr.id)
-        .map(|analysis| {
-            analysis
-                .captures
-                .iter()
-                .map(|c| VirCapture {
-                    name: c.name,
-                    ty: VirTypeId::UNKNOWN,
-                    vir_ty: VirTypeId::UNKNOWN,
-                    by_ref: false,
-                    rc_kind: VirCaptureRcKind::Unresolved,
-                })
-                .collect()
+    let captures = capture_names
+        .iter()
+        .map(|&name| VirCapture {
+            name,
+            ty: VirTypeId::UNKNOWN,
+            vir_ty: VirTypeId::UNKNOWN,
+            by_ref: false,
+            rc_kind: VirCaptureRcKind::Unresolved,
         })
-        .unwrap_or_default();
+        .collect();
 
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
@@ -1395,6 +1401,14 @@ fn lower_call(
         intrinsic
     } else if let Some(function_id) = ctx.resolve_callee_function(callee_sym) {
         CallTarget::Direct { function_id }
+    } else if let Some(closure_target) = resolve_closure_variable_target(
+        expr.id,
+        callee_sym,
+        &resolved_call_args,
+        &lambda_defaults,
+        ctx,
+    ) {
+        closure_target
     } else {
         make_unresolved(resolved_call_args, lambda_defaults, monomorph_key)
     };
@@ -1471,6 +1485,41 @@ fn resolve_intrinsic_target(
     let key_str = ctx.node_map.get_intrinsic_key(expr.id)?;
     let key = IntrinsicKey::try_from_name(key_str)?;
     Some(CallTarget::Intrinsic { key, line })
+}
+
+/// Try to classify a call as a closure variable or captured closure call.
+///
+/// When sema has annotated the call node with `callee_var_type` (indicating
+/// the callee is a function-typed variable rather than a declared function),
+/// returns the appropriate `CallTarget` variant:
+/// - `CapturedClosure`: callee symbol is in the current function's captures
+/// - `ClosureVariable`: callee is a local variable with function type
+///
+/// Returns `None` when sema did not annotate this call as a variable call.
+fn resolve_closure_variable_target(
+    call_expr_id: vole_identity::NodeId,
+    callee_sym: vole_identity::Symbol,
+    resolved_call_args: &Option<Vec<Option<usize>>>,
+    lambda_defaults: &Option<LambdaDefaultsInfo>,
+    ctx: &mut LoweringCtx<'_>,
+) -> Option<CallTarget> {
+    let callee_type = ctx.node_map.get_callee_var_type(call_expr_id)?;
+    let vir_type = ctx.translate(callee_type);
+    if ctx.captures.contains(&callee_sym) {
+        Some(CallTarget::CapturedClosure {
+            var_name: callee_sym,
+            vir_type,
+            resolved_call_args: resolved_call_args.clone(),
+            lambda_defaults: *lambda_defaults,
+        })
+    } else {
+        Some(CallTarget::ClosureVariable {
+            var_name: callee_sym,
+            vir_type,
+            resolved_call_args: resolved_call_args.clone(),
+            lambda_defaults: *lambda_defaults,
+        })
+    }
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.

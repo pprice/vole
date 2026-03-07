@@ -37,6 +37,7 @@ pub fn lower_global_inits(
         module_id,
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
+        captures: rustc_hash::FxHashSet::default(),
     };
 
     let mut map = FxHashMap::default();
@@ -89,6 +90,7 @@ pub fn lower_module_global_inits(
             module_id,
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
+            captures: rustc_hash::FxHashSet::default(),
         };
 
         let mut map = FxHashMap::default();

@@ -615,6 +615,12 @@ impl<'a> VirPrinter<'a> {
             CallTarget::VirDirect { function_index } => {
                 w!(out, "vir_direct(idx={}, ", function_index);
             }
+            CallTarget::ClosureVariable { var_name, .. } => {
+                w!(out, "closure_var({})(", self.sym(*var_name));
+            }
+            CallTarget::CapturedClosure { var_name, .. } => {
+                w!(out, "captured_closure({})(", self.sym(*var_name));
+            }
             CallTarget::Unresolved {
                 callee_sym,
                 line,

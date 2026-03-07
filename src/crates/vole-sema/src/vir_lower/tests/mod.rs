@@ -140,6 +140,7 @@ fn make_ctx<'a>(
         module_id: name_table.main_module(),
         generic: false,
         func_return_type: TypeId::VOID,
+        captures: rustc_hash::FxHashSet::default(),
     }
 }
 
@@ -164,5 +165,6 @@ fn make_generic_ctx<'a>(
         module_id: name_table.main_module(),
         generic: true,
         func_return_type: TypeId::VOID,
+        captures: rustc_hash::FxHashSet::default(),
     }
 }

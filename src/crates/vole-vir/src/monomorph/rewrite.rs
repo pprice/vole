@@ -799,6 +799,28 @@ fn rewrite_call_target(target: &CallTarget, ctx: &RewriteCtx) -> CallTarget {
             function_id: *function_id,
             type_args: type_args.iter().map(|t| ctx.remap(*t)).collect(),
         },
+        CallTarget::ClosureVariable {
+            var_name,
+            vir_type,
+            resolved_call_args,
+            lambda_defaults,
+        } => CallTarget::ClosureVariable {
+            var_name: *var_name,
+            vir_type: ctx.remap(*vir_type),
+            resolved_call_args: resolved_call_args.clone(),
+            lambda_defaults: *lambda_defaults,
+        },
+        CallTarget::CapturedClosure {
+            var_name,
+            vir_type,
+            resolved_call_args,
+            lambda_defaults,
+        } => CallTarget::CapturedClosure {
+            var_name: *var_name,
+            vir_type: ctx.remap(*vir_type),
+            resolved_call_args: resolved_call_args.clone(),
+            lambda_defaults: *lambda_defaults,
+        },
         other => other.clone(),
     }
 }

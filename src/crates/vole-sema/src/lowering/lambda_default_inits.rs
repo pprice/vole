@@ -168,6 +168,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         module_id,
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
+        captures: rustc_hash::FxHashSet::default(),
     };
 
     for (slot, param) in lambda.params.iter().enumerate() {

@@ -15,6 +15,7 @@ pub mod type_translate;
 #[cfg(test)]
 mod tests;
 
+use rustc_hash::FxHashSet;
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
 use vole_identity::{
     FunctionId, Interner, MethodId, ModuleId, NameId, NameTable, NodeId, Symbol, TypeDefId, TypeId,
@@ -65,6 +66,16 @@ pub struct LoweringCtx<'a> {
     /// Used to pre-compute the `ReturnConvention` on `VirStmt::Return`
     /// nodes.  `VOID` for test bodies and void-returning functions.
     pub func_return_type: TypeId,
+    /// Captured variable names for the function body currently being lowered.
+    ///
+    /// When lowering a lambda body, this is populated with the lambda's
+    /// capture names from `LambdaAnalysis`.  Used by call lowering to
+    /// distinguish `CallTarget::ClosureVariable` (local variable with
+    /// function type) from `CallTarget::CapturedClosure` (captured variable
+    /// with function type).
+    ///
+    /// Empty for top-level function bodies (no captures).
+    pub captures: FxHashSet<Symbol>,
 }
 
 impl LoweringCtx<'_> {
@@ -381,6 +392,7 @@ pub fn lower_function(
         module_id,
         generic: false,
         func_return_type: return_type,
+        captures: FxHashSet::default(),
     };
     let params = param_types
         .iter()
@@ -482,6 +494,7 @@ pub fn lower_method(
         module_id,
         generic: false,
         func_return_type: return_type,
+        captures: FxHashSet::default(),
     };
     let params = param_types
         .iter()
@@ -537,6 +550,7 @@ pub fn lower_interface_method(
         module_id,
         generic: false,
         func_return_type: return_type,
+        captures: FxHashSet::default(),
     };
     let params = param_types
         .iter()
@@ -598,6 +612,7 @@ pub fn lower_generic_function(
         module_id,
         generic: true,
         func_return_type: return_type,
+        captures: FxHashSet::default(),
     };
     let params = param_types
         .iter()
@@ -676,6 +691,7 @@ pub fn lower_test_body(
         module_id,
         generic: false,
         func_return_type: TypeId::VOID,
+        captures: FxHashSet::default(),
     };
     lower_func_body(body, &mut ctx)
 }

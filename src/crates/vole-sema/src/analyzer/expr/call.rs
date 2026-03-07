@@ -136,6 +136,11 @@ impl Analyzer {
                     };
 
                     if let Some((params, ret)) = func_info {
+                        // Annotate: callee is a function-typed variable (for VIR lowering).
+                        self.results
+                            .node_map
+                            .set_callee_var_type(expr.id, var_type_id);
+
                         // Calling a function-typed variable - conservatively mark side effects
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();

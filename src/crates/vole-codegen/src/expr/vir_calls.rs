@@ -55,6 +55,32 @@ impl Cg<'_, '_, '_> {
             CallTarget::VirDirect { function_index } => {
                 self.compile_vir_direct_call_by_index(*function_index, args, ty)
             }
+            CallTarget::ClosureVariable {
+                var_name,
+                vir_type,
+                resolved_call_args,
+                lambda_defaults,
+            } => self.compile_vir_closure_variable_call(
+                *var_name,
+                *vir_type,
+                args,
+                resolved_call_args.as_deref(),
+                *lambda_defaults,
+                ty,
+            ),
+            CallTarget::CapturedClosure {
+                var_name,
+                vir_type,
+                resolved_call_args,
+                lambda_defaults,
+            } => self.compile_vir_captured_closure_call(
+                *var_name,
+                *vir_type,
+                args,
+                resolved_call_args.as_deref(),
+                *lambda_defaults,
+                ty,
+            ),
             CallTarget::Unresolved {
                 callee_sym,
                 call_node_id,
@@ -491,6 +517,77 @@ impl Cg<'_, '_, '_> {
         self.vir_lambda_defaults = None;
         self.vir_monomorph_key = None;
         self.vir_call_return_type = None;
+        result.map(|r| self.mark_rc_owned(r))
+    }
+
+    /// Compile a call to a local closure variable (`CallTarget::ClosureVariable`).
+    ///
+    /// Looks up the variable in `vars`, loads its value, stashes lambda
+    /// defaults and named-arg mapping, then delegates to `call_closure`.
+    fn compile_vir_closure_variable_call(
+        &mut self,
+        var_name: vole_identity::Symbol,
+        vir_type: VirTypeId,
+        args: &[VirRef],
+        resolved_call_args: Option<&[Option<usize>]>,
+        lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
+        _return_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let (var, var_vir_ty) = self.vars.get(&var_name).copied().ok_or_else(|| {
+            CodegenError::not_found("closure variable", self.interner().resolve(var_name))
+        })?;
+        let func_vir_ty = if self.vir_query_is_function_v(var_vir_ty) {
+            var_vir_ty
+        } else {
+            vir_type
+        };
+        let arg_source = crate::structs::methods::ArgSource(args);
+        self.vir_resolved_call_args = resolved_call_args.map(|m| m.to_vec());
+        self.vir_lambda_defaults = lambda_defaults;
+        let result = self.call_closure(
+            var,
+            func_vir_ty,
+            &arg_source,
+            vole_identity::NodeId::new(vole_identity::ModuleId::new(0), 0),
+        );
+        self.vir_resolved_call_args = None;
+        self.vir_lambda_defaults = None;
+        result.map(|r| self.mark_rc_owned(r))
+    }
+
+    /// Compile a call to a captured closure variable (`CallTarget::CapturedClosure`).
+    ///
+    /// Loads the capture from the closure environment, stashes lambda
+    /// defaults and named-arg mapping, then delegates to `call_closure_value`.
+    fn compile_vir_captured_closure_call(
+        &mut self,
+        var_name: vole_identity::Symbol,
+        vir_type: VirTypeId,
+        args: &[VirRef],
+        resolved_call_args: Option<&[Option<usize>]>,
+        lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
+        _return_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let binding = self.get_capture(&var_name).copied().ok_or_else(|| {
+            CodegenError::not_found("captured closure", self.interner().resolve(var_name))
+        })?;
+        let captured = self.load_capture(&binding)?;
+        let func_vir_ty = if self.vir_query_is_function_v(binding.vole_type) {
+            binding.vole_type
+        } else {
+            vir_type
+        };
+        let arg_source = crate::structs::methods::ArgSource(args);
+        self.vir_resolved_call_args = resolved_call_args.map(|m| m.to_vec());
+        self.vir_lambda_defaults = lambda_defaults;
+        let result = self.call_closure_value(
+            captured.value,
+            func_vir_ty,
+            &arg_source,
+            vole_identity::NodeId::new(vole_identity::ModuleId::new(0), 0),
+        );
+        self.vir_resolved_call_args = None;
+        self.vir_lambda_defaults = None;
         result.map(|r| self.mark_rc_owned(r))
     }
 

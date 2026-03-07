@@ -24,7 +24,7 @@ type ArgVec = SmallVec<[Value; 8]>;
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call a function via variable (dispatches to closure or pure function call)
-    pub(super) fn call_closure(
+    pub(crate) fn call_closure(
         &mut self,
         func_var: Variable,
         func_vir_type_id: VirTypeId,
@@ -42,7 +42,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a function via value (always uses closure calling convention now that
     /// all lambdas are wrapped in Closure structs for consistent behavior)
-    pub(super) fn call_closure_value(
+    pub(crate) fn call_closure_value(
         &mut self,
         func_ptr_or_closure: Value,
         func_vir_type_id: VirTypeId,

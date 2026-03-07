@@ -64,6 +64,7 @@ pub fn lower_field_default_inits(
         module_id,
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
+        captures: rustc_hash::FxHashSet::default(),
     };
     let mut map = FxHashMap::default();
     lower_field_default_inits_in_decls(
@@ -111,6 +112,7 @@ pub fn lower_module_field_default_inits(
             module_id,
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
+            captures: rustc_hash::FxHashSet::default(),
         };
         lower_field_default_inits_in_decls(
             &program.declarations,

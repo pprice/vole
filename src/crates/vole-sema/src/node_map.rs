@@ -300,6 +300,14 @@ pub struct NodeData {
 
     /// Struct literal type resolution: TypeDefId and whether it is a class.
     pub struct_literal_info: Option<StructLiteralInfo>,
+
+    /// Function type of the callee when a call targets a function-typed variable.
+    ///
+    /// Set by sema when `check_call_expr` identifies the callee as a local or
+    /// captured variable with a function type (not a declared function).
+    /// VIR lowering reads this to emit `CallTarget::ClosureVariable` or
+    /// `CallTarget::CapturedClosure` instead of `Unresolved`.
+    pub callee_var_type: Option<TypeId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +666,18 @@ impl NodeMap {
     /// Set the resolved type definition for a struct/class literal expression.
     pub fn set_struct_literal_info(&mut self, node: NodeId, info: StructLiteralInfo) {
         self.get_mut_or_insert(node).struct_literal_info = Some(info);
+    }
+
+    // -- callee_var_type -----------------------------------------------------
+
+    /// Get the function type of the callee when a call targets a variable.
+    pub fn get_callee_var_type(&self, node: NodeId) -> Option<TypeId> {
+        self.get(node).and_then(|d| d.callee_var_type)
+    }
+
+    /// Set the function type of the callee for a variable call.
+    pub fn set_callee_var_type(&mut self, node: NodeId, ty: TypeId) {
+        self.get_mut_or_insert(node).callee_var_type = Some(ty);
     }
 
     // ======================================================================

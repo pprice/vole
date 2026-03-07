@@ -31,6 +31,40 @@ pub enum CallTarget {
     /// of the call's `args`.
     Lambda,
 
+    /// A call to a local variable that holds a closure/function value.
+    ///
+    /// Emitted when VIR lowering detects that the callee identifier is a
+    /// local variable with a function type (not a declared function).
+    /// Codegen loads the variable from `vars`, extracts the function pointer
+    /// from the closure struct, and emits an indirect call.
+    ClosureVariable {
+        /// The variable name symbol (used to look up the Cranelift `Variable`).
+        var_name: Symbol,
+        /// The VIR function type of the closure (e.g. `(i64) -> string`).
+        vir_type: VirTypeId,
+        /// Pre-resolved named-argument reordering mapping from sema.
+        resolved_call_args: Option<Vec<Option<usize>>>,
+        /// Lambda parameter defaults from sema.
+        lambda_defaults: Option<LambdaDefaultsInfo>,
+    },
+
+    /// A call to a captured closure variable from an enclosing scope.
+    ///
+    /// Emitted when VIR lowering detects that the callee identifier is a
+    /// captured variable with a function type.  Codegen loads the capture
+    /// from the closure environment, extracts the function pointer, and
+    /// emits an indirect call.
+    CapturedClosure {
+        /// The capture name symbol (used to look up the capture binding).
+        var_name: Symbol,
+        /// The VIR function type of the closure (e.g. `(i64) -> string`).
+        vir_type: VirTypeId,
+        /// Pre-resolved named-argument reordering mapping from sema.
+        resolved_call_args: Option<Vec<Option<usize>>>,
+        /// Lambda parameter defaults from sema.
+        lambda_defaults: Option<LambdaDefaultsInfo>,
+    },
+
     /// A call to a native (FFI) function.
     Native {
         module_path: Symbol,
