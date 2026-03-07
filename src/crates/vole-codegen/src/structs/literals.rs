@@ -43,6 +43,58 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Coerce a value to match a field's declared type, using a pre-computed
+    /// coercion hint for the interface boxing decision when available.
+    ///
+    /// When `hint` is `Some`, the interface boxing path is determined by the
+    /// hint without querying `vir_query_is_interface_v()`.  Unknown and union
+    /// coercions still use type queries (those are handled by other tickets).
+    ///
+    /// When `hint` is `None` or `Unresolved`, falls back to the full
+    /// `coerce_field_value_v()` path.
+    pub(crate) fn coerce_field_value_with_hint(
+        &mut self,
+        value: CompiledValue,
+        field_vir_ty: VirTypeId,
+        hint: Option<vole_vir::expr::FieldCoercionHint>,
+    ) -> CodegenResult<CompiledValue> {
+        use vole_vir::expr::FieldCoercionHint;
+
+        match hint {
+            Some(FieldCoercionHint::InterfaceBox) => {
+                // Hint says field is interface-typed and value is concrete.
+                self.box_interface_value_v(value, field_vir_ty)
+            }
+            Some(FieldCoercionHint::InterfaceCopy) => {
+                // Both field and value are interface-typed.
+                self.copy_interface_fat_ptr(value)
+            }
+            Some(FieldCoercionHint::None) => {
+                // Interface boxing is not needed per the hint. Still check
+                // unknown and union coercions (separate annotation tickets).
+                let field_is_unknown = self.vir_query_is_unknown_v(field_vir_ty);
+                let field_is_union = self.vir_query_is_union_v(field_vir_ty);
+                let value_is_unknown = self.vir_query_is_unknown_v(value.type_id);
+                let value_is_union = self.vir_query_is_union_v(value.type_id);
+                if field_is_unknown && !value_is_unknown {
+                    self.box_to_unknown_no_inc(value)
+                } else if field_is_unknown && value_is_unknown {
+                    self.copy_tagged_value_to_heap(value)
+                } else if field_is_union && !value_is_union {
+                    self.construct_union_heap_id_v(value, field_vir_ty)
+                } else if field_is_union && value_is_union {
+                    self.copy_union_to_heap(value)
+                } else {
+                    Ok(value)
+                }
+            }
+            Some(FieldCoercionHint::Unresolved) | None => {
+                // Fall back to full type-query path.
+                self.coerce_field_value_v(value, field_vir_ty)
+            }
+        }
+    }
+
     /// Construct a union value on the heap (for storing in class fields).
     /// Unlike the stack-based construct_union_id, this allocates on the heap so the
     /// union persists beyond the current function's stack frame.

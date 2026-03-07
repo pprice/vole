@@ -7,7 +7,7 @@
 use crate::{StringConversion, TypeArena};
 use vole_frontend::Expr;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
-use vole_identity::{MonomorphKey, TypeId, VirTypeId};
+use vole_identity::{MonomorphKey, TypeDefId, TypeId, VirTypeId};
 
 use vole_vir::IntrinsicKey;
 use vole_vir::calls::{CallTarget, LambdaDefaultsInfo};
@@ -1214,9 +1214,11 @@ fn lower_struct_literal(
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     if info.is_class {
+        let field_coercions = classify_class_field_coercions(sl, info.type_def_id, ctx);
         Box::new(VirExpr::ClassInstance {
             type_def: info.type_def_id,
             fields,
+            field_coercions,
             ty: compat_ty,
             vir_ty,
         })
@@ -1227,6 +1229,63 @@ fn lower_struct_literal(
             ty: compat_ty,
             vir_ty,
         })
+    }
+}
+
+/// Pre-compute per-field coercion hints for a class instance literal.
+///
+/// For each field in the literal, determines whether the field's declared type
+/// is an interface and whether the init expression's type is already an
+/// interface, producing a `FieldCoercionHint` that codegen reads instead of
+/// calling `vir_query_is_interface_v()` at compile time.
+///
+/// Returns an empty vec in generic mode (codegen falls back to type queries).
+fn classify_class_field_coercions(
+    sl: &vole_frontend::ast::StructLiteralExpr,
+    type_def_id: TypeDefId,
+    ctx: &LoweringCtx<'_>,
+) -> Vec<vole_vir::FieldCoercionHint> {
+    if ctx.generic {
+        return Vec::new();
+    }
+
+    sl.fields
+        .iter()
+        .map(|f| classify_single_field_coercion(f, type_def_id, ctx))
+        .collect()
+}
+
+/// Classify a single field's coercion hint.
+fn classify_single_field_coercion(
+    f: &vole_frontend::ast::StructFieldInit,
+    type_def_id: TypeDefId,
+    ctx: &LoweringCtx<'_>,
+) -> vole_vir::FieldCoercionHint {
+    use vole_vir::FieldCoercionHint;
+
+    // Look up the field's declared type from the entity registry.
+    let field_name_str = ctx.interner.resolve(f.name);
+    let type_def = ctx.entities.get_type(type_def_id);
+    let generic_info = match type_def.generic_info.as_ref() {
+        Some(gi) => gi,
+        None => return FieldCoercionHint::Unresolved,
+    };
+    let field_idx = match generic_info.field_index_by_name(field_name_str, ctx.name_table) {
+        Some(idx) => idx,
+        None => return FieldCoercionHint::Unresolved,
+    };
+    let field_ty = generic_info.field_types[field_idx];
+
+    if !ctx.type_arena.is_interface(field_ty) {
+        return FieldCoercionHint::None;
+    }
+
+    // Field is interface-typed. Check if the init value is already an interface.
+    let init_ty = ctx.node_map.get_type(f.value.id).unwrap_or(TypeId::UNKNOWN);
+    if ctx.type_arena.is_interface(init_ty) {
+        FieldCoercionHint::InterfaceCopy
+    } else {
+        FieldCoercionHint::InterfaceBox
     }
 }
 
@@ -1867,7 +1926,7 @@ fn find_error_type_def(
     error_type_id: TypeId,
     error_name: vole_identity::Symbol,
     ctx: &LoweringCtx<'_>,
-) -> Option<vole_identity::TypeDefId> {
+) -> Option<TypeDefId> {
     let error_name_str = ctx.interner.resolve(error_name);
 
     // Single error type
@@ -2027,7 +2086,7 @@ fn resolve_record_field_bindings(
 
 /// Find a field's slot index and type in a type definition.
 fn find_field_slot(
-    type_def_id: vole_identity::TypeDefId,
+    type_def_id: TypeDefId,
     field_name: vole_identity::Symbol,
     ctx: &LoweringCtx<'_>,
 ) -> Option<(usize, TypeId)> {

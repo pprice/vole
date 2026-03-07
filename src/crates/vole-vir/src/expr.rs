@@ -121,9 +121,15 @@ pub enum VirExpr {
     /// `ty` is the sema-inferred result type (may include generic args).
     /// `fields` are the explicitly provided field initializers; omitted default
     /// fields are compiled via `VirProgram::field_default_inits`.
+    ///
+    /// `field_coercions` is a parallel vec of pre-computed coercion hints for
+    /// each field in `fields`.  Codegen reads these instead of querying
+    /// `vir_query_is_interface_v()` at compile time.  Empty when lowered in
+    /// generic mode (codegen falls back to type queries).
     ClassInstance {
         type_def: TypeDefId,
         fields: Vec<(Symbol, VirRef)>,
+        field_coercions: Vec<FieldCoercionHint>,
         ty: VirTypeId,
         vir_ty: VirTypeId,
     },
@@ -516,6 +522,25 @@ pub enum FieldStorage {
     /// the object type contains type parameters.  Must be resolved before
     /// codegen via the monomorph rederive pass.
     ByName,
+}
+
+/// Per-field coercion hint for struct/class construction, pre-computed
+/// during VIR lowering so codegen reads a decision instead of querying
+/// `vir_query_is_interface_v()` / `vir_query_is_unknown_v()` etc.
+///
+/// Parallel to `LetStorageHint` for let bindings — tells codegen what
+/// coercion (if any) is needed when storing an init value into a field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FieldCoercionHint {
+    /// No coercion needed — value type matches field type.
+    None,
+    /// Box concrete value to interface fat pointer.
+    InterfaceBox,
+    /// Copy existing interface fat pointer (value is already an interface).
+    InterfaceCopy,
+    /// Unresolved — used in generic templates where the field or value
+    /// type contains type parameters.  Codegen falls back to type queries.
+    Unresolved,
 }
 
 /// RC cleanup strategy for a value, pre-computed during VIR lowering.

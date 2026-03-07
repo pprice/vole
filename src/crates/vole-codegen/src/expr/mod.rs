@@ -514,12 +514,14 @@ impl Cg<'_, '_, '_> {
             VirExpr::ClassInstance {
                 type_def,
                 fields,
+                field_coercions,
                 ty,
                 ..
             } => {
                 let result = self.compile_vir_class_instance(
                     *type_def,
                     fields,
+                    field_coercions,
                     self.try_substitute_type_v(*ty),
                 )?;
                 Ok(self.mark_rc_owned(result))

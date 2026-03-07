@@ -115,10 +115,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Mirrors the class path of `struct_literal()` but compiles field values
     /// from VIR expressions.  Default fields are compiled from AST.
+    ///
+    /// `field_coercions` carries pre-computed coercion hints parallel to
+    /// `fields`.  When non-empty, codegen reads these instead of querying
+    /// `vir_query_is_interface_v()` for each field.
     pub(crate) fn compile_vir_class_instance(
         &mut self,
         type_def_id: vole_identity::TypeDefId,
         fields: &[(Symbol, vole_vir::VirRef)],
+        field_coercions: &[vole_vir::FieldCoercionHint],
         vir_result_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let table = self.vir_type_table();
@@ -147,7 +152,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_types = self.collect_field_types(type_def_id);
 
         // Compile and store each explicitly provided field.
-        for (name, value_expr) in fields {
+        for (i, (name, value_expr)) in fields.iter().enumerate() {
+            let hint = field_coercions.get(i).copied();
             self.compile_class_field_vir(
                 *name,
                 value_expr,
@@ -155,6 +161,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 &field_types,
                 set_func_ref,
                 instance_ptr,
+                hint,
             )?;
         }
 
@@ -326,6 +333,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Compile and store a single class field from a VIR expression.
+    ///
+    /// When `coercion_hint` is provided, it is used for the interface boxing
+    /// decision instead of querying `vir_query_is_interface_v()`.
     fn compile_class_field_vir(
         &mut self,
         name: Symbol,
@@ -334,6 +344,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         field_types: &HashMap<String, VirTypeId>,
         set_func_ref: FuncRef,
         instance_ptr: Value,
+        coercion_hint: Option<vole_vir::FieldCoercionHint>,
     ) -> CodegenResult<()> {
         let init_name = self.interner().resolve(name);
         let slot = *field_slots
@@ -357,7 +368,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         value.mark_consumed();
 
         let final_value = if let Some(fvt) = field_vir_ty {
-            self.coerce_field_value_v(value, fvt)?
+            self.coerce_field_value_with_hint(value, fvt, coercion_hint)?
         } else {
             value
         };

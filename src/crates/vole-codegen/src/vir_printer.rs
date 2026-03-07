@@ -298,10 +298,21 @@ impl<'a> VirPrinter<'a> {
             VirExpr::ClassInstance {
                 type_def,
                 fields,
+                field_coercions,
                 ty,
                 ..
             } => {
                 self.fmt_construction("class", *type_def, fields, *ty, out, ind);
+                if !field_coercions.is_empty() {
+                    w!(out, "  /* coercions: ");
+                    for (i, hint) in field_coercions.iter().enumerate() {
+                        if i > 0 {
+                            w!(out, ", ");
+                        }
+                        w!(out, "{}", format_field_coercion(hint));
+                    }
+                    w!(out, " */");
+                }
             }
             VirExpr::BinaryOp {
                 op, lhs, rhs, ty, ..
@@ -1064,6 +1075,16 @@ fn format_unop(op: VirUnOp) -> &'static str {
         VirUnOp::Neg => "-",
         VirUnOp::Not => "!",
         VirUnOp::BitNot => "~",
+    }
+}
+
+fn format_field_coercion(hint: &vole_vir::FieldCoercionHint) -> &'static str {
+    use vole_vir::FieldCoercionHint;
+    match hint {
+        FieldCoercionHint::None => "none",
+        FieldCoercionHint::InterfaceBox => "iface_box",
+        FieldCoercionHint::InterfaceCopy => "iface_copy",
+        FieldCoercionHint::Unresolved => "unresolved",
     }
 }
 

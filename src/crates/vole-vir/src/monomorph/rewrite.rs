@@ -215,11 +215,13 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         VirExpr::ClassInstance {
             type_def,
             fields,
+            field_coercions,
             ty,
             vir_ty,
         } => VirExpr::ClassInstance {
             type_def: *type_def,
             fields: rewrite_named_refs(fields, ctx),
+            field_coercions: field_coercions.clone(),
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },

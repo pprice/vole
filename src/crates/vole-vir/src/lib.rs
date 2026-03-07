@@ -40,9 +40,9 @@ pub use entity_metadata::{
     VirTypeDefKind, compute_field_type_tag,
 };
 pub use expr::{
-    AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind,
-    VirClassMethodMonomorphKey, VirErrorFieldBinding, VirErrorPatternKind, VirExpr,
-    VirExternalMethodInfo, VirFunctionMonomorphKey, VirMatchArm, VirMetaKind,
+    AsCastKind, CoerceKind, FieldCoercionHint, FieldStorage, IsCheckResult, VirBinOp, VirCapture,
+    VirCaptureRcKind, VirClassMethodMonomorphKey, VirErrorFieldBinding, VirErrorPatternKind,
+    VirExpr, VirExternalMethodInfo, VirFunctionMonomorphKey, VirMatchArm, VirMetaKind,
     VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern,
     VirRcCleanup, VirRecordFieldBinding, VirResolvedMethod, VirStaticMethodMonomorphKey,
     VirStringPart, VirTupleBinding, VirUnOp,
