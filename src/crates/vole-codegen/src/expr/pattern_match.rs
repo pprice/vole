@@ -145,11 +145,17 @@ impl Cg<'_, '_, '_> {
         scrutinee_expr: &vole_vir::VirExpr,
         arms: &[vole_vir::VirMatchArm],
         vir_result_type_id: VirTypeId,
+        result_is_union: bool,
     ) -> CodegenResult<CompiledValue> {
         let scrutinee = self.compile_vir_expr(scrutinee_expr)?;
         let scrutinee_type_id = scrutinee.type_id;
 
         let mut effective_result_vir = self.try_substitute_type_v(vir_result_type_id);
+        // Track whether effective_result_vir is a union.  Start with the
+        // pre-computed annotation; updated when the repair heuristics below
+        // change effective_result_vir.
+        let mut is_result_union =
+            result_is_union || self.vir_query_is_union_v(effective_result_vir);
 
         // Repair degraded match result metadata by inferring from arm result
         // types when they provide a consistent concrete shape.
@@ -163,20 +169,22 @@ impl Cg<'_, '_, '_> {
         if arm_vir_types.len() > 1
             && let Some(inferred_union) =
                 self.vir_type_table().lookup_union_v(arm_vir_types.clone())
-            && (!self.vir_query_is_union_v(effective_result_vir)
+            && (!is_result_union
                 || effective_result_vir == VirTypeId::UNKNOWN
                 || self.vir_query_is_function_v(effective_result_vir))
         {
             effective_result_vir = inferred_union;
+            is_result_union = true;
         } else if let [single] = arm_vir_types.as_slice()
             && (effective_result_vir == VirTypeId::UNKNOWN
                 || self.vir_query_is_function_v(effective_result_vir))
         {
             effective_result_vir = *single;
+            is_result_union = self.vir_query_is_union_v(effective_result_vir);
         }
 
         // Replicate the nil-arm union return type adjustment from match_expr.
-        if !self.vir_query_is_union_v(effective_result_vir) {
+        if !is_result_union {
             let has_nil_arm = arms.iter().any(|arm| {
                 arm.ty != VirTypeId::UNKNOWN
                     && self.vir_query_is_nil_v(self.try_substitute_type_v(arm.ty))
@@ -185,6 +193,7 @@ impl Cg<'_, '_, '_> {
                 let ret_vir_ty = self.try_substitute_type_v(ret_vir_ty);
                 if self.vir_query_is_union_v(ret_vir_ty) {
                     effective_result_vir = ret_vir_ty;
+                    is_result_union = true;
                 }
             }
         }
@@ -202,6 +211,7 @@ impl Cg<'_, '_, '_> {
                 result_vir_ty,
                 result_cranelift_type,
                 is_void,
+                is_result_union,
             );
         }
 
@@ -212,10 +222,12 @@ impl Cg<'_, '_, '_> {
             result_cranelift_type,
             is_void,
             scrutinee_type_id,
+            is_result_union,
         )
     }
 
     /// Compile a VIR match using the standard chain of if-else blocks.
+    #[expect(clippy::too_many_arguments)]
     fn compile_vir_match_chain(
         &mut self,
         arms: &[vole_vir::VirMatchArm],
@@ -224,6 +236,7 @@ impl Cg<'_, '_, '_> {
         result_cranelift_type: Type,
         is_void: bool,
         scrutinee_type_id: VirTypeId,
+        is_result_union: bool,
     ) -> CodegenResult<CompiledValue> {
         let merge_block = self.builder.create_block();
         if !is_void {
@@ -255,6 +268,7 @@ impl Cg<'_, '_, '_> {
                 result_vir_ty,
                 result_cranelift_type,
                 is_void,
+                is_result_union,
             )?;
         }
 
@@ -280,6 +294,7 @@ impl Cg<'_, '_, '_> {
         result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
+        is_result_union: bool,
     ) -> CodegenResult<()> {
         self.switch_to_block(arm_block);
 
@@ -322,7 +337,7 @@ impl Cg<'_, '_, '_> {
 
         self.switch_to_block(body_block);
         let saved_vars = std::mem::replace(&mut self.vars, arm_variables);
-        let body_result = self.compile_vir_arm_body_v(&arm.body, result_vir_ty)?;
+        let body_result = self.compile_vir_arm_body_v(&arm.body, result_vir_ty, is_result_union)?;
         let _ = std::mem::replace(&mut self.vars, saved_vars);
 
         self.emit_match_arm_exit(
@@ -731,6 +746,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         body: &vole_vir::VirBody,
         result_vir_ty: VirTypeId,
+        is_result_union: bool,
     ) -> CodegenResult<CompiledValue> {
         let body_result = if let Some(trailing) = &body.trailing {
             let mut terminated = false;
@@ -742,7 +758,7 @@ impl Cg<'_, '_, '_> {
             }
             if terminated {
                 self.void_value()
-            } else if self.vir_query_is_union_v(result_vir_ty)
+            } else if is_result_union
                 && matches!(trailing.as_ref(), vole_vir::VirExpr::ArrayLiteral { .. })
                 && let Some(expected_variant) =
                     self.preferred_array_like_union_variant_v(result_vir_ty)
@@ -788,6 +804,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Emit a VIR match using Cranelift's Switch for O(1) dispatch.
+    #[expect(clippy::too_many_arguments)]
     fn emit_vir_switch_match(
         &mut self,
         arms: &[vole_vir::VirMatchArm],
@@ -796,6 +813,7 @@ impl Cg<'_, '_, '_> {
         result_vir_ty: VirTypeId,
         result_cranelift_type: Type,
         is_void: bool,
+        is_result_union: bool,
     ) -> CodegenResult<CompiledValue> {
         use cranelift::frontend::Switch;
 
@@ -829,7 +847,8 @@ impl Cg<'_, '_, '_> {
             self.switch_to_block(body_blocks[i]);
             self.builder.seal_block(body_blocks[i]);
 
-            let body_result = self.compile_vir_arm_body_v(&arm.body, result_vir_ty)?;
+            let body_result =
+                self.compile_vir_arm_body_v(&arm.body, result_vir_ty, is_result_union)?;
             self.emit_match_arm_exit(
                 body_result,
                 result_vir_ty,

@@ -479,8 +479,14 @@ impl Cg<'_, '_, '_> {
                 scrutinee,
                 arms,
                 ty,
+                result_is_union,
                 ..
-            } => self.compile_vir_match(scrutinee, arms, self.try_substitute_type_v(*ty)),
+            } => self.compile_vir_match(
+                scrutinee,
+                arms,
+                self.try_substitute_type_v(*ty),
+                *result_is_union,
+            ),
 
             // -- Construction -------------------------------------------------
             VirExpr::ArrayLiteral { elements, ty, .. } => {

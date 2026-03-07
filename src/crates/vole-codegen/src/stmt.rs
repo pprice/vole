@@ -50,7 +50,10 @@ impl Cg<'_, '_, '_> {
                     let boxed = self.box_to_unknown(*init)?;
                     (boxed.value, boxed.type_id)
                 }
-                LetStorageHint::Union { tag_hint } if !self.vir_query_is_union_v(init.type_id) => {
+                LetStorageHint::Union {
+                    tag_hint,
+                    init_is_union,
+                } if !(init_is_union || self.vir_query_is_union_v(init.type_id)) => {
                     let wrapped = if let Some(hint) = tag_hint {
                         self.construct_union_from_hint_v(*init, declared_vir, &hint)?
                     } else {
@@ -592,7 +595,7 @@ impl Cg<'_, '_, '_> {
                 // Match-expression type metadata can degrade in generic module
                 // bodies. Recompile with the declared return union as the
                 // expected result type.
-                compiled = self.compile_vir_match(scrutinee, arms, ret_vir_ty)?;
+                compiled = self.compile_vir_match(scrutinee, arms, ret_vir_ty, true)?;
                 compiled.type_id = self.try_substitute_type_v(compiled.type_id);
             }
 
@@ -1051,6 +1054,7 @@ impl Cg<'_, '_, '_> {
             final_value,
             final_vir_ty,
             is_stack_union,
+            storage,
         )?;
 
         init.mark_consumed();
@@ -1346,6 +1350,7 @@ impl Cg<'_, '_, '_> {
     /// union RC tracking.
     ///
     /// Mirrors the RC bookkeeping section of [`let_stmt`].
+    #[expect(clippy::too_many_arguments)]
     fn register_vir_let_rc(
         &mut self,
         var: Variable,
@@ -1354,6 +1359,7 @@ impl Cg<'_, '_, '_> {
         final_value: Value,
         final_vir_ty: VirTypeId,
         is_stack_union: bool,
+        storage: LetStorageHint,
     ) -> CodegenResult<()> {
         // Detect whether coerce_let_init called box_to_unknown (new TaggedValue).
         // The init's VirTypeId is checked directly: if the final type is unknown
@@ -1389,7 +1395,14 @@ impl Cg<'_, '_, '_> {
             }
         } else if self.rc_scopes.has_active_scope() {
             self.register_vir_let_composite_rc(var, init, value_expr, final_value, final_vir_ty)?;
-            self.register_vir_let_union_rc(var, init, final_value, final_vir_ty, is_stack_union)?;
+            self.register_vir_let_union_rc(
+                var,
+                init,
+                final_value,
+                final_vir_ty,
+                is_stack_union,
+                storage,
+            )?;
         }
         Ok(())
     }
@@ -1447,8 +1460,15 @@ impl Cg<'_, '_, '_> {
         final_value: Value,
         final_vir_ty: VirTypeId,
         is_stack_union: bool,
+        storage: LetStorageHint,
     ) -> CodegenResult<()> {
-        if !(is_stack_union || self.vir_query_is_union_v(final_vir_ty)) {
+        // Use the pre-computed `LetStorageHint::Union` annotation to determine
+        // whether this binding is union-typed, avoiding
+        // `vir_query_is_union_v(final_vir_ty)`.  `is_stack_union` is true when
+        // `coerce_let_init` performed union wrapping; `LetStorageHint::Union`
+        // covers the case where the init was already a union (pass-through).
+        let is_union_binding = is_stack_union || matches!(storage, LetStorageHint::Union { .. });
+        if !(is_union_binding || self.vir_query_is_union_v(final_vir_ty)) {
             return Ok(());
         }
         // Already handled by composite RC path.

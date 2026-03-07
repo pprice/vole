@@ -399,12 +399,14 @@ fn rewrite_let_storage(storage: &LetStorageHint, ctx: &RewriteCtx) -> LetStorage
     match storage {
         LetStorageHint::Union {
             tag_hint: Some(hint),
+            init_is_union,
         } => LetStorageHint::Union {
             tag_hint: Some(UnionTagHint {
                 tag: hint.tag,
                 is_rc: hint.is_rc,
                 variant_type: ctx.remap(hint.variant_type),
             }),
+            init_is_union: *init_is_union,
         },
         other => *other,
     }
@@ -431,11 +433,13 @@ fn rewrite_expr_control(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             arms,
             ty,
             vir_ty,
+            result_is_union,
         } => VirExpr::Match {
             scrutinee: rewrite_ref(scrutinee, ctx),
             arms: arms.iter().map(|a| rewrite_match_arm(a, ctx)).collect(),
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
+            result_is_union: *result_is_union,
         },
         VirExpr::Block {
             stmts,
@@ -1625,6 +1629,7 @@ mod tests {
                     }],
                     ty: type_id(10),
                     vir_ty: param_id,
+                    result_is_union: false,
                 })),
             },
             mangled_name_id: None,

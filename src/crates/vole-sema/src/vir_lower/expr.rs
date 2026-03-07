@@ -1704,11 +1704,13 @@ fn lower_match_expr(
 
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
+    let result_is_union = !ctx.generic && ctx.type_arena.is_union(ty);
     Box::new(VirExpr::Match {
         scrutinee,
         arms,
         ty: compat_ty,
         vir_ty,
+        result_is_union,
     })
 }
 

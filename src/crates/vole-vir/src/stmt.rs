@@ -149,7 +149,15 @@ pub enum LetStorageHint {
     /// `None` means the tag could not be determined statically (e.g. the
     /// init expression is already a union, is a type parameter, or the
     /// lowering ran in generic mode).
-    Union { tag_hint: Option<UnionTagHint> },
+    ///
+    /// `init_is_union` is `true` when the init expression's type is itself
+    /// a union — codegen should pass the value through without wrapping.
+    /// Pre-computed during VIR lowering so codegen reads a decision instead
+    /// of querying `vir_query_is_union_v(init.type_id)`.
+    Union {
+        tag_hint: Option<UnionTagHint>,
+        init_is_union: bool,
+    },
     /// The binding type is an interface — concrete values are boxed to an
     /// interface pointer (vtable + data).
     Interface,

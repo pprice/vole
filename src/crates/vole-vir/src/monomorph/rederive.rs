@@ -221,9 +221,14 @@ fn rederive_expr(
             }
         }
         VirExpr::Match {
-            scrutinee, arms, ..
+            scrutinee,
+            arms,
+            vir_ty,
+            result_is_union,
+            ..
         } => {
             rederive_ref(scrutinee, table, ret_ty, entities);
+            *result_is_union = table.is_union(*vir_ty);
             let scrutinee_vir_ty = extract_vir_ty(scrutinee);
             for arm in arms {
                 rederive_pattern(&mut arm.pattern, scrutinee_vir_ty, table, ret_ty, entities);
@@ -320,10 +325,11 @@ fn rederive_stmt(
             needs_struct_copy,
             ..
         } => {
-            *storage = rederive_let_storage(*vir_ty, storage, table);
+            let init_vir_ty = extract_vir_ty(value);
+            *storage = rederive_let_storage(*vir_ty, init_vir_ty, storage, table);
             // Re-derive struct copy flag: after monomorphization a type param
             // may have been substituted with a concrete struct type.
-            if !*needs_struct_copy && let Some(init_vir_ty) = extract_vir_ty(value) {
+            if !*needs_struct_copy && let Some(init_vir_ty) = init_vir_ty {
                 *needs_struct_copy = table.is_struct(init_vir_ty);
             }
             rederive_ref(value, table, ret_ty, entities);
@@ -1149,22 +1155,31 @@ fn rederive_return_convention(vir_return_ty: VirTypeId, table: &VirTypeTable) ->
 
 fn rederive_let_storage(
     vir_ty: VirTypeId,
+    init_vir_ty: Option<VirTypeId>,
     existing: &LetStorageHint,
     table: &VirTypeTable,
 ) -> LetStorageHint {
     match table.get(vir_ty) {
         VirType::Unknown => LetStorageHint::Unknown,
         VirType::Union { .. } | VirType::Optional { .. } => {
+            // Re-derive init_is_union from the init expression's now-concrete
+            // VIR type.  If the init type cannot be extracted, preserve the
+            // existing annotation.
+            let init_is_union = init_vir_ty.is_some_and(|t| table.is_union(t));
             // If the existing storage is already Union with a pre-computed
             // tag hint, preserve it — the rewrite pass has already remapped
             // the VirTypeIds inside the hint.  Otherwise (e.g. the storage
             // was Scalar before monomorphization resolved the type to a
             // union), leave the hint as None.
             match existing {
-                LetStorageHint::Union { tag_hint } => LetStorageHint::Union {
+                LetStorageHint::Union { tag_hint, .. } => LetStorageHint::Union {
                     tag_hint: *tag_hint,
+                    init_is_union,
                 },
-                _ => LetStorageHint::Union { tag_hint: None },
+                _ => LetStorageHint::Union {
+                    tag_hint: None,
+                    init_is_union,
+                },
             }
         }
         VirType::Interface { .. } => {
@@ -2018,6 +2033,7 @@ mod tests {
                     }],
                     ty: type_id(20),
                     vir_ty: VirTypeId::BOOL,
+                    result_is_union: false,
                 })),
             },
             mangled_name_id: None,

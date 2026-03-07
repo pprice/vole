@@ -153,7 +153,11 @@ fn classify_let_storage(ty: TypeId, init_ty: TypeId, ctx: &mut LoweringCtx<'_>) 
         LetStorageHint::Unknown
     } else if ctx.type_arena.is_union(ty) {
         let tag_hint = compute_union_tag_hint(ty, init_ty, ctx);
-        LetStorageHint::Union { tag_hint }
+        let init_is_union = !ctx.generic && ctx.type_arena.is_union(init_ty);
+        LetStorageHint::Union {
+            tag_hint,
+            init_is_union,
+        }
     } else if ctx.type_arena.is_interface(ty) {
         // RuntimeIterator implements Iterator dispatch directly; skip boxing.
         if !ctx.generic && ctx.type_arena.is_runtime_iterator(init_ty) {

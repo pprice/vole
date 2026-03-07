@@ -285,11 +285,18 @@ pub enum VirExpr {
     },
 
     /// Pattern match expression.
+    ///
+    /// `result_is_union` indicates whether the match result type (`vir_ty`)
+    /// is a union, pre-computed during VIR lowering so codegen reads a
+    /// decision instead of querying `vir_query_is_union_v(result_vir_ty)`.
+    /// Used for union reconstruction of arm results and array literal
+    /// variant disambiguation.
     Match {
         scrutinee: VirRef,
         arms: Vec<VirMatchArm>,
         ty: VirTypeId,
         vir_ty: VirTypeId,
+        result_is_union: bool,
     },
 
     /// Block expression with an optional trailing value.
