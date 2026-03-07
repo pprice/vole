@@ -560,7 +560,7 @@ impl<'a> VirPrinter<'a> {
             CallTarget::BuiltinMethod { method } => {
                 w!(out, "builtin({:?}, ", method);
             }
-            CallTarget::Intrinsic { key } => {
+            CallTarget::Intrinsic { key, .. } => {
                 w!(out, "intrinsic({:?}, ", key);
             }
             CallTarget::IntrinsicRuntime { key } => {

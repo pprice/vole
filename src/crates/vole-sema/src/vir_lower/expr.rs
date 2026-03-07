@@ -9,6 +9,7 @@ use vole_frontend::Expr;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
 use vole_identity::{MonomorphKey, TypeId, VirTypeId};
 
+use vole_vir::IntrinsicKey;
 use vole_vir::calls::{CallTarget, LambdaDefaultsInfo};
 use vole_vir::expr::{
     AsCastKind, IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind, VirClassMethodMonomorphKey,
@@ -1331,6 +1332,8 @@ fn lower_call(
     let target = if ctx.generic {
         generic_call_target(expr, ctx)
             .unwrap_or_else(|| make_unresolved(resolved_call_args, lambda_defaults, monomorph_key))
+    } else if let Some(intrinsic) = resolve_intrinsic_target(expr, callee_sym, ctx) {
+        intrinsic
     } else if let Some(function_id) = ctx.resolve_callee_function(callee_sym) {
         CallTarget::Direct { function_id }
     } else {
@@ -1362,6 +1365,53 @@ fn generic_call_target(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> Option<CallTar
         function_id,
         type_args,
     })
+}
+
+/// Try to classify a call as a builtin or compiler intrinsic.
+///
+/// Checks two sources:
+/// 1. Hardcoded builtin names (`print_char`, `assert`) that codegen handles
+///    with special inline emission.
+/// 2. NodeMap `intrinsic_key` set by sema for generic external calls whose
+///    type arguments resolve to a concrete intrinsic (e.g. `sqrt(2.0)` ->
+///    `f64_sqrt`).  Only used when the call has NO MonomorphKey (which would
+///    indicate a generic call needing full monomorphization/ambiguity checking).
+///
+/// Returns `Some(CallTarget::Intrinsic { key, line })` when the call can be
+/// classified, `None` otherwise.
+fn resolve_intrinsic_target(
+    expr: &Expr,
+    callee_sym: vole_identity::Symbol,
+    ctx: &LoweringCtx<'_>,
+) -> Option<CallTarget> {
+    let line = expr.span.line;
+    // 1. Check hardcoded builtins by callee name.
+    let callee_name = ctx.interner.try_resolve(callee_sym)?;
+    match callee_name {
+        "print_char" => {
+            return Some(CallTarget::Intrinsic {
+                key: IntrinsicKey::PrintChar,
+                line,
+            });
+        }
+        "assert" => {
+            return Some(CallTarget::Intrinsic {
+                key: IntrinsicKey::Assert,
+                line,
+            });
+        }
+        _ => {}
+    }
+    // 2. Check NodeMap for a sema-resolved intrinsic key (generic externals).
+    //    Skip when a MonomorphKey is present — that indicates a generic call
+    //    that needs the full monomorphization path (which also checks for
+    //    ambiguous where-clause mappings).
+    if ctx.node_map.get_generic(expr.id).is_some() {
+        return None;
+    }
+    let key_str = ctx.node_map.get_intrinsic_key(expr.id)?;
+    let key = IntrinsicKey::try_from_name(key_str)?;
+    Some(CallTarget::Intrinsic { key, line })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.

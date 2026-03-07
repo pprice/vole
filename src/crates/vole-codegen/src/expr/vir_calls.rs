@@ -34,7 +34,9 @@ impl Cg<'_, '_, '_> {
                 self.compile_vir_direct_call(*function_id, args, ty)
             }
             CallTarget::Lambda => self.compile_vir_lambda_call(args, ty),
-            CallTarget::Intrinsic { key } => self.compile_vir_intrinsic_call(*key, args, ty),
+            CallTarget::Intrinsic { key, line } => {
+                self.compile_vir_intrinsic_call(*key, args, ty, *line)
+            }
             CallTarget::IntrinsicRuntime { key } => {
                 self.compile_vir_intrinsic_runtime_call(*key, args, ty)
             }
@@ -271,17 +273,30 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a compiler-intrinsic call (`CallTarget::Intrinsic`).
     ///
-    /// Delegates to the existing `call_compiler_intrinsic_key_typed_with_line`
-    /// method which handles both inline and runtime-backed intrinsics.
+    /// Builtins (`Assert`, `PrintChar`) are handled inline; all other keys
+    /// delegate to `call_compiler_intrinsic_key_typed_with_line`.
     fn compile_vir_intrinsic_call(
         &mut self,
         key: crate::IntrinsicKey,
         args: &[VirRef],
         return_ty: TypeId,
+        line: u32,
     ) -> CodegenResult<CompiledValue> {
-        let typed_args = self.compile_vir_typed_args(args)?;
-        // Line 0: VIR nodes don't carry span info yet.
-        self.call_compiler_intrinsic_key_typed_with_line(key, &typed_args, return_ty, 0)
+        use crate::IntrinsicKey;
+        match key {
+            IntrinsicKey::Assert => {
+                let arg_source = crate::structs::methods::ArgSource(args);
+                self.call_assert(&arg_source, line)
+            }
+            IntrinsicKey::PrintChar => {
+                let arg_source = crate::structs::methods::ArgSource(args);
+                self.call_print_char(&arg_source)
+            }
+            _ => {
+                let typed_args = self.compile_vir_typed_args(args)?;
+                self.call_compiler_intrinsic_key_typed_with_line(key, &typed_args, return_ty, line)
+            }
+        }
     }
 
     /// Compile a runtime-intrinsic call (`CallTarget::IntrinsicRuntime`).

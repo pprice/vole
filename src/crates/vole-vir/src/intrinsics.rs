@@ -318,6 +318,8 @@ pub enum IntrinsicKey {
 
     // ---- Builtins ----
     Panic,
+    Assert,
+    PrintChar,
     ArrayLen,
     StringLen,
 
@@ -538,6 +540,8 @@ impl IntrinsicKey {
             "u64_checked_div" => Self::U64CheckedDiv,
             // Builtins
             "panic" => Self::Panic,
+            "assert" => Self::Assert,
+            "print_char" => Self::PrintChar,
             "array_len" => Self::ArrayLen,
             "string_len" => Self::StringLen,
             // Task intrinsics

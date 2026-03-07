@@ -789,7 +789,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Compile print_char builtin for ASCII output.
     ///
     /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
-    fn call_print_char(&mut self, arg_source: &ArgSource<'_>) -> CodegenResult<CompiledValue> {
+    pub(crate) fn call_print_char(
+        &mut self,
+        arg_source: &ArgSource<'_>,
+    ) -> CodegenResult<CompiledValue> {
         if arg_source.len() != 1 {
             return Err(CodegenError::arg_count("print_char", 1, arg_source.len()));
         }
@@ -818,7 +821,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// a pre-existing class-field-access register clobber bug (v-a1f9).
     ///
     /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
-    fn call_assert(
+    pub(crate) fn call_assert(
         &mut self,
         arg_source: &ArgSource<'_>,
         call_line: u32,

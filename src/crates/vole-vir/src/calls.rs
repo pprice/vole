@@ -21,7 +21,7 @@ pub enum CallTarget {
     BuiltinMethod { method: BuiltinMethod },
 
     /// A compiler intrinsic, identified by a typed `IntrinsicKey`.
-    Intrinsic { key: IntrinsicKey },
+    Intrinsic { key: IntrinsicKey, line: u32 },
 
     /// A runtime intrinsic (calls into `vole-runtime`), identified by a typed
     /// `IntrinsicKey`.  Codegen resolves to the appropriate `RuntimeKey`.
