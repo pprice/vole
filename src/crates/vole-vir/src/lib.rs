@@ -44,8 +44,8 @@ pub use expr::{
     VirClassMethodMonomorphKey, VirErrorFieldBinding, VirErrorPatternKind, VirExpr,
     VirExternalMethodInfo, VirFunctionMonomorphKey, VirMatchArm, VirMetaKind,
     VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern,
-    VirRecordFieldBinding, VirResolvedMethod, VirStaticMethodMonomorphKey, VirStringPart,
-    VirTupleBinding, VirUnOp,
+    VirRcCleanup, VirRecordFieldBinding, VirResolvedMethod, VirStaticMethodMonomorphKey,
+    VirStringPart, VirTupleBinding, VirUnOp,
 };
 pub use func::{VirBody, VirFunction, VirTest};
 pub use implement_dispatch::{
@@ -55,9 +55,9 @@ pub use implement_dispatch::{
 pub use intrinsics::IntrinsicKey;
 pub use monomorph::{
     InstanceIndex, MonomorphInstance, MonomorphResult, RewriteCtx, TypeSubstitution,
-    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo, monomorphize,
-    monomorphize_with_seeds, rederive_decisions, resolve_generic_calls, rewrite_function,
-    substitute_types,
+    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
+    classify_rc_cleanup, monomorphize, monomorphize_with_seeds, rederive_decisions,
+    resolve_generic_calls, rewrite_function, substitute_types,
 };
 pub use numeric_model::{
     NumericCoercion, integer_result_type, integer_result_type_v, numeric_coercion,

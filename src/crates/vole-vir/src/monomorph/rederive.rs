@@ -311,10 +311,9 @@ fn rederive_stmt(
             *storage = rederive_let_storage(*vir_ty, storage, table);
             // Re-derive struct copy flag: after monomorphization a type param
             // may have been substituted with a concrete struct type.
-            if !*needs_struct_copy
-                && let Some(init_vir_ty) = extract_vir_ty(value) {
-                    *needs_struct_copy = table.is_struct(init_vir_ty);
-                }
+            if !*needs_struct_copy && let Some(init_vir_ty) = extract_vir_ty(value) {
+                *needs_struct_copy = table.is_struct(init_vir_ty);
+            }
             rederive_ref(value, table, ret_ty, entities);
         }
         VirStmt::LetTuple { pattern, value, .. } => {
@@ -943,9 +942,9 @@ fn rederive_destructure_pattern(
                 if matches!(field.storage, FieldStorage::ByName)
                     && let Some(resolved) =
                         resolve_field_storage(source, field.field_name, table, entities)
-                    {
-                        field.storage = resolved;
-                    }
+                {
+                    field.storage = resolved;
+                }
             }
         }
         VirDestructurePattern::Tuple { elements, .. } => {
@@ -980,7 +979,11 @@ fn rederive_rc_cleanup(
 ///
 /// Mirrors the logic in codegen's `is_simple_rc_type` / `rc_state.rs` but
 /// operates on `VirType` instead of `SemaType`.
-fn classify_rc_cleanup(vir_ty: VirTypeId, table: &VirTypeTable) -> crate::expr::VirRcCleanup {
+///
+/// This is public so that VIR lowering and the builder can eagerly classify
+/// cleanup strategies for concrete types, avoiding the `Unresolved` fallback
+/// at codegen time.
+pub fn classify_rc_cleanup(vir_ty: VirTypeId, table: &VirTypeTable) -> crate::expr::VirRcCleanup {
     use crate::expr::VirRcCleanup;
     use crate::types::VirType;
 

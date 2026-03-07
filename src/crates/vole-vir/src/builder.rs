@@ -5,10 +5,12 @@
 use vole_identity::{FunctionId, Symbol, VirTypeId};
 
 use crate::calls::CallTarget;
-use crate::expr::{CoerceKind, FieldStorage, VirBinOp, VirExpr, VirUnOp};
+use crate::expr::{CoerceKind, FieldStorage, VirBinOp, VirExpr, VirRcCleanup, VirUnOp};
 use crate::func::{VirBody, VirFunction};
+use crate::monomorph::rederive::classify_rc_cleanup;
 use crate::refs::VirRef;
 use crate::stmt::{AssignTarget, VirStmt};
+use crate::type_table::VirTypeTable;
 
 /// Builder for constructing VIR function bodies.
 ///
@@ -161,20 +163,26 @@ impl VirBuilder {
 
     /// Increment the reference count of a value (expression form — returns
     /// the value).
-    pub fn build_rc_inc(&mut self, value: VirRef) -> VirRef {
-        Box::new(VirExpr::RcInc {
-            value,
-            cleanup: crate::expr::VirRcCleanup::Unresolved,
-        })
+    ///
+    /// The cleanup strategy is eagerly classified from the value's VirTypeId
+    /// using the type table.  For generic templates where the value type is a
+    /// type parameter, the result will be `Unresolved` — the monomorph rederive
+    /// pass resolves it after type substitution.
+    pub fn build_rc_inc(&mut self, value: VirRef, table: &VirTypeTable) -> VirRef {
+        let cleanup = classify_cleanup_for_value(&value, table);
+        Box::new(VirExpr::RcInc { value, cleanup })
     }
 
     /// Decrement the reference count of a value (expression form — returns
     /// the value).
-    pub fn build_rc_dec(&mut self, value: VirRef) -> VirRef {
-        Box::new(VirExpr::RcDec {
-            value,
-            cleanup: crate::expr::VirRcCleanup::Unresolved,
-        })
+    ///
+    /// The cleanup strategy is eagerly classified from the value's VirTypeId
+    /// using the type table.  For generic templates where the value type is a
+    /// type parameter, the result will be `Unresolved` — the monomorph rederive
+    /// pass resolves it after type substitution.
+    pub fn build_rc_dec(&mut self, value: VirRef, table: &VirTypeTable) -> VirRef {
+        let cleanup = classify_cleanup_for_value(&value, table);
+        Box::new(VirExpr::RcDec { value, cleanup })
     }
 
     /// Transfer ownership of a reference-counted value (consume without
@@ -271,11 +279,12 @@ impl VirBuilder {
     }
 
     /// Decrement reference count (statement form — fire-and-forget).
-    pub fn build_rc_dec_stmt(&mut self, value: VirRef) -> VirStmt {
-        VirStmt::RcDec {
-            value,
-            cleanup: crate::expr::VirRcCleanup::Unresolved,
-        }
+    ///
+    /// The cleanup strategy is eagerly classified from the value's VirTypeId
+    /// using the type table.
+    pub fn build_rc_dec_stmt(&mut self, value: VirRef, table: &VirTypeTable) -> VirStmt {
+        let cleanup = classify_cleanup_for_value(&value, table);
+        VirStmt::RcDec { value, cleanup }
     }
 
     // -- Body / function construction -----------------------------------------
@@ -312,6 +321,79 @@ impl VirBuilder {
 impl Default for VirBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Extract the VirTypeId from a VirRef and classify its RC cleanup strategy.
+///
+/// Falls back to `Unresolved` if the expression doesn't carry a type (e.g.,
+/// void-returning side-effect nodes like RcInc/RcDec themselves).
+fn classify_cleanup_for_value(value: &VirExpr, table: &VirTypeTable) -> VirRcCleanup {
+    let Some(vir_ty) = extract_vir_ty_for_cleanup(value) else {
+        return VirRcCleanup::Unresolved;
+    };
+    classify_rc_cleanup(vir_ty, table)
+}
+
+/// Extract the VirTypeId from a VirExpr for RC cleanup classification.
+///
+/// This is a focused version of `rederive::extract_vir_ty` — it only needs
+/// to handle the expression shapes that appear as operands to RcInc/RcDec.
+fn extract_vir_ty_for_cleanup(expr: &VirExpr) -> Option<VirTypeId> {
+    match expr {
+        VirExpr::IntLiteral { vir_ty, .. }
+        | VirExpr::WideLiteral { vir_ty, .. }
+        | VirExpr::FloatLiteral { vir_ty, .. }
+        | VirExpr::Import { vir_ty, .. }
+        | VirExpr::ArrayLiteral { vir_ty, .. }
+        | VirExpr::RepeatLiteral { vir_ty, .. }
+        | VirExpr::StructLiteral { vir_ty, .. }
+        | VirExpr::ClassInstance { vir_ty, .. }
+        | VirExpr::BinaryOp { vir_ty, .. }
+        | VirExpr::UnaryOp { vir_ty, .. }
+        | VirExpr::Call { vir_ty, .. }
+        | VirExpr::MethodCall { vir_ty, .. }
+        | VirExpr::FieldLoad { vir_ty, .. }
+        | VirExpr::Index { vir_ty, .. }
+        | VirExpr::If { vir_ty, .. }
+        | VirExpr::Match { vir_ty, .. }
+        | VirExpr::Block { vir_ty, .. }
+        | VirExpr::IsCheck { vir_ty, .. }
+        | VirExpr::MetaAccess { vir_ty, .. }
+        | VirExpr::LocalLoad { vir_ty, .. }
+        | VirExpr::Lambda { vir_ty, .. }
+        | VirExpr::NullCoalesce { vir_ty, .. }
+        | VirExpr::OptionalChain { vir_ty, .. }
+        | VirExpr::OptionalMethodCall { vir_ty, .. } => Some(*vir_ty),
+
+        VirExpr::BoolLiteral(_) => Some(VirTypeId::BOOL),
+        VirExpr::StringLiteral(_) => Some(VirTypeId::STRING),
+        VirExpr::NilLiteral => Some(VirTypeId::NIL),
+        VirExpr::Range { .. } => Some(VirTypeId::RANGE),
+        VirExpr::TypeLiteral => Some(VirTypeId::METATYPE),
+        VirExpr::Unreachable { .. } => Some(VirTypeId::NEVER),
+        VirExpr::StringConcat { .. } | VirExpr::InterpolatedString { .. } => {
+            Some(VirTypeId::STRING)
+        }
+
+        VirExpr::Coerce { vir_to, .. } => Some(*vir_to),
+        VirExpr::Try {
+            vir_success_type, ..
+        } => Some(*vir_success_type),
+        VirExpr::AsCast { vir_target_ty, .. } => Some(*vir_target_ty),
+
+        // Side-effect only expressions have no meaningful type for RC.
+        VirExpr::FieldStore { .. }
+        | VirExpr::IndexStore { .. }
+        | VirExpr::LocalStore { .. }
+        | VirExpr::RcInc { .. }
+        | VirExpr::RcDec { .. }
+        | VirExpr::RcMove { .. }
+        | VirExpr::Yield { .. } => None,
     }
 }
 
@@ -443,17 +525,18 @@ mod tests {
     #[test]
     fn build_rc_operations() {
         let mut b = VirBuilder::new();
+        let table = VirTypeTable::new();
         let ty = dummy_type_id();
 
         let val = b.build_local_load(dummy_symbol(), ty);
-        let inc = b.build_rc_inc(val);
+        let inc = b.build_rc_inc(val, &table);
         match inc.as_ref() {
             VirExpr::RcInc { .. } => {}
             other => panic!("expected RcInc, got {other:?}"),
         }
 
         let val2 = b.build_local_load(dummy_symbol(), ty);
-        let dec = b.build_rc_dec(val2);
+        let dec = b.build_rc_dec(val2, &table);
         match dec.as_ref() {
             VirExpr::RcDec { .. } => {}
             other => panic!("expected RcDec, got {other:?}"),
@@ -464,6 +547,40 @@ mod tests {
         match mv.as_ref() {
             VirExpr::RcMove { .. } => {}
             other => panic!("expected RcMove, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_rc_inc_classifies_string_as_simple() {
+        let mut b = VirBuilder::new();
+        let table = VirTypeTable::new();
+
+        // A string local should produce SimpleDecRef cleanup.
+        let val = b.build_local_load(dummy_symbol(), VirTypeId::STRING);
+        let inc = b.build_rc_inc(val, &table);
+        match inc.as_ref() {
+            VirExpr::RcInc {
+                cleanup: VirRcCleanup::SimpleDecRef,
+                ..
+            } => {}
+            other => panic!("expected RcInc SimpleDecRef, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_rc_dec_classifies_i64_as_none() {
+        let mut b = VirBuilder::new();
+        let table = VirTypeTable::new();
+
+        // An i64 local should produce None cleanup (primitives aren't RC).
+        let val = b.build_local_load(dummy_symbol(), VirTypeId::I64);
+        let dec = b.build_rc_dec(val, &table);
+        match dec.as_ref() {
+            VirExpr::RcDec {
+                cleanup: VirRcCleanup::None,
+                ..
+            } => {}
+            other => panic!("expected RcDec None, got {other:?}"),
         }
     }
 
