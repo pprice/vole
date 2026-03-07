@@ -411,10 +411,17 @@ impl Cg<'_, '_, '_> {
                 line,
                 lhs_is_optional,
                 rhs_is_optional,
+                lhs_is_unsigned,
                 ..
-            } => {
-                self.compile_vir_binary_op(*op, lhs, rhs, *line, *lhs_is_optional, *rhs_is_optional)
-            }
+            } => self.compile_vir_binary_op(
+                *op,
+                lhs,
+                rhs,
+                *line,
+                *lhs_is_optional,
+                *rhs_is_optional,
+                *lhs_is_unsigned,
+            ),
             VirExpr::UnaryOp { op, operand, .. } => self.compile_vir_unary_op(*op, operand),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
             VirExpr::InterpolatedString { parts } => self.compile_vir_interpolated_string(parts),
@@ -736,13 +743,22 @@ impl Cg<'_, '_, '_> {
         line: u32,
         lhs_is_optional: bool,
         rhs_is_optional: bool,
+        lhs_is_unsigned: bool,
     ) -> CodegenResult<CompiledValue> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
         if op == VirBinOp::Add && left.type_id == VirTypeId::STRING {
             return self.string_concat(left, right);
         }
-        self.binary_op(left, right, op, line, lhs_is_optional, rhs_is_optional)
+        self.binary_op(
+            left,
+            right,
+            op,
+            line,
+            lhs_is_optional,
+            rhs_is_optional,
+            lhs_is_unsigned,
+        )
     }
 
     /// Compile a VIR unary operation.

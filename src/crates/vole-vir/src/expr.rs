@@ -154,6 +154,13 @@ pub enum VirExpr {
         ///
         /// Symmetric with `lhs_is_optional`.
         rhs_is_optional: bool,
+        /// Pre-computed: the left operand's type is an unsigned integer.
+        ///
+        /// Used by Div, Mod, Shr, and comparison operations to select
+        /// unsigned Cranelift instructions (`udiv`, `ushr`, unsigned `icmp`)
+        /// without querying `VirTypeId::is_unsigned_int()` at codegen time.
+        /// Set during VIR lowering; re-derived after monomorphization.
+        lhs_is_unsigned: bool,
     },
 
     /// Unary operation (negation, logical/bitwise not).

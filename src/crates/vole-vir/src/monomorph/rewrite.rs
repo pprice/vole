@@ -250,6 +250,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             // Rederive will recompute from concrete types after monomorphization.
             lhs_is_optional: false,
             rhs_is_optional: false,
+            lhs_is_unsigned: false,
         },
         VirExpr::UnaryOp {
             op,
@@ -1402,6 +1403,7 @@ mod tests {
                         line: 1,
                         lhs_is_optional: false,
                         rhs_is_optional: false,
+                        lhs_is_unsigned: false,
                     }),
                     mutable: false,
                     ty: type_id(10),

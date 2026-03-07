@@ -195,6 +195,10 @@ impl Cg<'_, '_, '_> {
     /// short-circuit the type-table lookup for optional nil-comparison
     /// dispatch.  When the hint is `false`, the fallback query is still
     /// performed so that generic/unresolved paths remain correct.
+    ///
+    /// `lhs_is_unsigned` is a VIR-lowering hint that short-circuits the
+    /// `VirTypeId::is_unsigned_int()` check for selecting unsigned
+    /// Cranelift instructions (udiv, ushr, unsigned icmp).
     pub fn binary_op(
         &mut self,
         mut left: CompiledValue,
@@ -203,6 +207,7 @@ impl Cg<'_, '_, '_> {
         line: u32,
         lhs_is_optional: bool,
         rhs_is_optional: bool,
+        lhs_is_unsigned: bool,
     ) -> CodegenResult<CompiledValue> {
         // Handle optional/nil comparisons specially
         // When comparing optional == nil or optional != nil, we need to check the tag
@@ -244,6 +249,7 @@ impl Cg<'_, '_, '_> {
 
         let left_vir_ty = left.type_id;
         let left_is_string = left_vir_ty == VirTypeId::STRING;
+        let is_unsigned = lhs_is_unsigned || left_vir_ty.is_unsigned_int();
 
         // Determine result type using type promotion rules.
         // For numeric types, delegate to the canonical VIR numeric_model function.
@@ -304,7 +310,7 @@ impl Cg<'_, '_, '_> {
                 } else if result_ty == types::I128 {
                     // Cranelift x64 doesn't support sdiv.i128; use runtime helper
                     self.call_runtime(RuntimeKey::I128Sdiv, &[left_val, right_val])?
-                } else if left_vir_ty.is_unsigned_int() {
+                } else if is_unsigned {
                     // Unsigned division: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
                     self.builder.ins().udiv(left_val, right_val)
@@ -326,7 +332,7 @@ impl Cg<'_, '_, '_> {
                 } else if result_ty == types::I128 {
                     // Cranelift x64 doesn't support srem.i128; use runtime helper
                     self.call_runtime(RuntimeKey::I128Srem, &[left_val, right_val])?
-                } else if left_vir_ty.is_unsigned_int() {
+                } else if is_unsigned {
                     // Unsigned remainder: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
                     self.builder.ins().urem(left_val, right_val)
@@ -383,7 +389,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.emit_cmp(
                         result_ty,
-                        left_vir_ty,
+                        is_unsigned,
                         left_val,
                         right_val,
                         CmpCodes {
@@ -400,7 +406,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.emit_cmp(
                         result_ty,
-                        left_vir_ty,
+                        is_unsigned,
                         left_val,
                         right_val,
                         CmpCodes {
@@ -417,7 +423,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.emit_cmp(
                         result_ty,
-                        left_vir_ty,
+                        is_unsigned,
                         left_val,
                         right_val,
                         CmpCodes {
@@ -434,7 +440,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.emit_cmp(
                         result_ty,
-                        left_vir_ty,
+                        is_unsigned,
                         left_val,
                         right_val,
                         CmpCodes {
@@ -451,7 +457,7 @@ impl Cg<'_, '_, '_> {
             VirBinOp::BitXor => self.builder.ins().bxor(left_val, right_val),
             VirBinOp::Shl => self.builder.ins().ishl(left_val, right_val),
             VirBinOp::Shr => {
-                if left_vir_ty.is_unsigned_int() {
+                if is_unsigned {
                     self.builder.ins().ushr(left_val, right_val)
                 } else {
                     self.builder.ins().sshr(left_val, right_val)
@@ -876,7 +882,7 @@ impl Cg<'_, '_, '_> {
     fn emit_cmp(
         &mut self,
         result_ty: Type,
-        left_vir_ty: VirTypeId,
+        is_unsigned: bool,
         left_val: Value,
         right_val: Value,
         codes: CmpCodes,
@@ -887,13 +893,13 @@ impl Cg<'_, '_, '_> {
             try_constant_value(self.builder.func, left_val),
             try_constant_value(self.builder.func, right_val),
         ) {
-            let cc = if left_vir_ty.is_unsigned_int() {
+            let cc = if is_unsigned {
                 codes.unsigned
             } else {
                 codes.signed
             };
             self.iconst_cached(types::I8, i64::from(eval_int_cc(cc, a, b)))
-        } else if left_vir_ty.is_unsigned_int() {
+        } else if is_unsigned {
             self.builder.ins().icmp(codes.unsigned, left_val, right_val)
         } else {
             self.builder.ins().icmp(codes.signed, left_val, right_val)

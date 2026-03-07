@@ -122,6 +122,7 @@ impl VirBuilder {
             line,
             lhs_is_optional: false,
             rhs_is_optional: false,
+            lhs_is_unsigned: false,
         })
     }
 

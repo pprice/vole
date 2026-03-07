@@ -234,6 +234,17 @@ fn lower_binary(
             (false, false)
         };
 
+    // Pre-compute signedness hint so codegen can select unsigned
+    // Cranelift instructions (udiv, ushr, unsigned icmp) without
+    // querying VirTypeId::is_unsigned_int() at compile time.
+    let lhs_is_unsigned = if !ctx.generic {
+        ctx.node_map
+            .get_type(bin_expr.left.id)
+            .is_some_and(|t| t.is_unsigned_int())
+    } else {
+        false
+    };
+
     Box::new(VirExpr::BinaryOp {
         op: vir_op,
         lhs,
@@ -243,6 +254,7 @@ fn lower_binary(
         line: expr.span.line,
         lhs_is_optional,
         rhs_is_optional,
+        lhs_is_unsigned,
     })
 }
 
@@ -495,6 +507,9 @@ fn lower_compound_assign(
 
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
+    // For compound assignment, the target (left operand) has the same type
+    // as the result, so we can derive signedness from the result type.
+    let lhs_is_unsigned = !ctx.generic && ty.is_unsigned_int();
 
     match &compound.target {
         vole_frontend::AssignTarget::Variable(sym) => {
@@ -512,6 +527,7 @@ fn lower_compound_assign(
                 line: expr.span.line,
                 lhs_is_optional: false,
                 rhs_is_optional: false,
+                lhs_is_unsigned,
             });
             Box::new(VirExpr::LocalStore {
                 name: *sym,
@@ -539,6 +555,7 @@ fn lower_compound_assign(
                 line: expr.span.line,
                 lhs_is_optional: false,
                 rhs_is_optional: false,
+                lhs_is_unsigned,
             });
             Box::new(VirExpr::FieldStore {
                 object: obj_for_store,
@@ -569,6 +586,7 @@ fn lower_compound_assign(
                 line: expr.span.line,
                 lhs_is_optional: false,
                 rhs_is_optional: false,
+                lhs_is_unsigned,
             });
             Box::new(VirExpr::IndexStore {
                 object: obj_for_store,

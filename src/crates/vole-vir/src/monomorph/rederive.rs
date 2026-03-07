@@ -121,6 +121,7 @@ fn rederive_expr(
             op,
             lhs_is_optional,
             rhs_is_optional,
+            lhs_is_unsigned,
             ..
         } => {
             rederive_ref(lhs, table, ret_ty, entities);
@@ -133,6 +134,10 @@ fn rederive_expr(
                 if let Some(rhs_vir_ty) = extract_vir_ty(rhs) {
                     *rhs_is_optional = table.is_optional(rhs_vir_ty);
                 }
+            }
+            // Re-derive signedness hint from now-concrete left operand type.
+            if let Some(lhs_vir_ty) = extract_vir_ty(lhs) {
+                *lhs_is_unsigned = lhs_vir_ty.is_unsigned_int();
             }
         }
         VirExpr::UnaryOp { operand, .. } => {
