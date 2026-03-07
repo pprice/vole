@@ -263,12 +263,21 @@ fn rederive_expr(
         }
 
         // Lambda — use the lambda's own return type, not the enclosing function's.
-        VirExpr::Lambda { body, vir_ty, .. } => {
+        // Also rederive RC kind for each capture.
+        VirExpr::Lambda {
+            body,
+            captures,
+            vir_ty,
+            ..
+        } => {
             let lambda_ret_ty = table
                 .unwrap_function(*vir_ty)
                 .map(|(_, ret)| ret)
                 .unwrap_or(ret_ty);
             rederive_body(body, table, lambda_ret_ty, entities);
+            for cap in captures.iter_mut() {
+                cap.rc_kind = classify_capture_rc_kind(cap.vir_ty, table);
+            }
         }
 
         // Optional / null
@@ -1037,6 +1046,69 @@ pub fn classify_rc_cleanup(vir_ty: VirTypeId, table: &VirTypeTable) -> crate::ex
 
         // Unresolved generic parameter — keep unresolved.
         VirType::Param { .. } | VirType::Unknown => VirRcCleanup::Unresolved,
+    }
+}
+
+/// Classify a VIR type into a capture RC kind for lambda captures.
+///
+/// Capture-eligible types are the subset of RC types that closures manage
+/// via `rc_inc` on capture and `rc_dec` on drop: String, Array, Function,
+/// Class.  Interfaces, handles, and iterators are RC but NOT capture-
+/// eligible (interfaces are fat pointers, handles/iterators have different
+/// lifecycle management).
+///
+/// This mirrors codegen's `vir_is_capture_rc_type()` but operates on
+/// `VirType` directly so VIR can pre-classify during rederive.
+pub fn classify_capture_rc_kind(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> crate::expr::VirCaptureRcKind {
+    use crate::expr::VirCaptureRcKind;
+    use crate::types::VirType;
+
+    // String is a well-known capture-eligible RC type.
+    if vir_ty == VirTypeId::STRING {
+        return VirCaptureRcKind::Rc;
+    }
+
+    // UNKNOWN types are not capture-eligible.
+    if vir_ty == VirTypeId::UNKNOWN {
+        return VirCaptureRcKind::Unresolved;
+    }
+
+    // Guard against out-of-range type IDs.
+    if (vir_ty.raw() as usize) >= table.len() {
+        return VirCaptureRcKind::Unresolved;
+    }
+
+    match table.get(vir_ty) {
+        // Capture-eligible RC types: string, array, function, class.
+        VirType::Array { .. } | VirType::Function { .. } | VirType::Class { .. } => {
+            VirCaptureRcKind::Rc
+        }
+
+        // NOT capture-eligible despite being RC: interface (fat pointer),
+        // handle, iterator.
+        VirType::Interface { .. }
+        | VirType::RuntimeIterator { .. }
+        | VirType::Primitive(VirPrimitiveKind::Handle) => VirCaptureRcKind::None,
+
+        // Non-RC types.
+        VirType::Primitive(_)
+        | VirType::Struct { .. }
+        | VirType::Void
+        | VirType::Never
+        | VirType::Range
+        | VirType::MetaType
+        | VirType::Error { .. }
+        | VirType::FixedArray { .. }
+        | VirType::Tuple { .. }
+        | VirType::Union { .. }
+        | VirType::Optional { .. }
+        | VirType::Fallible { .. } => VirCaptureRcKind::None,
+
+        // Unresolved generic parameter.
+        VirType::Param { .. } | VirType::Unknown => VirCaptureRcKind::Unresolved,
     }
 }
 

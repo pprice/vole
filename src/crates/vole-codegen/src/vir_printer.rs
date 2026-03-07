@@ -707,8 +707,19 @@ impl<'a> VirPrinter<'a> {
             let cap_str = captures
                 .iter()
                 .map(|c| {
+                    use vole_vir::expr::VirCaptureRcKind;
                     let prefix = if c.by_ref { "&" } else { "" };
-                    format!("{}{}: {}", prefix, self.sym(c.name), self.ty(c.ty))
+                    let rc_suffix = match c.rc_kind {
+                        VirCaptureRcKind::Rc => " [rc]",
+                        _ => "",
+                    };
+                    format!(
+                        "{}{}: {}{}",
+                        prefix,
+                        self.sym(c.name),
+                        self.ty(c.ty),
+                        rc_suffix
+                    )
                 })
                 .collect::<Vec<_>>()
                 .join(", ");

@@ -11,7 +11,7 @@ use vole_identity::{MonomorphKey, TypeId, VirTypeId};
 
 use vole_vir::calls::{CallTarget, LambdaDefaultsInfo};
 use vole_vir::expr::{
-    AsCastKind, IsCheckResult, VirBinOp, VirCapture, VirClassMethodMonomorphKey,
+    AsCastKind, IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind, VirClassMethodMonomorphKey,
     VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirExternalMethodInfo,
     VirFunctionMonomorphKey, VirMatchArm, VirMetaKind, VirMethodDispatchKind,
     VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern, VirRecordFieldBinding,
@@ -829,6 +829,7 @@ fn lower_lambda(
                     ty: VirTypeId::UNKNOWN,
                     vir_ty: VirTypeId::UNKNOWN,
                     by_ref: false,
+                    rc_kind: VirCaptureRcKind::Unresolved,
                 })
                 .collect()
         })
@@ -2151,6 +2152,7 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                         ty: VirTypeId::UNKNOWN,
                         vir_ty: VirTypeId::UNKNOWN,
                         by_ref: false,
+                        rc_kind: VirCaptureRcKind::Unresolved,
                     })
                     .collect()
             })

@@ -1091,6 +1091,28 @@ pub enum VirMetaKind {
     TypeParam { name_id: NameId, value: VirRef },
 }
 
+/// RC classification for a captured variable in a closure.
+///
+/// Models the three capture-kind flags used by the closure runtime:
+///   - `None` (0): value type, no RC management
+///   - `Rc` (1): simple RC type (string, array, function, class) —
+///     `rc_inc` / `rc_dec` on the value directly
+///   - `Unresolved`: type is unknown or generic — codegen falls back to
+///     computing from the resolved type at compile time
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VirCaptureRcKind {
+    /// No RC management needed (primitive, struct, void, interface, handle,
+    /// iterator, etc.).
+    None,
+    /// Simple RC type eligible for capture management (string, array,
+    /// function, class).  The closure runtime calls `rc_inc` on capture
+    /// and `rc_dec` on drop for this value.
+    Rc,
+    /// Type is unknown or contains generic parameters — codegen falls
+    /// back to computing RC state from the resolved type.
+    Unresolved,
+}
+
 /// A captured variable in a lambda / closure.
 #[derive(Debug, Clone)]
 pub struct VirCapture {
@@ -1103,6 +1125,13 @@ pub struct VirCapture {
     /// Whether the variable is captured by reference (true) or by value
     /// (false).
     pub by_ref: bool,
+    /// Pre-classified RC kind for this capture.
+    ///
+    /// Set to `Unresolved` during initial lowering (capture types are
+    /// unknown) and reclassified by the rederive pass after
+    /// monomorphization resolves concrete types.  Codegen reads this
+    /// directly instead of re-computing from the capture type.
+    pub rc_kind: VirCaptureRcKind,
 }
 
 /// A single part of an interpolated string.

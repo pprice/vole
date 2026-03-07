@@ -9,7 +9,7 @@ use cranelift_module::Module;
 
 use vole_identity::{Symbol, TypeId, VirTypeId};
 use vole_vir::VirBody;
-use vole_vir::expr::VirCapture;
+use vole_vir::expr::{VirCapture, VirCaptureRcKind};
 
 use super::RuntimeKey;
 use super::compiler::common::FunctionCompileConfig;
@@ -292,7 +292,7 @@ impl Cg<'_, '_, '_> {
 
             // Self-captures are weak references (no rc_inc, no rc_dec on drop)
             // to break the reference cycle: closure -> self-capture -> closure.
-            let is_rc = !is_self_capture && self.rc_state_v(vole_vir_ty).is_capture();
+            let is_rc = !is_self_capture && self.capture_is_rc(capture, vole_vir_ty);
 
             // If the capture is RC, increment its refcount (the closure now shares ownership)
             if is_rc {
@@ -329,6 +329,19 @@ impl Cg<'_, '_, '_> {
         }
 
         Ok(())
+    }
+
+    /// Check whether a capture needs RC management.
+    ///
+    /// Uses the pre-classified `rc_kind` from VIR when available;
+    /// falls back to computing from the resolved type for `Unresolved`
+    /// captures (e.g. generic templates before monomorphization).
+    fn capture_is_rc(&self, capture: &VirCapture, resolved_vir_ty: VirTypeId) -> bool {
+        match capture.rc_kind {
+            VirCaptureRcKind::None => false,
+            VirCaptureRcKind::Rc => true,
+            VirCaptureRcKind::Unresolved => self.rc_state_v(resolved_vir_ty).is_capture(),
+        }
     }
 
     /// Resolve a captured variable's value and type.

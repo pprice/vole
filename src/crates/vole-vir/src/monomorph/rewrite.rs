@@ -750,6 +750,9 @@ fn rewrite_capture(cap: &VirCapture, ctx: &RewriteCtx) -> VirCapture {
         ty: ctx.remap(cap.ty),
         vir_ty: ctx.remap(cap.vir_ty),
         by_ref: cap.by_ref,
+        // Preserve the existing rc_kind; the rederive pass will
+        // reclassify it once concrete types are available.
+        rc_kind: cap.rc_kind,
     }
 }
 
@@ -1230,7 +1233,7 @@ use vole_identity::Symbol;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::expr::VirClassMethodMonomorphKey;
+    use crate::expr::{VirCaptureRcKind, VirClassMethodMonomorphKey};
     use crate::func::VirBody;
     use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
     use crate::type_table::VirTypeTable;
@@ -1963,6 +1966,7 @@ mod tests {
                         ty: type_id(10),
                         vir_ty: param_id,
                         by_ref: false,
+                        rc_kind: VirCaptureRcKind::Unresolved,
                     }],
                     ty: type_id(20),
                     vir_ty: param_id,

@@ -40,7 +40,7 @@ pub use entity_metadata::{
     VirTypeDefKind, compute_field_type_tag,
 };
 pub use expr::{
-    AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture,
+    AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind,
     VirClassMethodMonomorphKey, VirErrorFieldBinding, VirErrorPatternKind, VirExpr,
     VirExternalMethodInfo, VirFunctionMonomorphKey, VirMatchArm, VirMetaKind,
     VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern,
@@ -56,8 +56,8 @@ pub use intrinsics::IntrinsicKey;
 pub use monomorph::{
     InstanceIndex, MonomorphInstance, MonomorphResult, RewriteCtx, TypeSubstitution,
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
-    classify_rc_cleanup, monomorphize, monomorphize_with_seeds, rederive_decisions,
-    resolve_generic_calls, rewrite_function, substitute_types,
+    classify_capture_rc_kind, classify_rc_cleanup, monomorphize, monomorphize_with_seeds,
+    rederive_decisions, resolve_generic_calls, rewrite_function, substitute_types,
 };
 pub use numeric_model::{
     NumericCoercion, integer_result_type, integer_result_type_v, numeric_coercion,
