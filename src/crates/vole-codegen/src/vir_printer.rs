@@ -930,9 +930,7 @@ impl<'a> VirPrinter<'a> {
                 }
                 w!(out, "]");
             }
-            VirDestructurePattern::Record {
-                fields, is_struct, ..
-            } => {
+            VirDestructurePattern::Record { fields, .. } => {
                 w!(out, "{{ ");
                 for (i, f) in fields.iter().enumerate() {
                     if i > 0 {
@@ -951,8 +949,14 @@ impl<'a> VirPrinter<'a> {
                     }
                 }
                 w!(out, " }}");
-                if *is_struct {
-                    w!(out, " [struct]");
+                // Show storage annotation from first field (all fields share the same source type).
+                if let Some(first) = fields.first() {
+                    match first.storage {
+                        FieldStorage::Direct { .. } => w!(out, " [struct]"),
+                        FieldStorage::Heap { .. } => w!(out, " [heap]"),
+                        FieldStorage::ByName => w!(out, " [byname]"),
+                        FieldStorage::Module { .. } => {}
+                    }
                 }
             }
             VirDestructurePattern::Module { bindings, .. } => {

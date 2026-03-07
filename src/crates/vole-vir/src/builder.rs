@@ -244,6 +244,7 @@ impl VirBuilder {
             vir_ty: ty,
             storage: crate::stmt::LetStorageHint::Scalar,
             declared_type: None,
+            needs_struct_copy: false,
         }
     }
 

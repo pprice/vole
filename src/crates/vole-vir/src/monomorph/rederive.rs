@@ -15,7 +15,7 @@ use crate::entity_metadata::VirEntityMetadata;
 use crate::expr::{FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use crate::func::{VirBody, VirFunction};
 use crate::refs::VirRef;
-use crate::stmt::{LetStorageHint, ReturnConvention, VirIterKind, VirStmt};
+use crate::stmt::{LetStorageHint, ReturnConvention, VirDestructurePattern, VirIterKind, VirStmt};
 use crate::type_table::VirTypeTable;
 use crate::types::{VirPrimitiveKind, VirType};
 
@@ -305,12 +305,22 @@ fn rederive_stmt(
             value,
             vir_ty,
             storage,
+            needs_struct_copy,
             ..
         } => {
             *storage = rederive_let_storage(*vir_ty, storage, table);
+            // Re-derive struct copy flag: after monomorphization a type param
+            // may have been substituted with a concrete struct type.
+            if !*needs_struct_copy
+                && let Some(init_vir_ty) = extract_vir_ty(value) {
+                    *needs_struct_copy = table.is_struct(init_vir_ty);
+                }
             rederive_ref(value, table, ret_ty, entities);
         }
-        VirStmt::LetTuple { value, .. } => rederive_ref(value, table, ret_ty, entities),
+        VirStmt::LetTuple { pattern, value, .. } => {
+            rederive_destructure_pattern(pattern, table, entities);
+            rederive_ref(value, table, ret_ty, entities);
+        }
         VirStmt::Assign { target, value } => {
             rederive_assign_target(target, table, ret_ty, entities);
             rederive_ref(value, table, ret_ty, entities);
@@ -912,6 +922,41 @@ fn compute_class_physical_slot(
         physical_slot += if table.is_wide(fd.vir_ty) { 2 } else { 1 };
     }
     None
+}
+
+/// Re-derive `FieldStorage` on destructure pattern fields after monomorphization.
+///
+/// Walks the pattern recursively.  For `Record` patterns, resolves any
+/// `ByName` storage on each field to a concrete `Direct`/`Heap` variant
+/// using the now-concrete source type.
+fn rederive_destructure_pattern(
+    pattern: &mut VirDestructurePattern,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) {
+    match pattern {
+        VirDestructurePattern::Record {
+            fields, source_ty, ..
+        } => {
+            let source = *source_ty;
+            for field in fields.iter_mut() {
+                if matches!(field.storage, FieldStorage::ByName)
+                    && let Some(resolved) =
+                        resolve_field_storage(source, field.field_name, table, entities)
+                    {
+                        field.storage = resolved;
+                    }
+            }
+        }
+        VirDestructurePattern::Tuple { elements, .. } => {
+            for elem in elements.iter_mut() {
+                rederive_destructure_pattern(&mut elem.pattern, table, entities);
+            }
+        }
+        VirDestructurePattern::Bind { .. }
+        | VirDestructurePattern::Wildcard
+        | VirDestructurePattern::Module { .. } => {}
+    }
 }
 
 /// Re-derive the `VirRcCleanup` for an RC node after monomorphization.

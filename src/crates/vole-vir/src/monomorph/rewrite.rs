@@ -583,6 +583,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             vir_ty,
             storage,
             declared_type,
+            needs_struct_copy,
         } => VirStmt::Let {
             name: *name,
             value: rewrite_ref(value, ctx),
@@ -591,6 +592,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             vir_ty: ctx.remap(*vir_ty),
             storage: rewrite_let_storage(storage, ctx),
             declared_type: declared_type.map(|dt| ctx.remap(dt)),
+            needs_struct_copy: *needs_struct_copy,
         },
         VirStmt::LetTuple {
             pattern,
@@ -1134,7 +1136,6 @@ fn rewrite_destructure_pattern(
             fields,
             source_ty,
             vir_source_ty,
-            is_struct,
         } => VirDestructurePattern::Record {
             fields: fields
                 .iter()
@@ -1142,7 +1143,6 @@ fn rewrite_destructure_pattern(
                 .collect(),
             source_ty: ctx.remap(*source_ty),
             vir_source_ty: ctx.remap(*vir_source_ty),
-            is_struct: *is_struct,
         },
         VirDestructurePattern::Module {
             bindings,
@@ -1194,6 +1194,7 @@ fn rewrite_destructure_field(field: &VirDestructureField, ctx: &RewriteCtx) -> V
         slot: field.slot,
         ty: ctx.remap(field.ty),
         vir_ty: ctx.remap(field.vir_ty),
+        storage: field.storage,
     }
 }
 
@@ -1344,6 +1345,7 @@ mod tests {
                     vir_ty: param_id,
                     storage: crate::stmt::LetStorageHint::Scalar,
                     declared_type: None,
+                    needs_struct_copy: false,
                 }],
                 trailing: Some(Box::new(VirExpr::LocalLoad {
                     name: sym(3),

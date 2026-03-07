@@ -124,6 +124,9 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     let sema_ty = ctx.compat_ty(ty);
     let storage = classify_let_storage(ty, expr_ty, ctx);
     let declared_type = declared_ty.map(|dt| ctx.compat_ty(dt));
+    // Struct values need copying for value semantics.  In generic mode the
+    // init type may be a type param; codegen falls back to a type query then.
+    let needs_struct_copy = !ctx.generic && ctx.type_arena.is_struct(expr_ty);
     VirStmt::Let {
         name: let_stmt.name,
         value,
@@ -132,6 +135,7 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
         vir_ty,
         storage,
         declared_type,
+        needs_struct_copy,
     }
 }
 
@@ -552,7 +556,6 @@ fn lower_destructure_record(
         .type_arena
         .unwrap_nominal(ty)
         .map(|(def_id, _, _)| def_id);
-    let is_struct = ctx.type_arena.is_struct(ty);
 
     let vir_fields = fields
         .iter()
@@ -561,12 +564,14 @@ fn lower_destructure_record(
                 .and_then(|def_id| find_destructure_field(def_id, f.field_name, ctx))
                 .unwrap_or((0, TypeId::UNKNOWN));
             let vir_ty = ctx.translate(field_ty);
+            let storage = ctx.resolve_field_storage(ty, f.field_name);
             VirDestructureField {
                 field_name: f.field_name,
                 binding: f.binding,
                 slot,
                 ty: vir_ty,
                 vir_ty,
+                storage,
             }
         })
         .collect();
@@ -576,7 +581,6 @@ fn lower_destructure_record(
         fields: vir_fields,
         source_ty: vir_source_ty,
         vir_source_ty,
-        is_struct,
     }
 }
 

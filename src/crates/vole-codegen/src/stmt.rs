@@ -8,6 +8,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use vole_identity::{NameId, Symbol, TypeId, VirTypeId};
 use vole_vir::VirStmt;
+use vole_vir::expr::FieldStorage;
 use vole_vir::stmt::LetStorageHint;
 
 use super::context::Cg;
@@ -517,6 +518,7 @@ impl Cg<'_, '_, '_> {
                 vir_ty,
                 storage,
                 declared_type,
+                needs_struct_copy,
             } => {
                 let binding_vir = if *vir_ty != VirTypeId::UNKNOWN {
                     self.try_substitute_type_v(*vir_ty)
@@ -524,7 +526,14 @@ impl Cg<'_, '_, '_> {
                     self.try_substitute_type_v(*ty)
                 };
                 let declared_vir = declared_type.map(|dt| self.try_substitute_type_v(dt));
-                self.compile_vir_let(*name, value, binding_vir, *storage, declared_vir)
+                self.compile_vir_let(
+                    *name,
+                    value,
+                    binding_vir,
+                    *storage,
+                    declared_vir,
+                    *needs_struct_copy,
+                )
             }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
@@ -969,6 +978,7 @@ impl Cg<'_, '_, '_> {
         binding_vir: VirTypeId,
         storage: LetStorageHint,
         declared_vir_type: Option<VirTypeId>,
+        needs_struct_copy: bool,
     ) -> CodegenResult<bool> {
         // Pre-register recursive lambdas so they can capture themselves.
         let preregistered_var = self.preregister_recursive_vir_lambda(name, value_expr);
@@ -988,7 +998,10 @@ impl Cg<'_, '_, '_> {
 
         // Struct copy: when binding a struct value, copy to a new stack slot
         // to maintain value semantics (structs are stack-allocated value types).
-        let mut init = if self.vir_query_is_struct_v(init.type_id) {
+        // Uses the pre-computed annotation; falls back to type query for
+        // generic templates where the annotation couldn't be resolved.
+        let do_copy = needs_struct_copy || self.vir_query_is_struct_v(init.type_id);
+        let mut init = if do_copy {
             self.copy_struct_value(init)?
         } else {
             init
@@ -1094,16 +1107,12 @@ impl Cg<'_, '_, '_> {
                 self.compile_vir_destructure_tuple(elements, *kind, value)?;
             }
             VirDestructurePattern::Record {
-                fields,
-                source_ty,
-                is_struct,
-                ..
+                fields, source_ty, ..
             } => {
                 self.compile_vir_destructure_record(
                     fields,
                     value,
                     self.try_substitute_type_v(*source_ty),
-                    *is_struct,
                 )?;
             }
             VirDestructurePattern::Module {
@@ -1189,22 +1198,37 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a record (struct/class) destructure pattern.
     ///
-    /// Uses pre-resolved field slots and types from lowering.
+    /// Dispatches on each field's pre-resolved `FieldStorage` annotation:
+    /// `Direct` loads from stack (struct), `Heap` from runtime instance,
+    /// `ByName` falls back to type-query dispatch.
     fn compile_vir_destructure_record(
         &mut self,
         fields: &[vole_vir::VirDestructureField],
         value: Value,
         source_ty: VirTypeId,
-        is_struct: bool,
     ) -> CodegenResult<()> {
         for field in fields {
             let field_vir_ty = self.try_substitute_type_v(field.ty);
-            let converted = if is_struct {
-                // Structs are stack-allocated: load field directly from pointer + offset
-                self.struct_field_load_v(value, field.slot as usize, field_vir_ty, source_ty)?
-            } else {
-                // Classes are heap-allocated: use runtime field access
-                self.get_instance_field_v(value, field.slot as usize, field_vir_ty)?
+            let converted = match field.storage {
+                FieldStorage::Direct { slot } => {
+                    self.struct_field_load_v(value, slot as usize, field_vir_ty, source_ty)?
+                }
+                FieldStorage::Heap { slot } => {
+                    self.get_instance_field_v(value, slot as usize, field_vir_ty)?
+                }
+                FieldStorage::ByName | FieldStorage::Module { .. } => {
+                    // Fallback: use type-query dispatch (generic templates, etc.)
+                    if self.vir_query_is_struct_v(source_ty) {
+                        self.struct_field_load_v(
+                            value,
+                            field.slot as usize,
+                            field_vir_ty,
+                            source_ty,
+                        )?
+                    } else {
+                        self.get_instance_field_v(value, field.slot as usize, field_vir_ty)?
+                    }
+                }
             };
 
             let var = self.builder.declare_var(converted.ty);

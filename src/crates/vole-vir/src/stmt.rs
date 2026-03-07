@@ -38,6 +38,11 @@ pub enum VirStmt {
         /// where the codegen-computed return type may differ from sema's
         /// expression type.
         declared_type: Option<VirTypeId>,
+        /// Whether the init expression's type is a struct, requiring a
+        /// value-copy to maintain value semantics.  Pre-computed during VIR
+        /// lowering so codegen reads a decision instead of querying
+        /// `vir_query_is_struct_v()`.
+        needs_struct_copy: bool,
     },
 
     /// Tuple destructuring (`let [a, b] = ...`, `let { x, y } = ...`).
@@ -353,12 +358,12 @@ pub enum VirDestructurePattern {
     /// Record (struct/class) destructuring: `let { x, y } = point`.
     ///
     /// Field slots and types are pre-resolved from `EntityRegistry`.
-    /// `is_struct` distinguishes flat struct layout from heap class layout.
+    /// Each field carries a `FieldStorage` annotation so codegen dispatches
+    /// struct (flat) vs class (heap) field extraction without type queries.
     Record {
         fields: Vec<VirDestructureField>,
         source_ty: VirTypeId,
         vir_source_ty: VirTypeId,
-        is_struct: bool,
     },
 
     /// Module destructuring: `let { A, B } = import "mod"`.
@@ -407,6 +412,12 @@ pub struct VirDestructureField {
     pub ty: VirTypeId,
     /// VIR type of the field.
     pub vir_ty: VirTypeId,
+    /// Pre-resolved storage dispatch for this field.
+    ///
+    /// `Direct { slot }` for struct fields (stack-allocated, loaded via offset),
+    /// `Heap { slot }` for class fields (runtime field access),
+    /// `ByName` for generic templates or unresolved types.
+    pub storage: FieldStorage,
 }
 
 /// A single binding in a module destructure pattern.
