@@ -394,9 +394,9 @@ impl LoweringCtx<'_> {
             && let Some(name_id) = self
                 .name_table
                 .name_id_raw(source_module_id, &[callee_name])
-            {
-                return Some(name_id);
-            }
+        {
+            return Some(name_id);
+        }
         // Stage 3: prelude.
         for &prelude_module_id in &self.cross_module.prelude_module_ids {
             if let Some(name_id) = self

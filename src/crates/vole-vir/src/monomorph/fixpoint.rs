@@ -16,7 +16,7 @@ use crate::program::VirProgram;
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
 
-use super::rederive::rederive_decisions;
+use super::rederive::{RederiveCallCtx, rederive_decisions_with_calls};
 use super::rewrite::{RewriteCtx, rewrite_function};
 use super::substitute::{TypeSubstitution, substitute_types};
 
@@ -140,7 +140,30 @@ fn monomorphize_one(instance: &MonomorphInstance, program: &mut VirProgram) -> O
     let ctx = RewriteCtx::new(type_map);
     let mut concrete = rewrite_function(&template, &ctx);
 
-    rederive_decisions(&mut concrete, &target_table, &program.entity_metadata);
+    // Build call reclassification context from the monomorphized function.
+    // The module_id comes from the function's entity metadata entry.
+    let module_id = program
+        .entity_metadata
+        .get_function_def(instance.function_id)
+        .map(|def| def.module)
+        .unwrap_or(program.module_id);
+    let call_ctx = RederiveCallCtx {
+        interner: &program.interner,
+        name_table: &program.name_table,
+        module_id,
+        implement_dispatch: &program.implement_dispatch,
+        params: concrete
+            .params
+            .iter()
+            .map(|&(sym, _, vir_ty)| (sym, vir_ty))
+            .collect(),
+    };
+    rederive_decisions_with_calls(
+        &mut concrete,
+        &target_table,
+        &program.entity_metadata,
+        &call_ctx,
+    );
 
     // Clear type_params on the concrete function (it's no longer generic).
     concrete.type_params = Vec::new();

@@ -9,15 +9,45 @@
 // now-concrete types.
 
 use rustc_hash::FxHashSet;
-use vole_identity::{StringConversion, Symbol, UnionStorageKind, VirTypeId};
+use vole_identity::{
+    Interner, ModuleId, NameTable, StringConversion, Symbol, UnionStorageKind, VirTypeId,
+};
 
+use crate::calls::CallTarget;
 use crate::entity_metadata::VirEntityMetadata;
 use crate::expr::{FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use crate::func::{ReturnAbi, VirBody, VirFunction};
+use crate::implement_dispatch::VirImplementDispatch;
+use crate::intrinsics::IntrinsicKey;
 use crate::refs::VirRef;
 use crate::stmt::{LetStorageHint, ReturnConvention, VirDestructurePattern, VirIterKind, VirStmt};
 use crate::type_table::VirTypeTable;
 use crate::types::{VirPrimitiveKind, VirType};
+
+// ---------------------------------------------------------------------------
+// Call target reclassification context
+// ---------------------------------------------------------------------------
+
+/// Context for re-classifying `CallTarget::Unresolved` during rederive.
+///
+/// After monomorphization, some calls that were `Unresolved` in generic
+/// templates can be classified with concrete type information.  This context
+/// provides the name resolution and entity lookup needed for reclassification.
+///
+/// Constructed by `monomorphize_one` which has access to `VirProgram`.
+pub struct RederiveCallCtx<'a> {
+    /// String interner for resolving `Symbol` to `&str`.
+    pub interner: &'a Interner,
+    /// Name table for resolving `(ModuleId, Symbol)` to `NameId`.
+    pub name_table: &'a NameTable,
+    /// Module ID of the generic template's declaring module.
+    pub module_id: ModuleId,
+    /// Implement-dispatch metadata for external function lookup.
+    pub implement_dispatch: &'a VirImplementDispatch,
+    /// Function parameter names and VIR types from the monomorphized function.
+    /// Used to detect closure variable calls (callee matches a function-typed param).
+    pub params: Vec<(Symbol, VirTypeId)>,
+}
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -44,11 +74,31 @@ pub fn rederive_decisions(
     table: &VirTypeTable,
     entities: &VirEntityMetadata,
 ) {
+    rederive_decisions_inner(func, table, entities, None);
+}
+
+/// Walk a monomorphized VirFunction and re-derive decisions, including
+/// call target reclassification when a `RederiveCallCtx` is provided.
+pub fn rederive_decisions_with_calls(
+    func: &mut VirFunction,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+    call_ctx: &RederiveCallCtx<'_>,
+) {
+    rederive_decisions_inner(func, table, entities, Some(call_ctx));
+}
+
+fn rederive_decisions_inner(
+    func: &mut VirFunction,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+    call_ctx: Option<&RederiveCallCtx<'_>>,
+) {
     // Recompute return ABI from now-concrete return type.
     func.return_abi = ReturnAbi::classify(func.vir_return_type, table);
 
     let ret_ty = func.vir_return_type;
-    rederive_body(&mut func.body, table, ret_ty, entities);
+    rederive_body(&mut func.body, table, ret_ty, entities, call_ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -60,12 +110,13 @@ fn rederive_body(
     table: &VirTypeTable,
     ret_ty: VirTypeId,
     entities: &VirEntityMetadata,
+    call_ctx: Option<&RederiveCallCtx<'_>>,
 ) {
     for stmt in &mut body.stmts {
-        rederive_stmt(stmt, table, ret_ty, entities);
+        rederive_stmt(stmt, table, ret_ty, entities, call_ctx);
     }
     if let Some(ref mut trailing) = body.trailing {
-        rederive_ref(trailing, table, ret_ty, entities);
+        rederive_ref(trailing, table, ret_ty, entities, call_ctx);
     }
 }
 
@@ -74,8 +125,9 @@ fn rederive_ref(
     table: &VirTypeTable,
     ret_ty: VirTypeId,
     entities: &VirEntityMetadata,
+    call_ctx: Option<&RederiveCallCtx<'_>>,
 ) {
-    rederive_expr(r.as_mut(), table, ret_ty, entities);
+    rederive_expr(r.as_mut(), table, ret_ty, entities, call_ctx);
 }
 
 fn rederive_expr(
@@ -83,6 +135,7 @@ fn rederive_expr(
     table: &VirTypeTable,
     ret_ty: VirTypeId,
     entities: &VirEntityMetadata,
+    call_ctx: Option<&RederiveCallCtx<'_>>,
 ) {
     match expr {
         // Literals & construction — recurse into sub-expressions only
@@ -97,20 +150,20 @@ fn rederive_expr(
         | VirExpr::TypeLiteral => {}
 
         VirExpr::Range { start, end, .. } => {
-            rederive_ref(start, table, ret_ty, entities);
-            rederive_ref(end, table, ret_ty, entities);
+            rederive_ref(start, table, ret_ty, entities, call_ctx);
+            rederive_ref(end, table, ret_ty, entities, call_ctx);
         }
         VirExpr::ArrayLiteral { elements, .. } => {
             for elem in elements {
-                rederive_ref(elem, table, ret_ty, entities);
+                rederive_ref(elem, table, ret_ty, entities, call_ctx);
             }
         }
         VirExpr::RepeatLiteral { element, .. } => {
-            rederive_ref(element, table, ret_ty, entities);
+            rederive_ref(element, table, ret_ty, entities, call_ctx);
         }
         VirExpr::StructLiteral { fields, .. } | VirExpr::ClassInstance { fields, .. } => {
             for (_, val) in fields {
-                rederive_ref(val, table, ret_ty, entities);
+                rederive_ref(val, table, ret_ty, entities, call_ctx);
             }
         }
 
@@ -124,8 +177,8 @@ fn rederive_expr(
             lhs_is_unsigned,
             ..
         } => {
-            rederive_ref(lhs, table, ret_ty, entities);
-            rederive_ref(rhs, table, ret_ty, entities);
+            rederive_ref(lhs, table, ret_ty, entities, call_ctx);
+            rederive_ref(rhs, table, ret_ty, entities, call_ctx);
             // Re-derive optional hints from now-concrete operand types.
             if matches!(op, crate::expr::VirBinOp::Eq | crate::expr::VirBinOp::Ne) {
                 if let Some(lhs_vir_ty) = extract_vir_ty(lhs) {
@@ -141,31 +194,36 @@ fn rederive_expr(
             }
         }
         VirExpr::UnaryOp { operand, .. } => {
-            rederive_ref(operand, table, ret_ty, entities);
+            rederive_ref(operand, table, ret_ty, entities, call_ctx);
         }
 
         // Strings — re-derive StringConversion::Generic
         VirExpr::StringConcat { parts } => {
             for part in parts {
-                rederive_ref(part, table, ret_ty, entities);
+                rederive_ref(part, table, ret_ty, entities, call_ctx);
             }
         }
         VirExpr::InterpolatedString { parts } => {
-            rederive_string_parts(parts, table, ret_ty, entities);
+            rederive_string_parts(parts, table, ret_ty, entities, call_ctx);
         }
 
-        // Calls
+        // Calls — rederive fallible hint and reclassify Unresolved targets
         VirExpr::Call {
+            target,
             args,
             vir_ty,
             result_is_fallible,
             ..
         } => {
             for arg in args {
-                rederive_ref(arg, table, ret_ty, entities);
+                rederive_ref(arg, table, ret_ty, entities, call_ctx);
             }
             // Re-derive fallible hint from now-concrete result type.
             *result_is_fallible = table.is_fallible(*vir_ty);
+            // Reclassify Unresolved call targets with concrete type information.
+            if let Some(ctx) = call_ctx {
+                rederive_call_target(target, table, entities, ctx);
+            }
         }
         VirExpr::MethodCall {
             receiver,
@@ -173,9 +231,9 @@ fn rederive_expr(
             dispatch,
             ..
         } => {
-            rederive_ref(receiver, table, ret_ty, entities);
+            rederive_ref(receiver, table, ret_ty, entities, call_ctx);
             for arg in args {
-                rederive_ref(arg, table, ret_ty, entities);
+                rederive_ref(arg, table, ret_ty, entities, call_ctx);
             }
             // Re-derive receiver_is_interface from the now-concrete receiver type.
             if let Some(recv_vir_ty) = extract_vir_ty(receiver) {
@@ -190,7 +248,7 @@ fn rederive_expr(
             storage,
             ..
         } => {
-            rederive_ref(object, table, ret_ty, entities);
+            rederive_ref(object, table, ret_ty, entities, call_ctx);
             rederive_field_storage(object, *field, storage, table, entities);
         }
         VirExpr::FieldStore {
@@ -199,8 +257,8 @@ fn rederive_expr(
             storage,
             value,
         } => {
-            rederive_ref(object, table, ret_ty, entities);
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(object, table, ret_ty, entities, call_ctx);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             rederive_field_storage(object, *field, storage, table, entities);
         }
 
@@ -211,8 +269,8 @@ fn rederive_expr(
             union_storage,
             ..
         } => {
-            rederive_ref(object, table, ret_ty, entities);
-            rederive_ref(index, table, ret_ty, entities);
+            rederive_ref(object, table, ret_ty, entities, call_ctx);
+            rederive_ref(index, table, ret_ty, entities, call_ctx);
             rederive_union_storage_from_array_expr(object, union_storage, table);
         }
         VirExpr::IndexStore {
@@ -222,27 +280,27 @@ fn rederive_expr(
             union_storage,
             ..
         } => {
-            rederive_ref(object, table, ret_ty, entities);
-            rederive_ref(index, table, ret_ty, entities);
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(object, table, ret_ty, entities, call_ctx);
+            rederive_ref(index, table, ret_ty, entities, call_ctx);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             rederive_union_storage_from_array_expr(object, union_storage, table);
         }
 
         // RC — rederive cleanup strategy from the concrete value type
         VirExpr::RcInc { value, cleanup } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             rederive_rc_cleanup(value, cleanup, table);
         }
         VirExpr::RcDec { value, cleanup } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             rederive_rc_cleanup(value, cleanup, table);
         }
         VirExpr::RcMove { value } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
         }
 
         // Coercion
-        VirExpr::Coerce { value, .. } => rederive_ref(value, table, ret_ty, entities),
+        VirExpr::Coerce { value, .. } => rederive_ref(value, table, ret_ty, entities, call_ctx),
 
         // Control flow
         VirExpr::If {
@@ -251,10 +309,10 @@ fn rederive_expr(
             else_body,
             ..
         } => {
-            rederive_ref(cond, table, ret_ty, entities);
-            rederive_body(then_body, table, ret_ty, entities);
+            rederive_ref(cond, table, ret_ty, entities, call_ctx);
+            rederive_body(then_body, table, ret_ty, entities, call_ctx);
             if let Some(eb) = else_body {
-                rederive_body(eb, table, ret_ty, entities);
+                rederive_body(eb, table, ret_ty, entities, call_ctx);
             }
         }
         VirExpr::Match {
@@ -264,35 +322,35 @@ fn rederive_expr(
             result_is_union,
             ..
         } => {
-            rederive_ref(scrutinee, table, ret_ty, entities);
+            rederive_ref(scrutinee, table, ret_ty, entities, call_ctx);
             *result_is_union = table.is_union(*vir_ty);
             let scrutinee_vir_ty = extract_vir_ty(scrutinee);
             for arm in arms {
                 rederive_pattern(&mut arm.pattern, scrutinee_vir_ty, table, ret_ty, entities);
                 if let Some(guard) = &mut arm.guard {
-                    rederive_ref(guard, table, ret_ty, entities);
+                    rederive_ref(guard, table, ret_ty, entities, call_ctx);
                 }
-                rederive_body(&mut arm.body, table, ret_ty, entities);
+                rederive_body(&mut arm.body, table, ret_ty, entities, call_ctx);
             }
         }
         VirExpr::Block {
             stmts, trailing, ..
         } => {
             for stmt in stmts {
-                rederive_stmt(stmt, table, ret_ty, entities);
+                rederive_stmt(stmt, table, ret_ty, entities, call_ctx);
             }
             if let Some(t) = trailing {
-                rederive_ref(t, table, ret_ty, entities);
+                rederive_ref(t, table, ret_ty, entities, call_ctx);
             }
         }
 
         // Type operations — re-derive IsCheckResult
         VirExpr::IsCheck { value, result, .. } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             rederive_is_check_from_expr(value, result, table);
         }
         VirExpr::AsCast { value, result, .. } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             rederive_is_check_from_expr(value, result, table);
         }
 
@@ -304,7 +362,7 @@ fn rederive_expr(
         // Variables
         VirExpr::LocalLoad { .. } => {}
         VirExpr::LocalStore { value, .. } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
         }
 
         // Lambda — use the lambda's own return type, not the enclosing function's.
@@ -319,7 +377,7 @@ fn rederive_expr(
                 .unwrap_function(*vir_ty)
                 .map(|(_, ret)| ret)
                 .unwrap_or(ret_ty);
-            rederive_body(body, table, lambda_ret_ty, entities);
+            rederive_body(body, table, lambda_ret_ty, entities, call_ctx);
             for cap in captures.iter_mut() {
                 cap.rc_kind = classify_capture_rc_kind(cap.vir_ty, table);
             }
@@ -327,11 +385,11 @@ fn rederive_expr(
 
         // Optional / null
         VirExpr::NullCoalesce { value, default, .. } => {
-            rederive_ref(value, table, ret_ty, entities);
-            rederive_ref(default, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
+            rederive_ref(default, table, ret_ty, entities, call_ctx);
         }
         VirExpr::OptionalChain { object, .. } => {
-            rederive_ref(object, table, ret_ty, entities);
+            rederive_ref(object, table, ret_ty, entities, call_ctx);
         }
         VirExpr::OptionalMethodCall {
             object,
@@ -339,17 +397,17 @@ fn rederive_expr(
             dispatch,
             ..
         } => {
-            rederive_ref(object, table, ret_ty, entities);
+            rederive_ref(object, table, ret_ty, entities, call_ctx);
             for arg in method_args {
-                rederive_ref(arg, table, ret_ty, entities);
+                rederive_ref(arg, table, ret_ty, entities, call_ctx);
             }
             // Re-derive receiver_is_interface from the now-concrete object type.
             if let Some(obj_vir_ty) = extract_vir_ty(object) {
                 dispatch.receiver_is_interface = table.is_interface(obj_vir_ty);
             }
         }
-        VirExpr::Try { value, .. } => rederive_ref(value, table, ret_ty, entities),
-        VirExpr::Yield { value } => rederive_ref(value, table, ret_ty, entities),
+        VirExpr::Try { value, .. } => rederive_ref(value, table, ret_ty, entities, call_ctx),
+        VirExpr::Yield { value } => rederive_ref(value, table, ret_ty, entities, call_ctx),
     }
 }
 
@@ -358,6 +416,7 @@ fn rederive_stmt(
     table: &VirTypeTable,
     ret_ty: VirTypeId,
     entities: &VirEntityMetadata,
+    call_ctx: Option<&RederiveCallCtx<'_>>,
 ) {
     match stmt {
         VirStmt::Let {
@@ -374,44 +433,44 @@ fn rederive_stmt(
             if !*needs_struct_copy && let Some(init_vir_ty) = init_vir_ty {
                 *needs_struct_copy = table.is_struct(init_vir_ty);
             }
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
         }
         VirStmt::LetTuple { pattern, value, .. } => {
             rederive_destructure_pattern(pattern, table, entities);
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
         }
         VirStmt::Assign { target, value } => {
-            rederive_assign_target(target, table, ret_ty, entities);
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_assign_target(target, table, ret_ty, entities, call_ctx);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
         }
-        VirStmt::Expr { value } => rederive_ref(value, table, ret_ty, entities),
+        VirStmt::Expr { value } => rederive_ref(value, table, ret_ty, entities, call_ctx),
         VirStmt::While { cond, body } => {
-            rederive_ref(cond, table, ret_ty, entities);
-            rederive_body(body, table, ret_ty, entities);
+            rederive_ref(cond, table, ret_ty, entities, call_ctx);
+            rederive_body(body, table, ret_ty, entities, call_ctx);
         }
         VirStmt::For(vir_for) => {
-            rederive_ref(&mut vir_for.iterable, table, ret_ty, entities);
-            rederive_body(&mut vir_for.body, table, ret_ty, entities);
+            rederive_ref(&mut vir_for.iterable, table, ret_ty, entities, call_ctx);
+            rederive_body(&mut vir_for.body, table, ret_ty, entities, call_ctx);
             rederive_iter_kind(&mut vir_for.kind, table);
         }
         VirStmt::Return { value, convention } => {
             if let Some(v) = value {
-                rederive_ref(v, table, ret_ty, entities);
+                rederive_ref(v, table, ret_ty, entities, call_ctx);
             }
             *convention = rederive_return_convention(ret_ty, table);
         }
         VirStmt::Break | VirStmt::Continue | VirStmt::Noop => {}
         VirStmt::Raise { fields, .. } => {
             for (_, val) in fields {
-                rederive_ref(val, table, ret_ty, entities);
+                rederive_ref(val, table, ret_ty, entities, call_ctx);
             }
         }
         VirStmt::RcInc { value, cleanup } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             rederive_rc_cleanup(value, cleanup, table);
         }
         VirStmt::RcDec { value, cleanup } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             rederive_rc_cleanup(value, cleanup, table);
         }
     }
@@ -422,6 +481,7 @@ fn rederive_assign_target(
     table: &VirTypeTable,
     ret_ty: VirTypeId,
     entities: &VirEntityMetadata,
+    call_ctx: Option<&RederiveCallCtx<'_>>,
 ) {
     use crate::stmt::AssignTarget;
     match target {
@@ -431,12 +491,12 @@ fn rederive_assign_target(
             field,
             storage,
         } => {
-            rederive_ref(object, table, ret_ty, entities);
+            rederive_ref(object, table, ret_ty, entities, call_ctx);
             rederive_field_storage(object, *field, storage, table, entities);
         }
         AssignTarget::Index { array, index } => {
-            rederive_ref(array, table, ret_ty, entities);
-            rederive_ref(index, table, ret_ty, entities);
+            rederive_ref(array, table, ret_ty, entities, call_ctx);
+            rederive_ref(index, table, ret_ty, entities, call_ctx);
         }
     }
 }
@@ -461,7 +521,7 @@ fn rederive_pattern(
                     derive_is_check_result(scrutinee_vir_ty, *tested_type, *vir_tested_type, table);
             }
         }
-        VirPattern::Literal { value, .. } => rederive_ref(value, table, ret_ty, entities),
+        VirPattern::Literal { value, .. } => rederive_ref(value, table, ret_ty, entities, None),
         VirPattern::Success {
             inner,
             vir_success_type,
@@ -492,6 +552,121 @@ fn rederive_pattern(
             // Field patterns are simple bindings — no decisions to re-derive.
             let _ = fields;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Call target reclassification
+// ---------------------------------------------------------------------------
+
+/// Attempt to reclassify a `CallTarget::Unresolved` using concrete post-monomorphization info.
+///
+/// After monomorphization, types are concrete but calls inside generic templates
+/// were all emitted as `Unresolved` (except `GenericCall`).  This function
+/// re-classifies what it can:
+///
+/// 1. **Hardcoded intrinsics** (`assert`, `print_char`) by resolving `callee_sym`.
+/// 2. **Direct function calls** via `NameTable` + `VirEntityMetadata` lookup.
+/// 3. **Compiler intrinsics** (`panic`, etc.) via `VirImplementDispatch`.
+/// 4. **Closure variable calls** when the callee matches a function-typed parameter.
+///
+/// **Not reclassified** (left for codegen's `call_dispatch`):
+/// - Captured closure calls (no capture context available on `VirFunction`)
+/// - Regular FFI external calls (would need `&mut Interner` to create `Symbol`s)
+/// - Global closure calls (need module-level scope tracking)
+/// - Functional interface variable calls (need sema's `callee_var_type`)
+fn rederive_call_target(
+    target: &mut CallTarget,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+    ctx: &RederiveCallCtx<'_>,
+) {
+    let CallTarget::Unresolved {
+        callee_sym,
+        line,
+        resolved_call_args,
+        lambda_defaults,
+        ..
+    } = target
+    else {
+        return;
+    };
+
+    let callee_sym = *callee_sym;
+    let line = *line;
+    let rca = resolved_call_args.clone();
+    let ld = *lambda_defaults;
+
+    // 1. Hardcoded intrinsics (assert, print_char).
+    if let Some(callee_name) = ctx.interner.try_resolve(callee_sym) {
+        match callee_name {
+            "assert" => {
+                *target = CallTarget::Intrinsic {
+                    key: IntrinsicKey::Assert,
+                    line,
+                };
+                return;
+            }
+            "print_char" => {
+                *target = CallTarget::Intrinsic {
+                    key: IntrinsicKey::PrintChar,
+                    line,
+                };
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    // 2. Closure variable call: callee matches a function-typed parameter.
+    for &(param_sym, param_vir_ty) in &ctx.params {
+        if param_sym == callee_sym && table.is_function(param_vir_ty) {
+            *target = CallTarget::ClosureVariable {
+                var_name: callee_sym,
+                vir_type: param_vir_ty,
+                resolved_call_args: rca,
+                lambda_defaults: ld,
+            };
+            return;
+        }
+    }
+
+    // 3. Direct function call: look up in the name table.
+    if let Some(name_id) = ctx
+        .name_table
+        .name_id(ctx.module_id, &[callee_sym], ctx.interner)
+        && let Some(func_id) = entities.function_by_name(name_id)
+        && let Some(func_def) = entities.get_function_def(func_id)
+        && !func_def.is_generic
+        && !func_def.is_external
+    {
+        *target = CallTarget::Direct {
+            function_id: func_id,
+        };
+        return;
+    }
+
+    // 4. Compiler intrinsics via implement-dispatch (e.g. `panic`).
+    if let Some(callee_name) = ctx.interner.try_resolve(callee_sym)
+        && let Some(ext_info) = ctx.implement_dispatch.external_func_by_name(callee_name)
+    {
+        let module_path_str = ctx
+            .name_table
+            .last_segment_str(ext_info.module_path)
+            .unwrap_or_default();
+        if module_path_str == "vole:compiler_intrinsic" {
+            let native_name_str = ctx
+                .name_table
+                .last_segment_str(ext_info.native_name)
+                .unwrap_or_default();
+            if let Some(key) = IntrinsicKey::try_from_name(&native_name_str) {
+                *target = CallTarget::Intrinsic { key, line };
+            }
+        }
+        // Regular FFI external calls are NOT reclassified here because
+        // producing CallTarget::Native requires interning new Symbol values
+        // (module_path, native_name) which needs &mut Interner.
+        // These remain Unresolved for codegen's call_dispatch().
     }
 }
 
@@ -785,10 +960,11 @@ fn rederive_string_parts(
     table: &VirTypeTable,
     ret_ty: VirTypeId,
     entities: &VirEntityMetadata,
+    call_ctx: Option<&RederiveCallCtx<'_>>,
 ) {
     for part in parts {
         if let VirStringPart::Expr { value, conversion } = part {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
             // Extract the expression's VirTypeId to re-derive the conversion.
             let vir_ty = extract_vir_ty(value);
             if let Some(vir_ty) = vir_ty {
@@ -807,7 +983,7 @@ fn rederive_meta_kind(
     match kind {
         VirMetaKind::Static { object, type_def } => {
             if let Some(obj) = object {
-                rederive_ref(obj, table, ret_ty, entities);
+                rederive_ref(obj, table, ret_ty, entities, None);
                 if let Some(obj_vir_ty) = extract_vir_ty(obj)
                     && let Some(concrete_type_def) =
                         nominal_type_def_from_vir_type(obj_vir_ty, table)
@@ -816,9 +992,9 @@ fn rederive_meta_kind(
                 }
             }
         }
-        VirMetaKind::Dynamic { value } => rederive_ref(value, table, ret_ty, entities),
+        VirMetaKind::Dynamic { value } => rederive_ref(value, table, ret_ty, entities, None),
         VirMetaKind::TypeParam { value, .. } => {
-            rederive_ref(value, table, ret_ty, entities);
+            rederive_ref(value, table, ret_ty, entities, None);
             let Some(value_vir_ty) = extract_vir_ty(value) else {
                 return;
             };
@@ -2149,5 +2325,197 @@ mod tests {
             cleanup: crate::expr::VirRcCleanup::Unresolved,
         };
         assert_eq!(extract_vir_ty(&expr), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Call target reclassification tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: build a RederiveCallCtx for testing with the given interner.
+    fn call_ctx_with_interner<'a>(
+        interner: &'a Interner,
+        name_table: &'a vole_identity::NameTable,
+        params: Vec<(Symbol, VirTypeId)>,
+    ) -> RederiveCallCtx<'a> {
+        let impl_dispatch = Box::leak(Box::new(VirImplementDispatch::new()));
+        RederiveCallCtx {
+            interner,
+            name_table,
+            module_id: vole_identity::ModuleId::new(0),
+            implement_dispatch: impl_dispatch,
+            params,
+        }
+    }
+
+    /// Helper: build an Unresolved CallTarget for testing.
+    fn unresolved_target(callee_sym: Symbol, line: u32) -> CallTarget {
+        CallTarget::Unresolved {
+            callee_sym,
+            call_node_id: vole_identity::NodeId::new_for_test(0),
+            line,
+            resolved_call_args: None,
+            lambda_defaults: None,
+            monomorph_key: None,
+        }
+    }
+
+    #[test]
+    fn rederive_unresolved_assert_to_intrinsic() {
+        let mut interner = Interner::new();
+        let assert_sym = interner.intern("assert");
+        let name_table = vole_identity::NameTable::new();
+
+        let mut target = unresolved_target(assert_sym, 42);
+        let table = VirTypeTable::new();
+        let entities = empty_entities();
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![]);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        assert!(matches!(
+            target,
+            CallTarget::Intrinsic {
+                key: IntrinsicKey::Assert,
+                line: 42,
+            }
+        ));
+    }
+
+    #[test]
+    fn rederive_unresolved_print_char_to_intrinsic() {
+        let mut interner = Interner::new();
+        let pc_sym = interner.intern("print_char");
+        let name_table = vole_identity::NameTable::new();
+
+        let mut target = unresolved_target(pc_sym, 10);
+        let table = VirTypeTable::new();
+        let entities = empty_entities();
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![]);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        assert!(matches!(
+            target,
+            CallTarget::Intrinsic {
+                key: IntrinsicKey::PrintChar,
+                line: 10,
+            }
+        ));
+    }
+
+    #[test]
+    fn rederive_unresolved_closure_param_to_closure_variable() {
+        let mut interner = Interner::new();
+        let callback_sym = interner.intern("callback");
+        let name_table = vole_identity::NameTable::new();
+
+        let mut table = VirTypeTable::new();
+        let func_ty = table.intern(
+            VirType::Function {
+                params: vec![VirTypeId::I64],
+                ret: VirTypeId::STRING,
+            },
+            None,
+        );
+
+        let mut target = unresolved_target(callback_sym, 5);
+        let entities = empty_entities();
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![(callback_sym, func_ty)]);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        match &target {
+            CallTarget::ClosureVariable {
+                var_name, vir_type, ..
+            } => {
+                assert_eq!(*var_name, callback_sym);
+                assert_eq!(*vir_type, func_ty);
+            }
+            other => panic!("expected ClosureVariable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rederive_unresolved_non_function_param_stays_unresolved() {
+        let mut interner = Interner::new();
+        let x_sym = interner.intern("x");
+        let name_table = vole_identity::NameTable::new();
+
+        let table = VirTypeTable::new();
+        let mut target = unresolved_target(x_sym, 1);
+        let entities = empty_entities();
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![(x_sym, VirTypeId::I64)]);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        assert!(matches!(target, CallTarget::Unresolved { .. }));
+    }
+
+    #[test]
+    fn rederive_non_unresolved_target_unchanged() {
+        let interner = Interner::new();
+        let name_table = vole_identity::NameTable::new();
+
+        let mut target = CallTarget::Direct {
+            function_id: FunctionId::new(42),
+        };
+
+        let table = VirTypeTable::new();
+        let entities = empty_entities();
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![]);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        assert!(matches!(target, CallTarget::Direct { .. }));
+    }
+
+    #[test]
+    fn rederive_unresolved_direct_function() {
+        let mut interner = Interner::new();
+        let helper_sym = interner.intern("helper");
+        let mut name_table = vole_identity::NameTable::new();
+        let module_id = name_table.module_id("main");
+        let helper_name = name_table.intern(module_id, &[helper_sym], &interner);
+
+        let func_id = FunctionId::new(99);
+        let mut entities = VirEntityMetadata::new();
+        entities.insert_function_def(crate::entity_metadata::VirFunctionDef {
+            id: func_id,
+            name_id: helper_name,
+            full_name_id: helper_name,
+            module: module_id,
+            param_types: vec![VirTypeId::I64],
+            return_type: VirTypeId::I64,
+            param_names: vec!["x".to_string()],
+            required_params: 1,
+            has_defaults: vec![false],
+            is_generic: false,
+            is_external: false,
+            generator_element_type: None,
+            sema_param_types: vec![],
+            sema_return_type: TypeId::from_raw(0),
+            sema_generator_element_type: None,
+        });
+        entities.insert_function_by_name(helper_name, func_id);
+
+        let mut target = unresolved_target(helper_sym, 7);
+        let table = VirTypeTable::new();
+        let impl_dispatch = VirImplementDispatch::new();
+        let ctx = RederiveCallCtx {
+            interner: &interner,
+            name_table: &name_table,
+            module_id,
+            implement_dispatch: &impl_dispatch,
+            params: vec![],
+        };
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        match &target {
+            CallTarget::Direct { function_id } => {
+                assert_eq!(*function_id, func_id);
+            }
+            other => panic!("expected Direct, got {other:?}"),
+        }
     }
 }
