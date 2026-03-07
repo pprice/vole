@@ -500,7 +500,7 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
 ) -> CodegenResult<()> {
     // Auto-detect sret convention.
     let config = if let Some(ret_vir_ty) = config.return_type_id {
-        let vir_table = &env.analyzed.vir_program().type_table;
+        let vir_table = &env.analyzed.type_table;
         if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             ret_vir_ty,
             vir_table,
@@ -518,7 +518,7 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
         config
     };
 
-    let vir_type_table = &env.analyzed.vir_program().type_table;
+    let vir_type_table = &env.analyzed.type_table;
     let (variables, captures) = setup_function_entry(&mut builder, &config, vir_type_table);
 
     let mut cg = Cg::new(&mut builder, codegen_ctx, env)
@@ -567,7 +567,7 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
     let skip_block_params = if has_return {
         if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             vir_func.return_type,
-            &env.analyzed.vir_program().type_table,
+            &env.analyzed.type_table,
             env.analyzed,
         ) {
             if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
@@ -589,7 +589,7 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
 
     let block_params = builder.block_params(entry_block).to_vec();
     let ptr = codegen_ctx.ptr_type();
-    let vir_table = &env.analyzed.vir_program().type_table;
+    let vir_table = &env.analyzed.type_table;
 
     // Declare Cranelift variables for each param (type conversion deferred to Cg bridge).
     let param_info: Vec<(Symbol, Variable, VirTypeId)> = vir_func

@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 
 use vole_identity::{Interner, ModuleId, Symbol, VirTypeId};
 
-use crate::AnalyzedProgram;
+use vole_vir::VirProgram;
 
 use super::CodegenState;
 
@@ -23,8 +23,8 @@ pub type ModuleExportBinding = (ModuleId, Symbol, VirTypeId);
 /// - `CompileEnv` = session/unit level (interner, module)
 /// - `Cg` = per-function working context (return_type, substitutions)
 pub struct CompileEnv<'a> {
-    /// Analyzed program containing expr_types, method_resolutions, etc.
-    pub analyzed: &'a AnalyzedProgram,
+    /// The VIR program containing types, methods, entities, etc.
+    pub analyzed: &'a VirProgram,
     /// Codegen lookup tables (type_metadata, method_infos, etc.)
     pub state: &'a CodegenState,
     /// Interner for symbol resolution (main or module-specific)

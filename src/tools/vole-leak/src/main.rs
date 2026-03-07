@@ -16,7 +16,7 @@ use clap::Parser;
 
 use vole::cli::{ColorMode, expand_paths, should_skip_path};
 use vole::commands::common::{PipelineOptions, compile_source, render_pipeline_error};
-use vole_codegen::{AnalyzedProgram, CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
+use vole_codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo, VirProgram};
 use vole_runtime::{
     JmpBuf, alloc_track, call_setjmp, clear_current_test, clear_test_jmp_buf, recover_from_signal,
     set_current_file, set_current_test, set_stdout_capture, set_test_jmp_buf, take_assert_failure,
@@ -212,7 +212,7 @@ fn compile_and_run_tests(
 
 /// Compile using pre-compiled cached modules.
 fn compile_with_cached_modules(
-    analyzed: &AnalyzedProgram,
+    analyzed: &VirProgram,
     compiled_modules: &mut Option<CompiledModules>,
     options: JitOptions,
     file_path: &str,
@@ -233,7 +233,7 @@ fn compile_with_cached_modules(
 
 /// Compile from scratch, caching modules for subsequent files.
 fn compile_fresh(
-    analyzed: &AnalyzedProgram,
+    analyzed: &VirProgram,
     compiled_modules: &mut Option<CompiledModules>,
     options: JitOptions,
     file_path: &str,

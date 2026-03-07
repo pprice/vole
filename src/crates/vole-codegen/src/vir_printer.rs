@@ -38,11 +38,11 @@ macro_rules! wln {
 
 /// Pretty-printer for VIR trees.
 pub struct VirPrinter<'a> {
-    analyzed: &'a crate::analyzed::AnalyzedProgram,
+    analyzed: &'a vole_vir::VirProgram,
 }
 
 impl<'a> VirPrinter<'a> {
-    pub fn new(analyzed: &'a crate::analyzed::AnalyzedProgram) -> Self {
+    pub fn new(analyzed: &'a vole_vir::VirProgram) -> Self {
         Self { analyzed }
     }
 
@@ -1065,7 +1065,12 @@ impl<'a> VirPrinter<'a> {
     }
 
     fn ty(&self, id: VirTypeId) -> String {
-        self.analyzed.display_vir_type(id)
+        crate::types::vir_conversions::vir_display_named(
+            id,
+            &self.analyzed.type_table,
+            self.analyzed.entity_metadata(),
+            self.analyzed.name_table(),
+        )
     }
 }
 

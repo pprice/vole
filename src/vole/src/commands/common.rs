@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::cli::ColorMode;
-use crate::codegen::{AnalyzedProgramArgs, Compiler, JitContext, JitOptions, LazyCompilationState};
+use crate::codegen::{Compiler, JitContext, JitOptions, LazyCompilationState};
 use crate::errors::{
     CodegenError, LexerError, ParserError, WithExtraHelp, render_to_writer_terminal,
 };
@@ -22,8 +22,8 @@ use crate::runtime::{
 };
 use crate::sema::{ModuleCache, ModuleLoader, TypeError, TypeWarning, optimize_all};
 
-// Re-export AnalyzedProgram from codegen
-pub use crate::codegen::AnalyzedProgram;
+// Re-export VirProgram for callers that need it
+pub use vole_vir::VirProgram;
 
 /// Errors that can occur during the compilation pipeline.
 ///
@@ -203,7 +203,7 @@ pub struct PipelineOptions<'a> {
 pub fn compile_source(
     opts: PipelineOptions,
     warnings: &mut dyn Write,
-) -> Result<AnalyzedProgram, PipelineError> {
+) -> Result<VirProgram, PipelineError> {
     let PipelineOptions {
         source,
         file_path,
@@ -343,10 +343,10 @@ pub fn compile_source(
     ))
 }
 
-/// Bridge between sema's `AnalysisOutput` and codegen's `AnalyzedProgram`.
+/// Bridge between sema's `AnalysisOutput` and codegen's `VirProgram`.
 ///
-/// Runs VIR lowering on the sema output and assembles the result into an
-/// `AnalyzedProgram`.  This function lives in the CLI crate (which depends on
+/// Runs VIR lowering on the sema output and assembles the result into a
+/// `VirProgram`.  This function lives in the CLI crate (which depends on
 /// both vole-sema and vole-codegen) so that vole-codegen itself does not need
 /// a direct dependency on vole-sema.
 pub fn build_analyzed_program(
@@ -354,7 +354,7 @@ pub fn build_analyzed_program(
     mut interner: crate::frontend::Interner,
     output: crate::sema::AnalysisOutput,
     module_vir_cache: Option<Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>>,
-) -> AnalyzedProgram {
+) -> VirProgram {
     use crate::sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 
     let crate::sema::AnalysisOutput {
@@ -394,16 +394,16 @@ pub fn build_analyzed_program(
 
     // Inject TypeArena substitution fallback for compound types not yet in VirTypeTable.
     let type_arena = Rc::clone(&db.types);
-    let substitute_fallback: Box<crate::codegen::SubstituteFallbackFn> =
+    let substitute_fallback: Box<vole_vir::SubstituteFallbackFn> =
         Box::new(move |ty, subs| type_arena.lookup_substitute(ty, subs));
 
-    AnalyzedProgram::new(AnalyzedProgramArgs {
-        tests_virtual_modules,
-        module_id,
-        modules_with_errors,
-        vir_program,
-        substitute_fallback: Some(substitute_fallback),
-    })
+    // Set the fields that were previously on AnalyzedProgram.
+    vir_program.tests_virtual_modules = tests_virtual_modules;
+    vir_program.module_id = module_id;
+    vir_program.modules_with_errors = modules_with_errors;
+    vir_program.substitute_fallback = Some(substitute_fallback);
+
+    vir_program
 }
 
 /// Options for the compile_and_run codegen+execution pipeline.
@@ -421,7 +421,7 @@ pub struct RunOptions<'a> {
 ///
 /// The caller is responsible for setting up stdout/stderr capture (via
 /// `set_stdout_capture`/`set_stderr_capture`) before calling if needed.
-pub fn compile_and_run(analyzed: &AnalyzedProgram, opts: &RunOptions) -> Result<(), PipelineError> {
+pub fn compile_and_run(analyzed: &VirProgram, opts: &RunOptions) -> Result<(), PipelineError> {
     // Codegen phase
     let (jit, lazy_state) = {
         let _span = tracing::info_span!("codegen").entered();

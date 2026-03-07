@@ -469,7 +469,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     pub fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
-        &self.env.analyzed.vir_program().type_table
+        &self.env.analyzed.type_table
     }
 
     /// Best-effort translation from sema `TypeId` to `VirTypeId`.
@@ -1074,7 +1074,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         type_id: TypeId,
     ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
-        let vir = self.env.analyzed.vir_program();
+        let vir = self.env.analyzed;
         vir.module_exports
             .get(&type_id)
             .map(|(mid, exports)| (*mid, exports.iter().copied().collect()))
@@ -1090,7 +1090,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         module_id: ModuleId,
     ) -> Option<smallvec::SmallVec<[(NameId, TypeId); 8]>> {
-        let vir = self.env.analyzed.vir_program();
+        let vir = self.env.analyzed;
         vir.module_exports
             .values()
             .find(|(mid, _)| *mid == module_id)
@@ -1108,7 +1108,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<vole_identity::ConstantValue> {
         self.env
             .analyzed
-            .vir_program()
             .module_constants
             .get(&(module_id, name_id))
             .cloned()
@@ -1285,7 +1284,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check whether a global variable initializer exists for the given symbol.
     #[inline]
     pub fn has_global_init(&self, name: Symbol) -> bool {
-        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
+        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
         self.name_table()
             .name_id(module_id, &[name], self.interner())
             .is_some_and(|name_id| self.analyzed().has_global(name_id))
@@ -1299,7 +1298,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let analyzed = self.analyzed();
         if let Some(module_id) = self.current_module() {
             let module_path = self.name_table().module_path(module_id);
-            if let Some(module_map) = analyzed.vir_program().module_global_inits.get(module_path) {
+            if let Some(module_map) = analyzed.module_global_inits.get(module_path) {
                 return module_map.get(&name).map(|r| r.as_ref());
             }
             // Imported modules use their own interner; Symbol indices are not
@@ -1309,11 +1308,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 return None;
             }
         }
-        analyzed
-            .vir_program()
-            .global_inits
-            .get(&name)
-            .map(|r| r.as_ref())
+        analyzed.global_inits.get(&name).map(|r| r.as_ref())
     }
 
     /// Get VIR-lowered default parameter expression by semantic `FunctionId`.
@@ -1323,7 +1318,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: usize,
     ) -> Option<&vole_vir::VirExpr> {
         self.analyzed()
-            .vir_program()
             .get_function_default(func_id, slot)
             .map(|r| r.as_ref())
     }
@@ -1335,7 +1329,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: usize,
     ) -> Option<&vole_vir::VirExpr> {
         self.analyzed()
-            .vir_program()
             .get_method_default(method_id, slot)
             .map(|r| r.as_ref())
     }
@@ -1347,7 +1340,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: usize,
     ) -> Option<&vole_vir::VirExpr> {
         self.analyzed()
-            .vir_program()
             .get_lambda_default(lambda_node_id, slot)
             .map(|r| r.as_ref())
     }
@@ -1356,7 +1348,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn field_default_vir_init(&self, field_id: FieldId) -> Option<&vole_vir::VirExpr> {
         self.analyzed()
-            .vir_program()
             .get_field_default(field_id)
             .map(|r| r.as_ref())
     }
@@ -1416,7 +1407,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         key: &vole_identity::MonomorphKey,
     ) -> Option<&'ctx vole_vir::monomorph::instance::VirMonomorphInfo> {
-        let vir = self.env.analyzed.vir_program();
+        let vir = self.env.analyzed;
         let mangled = vir.free_monomorphs_by_key.get(key)?;
         vir.free_monomorphs.get(mangled)
     }
@@ -1427,9 +1418,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.current_module
     }
 
-    /// Get analyzed program reference
+    /// Get VIR program reference
     #[inline]
-    pub fn analyzed(&self) -> &'ctx crate::AnalyzedProgram {
+    pub fn analyzed(&self) -> &'ctx vole_vir::VirProgram {
         self.env.analyzed
     }
 
@@ -1539,7 +1530,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         elem_vir: VirTypeId,
         union_storage_hint: Option<UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
-        let table = &self.env.analyzed.vir_program().type_table;
+        let table = &self.env.analyzed.type_table;
         let elem_sema = table.vir_to_type_id(elem_vir);
         self.prepare_dynamic_array_store_with_hint(value, elem_sema, union_storage_hint)
     }
@@ -2037,7 +2028,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 }
 
 impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
-    fn analyzed(&self) -> &crate::AnalyzedProgram {
+    fn analyzed(&self) -> &vole_vir::VirProgram {
         self.env.analyzed
     }
 
@@ -2121,7 +2112,7 @@ fn build_monomorph_signature(
     func_type: &vole_identity::FunctionType,
     has_self_param: bool,
     table: &vole_vir::type_table::VirTypeTable,
-    analyzed: &crate::analyzed::AnalyzedProgram,
+    analyzed: &vole_vir::VirProgram,
     ptr_type: Type,
     module: &cranelift_jit::JITModule,
 ) -> cranelift::prelude::Signature {

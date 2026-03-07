@@ -306,7 +306,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Handles type narrowing for primitives (f64 bitcast, bool/int reduction).
     pub fn convert_field_value_v(&mut self, raw_value: Value, vir_ty: VirTypeId) -> CompiledValue {
         // Use env path to avoid borrow conflict with self.builder
-        let table = &self.env.analyzed.vir_program().type_table;
+        let table = &self.env.analyzed.type_table;
         let (value, ty) = crate::types::vir_struct_helpers::vir_convert_field_value(
             self.builder,
             raw_value,

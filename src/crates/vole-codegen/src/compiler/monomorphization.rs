@@ -67,13 +67,7 @@ impl Compiler<'_> {
     /// Declare all monomorphized function instances
     pub(super) fn declare_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Collect from VirProgram.free_monomorphs to avoid borrow issues
-        let instances: Vec<_> = self
-            .analyzed
-            .vir_program()
-            .free_monomorphs
-            .values()
-            .cloned()
-            .collect();
+        let instances: Vec<_> = self.analyzed.free_monomorphs.values().cloned().collect();
 
         for instance in &instances {
             // Skip external functions - they don't need JIT compilation
@@ -99,13 +93,7 @@ impl Compiler<'_> {
         is_program_phase: bool,
     ) -> CodegenResult<()> {
         // Collect instances from VirProgram.free_monomorphs to avoid borrow issues
-        let instances: Vec<_> = self
-            .analyzed
-            .vir_program()
-            .free_monomorphs
-            .values()
-            .cloned()
-            .collect();
+        let instances: Vec<_> = self.analyzed.free_monomorphs.values().cloned().collect();
 
         let program_module = self.program_module();
 
@@ -155,7 +143,7 @@ impl Compiler<'_> {
             .to_string();
 
         // Need the module interner for compile_env
-        if !self.analyzed.vir_program().has_module(&module_path) {
+        if !self.analyzed.has_module(&module_path) {
             return Ok(false);
         }
 
@@ -172,7 +160,7 @@ impl Compiler<'_> {
         // Get the VIR function (must be available — module monomorphs are always lowered)
         let vir_func = self
             .analyzed
-            .get_vir_monomorph(instance.mangled_name)
+            .get_monomorph(instance.mangled_name)
             .ok_or_else(|| {
                 CodegenError::not_found(
                     "VIR module monomorphized function",
@@ -211,7 +199,6 @@ impl Compiler<'_> {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let module_interner = self
                     .analyzed
-                    .vir_program()
                     .module_interner_rc(&module_path)
                     .expect("module interner not found for module path");
                 let env = compile_env!(self, &module_interner, source_file_ptr);
@@ -258,7 +245,7 @@ impl Compiler<'_> {
         // Get VIR function (provides param names and body)
         let vir_func = self
             .analyzed
-            .get_vir_monomorph(instance.mangled_name)
+            .get_monomorph(instance.mangled_name)
             .ok_or_else(|| {
                 CodegenError::not_found(
                     "VIR monomorphized function",
@@ -322,7 +309,7 @@ impl Compiler<'_> {
         &self,
         instance: &VirClassMethodMonomorphInfo,
     ) -> bool {
-        let type_table = &self.analyzed.vir_program().type_table;
+        let type_table = &self.analyzed.type_table;
         instance
             .vir_substitutions
             .values()
@@ -334,7 +321,7 @@ impl Compiler<'_> {
         &self,
         instance: &VirStaticMethodMonomorphInfo,
     ) -> bool {
-        let type_table = &self.analyzed.vir_program().type_table;
+        let type_table = &self.analyzed.type_table;
         instance
             .vir_substitutions
             .values()
@@ -371,7 +358,7 @@ impl Compiler<'_> {
                 .name_table()
                 .module_path(module_id)
                 .to_string();
-            !self.analyzed.vir_program().has_module(&module_path)
+            !self.analyzed.has_module(&module_path)
         };
 
         if let Some((type_def_id, type_args)) = self.vir_query_unwrap_class_v(vir_ty) {
@@ -449,7 +436,6 @@ impl Compiler<'_> {
         // Collect from VirProgram.class_method_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
-            .vir_program()
             .class_method_monomorphs
             .values()
             .cloned()
@@ -490,7 +476,6 @@ impl Compiler<'_> {
         // Collect from VirProgram.class_method_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
-            .vir_program()
             .class_method_monomorphs
             .values()
             .cloned()
@@ -573,7 +558,7 @@ impl Compiler<'_> {
         // Get VIR function (provides param names and body)
         let vir_func = self
             .analyzed
-            .get_vir_monomorph(instance.mangled_name)
+            .get_monomorph(instance.mangled_name)
             .ok_or_else(|| {
                 CodegenError::not_found(
                     "VIR class method monomorph",
@@ -582,8 +567,7 @@ impl Compiler<'_> {
             })?;
 
         // Only use module interner if the module is actually loaded
-        let effective_module_path =
-            module_path.filter(|p| self.analyzed.vir_program().has_module(p));
+        let effective_module_path = module_path.filter(|p| self.analyzed.has_module(p));
 
         // Save/restore module bindings when compiling module code via IIFE.
         // Ensures bindings are restored even when `?` returns early.
@@ -630,8 +614,8 @@ impl Compiler<'_> {
             let cg_module_id = effective_module_path
                 .map(|_| self.analyzed.name_table().module_of(instance.class_name));
             // Hoist module interner Rc so it outlives the compile_env borrow.
-            let module_interner_rc = effective_module_path
-                .and_then(|p| self.analyzed.vir_program().module_interner_rc(p));
+            let module_interner_rc =
+                effective_module_path.and_then(|p| self.analyzed.module_interner_rc(p));
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = if let Some(ref interner) = module_interner_rc {
@@ -673,7 +657,6 @@ impl Compiler<'_> {
         // Collect from VirProgram.static_method_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
-            .vir_program()
             .static_method_monomorphs
             .values()
             .cloned()
@@ -707,7 +690,6 @@ impl Compiler<'_> {
         // Collect from VirProgram.static_method_monomorphs to avoid borrow issues
         let instances: Vec<_> = self
             .analyzed
-            .vir_program()
             .static_method_monomorphs
             .values()
             .cloned()
@@ -778,7 +760,7 @@ impl Compiler<'_> {
         // Get VIR function (provides param names and body)
         let vir_func = self
             .analyzed
-            .get_vir_monomorph(instance.mangled_name)
+            .get_monomorph(instance.mangled_name)
             .ok_or_else(|| {
                 CodegenError::not_found(
                     "VIR static method monomorph",
@@ -787,8 +769,7 @@ impl Compiler<'_> {
             })?;
 
         // Only use module interner if the module is actually loaded
-        let effective_module_path =
-            module_path.filter(|p| self.analyzed.vir_program().has_module(p));
+        let effective_module_path = module_path.filter(|p| self.analyzed.has_module(p));
 
         // Save/restore module bindings when compiling module code via IIFE.
         // Ensures bindings are restored even when `?` returns early.
@@ -829,8 +810,8 @@ impl Compiler<'_> {
             let cg_module_id = effective_module_path
                 .map(|_| self.analyzed.name_table().module_of(instance.class_name));
             // Hoist module interner Rc so it outlives the compile_env borrow.
-            let module_interner_rc = effective_module_path
-                .and_then(|p| self.analyzed.vir_program().module_interner_rc(p));
+            let module_interner_rc =
+                effective_module_path.and_then(|p| self.analyzed.module_interner_rc(p));
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = if let Some(ref interner) = module_interner_rc {
@@ -883,8 +864,8 @@ impl Compiler<'_> {
         use vole_identity::{ClassMethodMonomorphKey, FunctionType};
 
         // Early-exit if monomorph caches haven't grown since last expansion
-        let current_cache_size = self.analyzed.vir_program().class_method_monomorphs.len()
-            + self.analyzed.vir_program().static_method_monomorphs.len();
+        let current_cache_size = self.analyzed.class_method_monomorphs.len()
+            + self.analyzed.static_method_monomorphs.len();
         if current_cache_size == self.last_expansion_cache_size {
             tracing::debug!("expand_abstract_class_method_monomorphs: caches unchanged, skipping");
             return Ok(());
@@ -897,10 +878,9 @@ impl Compiler<'_> {
             "expand_abstract_class_method_monomorphs: checking cache"
         );
 
-        let type_table = &self.analyzed.vir_program().type_table;
+        let type_table = &self.analyzed.type_table;
         let abstract_templates: Vec<(ClassMethodMonomorphKey, VirClassMethodMonomorphInfo)> = self
             .analyzed
-            .vir_program()
             .class_method_monomorphs
             .iter()
             .filter(|(_, inst)| {
@@ -936,7 +916,7 @@ impl Compiler<'_> {
             FxHashMap::default();
 
         // Collect from concrete static method monomorphs
-        for (key, inst) in &self.analyzed.vir_program().static_method_monomorphs {
+        for (key, inst) in &self.analyzed.static_method_monomorphs {
             // Skip abstract entries (TypeParam in substitutions)
             if inst
                 .vir_substitutions
@@ -986,7 +966,7 @@ impl Compiler<'_> {
         }
 
         // Collect from concrete class method monomorphs
-        for (key, inst) in &self.analyzed.vir_program().class_method_monomorphs {
+        for (key, inst) in &self.analyzed.class_method_monomorphs {
             // Skip abstract entries
             if inst
                 .vir_substitutions
@@ -1097,7 +1077,6 @@ impl Compiler<'_> {
                 // Skip if already in VirProgram or already expanded
                 if self
                     .analyzed
-                    .vir_program()
                     .class_method_monomorphs
                     .contains_key(&concrete_key)
                 {
@@ -1271,7 +1250,7 @@ impl Compiler<'_> {
             // Get VIR function (provides param names and body)
             let vir_func = self
                 .analyzed
-                .get_vir_monomorph(data.template_mangled_name)
+                .get_monomorph(data.template_mangled_name)
                 .ok_or_else(|| {
                     CodegenError::not_found(
                         "VIR expanded class method monomorph template",
@@ -1319,8 +1298,7 @@ impl Compiler<'_> {
                 let mut builder_ctx = FunctionBuilderContext::new();
                 let cg_module_id = Some(module_id);
                 // Hoist module interner Rc so it outlives the compile_env borrow.
-                let module_interner_rc =
-                    self.analyzed.vir_program().module_interner_rc(&module_path);
+                let module_interner_rc = self.analyzed.module_interner_rc(&module_path);
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                     let env = if let Some(ref interner) = module_interner_rc {
@@ -1630,7 +1608,7 @@ impl Compiler<'_> {
     /// Called before body compilation in both `compile_module_functions` and
     /// `compile_program_body`.
     pub(super) fn build_monomorph_index(&mut self) {
-        let vir_program = self.analyzed.vir_program();
+        let vir_program = self.analyzed;
         let type_table = &vir_program.type_table;
         let mut index = FxHashMap::default();
 

@@ -41,7 +41,7 @@ impl Compiler<'_> {
     /// Reads `module_bindings` from VirProgram (populated during VIR lowering)
     /// and registers them in `global_module_bindings` for use during compilation.
     pub(super) fn register_global_module_bindings(&mut self) {
-        let vir = self.analyzed.vir_program();
+        let vir = self.analyzed;
         for (&binding_sym, &(module_id, export_name, vir_export_ty)) in &vir.module_bindings {
             self.global_module_bindings
                 .insert(binding_sym, (module_id, export_name, vir_export_ty));
@@ -58,7 +58,7 @@ impl Compiler<'_> {
         &self,
         module_path: &str,
     ) -> Vec<(Symbol, super::ModuleExportBinding)> {
-        let vir = self.analyzed.vir_program();
+        let vir = self.analyzed;
         let Some(module_bindings) = vir.module_module_bindings.get(module_path) else {
             return Vec::new();
         };
@@ -72,13 +72,8 @@ impl Compiler<'_> {
     pub fn compile_program(&mut self) -> CodegenResult<()> {
         // Bail early if any modules had sema errors - their VIR may be missing
         // and compiling their function bodies would panic.
-        if !self.analyzed.modules_with_errors().is_empty() {
-            let module_list: Vec<_> = self
-                .analyzed
-                .modules_with_errors()
-                .iter()
-                .cloned()
-                .collect();
+        if !self.analyzed.modules_with_errors.is_empty() {
+            let module_list: Vec<_> = self.analyzed.modules_with_errors.iter().cloned().collect();
             return Err(CodegenError::internal_with_context(
                 "module(s) with type errors",
                 module_list.join(", "),
@@ -94,13 +89,8 @@ impl Compiler<'_> {
     pub fn compile_modules_only(&mut self) -> CodegenResult<()> {
         // Bail early if any modules had sema errors - their expression data may
         // contain INVALID type IDs that would cause panics in codegen.
-        if !self.analyzed.modules_with_errors().is_empty() {
-            let module_list: Vec<_> = self
-                .analyzed
-                .modules_with_errors()
-                .iter()
-                .cloned()
-                .collect();
+        if !self.analyzed.modules_with_errors.is_empty() {
+            let module_list: Vec<_> = self.analyzed.modules_with_errors.iter().cloned().collect();
             return Err(CodegenError::internal_with_context(
                 "module(s) with type errors",
                 module_list.join(", "),
@@ -144,7 +134,6 @@ impl Compiler<'_> {
         let mut seen = HashSet::new();
         let func_defs: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_function_defs(program_module)
             .into_iter()
@@ -172,7 +161,6 @@ impl Compiler<'_> {
         // Finalize classes in the main program module.
         let class_ids: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_type_defs_by_kind(program_module, VirTypeDefKind::Class)
             .into_iter()
@@ -185,7 +173,6 @@ impl Compiler<'_> {
         // Finalize structs in the main program module.
         let struct_ids: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_type_defs_by_kind(program_module, VirTypeDefKind::Struct)
             .into_iter()
@@ -201,7 +188,6 @@ impl Compiler<'_> {
             for vm_id in virtual_module_ids {
                 let class_ids: Vec<_> = self
                     .analyzed
-                    .vir_program()
                     .entity_metadata
                     .module_type_defs_by_kind(vm_id, VirTypeDefKind::Class)
                     .into_iter()
@@ -214,11 +200,7 @@ impl Compiler<'_> {
         }
 
         // Register implement block methods from VIR metadata (pass 1).
-        let impl_blocks = self
-            .analyzed
-            .vir_program()
-            .entity_metadata
-            .implement_blocks();
+        let impl_blocks = self.analyzed.entity_metadata.implement_blocks();
         for entry in impl_blocks {
             self.register_implement_block(entry)?;
         }
@@ -227,7 +209,7 @@ impl Compiler<'_> {
         // This uses VirProgram.tests order (outer tests first, then nested),
         // matching the order used during compilation in compile_all_tests.
         if !self.skip_tests {
-            let num_tests = self.analyzed.vir_program().tests.len();
+            let num_tests = self.analyzed.tests.len();
             let i64_type_id = TypeId::I64;
             for test_index in 0..num_tests {
                 let func_key = self.test_function_key(test_index);
@@ -286,7 +268,6 @@ impl Compiler<'_> {
         let mut seen = HashSet::new();
         let func_name_ids: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_function_defs(program_module)
             .into_iter()
@@ -300,7 +281,6 @@ impl Compiler<'_> {
         // Compile class methods in the main program module.
         let class_ids: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_type_defs_by_kind(program_module, VirTypeDefKind::Class)
             .into_iter()
@@ -313,7 +293,6 @@ impl Compiler<'_> {
         // Compile struct methods in the main program module.
         let struct_ids: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_type_defs_by_kind(program_module, VirTypeDefKind::Struct)
             .into_iter()
@@ -329,7 +308,6 @@ impl Compiler<'_> {
             for vm_id in virtual_module_ids {
                 let class_ids: Vec<_> = self
                     .analyzed
-                    .vir_program()
                     .entity_metadata
                     .module_type_defs_by_kind(vm_id, VirTypeDefKind::Class)
                     .into_iter()
@@ -342,13 +320,7 @@ impl Compiler<'_> {
         }
 
         // Compile implement block methods from VIR metadata (pass 2).
-        for entry in self
-            .analyzed
-            .vir_program()
-            .entity_metadata
-            .implement_blocks()
-            .to_vec()
-        {
+        for entry in self.analyzed.entity_metadata.implement_blocks().to_vec() {
             self.compile_implement_block(&entry)?;
         }
 
@@ -356,7 +328,7 @@ impl Compiler<'_> {
         // This must happen after scoped declarations are compiled above,
         // since test bodies may reference scoped functions/classes/impls.
         if !self.skip_tests {
-            let vir_tests = &self.analyzed.vir_program().tests;
+            let vir_tests = &self.analyzed.tests;
             // Clone the tests slice to avoid borrowing self.analyzed during compilation.
             let vir_tests: Vec<_> = vir_tests.clone();
             self.compile_all_tests(&vir_tests)?;
@@ -380,7 +352,6 @@ impl Compiler<'_> {
         for kind in &type_kinds {
             let type_ids: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_type_defs_by_kind(program_module, *kind)
                 .into_iter()
@@ -451,7 +422,6 @@ impl Compiler<'_> {
             // external functions (declared via implement block / FFI path).
             let func_defs: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_function_defs(module_id)
                 .into_iter()
@@ -467,7 +437,6 @@ impl Compiler<'_> {
             // MUST happen before implement block registration, which needs type_metadata
             let class_ids: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_type_defs_by_kind(module_id, VirTypeDefKind::Class)
                 .into_iter()
@@ -480,7 +449,6 @@ impl Compiler<'_> {
             // Finalize module structs (register type metadata, declare methods)
             let struct_ids: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_type_defs_by_kind(module_id, VirTypeDefKind::Struct)
                 .into_iter()
@@ -493,7 +461,6 @@ impl Compiler<'_> {
             // Register module sentinels (zero-field struct types like Done, nil)
             let sentinel_ids: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_type_defs_by_kind(module_id, VirTypeDefKind::Sentinel)
                 .into_iter()
@@ -507,7 +474,6 @@ impl Compiler<'_> {
             // MUST happen after class finalization so type_metadata is populated
             let entries = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_implement_blocks(module_path)
                 .to_vec();
@@ -608,7 +574,6 @@ impl Compiler<'_> {
             // Find non-generic, non-external functions in this module
             let func_defs: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_function_defs(module_id)
                 .into_iter()
@@ -706,7 +671,6 @@ impl Compiler<'_> {
         // Get module interner from VirProgram (populated during VIR lowering)
         let module_interner = self
             .analyzed
-            .vir_program()
             .module_interner_rc(module_path)
             .unwrap_or_else(|| self.analyzed.interner_rc());
 
@@ -726,7 +690,6 @@ impl Compiler<'_> {
         // external functions (no Vole body to compile).
         let func_name_ids: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_function_defs(module_id)
             .into_iter()
@@ -740,7 +703,6 @@ impl Compiler<'_> {
         // Compile implement block methods from VIR metadata (both instance and static)
         let impl_entries = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_implement_blocks(module_path)
             .to_vec();
@@ -751,7 +713,6 @@ impl Compiler<'_> {
         // Compile module class methods (both instance and static) from VirEntityMetadata
         let class_ids: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_type_defs_by_kind(module_id, VirTypeDefKind::Class)
             .into_iter()
@@ -765,7 +726,6 @@ impl Compiler<'_> {
         // Compile module struct methods (both instance and static) from VirEntityMetadata
         let struct_ids: Vec<_> = self
             .analyzed
-            .vir_program()
             .entity_metadata
             .module_type_defs_by_kind(module_id, VirTypeDefKind::Struct)
             .into_iter()
@@ -801,7 +761,6 @@ impl Compiler<'_> {
             // external functions (declared via implement block / FFI path).
             let func_defs: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_function_defs(module_id)
                 .into_iter()
@@ -822,7 +781,6 @@ impl Compiler<'_> {
             // MUST happen before implement block import, which needs type_metadata
             let class_ids: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_type_defs_by_kind(module_id, VirTypeDefKind::Class)
                 .into_iter()
@@ -835,7 +793,6 @@ impl Compiler<'_> {
             // Finalize module structs (register type metadata, import methods)
             let struct_ids: Vec<_> = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_type_defs_by_kind(module_id, VirTypeDefKind::Struct)
                 .into_iter()
@@ -849,7 +806,6 @@ impl Compiler<'_> {
             // MUST happen after class finalization so type_metadata is populated
             let impl_entries = self
                 .analyzed
-                .vir_program()
                 .entity_metadata
                 .module_implement_blocks(module_path)
                 .to_vec();
@@ -895,7 +851,7 @@ impl Compiler<'_> {
             (func_def.sema_param_types.clone(), func_def.sema_return_type);
 
         // Check if a VIR function was lowered for this function
-        let vir_func = self.analyzed.get_vir_function(semantic_func_id);
+        let vir_func = self.analyzed.get_function(semantic_func_id);
 
         // Check if this is a generator function (sema annotated it with element type)
         if let Some(elem_type_id) = func_def.sema_generator_element_type {
@@ -1007,7 +963,7 @@ impl Compiler<'_> {
             (func_def.sema_param_types.clone(), func_def.sema_return_type);
 
         // Check if a VIR function was lowered for this function
-        let vir_func = self.analyzed.get_vir_function(semantic_func_id);
+        let vir_func = self.analyzed.get_function(semantic_func_id);
 
         // Check if this is a generator function (sema annotated it with element type)
         if let Some(elem_type_id) = func_def.sema_generator_element_type {
@@ -1110,7 +1066,7 @@ impl Compiler<'_> {
     /// From those roots, walk `VirDirect` edges transitively and collect
     /// target indices that must be declared/compiled.
     fn vir_monomorph_indices(&self) -> Vec<usize> {
-        collect_reachable_vir_direct_targets(&self.analyzed.vir_program().functions)
+        collect_reachable_vir_direct_targets(&self.analyzed.functions)
     }
 
     /// Declare VIR-monomorphized functions in the JIT module.
@@ -1126,7 +1082,7 @@ impl Compiler<'_> {
             return Ok(());
         }
         for idx in indices {
-            let vir_func = &self.analyzed.vir_program().functions[idx];
+            let vir_func = &self.analyzed.functions[idx];
             let sig = self.build_signature_for_vir_func(vir_func);
             let jit_name = format!("__vir_monomorph_{}", vir_func.name);
             let func_id = self.jit.declare_function(&jit_name, &sig);
@@ -1151,7 +1107,7 @@ impl Compiler<'_> {
             if self.defined_functions.contains(&func_id) {
                 continue;
             }
-            let vir_func = &self.analyzed.vir_program().functions[idx];
+            let vir_func = &self.analyzed.functions[idx];
             let sig = self.build_signature_for_vir_func(vir_func);
             self.jit.ctx.func.signature = sig;
 

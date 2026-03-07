@@ -248,5 +248,9 @@ fn build_empty_vir_program(
         module_interners: FxHashMap::default(),
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),
+        tests_virtual_modules: FxHashMap::default(),
+        module_id: vole_identity::ModuleId::new(0),
+        modules_with_errors: HashSet::new(),
+        substitute_fallback: None,
     }
 }

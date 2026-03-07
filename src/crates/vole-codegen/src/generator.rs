@@ -84,7 +84,7 @@ pub(crate) fn compile_generator_function<'ctx>(
     compile_generator_wrapper(params, body_func_id, has_captures, codegen_ctx, env)?;
 
     // Override the return type to RuntimeIterator(T) so callers use direct dispatch
-    let vir_table = &env.analyzed.vir_program().type_table;
+    let vir_table = &env.analyzed.type_table;
     let runtime_iter_type_id = vir_table
         .lookup_runtime_iterator_sema(params.elem_type_id)
         .ok_or_else(|| {
@@ -135,7 +135,7 @@ fn compile_generator_body<'ctx>(
         .set_return_type(body_func_key, TypeId::VOID);
 
     // Build capture bindings: each parameter becomes a closure capture
-    let vir_type_table = &env.analyzed.vir_program().type_table;
+    let vir_type_table = &env.analyzed.type_table;
     let mut capture_bindings: FxHashMap<Symbol, crate::lambda::CaptureBinding> =
         FxHashMap::default();
     for (i, &name) in param_names.iter().enumerate() {
@@ -216,7 +216,7 @@ fn compile_generator_wrapper<'ctx>(
     let param_type_ids = params.param_type_ids;
     let elem_type_id = params.elem_type_id;
     let ptr_type = codegen_ctx.ptr_type();
-    let vir_table = &env.analyzed.vir_program().type_table;
+    let vir_table = &env.analyzed.type_table;
 
     let mut wrapper_ctx = codegen_ctx.jit_module().make_context();
 
@@ -301,7 +301,7 @@ fn emit_capture_closure(
     builder: &mut FunctionBuilder<'_>,
 ) -> CodegenResult<Value> {
     let ptr_type = codegen_ctx.ptr_type();
-    let vir_table = &env.analyzed.vir_program().type_table;
+    let vir_table = &env.analyzed.type_table;
 
     // Resolve all needed runtime functions
     let alloc_ref = runtime_func_ref(RuntimeKey::ClosureAlloc, codegen_ctx, builder.func)?;

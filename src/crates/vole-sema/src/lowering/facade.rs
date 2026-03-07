@@ -904,6 +904,10 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         module_interners,
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),
+        tests_virtual_modules: FxHashMap::default(),
+        module_id: ModuleId::new(0),
+        modules_with_errors: HashSet::new(),
+        substitute_fallback: None,
     };
     run_vir_monomorphize(&mut vir_program);
 

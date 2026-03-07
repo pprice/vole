@@ -279,9 +279,9 @@ fn inspect_vir(
     let printer = VirPrinter::new(&analyzed);
 
     let include_tests = !no_tests;
-    let main_module = analyzed.module_id();
+    let main_module = analyzed.module_id;
 
-    for func in &analyzed.vir_program().functions {
+    for func in &analyzed.functions {
         // Skip non-main-module functions unless --all
         if !show_all && !analyzed.vir_function_in_module(func, main_module) {
             continue;
@@ -293,17 +293,17 @@ fn inspect_vir(
     }
 
     // Print generic VIR function templates (pre-monomorphization)
-    if !analyzed.vir_program().generic_functions.is_empty() {
+    if !analyzed.generic_functions.is_empty() {
         println!("// --- generic VIR templates ---");
-        for func in &analyzed.vir_program().generic_functions {
+        for func in &analyzed.generic_functions {
             print!("{}", printer.print_function(func));
         }
     }
 
     // Print VIR test bodies
-    if include_tests && !analyzed.vir_program().tests.is_empty() {
+    if include_tests && !analyzed.tests.is_empty() {
         println!("tests {{");
-        for test in &analyzed.vir_program().tests {
+        for test in &analyzed.tests {
             // Indent each line of the test output
             for line in printer.print_test(test).lines() {
                 println!("  {line}");

@@ -48,8 +48,8 @@ pub use types::CompiledValue;
 // Error types
 pub use errors::{CodegenError, CodegenResult};
 
-// Analysis types
-pub use analyzed::{AnalyzedProgram, AnalyzedProgramArgs, SubstituteFallbackFn};
+// Re-export VirProgram and SubstituteFallbackFn from vole-vir
+pub use vole_vir::{SubstituteFallbackFn, VirProgram};
 
 // VIR printer
 pub use vir_printer::VirPrinter;

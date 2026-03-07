@@ -805,11 +805,14 @@ impl Cg<'_, '_, '_> {
             })?;
 
             // Check for external method binding first (interface methods on primitives)
-            if let Some(binding) = self.analyzed().method_binding(type_def_id, method_name_id)
-                && let Some(external_info) = binding.external_info
+            if let Some(binding) = self
+                .analyzed()
+                .entity_metadata()
+                .find_method_binding(type_def_id, method_name_id)
+                && let Some(external_info) = &binding.external_info
             {
                 // External method - call via FFI
-                let param_type_ids = &binding.func_type.params_id;
+                let param_type_ids = &binding.sema_func_type.params_id;
                 let ext_arg_source = mc.arg_source();
                 let ext_arg_count = mc.arg_count();
                 let mut args: ArgVec = smallvec![obj.value];
@@ -824,8 +827,8 @@ impl Cg<'_, '_, '_> {
                     args.push(compiled.value);
                 }
                 let return_type_id =
-                    self.maybe_convert_iterator_return_type(binding.func_type.return_type_id);
-                let ext = ExternalMethodRef::from(external_info);
+                    self.maybe_convert_iterator_return_type(binding.sema_func_type.return_type_id);
+                let ext = ExternalMethodRef::from(*external_info);
                 let result = self.call_external_id(&ext, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call
                 let mut obj = obj;
@@ -854,11 +857,12 @@ impl Cg<'_, '_, '_> {
             // Get return type and param types from entity registry
             let (return_type_id, fb_param_ids) = self
                 .analyzed()
-                .method_binding(type_def_id, method_name_id)
+                .entity_metadata()
+                .find_method_binding(type_def_id, method_name_id)
                 .map(|binding| {
                     (
-                        binding.func_type.return_type_id,
-                        Some(binding.func_type.params_id),
+                        binding.sema_func_type.return_type_id,
+                        Some(binding.sema_func_type.params_id.clone()),
                     )
                 })
                 .or_else(|| {
@@ -866,7 +870,7 @@ impl Cg<'_, '_, '_> {
                         .find_method(type_def_id, method_name_id)
                         .map(|mid| {
                             let method = self.analyzed().method_def(mid);
-                            let vir_table = &self.analyzed().vir_program().type_table;
+                            let vir_table = &self.analyzed().type_table;
                             let (params, ret) = vir_table
                                 .lookup_type_id(method.signature_id)
                                 .and_then(|vir_id| vir_table.unwrap_function(vir_id))
@@ -986,86 +990,82 @@ impl Cg<'_, '_, '_> {
 
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
-        let (method_func_ref, is_generic_class) =
-            if let Some(monomorph_key) = class_method_monomorph_key.as_ref() {
-                // Calls inside generic class methods are recorded with abstract keys
-                // (TypeParam type_keys). In concrete monomorphized contexts, rewrite
-                // those keys using the current substitution map before cache lookup.
-                let effective_key = if let Some(subs) = self.substitutions {
-                    let needs_substitution = monomorph_key
+        let (method_func_ref, is_generic_class) = if let Some(monomorph_key) =
+            class_method_monomorph_key.as_ref()
+        {
+            // Calls inside generic class methods are recorded with abstract keys
+            // (TypeParam type_keys). In concrete monomorphized contexts, rewrite
+            // those keys using the current substitution map before cache lookup.
+            let effective_key = if let Some(subs) = self.substitutions {
+                let needs_substitution = monomorph_key
+                    .type_keys
+                    .iter()
+                    .any(|&vir_ty| self.vir_query_unwrap_type_param_v(vir_ty).is_some());
+                if needs_substitution {
+                    let concrete_keys: Vec<VirTypeId> = monomorph_key
                         .type_keys
                         .iter()
-                        .any(|&vir_ty| self.vir_query_unwrap_type_param_v(vir_ty).is_some());
-                    if needs_substitution {
-                        let concrete_keys: Vec<VirTypeId> = monomorph_key
-                            .type_keys
-                            .iter()
-                            .map(|&vir_ty| {
-                                if let Some(name_id) = self.vir_query_unwrap_type_param_v(vir_ty) {
-                                    subs.get(&name_id).copied().unwrap_or(vir_ty)
-                                } else {
-                                    vir_ty
-                                }
-                            })
-                            .collect();
-                        ClassMethodMonomorphKey::new(
-                            monomorph_key.class_name,
-                            monomorph_key.method_name,
-                            concrete_keys,
-                        )
-                    } else {
-                        monomorph_key.clone()
-                    }
+                        .map(|&vir_ty| {
+                            if let Some(name_id) = self.vir_query_unwrap_type_param_v(vir_ty) {
+                                subs.get(&name_id).copied().unwrap_or(vir_ty)
+                            } else {
+                                vir_ty
+                            }
+                        })
+                        .collect();
+                    ClassMethodMonomorphKey::new(
+                        monomorph_key.class_name,
+                        monomorph_key.method_name,
+                        concrete_keys,
+                    )
                 } else {
                     monomorph_key.clone()
-                };
-
-                // Look up the monomorphized instance from VirProgram
-                if let Some(instance) = self
-                    .analyzed()
-                    .vir_program()
-                    .class_method_monomorphs
-                    .get(&effective_key)
-                {
-                    return_type_id = instance.func_type.return_type_id;
-                    let monomorph_func_key = self.funcs().intern_name_id(instance.mangled_name);
-                    // Monomorphized methods have concrete types, no i64 conversion needed
-                    (self.func_ref(monomorph_func_key)?, false)
-                } else if let Some(expanded_info) = self
-                    .env
-                    .state
-                    .expanded_class_method_monomorphs
-                    .get(&effective_key)
-                {
-                    // Found in codegen-side expanded monomorphs table.
-                    // This handles methods on generic module types (e.g. Channel<T>.close())
-                    // called from within monomorphized code (e.g. Task.stream<i64>).
-                    return_type_id = expanded_info.return_type_id;
-                    (self.func_ref(expanded_info.func_key)?, false)
-                } else {
-                    // Fallback to regular method if monomorph not found
-                    let func_key = func_key.ok_or_else(|| {
-                        CodegenError::not_found(
-                            "method",
-                            format!("{method_name_str} (no regular function key)"),
-                        )
-                    })?;
-                    (self.func_ref(func_key)?, false)
                 }
             } else {
-                // Not a monomorphized class method, use regular dispatch
-                let is_generic_class = self
-                    .vir_query_unwrap_class_v(obj.type_id)
-                    .map(|(_, type_args)| !type_args.is_empty())
-                    .unwrap_or(false);
+                monomorph_key.clone()
+            };
+
+            // Look up the monomorphized instance from VirProgram
+            if let Some(instance) = self.analyzed().class_method_monomorphs.get(&effective_key) {
+                return_type_id = instance.func_type.return_type_id;
+                let monomorph_func_key = self.funcs().intern_name_id(instance.mangled_name);
+                // Monomorphized methods have concrete types, no i64 conversion needed
+                (self.func_ref(monomorph_func_key)?, false)
+            } else if let Some(expanded_info) = self
+                .env
+                .state
+                .expanded_class_method_monomorphs
+                .get(&effective_key)
+            {
+                // Found in codegen-side expanded monomorphs table.
+                // This handles methods on generic module types (e.g. Channel<T>.close())
+                // called from within monomorphized code (e.g. Task.stream<i64>).
+                return_type_id = expanded_info.return_type_id;
+                (self.func_ref(expanded_info.func_key)?, false)
+            } else {
+                // Fallback to regular method if monomorph not found
                 let func_key = func_key.ok_or_else(|| {
                     CodegenError::not_found(
                         "method",
-                        format!("{method_name_str} not found in method_func_keys"),
+                        format!("{method_name_str} (no regular function key)"),
                     )
                 })?;
-                (self.func_ref(func_key)?, is_generic_class)
-            };
+                (self.func_ref(func_key)?, false)
+            }
+        } else {
+            // Not a monomorphized class method, use regular dispatch
+            let is_generic_class = self
+                .vir_query_unwrap_class_v(obj.type_id)
+                .map(|(_, type_args)| !type_args.is_empty())
+                .unwrap_or(false);
+            let func_key = func_key.ok_or_else(|| {
+                CodegenError::not_found(
+                    "method",
+                    format!("{method_name_str} not found in method_func_keys"),
+                )
+            })?;
+            (self.func_ref(func_key)?, is_generic_class)
+        };
 
         // Use TypeId-based params for argument coercion (e.g. concrete -> union, concrete -> interface).
         // Try resolution first, fall back to entity registry params from monomorphized context.

@@ -13,7 +13,8 @@ use vole_identity::NameId;
 use vole_runtime::NativeRegistry;
 
 use crate::types::{CodegenCtx, CompileEnv, TypeMetadataMap};
-use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
+use crate::{FunctionKey, FunctionRegistry};
+use vole_vir::VirProgram;
 
 /// Trait providing the interface needed for vtable compilation.
 ///
@@ -21,7 +22,7 @@ use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
 /// which combines CodegenCtx and CompileEnv.
 pub trait VtableCtx {
     /// Get the analyzed program reference
-    fn analyzed(&self) -> &AnalyzedProgram;
+    fn analyzed(&self) -> &VirProgram;
 
     /// Get the interner
     fn interner(&self) -> &Interner;
@@ -71,7 +72,7 @@ impl<'a, 'ctx> VtableCtxView<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
-    fn analyzed(&self) -> &AnalyzedProgram {
+    fn analyzed(&self) -> &VirProgram {
         self.env.analyzed
     }
 

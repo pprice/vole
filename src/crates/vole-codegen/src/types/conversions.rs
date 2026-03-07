@@ -5,10 +5,10 @@
 use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
-use crate::AnalyzedProgram;
 use vole_identity::Interner;
 use vole_identity::{ModuleId, NameId, TypeId, VirTypeId};
 use vole_runtime::native_registry::NativeType;
+use vole_vir::VirProgram;
 
 use super::codegen_state::TypeMetadataMap;
 use crate::ops::{sextend_const, uextend_const};
@@ -173,11 +173,11 @@ pub(crate) fn type_metadata_by_name_id(
 }
 
 pub(crate) fn module_name_id(
-    analyzed: &AnalyzedProgram,
+    analyzed: &VirProgram,
     module_id: ModuleId,
     name: &str,
 ) -> Option<NameId> {
-    let module_interner = analyzed.module_interner(module_id)?;
+    let module_interner = analyzed.module_interner_for_id(module_id)?;
     let sym = module_interner.lookup(name)?;
     analyzed
         .name_table()
@@ -186,7 +186,7 @@ pub(crate) fn module_name_id(
 
 /// Look up a method NameId by string name (cross-interner safe)
 pub(crate) fn method_name_id_by_str(
-    analyzed: &AnalyzedProgram,
+    analyzed: &VirProgram,
     interner: &Interner,
     name_str: &str,
 ) -> Option<NameId> {

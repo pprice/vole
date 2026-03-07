@@ -317,7 +317,7 @@ impl Compiler<'_> {
     pub fn build_vir_signature_for_function(&self, func_id: FunctionId) -> Signature {
         let vir_func = self
             .analyzed
-            .get_vir_function(func_id)
+            .get_function(func_id)
             .unwrap_or_else(|| panic!("build_vir_signature_for_function: no VIR for {func_id:?}"));
         let param_vir_types: SmallVec<[VirTypeId; 8]> = vir_func
             .params

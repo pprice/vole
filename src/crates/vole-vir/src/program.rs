@@ -3,12 +3,13 @@
 // VirProgram: the complete VIR output from sema/lowering, consumed by codegen.
 // This is the clean boundary between VIR lowering and code generation.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 use vole_identity::{
     FieldId, FunctionId, Interner, MethodId, ModuleId, NameId, NameTable, NamerLookup, NodeId,
-    Span, Symbol, TypeDefId, VirTypeId,
+    Span, Symbol, TypeDefId, TypeId, VirTypeId,
 };
 
 use vole_identity::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
@@ -24,6 +25,15 @@ use crate::monomorph::instance::{
 use crate::refs::VirRef;
 use crate::type_table::VirTypeTable;
 use crate::types::VirAnnotation;
+
+/// Substitution fallback function type.
+///
+/// Called when VirTypeTable cannot resolve a substituted compound type.
+/// Allows the CLI crate to inject sema TypeArena substitution logic without
+/// vole-codegen depending on vole-sema.
+///
+/// Arguments: (type_id, substitution_map) -> Option<TypeId>
+pub type SubstituteFallbackFn = dyn Fn(TypeId, &FxHashMap<NameId, TypeId>) -> Option<TypeId>;
 
 /// The complete VIR output: all lowered functions, tests, global inits, and
 /// type metadata bundled into a single struct.
@@ -125,8 +135,7 @@ pub struct VirProgram {
     /// Populated during VIR lowering from `SemaType::Module` entries.
     /// Keyed by the sema `TypeId` of the module type so that codegen can
     /// resolve `obj.@field` on module values without arena access.
-    pub module_exports:
-        FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>,
+    pub module_exports: FxHashMap<TypeId, (ModuleId, Vec<(NameId, TypeId)>)>,
 
     /// Base index of VIR-monomorphized functions within `functions`.
     ///
@@ -191,17 +200,31 @@ pub struct VirProgram {
 
     /// String interner for resolving Symbol IDs to strings.
     ///
-    /// Rc-shared with AnalyzedProgram during the transition period.
     /// Codegen uses this to resolve field names, method names, and other
     /// symbol-based identifiers.
     pub interner: Rc<Interner>,
 
     /// Name table for resolving NameIds to qualified names and module paths.
     ///
-    /// Rc-shared with AnalyzedProgram during the transition period.
     /// Codegen uses this for module path resolution, function/type name
     /// lookup, and NameId-based dispatch.
     pub name_table: Rc<NameTable>,
+
+    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
+    pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
+
+    /// The module ID for the main program (may differ from main_module when using shared cache).
+    pub module_id: ModuleId,
+
+    /// Module paths that had sema errors. Codegen should skip compiling
+    /// function bodies for these modules to avoid INVALID type IDs.
+    pub modules_with_errors: HashSet<String>,
+
+    /// Substitution fallback for compound types not yet interned in VirTypeTable.
+    ///
+    /// Injected by the CLI crate (wraps sema TypeArena::lookup_substitute).
+    /// Will be removed once VirTypeTable supports intern-on-substitute.
+    pub substitute_fallback: Option<Box<SubstituteFallbackFn>>,
 }
 
 impl VirProgram {
@@ -447,5 +470,377 @@ impl VirProgram {
     /// Return the module path string for a module ID.
     pub fn module_path(&self, module_id: ModuleId) -> &str {
         self.name_table.module_path(module_id)
+    }
+
+    // ---- Methods migrated from AnalyzedProgram ----
+
+    /// Try substituting via the injected fallback (TypeArena wrapper).
+    ///
+    /// Returns `None` when no fallback was provided or when the fallback itself
+    /// cannot resolve the type.
+    pub fn substitute_fallback(
+        &self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<TypeId> {
+        self.substitute_fallback.as_ref()?.as_ref()(ty, subs)
+    }
+
+    /// Resolve the EntityRegistry NameId used for all array implement dispatch.
+    pub fn array_type_name_id(&self) -> Option<NameId> {
+        self.entity_metadata.array_name_id()
+    }
+
+    /// Resolve a type's canonical entity NameId from its TypeDefId.
+    pub fn entity_type_name_id(&self, type_def_id: TypeDefId) -> NameId {
+        self.entity_metadata
+            .type_name_id(type_def_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "entity_type_name_id: type def {:?} not in VirEntityMetadata",
+                    type_def_id
+                )
+            })
+    }
+
+    /// Resolve a VIR type definition by ID.
+    pub fn type_def(&self, type_def_id: TypeDefId) -> &crate::entity_metadata::VirTypeDef {
+        self.entity_metadata
+            .get_type_def(type_def_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "type_def: type def {:?} not in VirEntityMetadata",
+                    type_def_id
+                )
+            })
+    }
+
+    /// Query-compatible alias for resolving a VIR type definition by ID.
+    pub fn get_type(&self, type_def_id: TypeDefId) -> &crate::entity_metadata::VirTypeDef {
+        self.type_def(type_def_id)
+    }
+
+    /// Resolve a VIR field definition by ID.
+    pub fn field_def(&self, field_id: FieldId) -> &crate::VirFieldDef {
+        self.entity_metadata
+            .get_field_def(field_id)
+            .unwrap_or_else(|| panic!("field_def: no VirFieldDef for {field_id:?}"))
+    }
+
+    /// Query-compatible alias for resolving a VIR field definition by ID.
+    pub fn get_field(&self, field_id: FieldId) -> &crate::VirFieldDef {
+        self.field_def(field_id)
+    }
+
+    /// Resolve a VIR function definition by ID.
+    pub fn function_def(&self, function_id: FunctionId) -> &crate::entity_metadata::VirFunctionDef {
+        self.entity_metadata
+            .get_function_def(function_id)
+            .unwrap_or_else(|| panic!("function_def: no VirFunctionDef for {function_id:?}"))
+    }
+
+    /// Resolve a VIR method definition by ID.
+    pub fn method_def(&self, method_id: MethodId) -> &crate::entity_metadata::VirMethodDef {
+        self.entity_metadata
+            .get_method_def(method_id)
+            .unwrap_or_else(|| panic!("method_def: no VirMethodDef for {method_id:?}"))
+    }
+
+    /// Query-compatible alias for resolving a VIR method definition by ID.
+    pub fn get_method_def(&self, method_id: MethodId) -> &crate::entity_metadata::VirMethodDef {
+        self.method_def(method_id)
+    }
+
+    /// Return the sema signature TypeId for a method.
+    pub fn method_signature_id(&self, method_id: MethodId) -> TypeId {
+        self.method_def(method_id).signature_id
+    }
+
+    /// Return all field IDs declared on a type definition.
+    pub fn fields_on_type(&self, type_def_id: TypeDefId) -> impl Iterator<Item = FieldId> + '_ {
+        self.entity_metadata
+            .fields_on_type(type_def_id)
+            .unwrap_or(&[])
+            .iter()
+            .copied()
+    }
+
+    /// Return true when a global is present for the given NameId.
+    pub fn has_global(&self, name_id: NameId) -> bool {
+        self.entity_metadata.has_global(name_id)
+    }
+
+    /// Resolve type definition by NameId.
+    pub fn try_type_def_id(&self, name_id: NameId) -> Option<TypeDefId> {
+        self.entity_metadata.type_by_name(name_id)
+    }
+
+    /// Resolve semantic FunctionId by NameId.
+    pub fn function_id_by_name_id(&self, name_id: NameId) -> Option<FunctionId> {
+        self.entity_metadata.function_by_name(name_id)
+    }
+
+    /// Resolve a string type name in a module context.
+    pub fn resolve_type_def_by_str(&self, module_id: ModuleId, name: &str) -> Option<TypeDefId> {
+        self.entity_metadata.resolve_type_def_by_str(
+            self.interner(),
+            self.name_table(),
+            module_id,
+            name,
+        )
+    }
+
+    /// Return sentinel base type for a sentinel TypeDef, when present.
+    pub fn sentinel_base_type(&self, type_def_id: TypeDefId) -> Option<TypeId> {
+        self.type_def(type_def_id).base_type_id
+    }
+
+    /// Return whether a type definition is a sentinel.
+    pub fn is_sentinel_type(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_type_is_sentinel(type_def_id)
+    }
+
+    /// Return whether a type definition is an interface.
+    pub fn is_interface_type(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_metadata
+            .type_def_kind(type_def_id)
+            .is_some_and(|k| k.is_interface())
+    }
+
+    /// Return interface method binding return type, when a binding exists.
+    pub fn method_binding_return_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<TypeId> {
+        self.entity_metadata
+            .find_method_binding(type_def_id, method_name_id)
+            .map(|binding| binding.sema_func_type.return_type_id)
+    }
+
+    /// Find a method on a type by method NameId.
+    pub fn find_method(&self, type_def_id: TypeDefId, method_name_id: NameId) -> Option<MethodId> {
+        self.entity_metadata
+            .find_method_on_type(type_def_id, method_name_id)
+    }
+
+    /// Return direct method IDs declared on a type definition.
+    pub fn type_methods(&self, type_def_id: TypeDefId) -> Vec<MethodId> {
+        self.entity_metadata
+            .methods_on_type(type_def_id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Build interface type-parameter substitutions for a concrete implementation.
+    pub fn interface_impl_type_param_subs(
+        &self,
+        implementing_type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> FxHashMap<NameId, TypeId> {
+        let type_params = self.entity_type_params(interface_id);
+        let type_args = self
+            .entity_metadata
+            .implementation_sema_type_args(implementing_type_id, interface_id);
+        type_params
+            .into_iter()
+            .zip(type_args.iter().copied())
+            .collect()
+    }
+
+    /// Build VirTypeId-native interface type-parameter substitutions for a concrete
+    /// implementation.
+    pub fn interface_impl_type_param_vir_subs(
+        &self,
+        implementing_type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> FxHashMap<NameId, VirTypeId> {
+        let sema_subs = self.interface_impl_type_param_subs(implementing_type_id, interface_id);
+        sema_subs
+            .into_iter()
+            .map(|(name, tid)| {
+                let vir_ty = self.type_table.lookup_type_id(tid).unwrap_or_else(|| {
+                    debug_assert!(
+                        false,
+                        "interface impl sub TypeId({}) not in VirTypeTable",
+                        tid.raw()
+                    );
+                    VirTypeId::UNKNOWN
+                });
+                (name, vir_ty)
+            })
+            .collect()
+    }
+
+    /// Get the full NameId for a semantic method.
+    pub fn method_full_name(&self, method_id: MethodId) -> NameId {
+        self.entity_metadata
+            .method_full_name_id(method_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "method_full_name: method {:?} not in VirEntityMetadata",
+                    method_id
+                )
+            })
+    }
+
+    /// Return all interfaces implemented by a type definition.
+    pub fn implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId> {
+        self.entity_metadata.implemented_interfaces(type_def_id)
+    }
+
+    /// Return all implement block entries (main program + all modules) that
+    /// target the given type.
+    pub fn implement_blocks_for_type(
+        &self,
+        type_def_id: TypeDefId,
+    ) -> impl Iterator<Item = &crate::VirImplementBlockEntry> {
+        let em = &self.entity_metadata;
+        em.implement_blocks()
+            .iter()
+            .chain(
+                em.all_module_implement_blocks()
+                    .flat_map(|(_, entries)| entries.iter()),
+            )
+            .filter(move |entry| entry.type_def_id == type_def_id)
+    }
+
+    /// Return external binding metadata for a method, when available.
+    pub fn method_external_binding(
+        &self,
+        method_id: MethodId,
+    ) -> Option<&crate::VirExternalMethodInfo> {
+        self.method_def(method_id).external_binding.as_ref()
+    }
+
+    /// Return true when all methods on a type are external-only.
+    pub fn is_external_only(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_metadata.is_external_only(type_def_id)
+    }
+
+    /// Return the single abstract method for functional interfaces.
+    pub fn is_functional_interface(&self, type_def_id: TypeDefId) -> Option<MethodId> {
+        self.entity_metadata.is_functional(type_def_id)
+    }
+
+    /// Return all test-scoped virtual module IDs.
+    pub fn tests_virtual_module_ids(&self) -> Vec<ModuleId> {
+        self.tests_virtual_modules.values().copied().collect()
+    }
+
+    /// Return function parameter TypeIds by FunctionId.
+    pub fn function_param_type_ids(&self, func_id: FunctionId) -> Vec<TypeId> {
+        self.function_def(func_id).sema_param_types.clone()
+    }
+
+    /// Return global declared VirTypeId by NameId.
+    pub fn global_vir_type(&self, name_id: NameId) -> Option<VirTypeId> {
+        let global_id = self.entity_metadata.global_by_name(name_id)?;
+        Some(
+            self.entity_metadata
+                .get_global_def(global_id)
+                .expect("global_vir_type: global ID not in VirEntityMetadata")
+                .vir_ty,
+        )
+    }
+
+    /// Return whether a function parameter has a default expression.
+    pub fn has_function_default_expr(&self, func_id: FunctionId, param_idx: usize) -> bool {
+        self.function_def(func_id)
+            .has_defaults
+            .get(param_idx)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Return whether a method parameter has a default expression.
+    pub fn has_method_default_expr(&self, method_id: MethodId, param_idx: usize) -> bool {
+        self.method_def(method_id)
+            .has_param_defaults
+            .get(param_idx)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Return imported-module interner for a module ID, when available.
+    pub fn module_interner_for_id(&self, module_id: ModuleId) -> Option<&Interner> {
+        let module_path = self.module_path(module_id);
+        self.module_interner(module_path)
+    }
+
+    /// Return whether a type definition is marked as an annotation type.
+    pub fn type_is_annotation(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_metadata.is_annotation(type_def_id)
+    }
+
+    /// Return interface method IDs in deterministic slot order.
+    pub fn interface_method_ids_ordered(&self, interface_type_def_id: TypeDefId) -> Vec<MethodId> {
+        self.entity_metadata
+            .interface_methods_ordered(interface_type_def_id)
+    }
+
+    /// Return declared type parameter NameIds for a type definition.
+    pub fn entity_type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
+        self.entity_metadata
+            .type_params(type_def_id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Return whether a type definition is a sentinel type.
+    pub fn entity_type_is_sentinel(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_metadata
+            .type_def_kind(type_def_id)
+            .is_some_and(|k| k.is_sentinel())
+    }
+
+    /// Find a type by its short (last-segment) name.
+    pub fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
+        self.entity_metadata.type_by_short_name(short_name)
+    }
+
+    /// Return whether a VIR function belongs to the given module.
+    pub fn vir_function_in_module(&self, func: &VirFunction, module_id: ModuleId) -> bool {
+        if let Some(method_id) = func.method_id {
+            let method_def = self.get_method_def(method_id);
+            self.get_type(method_def.defining_type).module == module_id
+        } else {
+            self.function_def(func.id).module == module_id
+        }
+    }
+
+    /// Resolve the implement-registry type key NameId from a `VirTypeId`.
+    ///
+    /// Inspects the `VirTypeTable` directly for Array / Class / Struct, and
+    /// falls back through `vir_to_sema_type_id_lossy` for primitives that are
+    /// in the pre-computed `impl_type_names` map.
+    pub fn impl_type_name_id_from_vir_type_id(&self, vir_ty: VirTypeId) -> Option<NameId> {
+        let entity_metadata = &self.entity_metadata;
+        let table = &self.type_table;
+        match table.get(vir_ty) {
+            crate::types::VirType::Array { .. } => entity_metadata.array_name_id(),
+            crate::types::VirType::Class { def, .. }
+            | crate::types::VirType::Struct { def, .. } => entity_metadata.type_name_id(*def),
+            _ => {
+                // Primitives, Range, Handle: try the pre-computed map keyed by sema TypeId.
+                let sema_id = self.type_table.vir_to_type_id(vir_ty);
+                entity_metadata.impl_type_name(sema_id)
+            }
+        }
+    }
+
+    /// VirTypeId-accepting overload of implement method lookup.
+    ///
+    /// Converts VirTypeId to the implement-registry NameId via
+    /// `impl_type_name_id_from_vir_type_id`, then delegates to
+    /// `implement_method_by_name`.
+    pub fn implement_method_for_type_v(
+        &self,
+        vir_ty: VirTypeId,
+        method_name_id: NameId,
+    ) -> Option<(NameId, &VirMethodImplInfo)> {
+        let type_name_id = self.impl_type_name_id_from_vir_type_id(vir_ty)?;
+        let method_impl = self.implement_method_by_name(type_name_id, method_name_id)?;
+        Some((type_name_id, method_impl))
     }
 }

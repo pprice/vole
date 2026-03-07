@@ -188,7 +188,7 @@ impl Compiler<'_> {
         let mut method_infos = FxHashMap::default();
 
         for &method_id in method_ids {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             // Skip inherited default methods — they are declared separately
             // by register_interface_default_methods.
             if method_def.has_default {
@@ -226,7 +226,7 @@ impl Compiler<'_> {
         let direct_method_name_strs: std::collections::HashSet<String> = direct_method_ids
             .iter()
             .filter_map(|&mid| {
-                let md = self.analyzed.get_method(mid);
+                let md = self.analyzed.get_method_def(mid);
                 if md.has_default {
                     return None;
                 }
@@ -244,7 +244,7 @@ impl Compiler<'_> {
             for interface_tdef_id in query.implemented_interfaces(type_def_id) {
                 let interface_method_ids = query.type_methods(interface_tdef_id);
                 for method_id in interface_method_ids {
-                    let method_def = query.get_method(method_id);
+                    let method_def = query.get_method_def(method_id);
                     if !method_def.has_default {
                         continue;
                     }
@@ -280,7 +280,7 @@ impl Compiler<'_> {
         // Register each default method in the JIT function registry
         for (_interface_tdef_id, semantic_method_id, method_name_id) in default_method_ids {
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method_def(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -473,7 +473,7 @@ impl Compiler<'_> {
         type_def_id: TypeDefId,
     ) -> CodegenResult<()> {
         for &method_id in static_method_ids {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
 
             // Skip external-only statics (no Vole body to compile)
             if method_def.external_binding.is_some() {
@@ -517,7 +517,7 @@ impl Compiler<'_> {
         );
 
         for &method_id in method_ids {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             // Skip inherited default methods — they are declared and compiled
             // through the implement block path, not the module type path.
             if method_def.has_default {
@@ -570,7 +570,7 @@ impl Compiler<'_> {
         type_name_str: &str,
     ) -> CodegenResult<()> {
         for &method_id in static_method_ids {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
 
             // Skip external-only statics (no Vole body to compile)
             if method_def.external_binding.is_some() {

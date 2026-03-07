@@ -257,7 +257,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let module_id = self
             .current_module_id()
-            .unwrap_or(self.env.analyzed.module_id());
+            .unwrap_or(self.env.analyzed.module_id);
         let name_id = self.analyzed().function_name_id(module_id, sym);
 
         let orig_func_key = self.funcs().intern_name_id(name_id);
@@ -1181,7 +1181,7 @@ impl Cg<'_, '_, '_> {
 
         // Sentinel fallback (name-based resolution)
         let name = self.interner().resolve(sym);
-        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
+        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
         if let Some(type_def_id) = self.analyzed().resolve_type_def_by_str(module_id, name)
             && self.analyzed().is_sentinel_type(type_def_id)
             && let Some(sentinel_type_id) = self.analyzed().sentinel_base_type(type_def_id)
@@ -1207,9 +1207,7 @@ impl Cg<'_, '_, '_> {
         value: &mut CompiledValue,
     ) -> CodegenResult<()> {
         let name_table = self.name_table();
-        let module_id = self
-            .current_module()
-            .unwrap_or(self.env.analyzed.module_id());
+        let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
         if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
             && let Some(global_vir_ty) = self.analyzed().global_vir_type(name_id)
         {

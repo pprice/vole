@@ -3,8 +3,8 @@
 // Utility functions for method resolution during codegen.
 // Method resolution uses VirResolvedMethod from VIR lowering.
 
-use crate::AnalyzedProgram;
 use vole_identity::{TypeDefId, VirTypeId};
+use vole_vir::VirProgram;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{VirPrimitiveKind, VirType};
 
@@ -15,7 +15,7 @@ use vole_vir::types::{VirPrimitiveKind, VirType};
 pub(crate) fn get_type_def_id_from_vir_type_id(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    analyzed: &AnalyzedProgram,
+    analyzed: &VirProgram,
 ) -> Option<TypeDefId> {
     let name_table = analyzed.name_table();
 

@@ -64,7 +64,7 @@ pub use numeric_model::{
     NumericCoercion, integer_result_type, integer_result_type_v, numeric_coercion,
     numeric_coercion_v, numeric_result_type, numeric_result_type_v,
 };
-pub use program::VirProgram;
+pub use program::{SubstituteFallbackFn, VirProgram};
 pub use refs::VirRef;
 pub use stmt::{
     AssignTarget, DestructureTupleKind, LetStorageHint, ReturnConvention, VirDestructureElement,

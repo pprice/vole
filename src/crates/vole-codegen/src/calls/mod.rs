@@ -128,9 +128,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // 1. Try direct function lookup
         // 2. If in module context, try mangled name
         // 3. If in module context, try FFI call
-        let program_module = self
-            .current_module()
-            .unwrap_or(self.env.analyzed.module_id());
+        let program_module = self.current_module().unwrap_or(self.env.analyzed.module_id);
         let direct_name_id = {
             let names = self.name_table();
             names.name_id(program_module, &[callee_sym], self.interner())
@@ -294,9 +292,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Scope the name_table borrow to avoid conflicts with later mutable borrows
         let global_vir_ty = {
             let name_table = self.name_table();
-            let module_id = self
-                .current_module()
-                .unwrap_or(self.env.analyzed.module_id());
+            let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
             name_table
                 .name_id(module_id, &[callee_sym], self.interner())
                 .and_then(|name_id| self.analyzed().global_vir_type(name_id))
@@ -369,9 +365,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // current AST, which may be a module with its own interner. ProgramQuery
         // always uses the main program's interner, causing index-out-of-bounds when
         // a module Symbol index exceeds the main interner's size.
-        let module_id = self
-            .current_module()
-            .unwrap_or(self.env.analyzed.module_id());
+        let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
         let name_id = self
             .name_table()
             .name_id(module_id, &[callee_sym], self.interner());
@@ -750,9 +744,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Otherwise, compile defaults for the missing parameters.
-        let module_id = self
-            .current_module()
-            .unwrap_or(self.env.analyzed.module_id());
+        let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
 
         // Look up the function by symbol. Use self.interner() to resolve module-local
         // symbols correctly (avoids index-out-of-bounds on module interners).

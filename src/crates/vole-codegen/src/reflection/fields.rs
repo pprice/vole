@@ -83,7 +83,7 @@ pub(super) fn build_field_meta_array(
 
 /// Collect field info tuples for all fields, including VIR-lowered annotations.
 fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
-    let vir_program = cg.analyzed().vir_program();
+    let vir_program = cg.analyzed();
     cg.analyzed()
         .fields_on_type(type_def_id)
         .map(|field_id| {

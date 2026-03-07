@@ -113,7 +113,7 @@ impl Compiler<'_> {
                 continue;
             }
             if has_impl_blocks {
-                let method_def = self.analyzed.get_method(method_id);
+                let method_def = self.analyzed.get_method_def(method_id);
                 if method_def.has_default {
                     // When implement blocks exist, compile_iface_default_methods
                     // handles ALL default methods (from all interfaces, not just
@@ -121,7 +121,7 @@ impl Compiler<'_> {
                     continue;
                 }
             }
-            if self.analyzed.get_vir_method(method_id).is_none() {
+            if self.analyzed.get_method(method_id).is_none() {
                 continue;
             }
             self.compile_method_by_id_inner(method_id, &type_display, &metadata)?;
@@ -157,7 +157,7 @@ impl Compiler<'_> {
         type_name_str: &str,
         metadata: &TypeMetadata,
     ) -> CodegenResult<()> {
-        let method_def = self.analyzed.get_method(method_id);
+        let method_def = self.analyzed.get_method_def(method_id);
         let method_name_id = method_def.name_id;
         let method_name_str = self
             .analyzed
@@ -184,14 +184,14 @@ impl Compiler<'_> {
         let self_type_id = metadata.vole_type;
 
         // Get param and return types from VIR method definition
-        let method_def = self.analyzed.get_method(method_id);
+        let method_def = self.analyzed.get_method_def(method_id);
         let param_vir_types = &method_def.param_types;
         let return_vir_type = method_def.return_type;
 
         // Get VIR function (must be available at this point)
         let vir_func = self
             .analyzed
-            .get_vir_method(method_id)
+            .get_method(method_id)
             .expect("VIR must be available for type method");
 
         // Build params using VIR function param Symbols (not interner lookup).
@@ -266,7 +266,7 @@ impl Compiler<'_> {
         _module_id: ModuleId,
     ) -> CodegenResult<()> {
         for &method_id in static_method_ids {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
 
             // Only compile methods with bodies (skip external-only)
             if method_def.external_binding.is_some() {
@@ -292,14 +292,14 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Get param and return types from VIR method definition
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let param_vir_types = &method_def.param_types;
             let return_vir_type = method_def.return_type;
 
             // Get VIR function (must be available)
             let vir_func = self
                 .analyzed
-                .get_vir_method(method_id)
+                .get_method(method_id)
                 .expect("VIR must be available for static method");
 
             // Build params using VIR function param Symbols
@@ -448,7 +448,7 @@ impl Compiler<'_> {
         type_name_str: &str,
     ) -> CodegenResult<()> {
         for &method_id in method_ids {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             // Skip inherited default methods — they are compiled via the
             // implement block / default method path, not the direct method path.
             if method_def.has_default {
@@ -476,14 +476,14 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Get param and return types from VIR method definition
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let param_vir_types = &method_def.param_types;
             let return_vir_type = method_def.return_type;
 
             // Get VIR function (must be available)
             let vir_func = self
                 .analyzed
-                .get_vir_method(method_id)
+                .get_method(method_id)
                 .expect("VIR must be available for module method");
 
             let self_sym = module_info
@@ -552,7 +552,7 @@ impl Compiler<'_> {
         type_name_str: &str,
     ) -> CodegenResult<()> {
         for &method_id in static_method_ids {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
 
             // Skip external-only statics
             if method_def.external_binding.is_some() {
@@ -577,14 +577,14 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Get param and return types from sema
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let param_vir_types = &method_def.param_types;
             let return_vir_type = method_def.return_type;
 
             // Get VIR function (must be available)
             let vir_func = self
                 .analyzed
-                .get_vir_method(method_id)
+                .get_method(method_id)
                 .expect("VIR must be available for module static method");
 
             // Build params using VIR function param Symbols

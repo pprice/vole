@@ -47,7 +47,7 @@ impl Compiler<'_> {
 
         // Import explicitly declared instance methods
         for &method_id in &entry.instance_methods {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let sig = self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
             let func_key = self.register_method_func(method_id, &sig, DeclareMode::Import);
             self.state
@@ -60,7 +60,7 @@ impl Compiler<'_> {
         let direct_method_name_ids: std::collections::HashSet<NameId> = entry
             .instance_methods
             .iter()
-            .map(|&mid| self.analyzed.get_method(mid).name_id)
+            .map(|&mid| self.analyzed.get_method_def(mid).name_id)
             .collect();
 
         let iface_default_methods =
@@ -81,7 +81,7 @@ impl Compiler<'_> {
                     continue;
                 }
             }
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method_def(semantic_method_id);
             let sig = self
                 .build_substituted_method_sig(
                     &method_def.param_types,
@@ -104,7 +104,7 @@ impl Compiler<'_> {
 
         // Import static methods
         for &method_id in &entry.static_methods {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
             let func_key = self.register_method_func(method_id, &sig, DeclareMode::Import);
             self.state
@@ -130,7 +130,7 @@ impl Compiler<'_> {
 
         // Declare instance methods as functions
         for &method_id in &entry.instance_methods {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let sig = self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
             let func_key = self.register_method_func(method_id, &sig, DeclareMode::Declare);
             self.state
@@ -145,7 +145,7 @@ impl Compiler<'_> {
         let direct_method_name_ids: std::collections::HashSet<NameId> = entry
             .instance_methods
             .iter()
-            .map(|&mid| self.analyzed.get_method(mid).name_id)
+            .map(|&mid| self.analyzed.get_method_def(mid).name_id)
             .collect();
 
         let iface_default_methods =
@@ -172,7 +172,7 @@ impl Compiler<'_> {
                     continue;
                 }
             }
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method_def(semantic_method_id);
             let sig = self
                 .build_substituted_method_sig(
                     &method_def.param_types,
@@ -196,7 +196,7 @@ impl Compiler<'_> {
 
         // Register static methods (VirImplementBlockEntry only includes methods with bodies)
         for &method_id in &entry.static_methods {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
             let func_key = self.register_method_func(method_id, &sig, DeclareMode::Declare);
             self.state
@@ -232,7 +232,7 @@ impl Compiler<'_> {
 
         // Compile instance methods
         for &method_id in &entry.instance_methods {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let method_key = self
                 .state
                 .method_func_keys
@@ -268,7 +268,7 @@ impl Compiler<'_> {
 
         // Compile instance methods using module interner for name resolution
         for &method_id in &entry.instance_methods {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let method_key = self
                 .state
                 .method_func_keys
@@ -306,7 +306,7 @@ impl Compiler<'_> {
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
@@ -328,12 +328,12 @@ impl Compiler<'_> {
         let params = self.build_method_params_from_vir(method_id, interner)?;
 
         let method_return_vir_ty = {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             Some(method_def.return_type)
         };
 
         // Get the VIR function (must be available — implement block methods are always lowered)
-        let vir_func = self.analyzed.get_vir_method(method_id).unwrap_or_else(|| {
+        let vir_func = self.analyzed.get_method(method_id).unwrap_or_else(|| {
             panic!("VIR must be available for module implement method (MethodId={method_id:?})")
         });
 
@@ -389,7 +389,7 @@ impl Compiler<'_> {
             })?;
 
             // Use VIR method definition for param/return types
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let param_vir_types = method_def.param_types.clone();
             let return_vir_type = method_def.return_type;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
@@ -403,7 +403,7 @@ impl Compiler<'_> {
             // Build param info from VirMethodDef.param_names
             let interner = self.interner_for_module(module_id);
             let table = self.vir_type_table();
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             let params: Vec<_> = method_def
                 .param_names
                 .iter()
@@ -444,7 +444,7 @@ impl Compiler<'_> {
                 // VIR path — all implement block statics are lowered
                 let vir_func = self
                     .analyzed
-                    .get_vir_method(method_id)
+                    .get_method(method_id)
                     .expect("implement block static method should have VIR");
                 compile_function_inner_with_vir(
                     builder,
@@ -478,7 +478,7 @@ impl Compiler<'_> {
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
@@ -501,7 +501,7 @@ impl Compiler<'_> {
 
         // Get the method's return type from VIR method definition
         let method_return_vir_ty = {
-            let method_def = self.analyzed.get_method(method_id);
+            let method_def = self.analyzed.get_method_def(method_id);
             Some(method_def.return_type)
         };
 
@@ -525,7 +525,7 @@ impl Compiler<'_> {
             // VIR path — all implement block methods are lowered
             let vir_func = self
                 .analyzed
-                .get_vir_method(method_id)
+                .get_method(method_id)
                 .expect("implement block method should have VIR");
             compile_function_inner_with_vir(
                 builder,
@@ -567,7 +567,7 @@ impl Compiler<'_> {
         // Find the method by name string
         let method_name_id = self.analyzed.try_method_name_id_by_str(method_name_str)?;
         let method_id = self.analyzed.find_method(iface_tdef_id, method_name_id)?;
-        let method_def = self.analyzed.get_method(method_id);
+        let method_def = self.analyzed.get_method_def(method_id);
 
         // Only return if the method has a default body
         if !method_def.has_default {
@@ -585,10 +585,7 @@ impl Compiler<'_> {
         } else {
             // Interface is in a module — get its interner
             let module_path = self.analyzed.name_table().module_path(iface_module_id);
-            let interner = self
-                .analyzed
-                .vir_program()
-                .module_interner_rc(module_path)?;
+            let interner = self.analyzed.module_interner_rc(module_path)?;
             Some((interner, Some(iface_module_id)))
         }
     }
@@ -602,7 +599,7 @@ impl Compiler<'_> {
         method_id: MethodId,
         interner: &Interner,
     ) -> CodegenResult<Vec<(Symbol, VirTypeId, types::Type)>> {
-        let method_def = self.analyzed.get_method(method_id);
+        let method_def = self.analyzed.get_method_def(method_id);
         let table = self.vir_type_table();
         let params = method_def
             .param_names
@@ -629,7 +626,7 @@ impl Compiler<'_> {
     fn interner_for_module(&self, module_id: Option<ModuleId>) -> Rc<Interner> {
         if let Some(mod_id) = module_id {
             let module_path = self.analyzed.name_table().module_path(mod_id);
-            if let Some(interner) = self.analyzed.vir_program().module_interner_rc(module_path) {
+            if let Some(interner) = self.analyzed.module_interner_rc(module_path) {
                 return interner;
             }
         }
@@ -648,7 +645,7 @@ impl Compiler<'_> {
         let mut results = Vec::new();
         for interface_tdef_id in query.implemented_interfaces(type_def_id) {
             for iface_method_id in query.type_methods(interface_tdef_id) {
-                let method_def = query.get_method(iface_method_id);
+                let method_def = query.get_method_def(iface_method_id);
                 if !method_def.has_default {
                     continue;
                 }
@@ -687,7 +684,7 @@ impl Compiler<'_> {
         let direct_method_name_ids: std::collections::HashSet<NameId> = entry
             .instance_methods
             .iter()
-            .map(|&mid| self.analyzed.get_method(mid).name_id)
+            .map(|&mid| self.analyzed.get_method_def(mid).name_id)
             .collect();
 
         // Collect (interface_name_str, default_method_id, method_name_id, interface_tdef_id)
@@ -699,7 +696,7 @@ impl Compiler<'_> {
                     .last_segment(query.entity_type_name_id(interface_tdef_id))
                     .unwrap_or_default();
                 for iface_method_id in query.type_methods(interface_tdef_id) {
-                    let method_def = query.get_method(iface_method_id);
+                    let method_def = query.get_method_def(iface_method_id);
                     if !method_def.has_default {
                         continue;
                     }
@@ -775,7 +772,7 @@ impl Compiler<'_> {
 
             // Substitute VirTypeIds: UNKNOWN → self, TypeParam(T) → concrete type.
             let self_vir_ty = self.vir_lookup(self_type_id);
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method_def(semantic_method_id);
             let (subst_param_virs, return_vir_ty) = self
                 .substitute_method_vir_types(
                     &method_def.param_types,
@@ -801,7 +798,7 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Build params from VirMethodDef.param_names using the interface's interner
-            let method_def = self.analyzed.get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method_def(semantic_method_id);
             let param_cranelift_types = self.vir_ids_to_cranelift(&subst_param_virs);
             let params: Vec<_> = method_def
                 .param_names
@@ -858,7 +855,7 @@ impl Compiler<'_> {
                 };
                 let vir_func = self
                     .analyzed
-                    .get_vir_method(semantic_method_id)
+                    .get_method(semantic_method_id)
                     .expect("implement block default method should have VIR");
                 compile_function_inner_with_vir(
                     builder,
@@ -940,7 +937,7 @@ impl Compiler<'_> {
             let query = self.analyzed;
             let mut results = Vec::new();
             for iface_method_id in query.type_methods(iterable_tdef_id) {
-                let method_def = query.get_method(iface_method_id);
+                let method_def = query.get_method_def(iface_method_id);
                 if !method_def.has_default {
                     continue;
                 }
@@ -1002,7 +999,7 @@ impl Compiler<'_> {
                 // Substitute VirTypeIds: UNKNOWN → self, TypeParam(T) → concrete elem type.
                 // If the return type cannot be resolved (e.g. T? not interned for this
                 // elem_type), skip this method.
-                let method_def = self.analyzed.get_method(*semantic_method_id);
+                let method_def = self.analyzed.get_method_def(*semantic_method_id);
                 let Some((subst_param_virs, return_vir_ty)) = self.substitute_method_vir_types(
                     &method_def.param_types,
                     method_def.return_type,
@@ -1043,7 +1040,7 @@ impl Compiler<'_> {
                 self.jit.ctx.func.signature = sig;
 
                 // Build params from VirMethodDef.param_names using the interface's interner
-                let method_def = self.analyzed.get_method(*semantic_method_id);
+                let method_def = self.analyzed.get_method_def(*semantic_method_id);
                 let param_cranelift_types = self.vir_ids_to_cranelift(&subst_param_virs);
                 let params: Vec<_> = method_def
                     .param_names
@@ -1087,7 +1084,7 @@ impl Compiler<'_> {
                         FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
                             .with_iterable_default_body()
                             .with_self_vir_type(self_vir_ty);
-                    let vir_func = self.analyzed.get_vir_method(*semantic_method_id)
+                    let vir_func = self.analyzed.get_method(*semantic_method_id)
                         .unwrap_or_else(|| {
                             panic!("VIR must be available for array iterable default method (MethodId={semantic_method_id:?})")
                         });
@@ -1156,7 +1153,7 @@ impl Compiler<'_> {
             let query = self.analyzed;
             let mut results = Vec::new();
             for iface_method_id in query.type_methods(iterable_tdef_id) {
-                let method_def = query.get_method(iface_method_id);
+                let method_def = query.get_method_def(iface_method_id);
                 if !method_def.has_default || method_def.external_binding.is_some() {
                     continue;
                 }
@@ -1196,7 +1193,7 @@ impl Compiler<'_> {
 
                 // Substitute VirTypeIds and build signature (same as compile path).
                 // Returns None if return type unresolvable for this elem_type; skip.
-                let method_def = self.analyzed.get_method(*semantic_method_id);
+                let method_def = self.analyzed.get_method_def(*semantic_method_id);
                 let Some(sig) = self.build_substituted_method_sig(
                     &method_def.param_types,
                     method_def.return_type,

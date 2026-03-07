@@ -136,7 +136,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> crate::errors::CodegenResult<Value> {
         let ptr_type = self.codegen_ctx.ptr_type();
         let analyzed = self.env.analyzed;
-        let table = &self.env.analyzed.vir_program().type_table;
+        let table = &self.env.analyzed.type_table;
         super::types::vir_conversions::vir_value_to_word(
             self.builder,
             compiled,
@@ -156,7 +156,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn convert_from_i64_storage_v(&mut self, word: Value, vir_ty: VirTypeId) -> Value {
         let ptr_type = self.codegen_ctx.ptr_type();
         let analyzed = self.env.analyzed;
-        let table = &self.env.analyzed.vir_program().type_table;
+        let table = &self.env.analyzed.type_table;
         super::types::vir_conversions::vir_word_to_value(
             self.builder,
             word,

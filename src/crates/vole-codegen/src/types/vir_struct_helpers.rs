@@ -37,13 +37,13 @@ pub(crate) trait VirStructEntityLookup {
     fn vir_type_def(&self, type_def_id: TypeDefId) -> Option<&VirTypeDef>;
 }
 
-impl VirStructEntityLookup for crate::analyzed::AnalyzedProgram {
+impl VirStructEntityLookup for vole_vir::VirProgram {
     fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
         self.entity_type_is_sentinel(type_def_id)
     }
 
     fn last_segment(&self, name_id: NameId) -> Option<String> {
-        crate::analyzed::AnalyzedProgram::last_segment(self, name_id)
+        vole_vir::VirProgram::last_segment(self, name_id)
     }
 
     fn vir_type_def(&self, type_def_id: TypeDefId) -> Option<&VirTypeDef> {

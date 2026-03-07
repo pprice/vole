@@ -58,21 +58,21 @@ use crate::context::ModuleExportBinding;
 use crate::errors::CodegenResult;
 use crate::types::CodegenState;
 
-use crate::AnalyzedProgram;
 use crate::types::PendingMonomorph;
 use crate::{FunctionKey, FunctionRegistry, JitContext, JitOptions, RuntimeKey};
 use vole_identity::Symbol;
 use vole_identity::VirTypeId;
 use vole_identity::{ModuleId, NameId, TypeDefId, TypeId};
 use vole_runtime::NativeRegistry;
+use vole_vir::VirProgram;
 
 pub use state::TestInfo;
 
 /// Compiler for generating Cranelift IR from AST
 pub struct Compiler<'a> {
     jit: &'a mut JitContext,
-    /// Reference to analyzed program (types, methods, etc.)
-    analyzed: &'a AnalyzedProgram,
+    /// Reference to the VIR program (types, methods, entities, etc.)
+    analyzed: &'a VirProgram,
     pointer_type: clif_types::Type,
     tests: Vec<TestInfo>,
     /// FunctionKeys for declared test functions by index
@@ -105,7 +105,7 @@ pub struct Compiler<'a> {
 }
 
 impl<'a> Compiler<'a> {
-    pub fn new(jit: &'a mut JitContext, analyzed: &'a AnalyzedProgram) -> Self {
+    pub fn new(jit: &'a mut JitContext, analyzed: &'a VirProgram) -> Self {
         let pointer_type = jit.pointer_type();
 
         // Initialize native registry with stdlib functions
@@ -141,13 +141,13 @@ impl<'a> Compiler<'a> {
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
-        &self.analyzed.vir_program().type_table
+        &self.analyzed.type_table
     }
 
     /// Get the module ID for the program being compiled.
     /// This may differ from main_module() when using a shared cache with multiple programs.
     fn program_module(&self) -> ModuleId {
-        self.analyzed.module_id()
+        self.analyzed.module_id
     }
 
     /// Get the "self" keyword symbol (panics if not interned - should never happen)
@@ -227,8 +227,8 @@ impl<'a> Compiler<'a> {
     ///
     /// # Safety
     ///
-    /// The caller must ensure the `AnalyzedProgram` reference (`analyzed`) outlives
-    /// the execution of JIT code. This is safe when the `AnalyzedProgram` is on the
+    /// The caller must ensure the `VirProgram` reference (`analyzed`) outlives
+    /// the execution of JIT code. This is safe when the `VirProgram` is on the
     /// stack and execution happens in the same scope.
     pub unsafe fn take_lazy_state(
         &mut self,
@@ -238,7 +238,7 @@ impl<'a> Compiler<'a> {
         Some(unsafe {
             lazy::LazyCompilationState::new(
                 dispatch_table,
-                self.analyzed as *const AnalyzedProgram,
+                self.analyzed as *const VirProgram,
                 jit_options,
             )
         })

@@ -622,6 +622,10 @@ mod tests {
             module_interners: FxHashMap::default(),
             interner: std::rc::Rc::new(vole_identity::Interner::new()),
             name_table: std::rc::Rc::new(vole_identity::NameTable::new()),
+            tests_virtual_modules: FxHashMap::default(),
+            module_id: vole_identity::ModuleId::new(0),
+            modules_with_errors: std::collections::HashSet::new(),
+            substitute_fallback: None,
         }
     }
 

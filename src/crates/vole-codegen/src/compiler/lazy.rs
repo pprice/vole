@@ -18,7 +18,8 @@ use cranelift_module::{FuncId, Module};
 use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
-use crate::{AnalyzedProgram, JitContext, JitOptions};
+use crate::{JitContext, JitOptions};
+use vole_vir::VirProgram;
 
 /// Dispatch table for lazy module codegen.
 ///
@@ -123,11 +124,11 @@ pub struct LazyCompilationState {
     ///
     /// # Safety
     ///
-    /// The caller must ensure the `AnalyzedProgram` outlives execution.
-    /// This is safe in the current architecture because the `AnalyzedProgram`
+    /// The caller must ensure the `VirProgram` outlives execution.
+    /// This is safe in the current architecture because the `VirProgram`
     /// lives on the stack in `run_source_tests_with_modules` / `run_source`
     /// and execution happens in the same scope.
-    analyzed: *const AnalyzedProgram,
+    analyzed: *const VirProgram,
     /// JIT options for creating new JitContexts during lazy compilation.
     jit_options: JitOptions,
     /// Module index -> module path (reverse of `dispatch_table.module_index`).
@@ -139,9 +140,9 @@ pub struct LazyCompilationState {
     compiled_jits: Vec<JitContext>,
 }
 
-// SAFETY: LazyCompilationState contains `*const AnalyzedProgram` which is not
+// SAFETY: LazyCompilationState contains `*const VirProgram` which is not
 // Send/Sync by default. The pointer is only dereferenced on the thread that
-// created it (via the thread-local LAZY_STATE), and the AnalyzedProgram is
+// created it (via the thread-local LAZY_STATE), and the VirProgram is
 // guaranteed to outlive execution by the caller. The compiled_jits Vec
 // contains JitContexts with immutable finalized machine code.
 unsafe impl Send for LazyCompilationState {}
@@ -155,7 +156,7 @@ impl LazyCompilationState {
     /// (i.e., until `deactivate()` is called and all JIT code has finished).
     pub unsafe fn new(
         dispatch_table: Box<LazyDispatchTable>,
-        analyzed: *const AnalyzedProgram,
+        analyzed: *const VirProgram,
         jit_options: JitOptions,
     ) -> Self {
         // Build module_paths: module_idx -> module_path

@@ -120,7 +120,6 @@ impl Cg<'_, '_, '_> {
                     })
                     .collect();
                 let static_candidates: Vec<_> = self.analyzed()
-                    .vir_program()
                     .static_method_monomorphs
                     .iter()
                     .filter(|(k, _)| k.class_name == type_name_id && k.method_name == method_name_id)
@@ -320,12 +319,7 @@ impl Cg<'_, '_, '_> {
             };
 
             // Look up the monomorphized instance from VirProgram
-            if let Some(instance) = self
-                .analyzed()
-                .vir_program()
-                .static_method_monomorphs
-                .get(&effective_key)
-            {
+            if let Some(instance) = self.analyzed().static_method_monomorphs.get(&effective_key) {
                 return Some(instance.clone());
             }
         }
@@ -345,7 +339,6 @@ impl Cg<'_, '_, '_> {
                 .is_some_and(|vir| matches!(table.get(vir), VirType::Param { .. }))
         };
         self.analyzed()
-            .vir_program()
             .static_method_monomorphs
             .iter()
             .filter_map(|(key, instance)| {
