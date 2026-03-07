@@ -198,6 +198,7 @@ pub fn lower_type_methods(
         );
     }
 
+    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
     for (method, mid, method_def) in resolved_statics {
         let method_name_str = interner.resolve(method.name);
         let display_name = format!("{}::{}", type_name_str, method_name_str);
@@ -219,6 +220,7 @@ pub fn lower_type_methods(
             names,
             type_table,
             module_id,
+            &empty_xmod,
         ) {
             vir_functions.push(vir);
         }
@@ -283,6 +285,7 @@ pub fn lower_type_default_methods(
             .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
             .collect();
 
+        let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
         if let Some(vir) = lower_interface_method(
             iface_method,
             impl_method_id,
@@ -296,6 +299,7 @@ pub fn lower_type_default_methods(
             names,
             type_table,
             module_id,
+            &empty_xmod,
         ) {
             vir_functions.push(vir);
         }
@@ -335,6 +339,7 @@ fn lower_single_method(
         .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
         .collect();
 
+    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
     let vir = lower_method(
         method,
         method_id,
@@ -348,6 +353,7 @@ fn lower_single_method(
         names,
         type_table,
         module_id,
+        &empty_xmod,
     );
     vir_functions.push(vir);
 }

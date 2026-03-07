@@ -13,6 +13,38 @@ use crate::vir_lower::type_translate::translate_type_id;
 /// Pre-resolved module export binding: (module_id, export_name, export_vir_type).
 pub type VirModuleExportBinding = (ModuleId, Symbol, VirTypeId);
 
+/// Extract lightweight module bindings (Symbol → (ModuleId, Symbol)) from top-level
+/// destructuring imports.  Used to populate `CrossModuleCtx` for VIR call resolution
+/// before VirTypeTable-dependent lowering runs.
+pub fn extract_cross_module_bindings(
+    program: &Program,
+    node_map: &NodeMap,
+    type_arena: &TypeArena,
+) -> FxHashMap<Symbol, (ModuleId, Symbol)> {
+    let mut map = FxHashMap::default();
+    for decl in &program.declarations {
+        if let Decl::LetTuple(let_tuple) = decl
+            && let ExprKind::Import(_) = &let_tuple.init.kind
+        {
+            let Some(module_type_id) = node_map.get_type(let_tuple.init.id) else {
+                continue;
+            };
+            let Some(module_info) = type_arena.unwrap_module(module_type_id) else {
+                continue;
+            };
+            if let PatternKind::Record { fields, .. } = &let_tuple.pattern.kind {
+                for field_pattern in fields {
+                    map.insert(
+                        field_pattern.binding,
+                        (module_info.module_id, field_pattern.field_name),
+                    );
+                }
+            }
+        }
+    }
+    map
+}
+
 /// Extract module export bindings from top-level destructuring imports in the main program.
 ///
 /// Scans `Decl::LetTuple` declarations where the init expression is an `import`.

@@ -41,7 +41,9 @@ use super::method_default_inits::{
     LowerMethodDefaultInitsArgs, LowerModuleMethodDefaultInitsArgs, lower_method_default_inits,
     lower_module_method_default_inits,
 };
-use super::module_bindings::{lower_module_bindings, lower_module_module_bindings};
+use super::module_bindings::{
+    extract_cross_module_bindings, lower_module_bindings, lower_module_module_bindings,
+};
 use super::monomorph_functions::{
     LowerMonomorphizedInstancesArgs, build_generic_func_map, lower_monomorphized_instances,
 };
@@ -461,6 +463,29 @@ where
     } = module_vir;
 
     // -----------------------------------------------------------------------
+    // Cross-module call resolution context
+    // -----------------------------------------------------------------------
+
+    // Extract lightweight module bindings (Symbol → (ModuleId, Symbol)) from
+    // destructured imports for VIR call resolution.  This runs before function
+    // lowering so that `resolve_callee_function` can resolve cross-module
+    // calls to `CallTarget::Direct` instead of falling through to codegen's
+    // `call_dispatch()`.
+    let xmod_bindings = extract_cross_module_bindings(program, node_map, type_arena);
+
+    // Compute prelude module IDs from module_programs keys.
+    let prelude_module_ids: Vec<_> = module_programs
+        .keys()
+        .filter(|path| path.starts_with("std:prelude/"))
+        .filter_map(|path| names.module_id_if_known(path))
+        .collect();
+
+    let cross_module_ctx = crate::vir_lower::CrossModuleCtx {
+        module_bindings: xmod_bindings,
+        prelude_module_ids,
+    };
+
+    // -----------------------------------------------------------------------
     // Function lowering (file-level + cached module functions)
     // -----------------------------------------------------------------------
 
@@ -474,6 +499,7 @@ where
         node_map,
         module_id,
         type_table,
+        cross_module: &cross_module_ctx,
     });
     vir_functions.extend(module_vir_functions);
 

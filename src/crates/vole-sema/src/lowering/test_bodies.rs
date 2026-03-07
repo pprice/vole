@@ -59,6 +59,7 @@ fn lower_tests_decl_bodies(
             _ => None,
         })
         .collect();
+    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
     let scoped_let_vir_stmts = if scoped_let_stmts.is_empty() {
         Vec::new()
     } else {
@@ -73,6 +74,7 @@ fn lower_tests_decl_bodies(
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
             captures: rustc_hash::FxHashSet::default(),
+            cross_module: &empty_xmod,
         };
         lower_stmts(&scoped_let_stmts, &mut ctx).stmts
     };
@@ -87,6 +89,7 @@ fn lower_tests_decl_bodies(
             names,
             type_table,
             module_id,
+            &empty_xmod,
         );
         if !scoped_let_vir_stmts.is_empty() {
             vir_body

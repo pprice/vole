@@ -203,6 +203,7 @@ fn lower_class_method_monomorph_vir(
         .zip(instance.func_type.params_id.iter())
         .map(|(p, &ty)| (p.name, ty))
         .collect();
+    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
     let mut vir = lower_method(
         method,
         MethodId::new(0),
@@ -216,6 +217,7 @@ fn lower_class_method_monomorph_vir(
         ctx.names,
         type_table,
         module_id,
+        &empty_xmod,
     );
     // Monomorphized method instances are looked up via mangled name map, not MethodId.
     vir.method_id = None;
@@ -245,6 +247,7 @@ fn lower_static_method_monomorph_vir(
         .zip(instance.func_type.params_id.iter())
         .map(|(p, &ty)| (p.name, ty))
         .collect();
+    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
     let mut vir = lower_interface_method(
         method,
         MethodId::new(0),
@@ -258,6 +261,7 @@ fn lower_static_method_monomorph_vir(
         ctx.names,
         type_table,
         module_id,
+        &empty_xmod,
     )?;
     // Monomorphized method instances are looked up via mangled name map, not MethodId.
     vir.method_id = None;

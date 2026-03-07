@@ -15,7 +15,7 @@ pub mod type_translate;
 #[cfg(test)]
 mod tests;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
 use vole_identity::{
     FunctionId, Interner, MethodId, ModuleId, NameId, NameTable, NodeId, Symbol, TypeDefId, TypeId,
@@ -31,6 +31,27 @@ use vole_vir::type_table::VirTypeTable;
 use self::expr::lower_expr;
 use self::stmt::lower_stmt;
 use self::type_translate::translate_type_id;
+
+/// Cross-module and prelude call resolution context.
+///
+/// Bundles pre-computed data that `resolve_callee_function` needs for
+/// resolving calls to functions outside the current module.
+pub struct CrossModuleCtx {
+    /// Destructured import bindings: local symbol → (source ModuleId, export Symbol).
+    pub module_bindings: FxHashMap<Symbol, (ModuleId, Symbol)>,
+    /// Module IDs of prelude modules (paths starting with `std:prelude/`).
+    pub prelude_module_ids: Vec<ModuleId>,
+}
+
+impl CrossModuleCtx {
+    /// Create an empty context (no cross-module or prelude resolution).
+    pub fn empty() -> Self {
+        Self {
+            module_bindings: FxHashMap::default(),
+            prelude_module_ids: Vec::new(),
+        }
+    }
+}
 
 /// Shared lowering context threaded through all lowering helpers.
 ///
@@ -76,6 +97,14 @@ pub struct LoweringCtx<'a> {
     ///
     /// Empty for top-level function bodies (no captures).
     pub captures: FxHashSet<Symbol>,
+
+    /// Cross-module and prelude call resolution context.
+    ///
+    /// Used by `resolve_callee_function` to resolve calls to functions
+    /// outside the current module (destructured imports, prelude functions)
+    /// to `CallTarget::Direct` without falling through to codegen's
+    /// `call_dispatch()`.
+    pub cross_module: &'a CrossModuleCtx,
 }
 
 impl LoweringCtx<'_> {
@@ -94,16 +123,67 @@ impl LoweringCtx<'_> {
 
     // -- Call resolution helpers ---------------------------------------------
 
-    /// Try to resolve a callee `Symbol` to a `FunctionId` in the current
-    /// module.  Returns `None` when the symbol doesn't map to a known
-    /// same-module function (e.g. lambdas, closures, builtins, cross-module).
+    /// Try to resolve a callee `Symbol` to a `FunctionId`.
+    ///
+    /// Resolution proceeds through three stages:
+    /// 1. Same-module: look up `(module_id, callee_sym)` in the name table.
+    /// 2. Cross-module: if the callee is a destructured import binding,
+    ///    look it up in the source module's namespace.
+    /// 3. Prelude: try each prelude module's namespace.
+    ///
+    /// Returns `None` when the symbol doesn't map to a directly-callable
+    /// function (e.g. lambdas, closures, builtins, generics, FFI).
     pub fn resolve_callee_function(&self, callee_sym: Symbol) -> Option<FunctionId> {
         // Guard: if the symbol can't be resolved (e.g. UNKNOWN in tests),
         // bail early to avoid panicking in name_table.name_id().
-        self.interner.try_resolve(callee_sym)?;
+        let callee_name = self.interner.try_resolve(callee_sym)?;
+
+        // Stage 1: same-module lookup.
         let name_id = self
             .name_table
-            .name_id(self.module_id, &[callee_sym], self.interner)?;
+            .name_id(self.module_id, &[callee_sym], self.interner);
+        if let Some(name_id) = name_id
+            && let Some(func_id) = self.try_resolve_function_id(name_id)
+        {
+            return Some(func_id);
+        }
+
+        // Stage 2: cross-module lookup via destructured import bindings.
+        if let Some(&(source_module_id, _export_sym)) =
+            self.cross_module.module_bindings.get(&callee_sym)
+        {
+            // Look up the function in the source module's namespace using
+            // the callee name string (cross-interner safe via name_id_raw).
+            if let Some(source_name_id) = self
+                .name_table
+                .name_id_raw(source_module_id, &[callee_name])
+                && let Some(func_id) = self.try_resolve_function_id(source_name_id)
+            {
+                return Some(func_id);
+            }
+        }
+
+        // Stage 3: prelude module lookup.
+        for &prelude_module_id in &self.cross_module.prelude_module_ids {
+            if let Some(prelude_name_id) = self
+                .name_table
+                .name_id_raw(prelude_module_id, &[callee_name])
+                && let Some(func_id) = self.try_resolve_function_id(prelude_name_id)
+            {
+                return Some(func_id);
+            }
+        }
+
+        None
+    }
+
+    /// Check whether a `FunctionId` (looked up by `NameId`) is eligible for
+    /// `CallTarget::Direct` emission.
+    ///
+    /// Returns `None` for functions that need special codegen handling
+    /// (generics, FFI, generators, sret structs, defaults, interface/union
+    /// params).
+    fn try_resolve_function_id(&self, name_id: NameId) -> Option<FunctionId> {
         let func_id = self.entities.function_by_name(name_id)?;
         let func_def = self.entities.get_function(func_id);
         // Only resolve non-generic functions — generic calls use GenericCall.
@@ -114,12 +194,6 @@ impl LoweringCtx<'_> {
         // implement blocks or FFI registration, not the normal function
         // declaration path, so they won't be in the func_registry by NameId.
         if func_def.is_external {
-            return None;
-        }
-        // Only resolve same-module calls — cross-module calls go through
-        // different codegen registration paths and may not be available
-        // in the func_registry under the same NameId.
-        if func_def.module != self.module_id {
             return None;
         }
         // Skip generator functions — codegen overrides their return type to
@@ -307,7 +381,7 @@ impl LoweringCtx<'_> {
         let generic_info = type_def.generic_info.as_ref()?;
 
         // Build substitution map for generic classes.
-        let subs: rustc_hash::FxHashMap<NameId, TypeId> = type_def
+        let subs: FxHashMap<NameId, TypeId> = type_def
             .type_params
             .iter()
             .zip(type_args.iter())
@@ -381,6 +455,7 @@ pub fn lower_function(
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &CrossModuleCtx,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -393,6 +468,7 @@ pub fn lower_function(
         generic: false,
         func_return_type: return_type,
         captures: FxHashSet::default(),
+        cross_module,
     };
     let params = param_types
         .iter()
@@ -443,6 +519,7 @@ pub fn lower_monomorphized_function(
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &CrossModuleCtx,
 ) -> VirFunction {
     debug_assert_concrete_types(param_types, return_type, type_arena, &name);
     let mut vir = lower_function(
@@ -458,6 +535,7 @@ pub fn lower_monomorphized_function(
         name_table,
         type_table,
         module_id,
+        cross_module,
     );
     vir.mangled_name_id = Some(mangled_name_id);
     vir
@@ -483,6 +561,7 @@ pub fn lower_method(
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &CrossModuleCtx,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -495,6 +574,7 @@ pub fn lower_method(
         generic: false,
         func_return_type: return_type,
         captures: FxHashSet::default(),
+        cross_module,
     };
     let params = param_types
         .iter()
@@ -538,6 +618,7 @@ pub fn lower_interface_method(
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &CrossModuleCtx,
 ) -> Option<VirFunction> {
     let body_ast = method.body.as_ref()?;
     let mut ctx = LoweringCtx {
@@ -551,6 +632,7 @@ pub fn lower_interface_method(
         generic: false,
         func_return_type: return_type,
         captures: FxHashSet::default(),
+        cross_module,
     };
     let params = param_types
         .iter()
@@ -601,6 +683,7 @@ pub fn lower_generic_function(
     type_table: &mut VirTypeTable,
     type_param_names: &[NameId],
     module_id: ModuleId,
+    cross_module: &CrossModuleCtx,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -613,6 +696,7 @@ pub fn lower_generic_function(
         generic: true,
         func_return_type: return_type,
         captures: FxHashSet::default(),
+        cross_module,
     };
     let params = param_types
         .iter()
@@ -680,6 +764,7 @@ pub fn lower_test_body(
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &CrossModuleCtx,
 ) -> VirBody {
     let mut ctx = LoweringCtx {
         node_map,
@@ -692,6 +777,7 @@ pub fn lower_test_body(
         generic: false,
         func_return_type: TypeId::VOID,
         captures: FxHashSet::default(),
+        cross_module,
     };
     lower_func_body(body, &mut ctx)
 }

@@ -109,6 +109,7 @@ fn lower_tests_decl_type_methods(
                         .zip(func_def.signature.params_id.iter())
                         .map(|(p, &ty)| (p.name, ty))
                         .collect();
+                    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
                     let vir = lower_function(
                         func,
                         func_id,
@@ -122,6 +123,7 @@ fn lower_tests_decl_type_methods(
                         names,
                         type_table,
                         main_module_id,
+                        &empty_xmod,
                     );
                     vir_functions.push(vir);
                 }

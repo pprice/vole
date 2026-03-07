@@ -281,6 +281,7 @@ impl Analyzer {
             .collect();
 
         let mut type_table = self.ctx.vir_type_table.borrow_mut();
+        let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
         crate::vir_lower::lower_generic_function(
             func,
             func_id,
@@ -295,6 +296,7 @@ impl Analyzer {
             &mut type_table,
             &type_param_names,
             self.module.current_module,
+            &empty_xmod,
         )
     }
 }

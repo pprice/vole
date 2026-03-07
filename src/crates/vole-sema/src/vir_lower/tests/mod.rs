@@ -119,6 +119,16 @@ fn test_type_table() -> VirTypeTable {
     VirTypeTable::new()
 }
 
+/// Leaked empty cross-module context for tests.
+///
+/// Tests don't exercise cross-module resolution, so this provides a
+/// `&'static CrossModuleCtx` without requiring each test to allocate one.
+fn empty_cross_module() -> &'static super::CrossModuleCtx {
+    use std::sync::OnceLock;
+    static CTX: OnceLock<super::CrossModuleCtx> = OnceLock::new();
+    CTX.get_or_init(super::CrossModuleCtx::empty)
+}
+
 /// Create a `LoweringCtx` from test fixtures (concrete mode).
 ///
 /// This is a convenience helper that bundles the common test parameters.
@@ -141,6 +151,7 @@ fn make_ctx<'a>(
         generic: false,
         func_return_type: TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
+        cross_module: empty_cross_module(),
     }
 }
 
@@ -166,5 +177,6 @@ fn make_generic_ctx<'a>(
         generic: true,
         func_return_type: TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
+        cross_module: empty_cross_module(),
     }
 }
