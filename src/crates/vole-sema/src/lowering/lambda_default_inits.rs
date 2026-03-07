@@ -34,6 +34,7 @@ struct LowerSingleLambdaDefaultInitArgs<'a> {
     node_map: &'a NodeMap,
     type_arena: &'a TypeArena,
     type_table: &'a mut VirTypeTable,
+    module_id: ModuleId,
     map: &'a mut FxHashMap<(NodeId, usize), VirRef>,
 }
 
@@ -102,6 +103,7 @@ pub fn lower_lambda_default_inits(
                 node_map,
                 type_arena,
                 type_table,
+                module_id: main_module_id,
                 map: &mut map,
             });
         }
@@ -113,6 +115,9 @@ pub fn lower_lambda_default_inits(
             continue;
         };
         let module_interner = Rc::make_mut(module_interner);
+        let ext_module_id = names
+            .module_id_if_known(&module_path)
+            .unwrap_or_else(|| names.main_module());
         let module_lambdas = collect_lambdas_in_program(module_program);
         for lambda_node_id in node_ids {
             let Some(lambda) = module_lambdas.get(&lambda_node_id) else {
@@ -127,6 +132,7 @@ pub fn lower_lambda_default_inits(
                 node_map,
                 type_arena,
                 type_table,
+                module_id: ext_module_id,
                 map: &mut map,
             });
         }
@@ -148,6 +154,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         node_map,
         type_arena,
         type_table,
+        module_id,
         map,
     } = args;
 
@@ -158,6 +165,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         entities: entities.as_entity_registry(),
         name_table: names,
         type_table,
+        module_id,
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
     };

@@ -194,6 +194,7 @@ pub fn lower_type_methods(
             entities,
             vir_functions,
             type_table,
+            module_id,
         );
     }
 
@@ -217,6 +218,7 @@ pub fn lower_type_methods(
             entities.as_entity_registry(),
             names,
             type_table,
+            module_id,
         ) {
             vir_functions.push(vir);
         }
@@ -293,6 +295,7 @@ pub fn lower_type_default_methods(
             entities.as_entity_registry(),
             names,
             type_table,
+            module_id,
         ) {
             vir_functions.push(vir);
         }
@@ -313,6 +316,7 @@ fn lower_single_method(
     entities: &impl LoweringEntityLookup,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) {
     let arena_sig = method_def.signature_id;
     // We need the type arena to unwrap the signature, but we don't have it here.
@@ -343,6 +347,7 @@ fn lower_single_method(
         entities.as_entity_registry(),
         names,
         type_table,
+        module_id,
     );
     vir_functions.push(vir);
 }

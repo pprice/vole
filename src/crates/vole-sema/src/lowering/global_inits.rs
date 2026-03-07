@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use crate::LoweringEntityLookup;
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, LetInit, Program, Symbol};
-use vole_identity::NameTable;
+use vole_identity::{ModuleId, NameTable};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;
 
@@ -22,6 +22,7 @@ pub fn lower_global_inits(
     entities: &impl LoweringEntityLookup,
     names: &NameTable,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> FxHashMap<Symbol, VirRef> {
     use crate::vir_lower::LoweringCtx;
     use crate::vir_lower::expr::lower_expr;
@@ -33,6 +34,7 @@ pub fn lower_global_inits(
         entities: entities.as_entity_registry(),
         name_table: names,
         type_table,
+        module_id,
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
     };
@@ -73,6 +75,9 @@ pub fn lower_module_global_inits(
         if modules_with_errors.contains(module_path.as_str()) {
             continue;
         }
+        let module_id = names
+            .module_id_if_known(module_path)
+            .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
         let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
@@ -81,6 +86,7 @@ pub fn lower_module_global_inits(
             entities: entities.as_entity_registry(),
             name_table: names,
             type_table,
+            module_id,
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
         };

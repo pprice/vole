@@ -137,6 +137,7 @@ fn make_ctx<'a>(
         entities,
         name_table,
         type_table,
+        module_id: name_table.main_module(),
         generic: false,
         func_return_type: TypeId::VOID,
     }
@@ -160,6 +161,7 @@ fn make_generic_ctx<'a>(
         entities,
         name_table,
         type_table,
+        module_id: name_table.main_module(),
         generic: true,
         func_return_type: TypeId::VOID,
     }

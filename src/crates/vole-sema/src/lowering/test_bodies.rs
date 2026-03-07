@@ -6,7 +6,7 @@ use crate::LoweringEntityLookup;
 use crate::vir_lower::{lower_stmts, lower_test_body};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
-use vole_identity::NameTable;
+use vole_identity::{ModuleId, NameTable};
 use vole_vir::VirTest;
 use vole_vir::type_table::VirTypeTable;
 
@@ -23,12 +23,14 @@ pub fn lower_test_bodies(
     entities: &impl LoweringEntityLookup,
     names: &NameTable,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> Vec<VirTest> {
     let mut tests = Vec::new();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
             lower_tests_decl_bodies(
-                tests_decl, node_map, interner, type_arena, entities, names, &mut tests, type_table,
+                tests_decl, node_map, interner, type_arena, entities, names, &mut tests,
+                type_table, module_id,
             );
         }
     }
@@ -46,6 +48,7 @@ fn lower_tests_decl_bodies(
     names: &NameTable,
     tests: &mut Vec<VirTest>,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) {
     let scoped_let_stmts: Vec<vole_frontend::Stmt> = tests_decl
         .decls
@@ -66,6 +69,7 @@ fn lower_tests_decl_bodies(
             entities: entities.as_entity_registry(),
             name_table: names,
             type_table,
+            module_id,
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
         };
@@ -81,6 +85,7 @@ fn lower_tests_decl_bodies(
             entities.as_entity_registry(),
             names,
             type_table,
+            module_id,
         );
         if !scoped_let_vir_stmts.is_empty() {
             vir_body
@@ -98,6 +103,7 @@ fn lower_tests_decl_bodies(
         if let Decl::Tests(nested) = decl {
             lower_tests_decl_bodies(
                 nested, node_map, interner, type_arena, entities, names, tests, type_table,
+                module_id,
             );
         }
     }

@@ -591,10 +591,10 @@ where
     // -----------------------------------------------------------------------
 
     let vir_tests = lower_test_bodies(
-        program, node_map, interner, type_arena, entities, names, type_table,
+        program, node_map, interner, type_arena, entities, names, type_table, module_id,
     );
     let vir_global_inits = lower_global_inits(
-        program, interner, node_map, type_arena, entities, names, type_table,
+        program, interner, node_map, type_arena, entities, names, type_table, module_id,
     );
     // Module global inits (type-table-dependent, logically module-only).
     let module_vir_global_inits = lower_module_global_inits(

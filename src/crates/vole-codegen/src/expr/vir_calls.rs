@@ -86,10 +86,12 @@ impl Cg<'_, '_, '_> {
         args: &[VirRef],
         return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        // Resolve FunctionId -> NameId -> FunctionKey -> FuncId
+        // Resolve FunctionId -> NameId -> FunctionKey -> FuncId.
+        // Use `name_id` (the key used by declare_function_by_name_id) rather
+        // than `full_name_id` so the lookup matches the JIT registration.
         let func_def = self.analyzed().function_def(function_id);
-        let full_name_id = func_def.full_name_id;
-        let func_key = self.funcs().intern_name_id(full_name_id);
+        let name_id = func_def.name_id;
+        let func_key = self.funcs().intern_name_id(name_id);
         let func_id = self
             .funcs_ref()
             .func_id(func_key)
@@ -102,8 +104,25 @@ impl Cg<'_, '_, '_> {
 
         let (arg_values, mut rc_temps) = self.compile_vir_args(args)?;
         let call_inst = self.emit_call(func_ref, &arg_values);
+
+        // For union returns, copy the value out of the callee's stack frame
+        // BEFORE RC temp cleanup — rc_dec calls may clobber the callee's
+        // return slot (same ordering as call_func_id_impl).
+        let union_copy = if self.vir_query_is_union(return_ty) {
+            let results = self.builder.inst_results(call_inst);
+            let src_ptr = results[0];
+            Some(self.copy_union_ptr_to_local(src_ptr, return_ty))
+        } else {
+            None
+        };
+
         self.consume_rc_args(&mut rc_temps)?;
-        self.call_result(call_inst, return_ty)
+
+        if let Some(result) = union_copy {
+            return Ok(result);
+        }
+        let result = self.call_result(call_inst, return_ty)?;
+        Ok(self.mark_rc_owned(result))
     }
 
     /// Compile a direct call to a VIR-monomorphized function by its index

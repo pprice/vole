@@ -74,6 +74,7 @@ fn lower_class_method_monomorphized_instances(
                 work.interner,
                 ctx,
                 work.type_table,
+                work.module_id,
             ) {
                 work.vir_functions.push(vir);
             }
@@ -107,6 +108,7 @@ fn lower_class_method_monomorphized_instances(
                 module_interner,
                 ctx,
                 work.type_table,
+                source_module_id,
             ) {
                 work.vir_functions.push(vir);
             }
@@ -138,6 +140,7 @@ fn lower_static_method_monomorphized_instances(
                 work.interner,
                 ctx,
                 work.type_table,
+                work.module_id,
             ) {
                 work.vir_functions.push(vir);
             }
@@ -171,6 +174,7 @@ fn lower_static_method_monomorphized_instances(
                 module_interner,
                 ctx,
                 work.type_table,
+                source_module_id,
             ) {
                 work.vir_functions.push(vir);
             }
@@ -185,6 +189,7 @@ fn lower_class_method_monomorph_vir(
     interner: &mut Interner,
     ctx: &MethodMonomorphLoweringCtx<'_>,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> Option<VirFunction> {
     if method.params.len() != instance.func_type.params_id.len() {
         return None;
@@ -210,6 +215,7 @@ fn lower_class_method_monomorph_vir(
         ctx.entities.as_entity_registry(),
         ctx.names,
         type_table,
+        module_id,
     );
     // Monomorphized method instances are looked up via mangled name map, not MethodId.
     vir.method_id = None;
@@ -224,6 +230,7 @@ fn lower_static_method_monomorph_vir(
     interner: &mut Interner,
     ctx: &MethodMonomorphLoweringCtx<'_>,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> Option<VirFunction> {
     let body = method.body.as_ref()?;
     if method.params.len() != instance.func_type.params_id.len() {
@@ -250,6 +257,7 @@ fn lower_static_method_monomorph_vir(
         ctx.entities.as_entity_registry(),
         ctx.names,
         type_table,
+        module_id,
     )?;
     // Monomorphized method instances are looked up via mangled name map, not MethodId.
     vir.method_id = None;

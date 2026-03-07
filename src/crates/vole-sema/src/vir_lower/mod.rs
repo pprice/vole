@@ -17,7 +17,8 @@ mod tests;
 
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
 use vole_identity::{
-    FunctionId, Interner, MethodId, NameId, NameTable, NodeId, Symbol, TypeDefId, TypeId, VirTypeId,
+    FunctionId, Interner, MethodId, ModuleId, NameId, NameTable, NodeId, Symbol, TypeDefId, TypeId,
+    VirTypeId,
 };
 
 use crate::node_map::NodeMap;
@@ -39,6 +40,7 @@ use self::type_translate::translate_type_id;
 /// - `entities`: entity lookups (field info, error types, etc.)
 /// - `name_table`: name resolution (last_segment_str for error tag matching)
 /// - `type_table`: VIR type interning table (populated during lowering)
+/// - `module_id`: the module being lowered (for resolving callee symbols)
 pub struct LoweringCtx<'a> {
     pub node_map: &'a NodeMap,
     pub interner: &'a mut Interner,
@@ -46,6 +48,11 @@ pub struct LoweringCtx<'a> {
     pub entities: &'a EntityRegistry,
     pub name_table: &'a NameTable,
     pub type_table: &'a mut VirTypeTable,
+    /// The module whose body is being lowered.
+    ///
+    /// Used by call resolution to convert callee symbols to `NameId`
+    /// via `NameTable::name_id(module_id, &[sym], interner)`.
+    pub module_id: ModuleId,
     /// When `true`, NodeMap lookups that would normally panic on missing
     /// entries instead produce placeholder/generic values.  Used when
     /// lowering generic function bodies where sema decision data may be
@@ -72,6 +79,68 @@ impl LoweringCtx<'_> {
     /// Placeholder, Invalid) that have no VirTypeTable representation.
     pub fn compat_ty(&mut self, type_id: TypeId) -> VirTypeId {
         self.translate(type_id)
+    }
+
+    // -- Call resolution helpers ---------------------------------------------
+
+    /// Try to resolve a callee `Symbol` to a `FunctionId` in the current
+    /// module.  Returns `None` when the symbol doesn't map to a known
+    /// same-module function (e.g. lambdas, closures, builtins, cross-module).
+    pub fn resolve_callee_function(&self, callee_sym: Symbol) -> Option<FunctionId> {
+        // Guard: if the symbol can't be resolved (e.g. UNKNOWN in tests),
+        // bail early to avoid panicking in name_table.name_id().
+        self.interner.try_resolve(callee_sym)?;
+        let name_id = self
+            .name_table
+            .name_id(self.module_id, &[callee_sym], self.interner)?;
+        let func_id = self.entities.function_by_name(name_id)?;
+        let func_def = self.entities.get_function(func_id);
+        // Only resolve non-generic functions — generic calls use GenericCall.
+        if func_def.generic_info.is_some() {
+            return None;
+        }
+        // Skip external (FFI) functions — they are declared through
+        // implement blocks or FFI registration, not the normal function
+        // declaration path, so they won't be in the func_registry by NameId.
+        if func_def.is_external {
+            return None;
+        }
+        // Only resolve same-module calls — cross-module calls go through
+        // different codegen registration paths and may not be available
+        // in the func_registry under the same NameId.
+        if func_def.module != self.module_id {
+            return None;
+        }
+        // Skip generator functions — codegen overrides their return type to
+        // RuntimeIterator(T) and compiles them with special generator
+        // infrastructure.  The Direct call path doesn't account for this.
+        if func_def.generator_element_type.is_some() {
+            return None;
+        }
+        // Skip functions returning struct types — codegen may use the sret
+        // calling convention (hidden first parameter for the return buffer)
+        // for structs with more than 2 flat fields.  The Direct call path
+        // doesn't emit the sret argument.
+        let ret_ty = func_def.signature.return_type_id;
+        if self.type_arena.is_struct(ret_ty) {
+            return None;
+        }
+        // Skip functions with default parameters — when the call site
+        // omits a defaulted argument, the Direct path emits too few args.
+        // Default filling happens in call_dispatch (Unresolved path).
+        if func_def.param_defaults.iter().any(|d| d.is_some()) {
+            return None;
+        }
+        // Skip functions with interface or union/optional parameters —
+        // callers need implicit boxing/coercion that the Direct call path
+        // doesn't perform (the Unresolved path handles this via
+        // box_interface_value and union boxing in call_dispatch).
+        for &param_ty in func_def.signature.params_id.iter() {
+            if self.type_arena.is_interface(param_ty) || self.type_arena.is_union(param_ty) {
+                return None;
+            }
+        }
+        Some(func_id)
     }
 
     // -- Tolerant NodeMap query helpers -------------------------------------
@@ -300,6 +369,7 @@ pub fn lower_function(
     entities: &EntityRegistry,
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -308,6 +378,7 @@ pub fn lower_function(
         entities,
         name_table,
         type_table,
+        module_id,
         generic: false,
         func_return_type: return_type,
     };
@@ -357,6 +428,7 @@ pub fn lower_monomorphized_function(
     entities: &EntityRegistry,
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> VirFunction {
     debug_assert_concrete_types(param_types, return_type, type_arena, &name);
     let mut vir = lower_function(
@@ -371,6 +443,7 @@ pub fn lower_monomorphized_function(
         entities,
         name_table,
         type_table,
+        module_id,
     );
     vir.mangled_name_id = Some(mangled_name_id);
     vir
@@ -395,6 +468,7 @@ pub fn lower_method(
     entities: &EntityRegistry,
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -403,6 +477,7 @@ pub fn lower_method(
         entities,
         name_table,
         type_table,
+        module_id,
         generic: false,
         func_return_type: return_type,
     };
@@ -445,6 +520,7 @@ pub fn lower_interface_method(
     entities: &EntityRegistry,
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> Option<VirFunction> {
     let body_ast = method.body.as_ref()?;
     let mut ctx = LoweringCtx {
@@ -454,6 +530,7 @@ pub fn lower_interface_method(
         entities,
         name_table,
         type_table,
+        module_id,
         generic: false,
         func_return_type: return_type,
     };
@@ -503,6 +580,7 @@ pub fn lower_generic_function(
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
     type_param_names: &[NameId],
+    module_id: ModuleId,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -511,6 +589,7 @@ pub fn lower_generic_function(
         entities,
         name_table,
         type_table,
+        module_id,
         generic: true,
         func_return_type: return_type,
     };
@@ -574,6 +653,7 @@ pub fn lower_test_body(
     entities: &EntityRegistry,
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
+    module_id: ModuleId,
 ) -> VirBody {
     let mut ctx = LoweringCtx {
         node_map,
@@ -582,6 +662,7 @@ pub fn lower_test_body(
         entities,
         name_table,
         type_table,
+        module_id,
         generic: false,
         func_return_type: TypeId::VOID,
     };

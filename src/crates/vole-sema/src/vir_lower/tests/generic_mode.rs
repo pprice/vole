@@ -561,7 +561,7 @@ fn generic_mode_call_without_monomorph_key_emits_unresolved() {
 }
 
 #[test]
-fn concrete_mode_call_with_monomorph_key_still_emits_unresolved() {
+fn concrete_mode_call_with_monomorph_key_resolves_to_direct() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let mut entities = test_entities();
@@ -592,8 +592,11 @@ fn concrete_mode_call_with_monomorph_key_still_emits_unresolved() {
     let mut node_map = empty_node_map();
     node_map.set_generic(call_node_id, key);
 
-    // Concrete mode — should still emit Unresolved (GenericCall is only
-    // for generic templates).
+    // Concrete mode — same-module non-generic functions resolve to Direct.
+    // The monomorph key is irrelevant: resolve_callee_function finds the
+    // non-generic callee and emits Direct.  (In real code, a call with a
+    // monomorph key targets a generic function, which resolve_callee_function
+    // skips, so it would fall back to Unresolved.)
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
@@ -607,8 +610,8 @@ fn concrete_mode_call_with_monomorph_key_still_emits_unresolved() {
     match vir_ref.as_ref() {
         VirExpr::Call { target, .. } => {
             assert!(
-                matches!(target, CallTarget::Unresolved { .. }),
-                "expected Unresolved in concrete mode, got {target:?}"
+                matches!(target, CallTarget::Direct { .. }),
+                "expected Direct in concrete mode for non-generic callee, got {target:?}"
             );
         }
         other => panic!("expected VirExpr::Call, got {other:?}"),

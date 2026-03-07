@@ -294,6 +294,7 @@ impl Analyzer {
             &names,
             &mut type_table,
             &type_param_names,
+            self.module.current_module,
         )
     }
 }

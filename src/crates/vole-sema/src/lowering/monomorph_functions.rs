@@ -145,6 +145,7 @@ fn lower_single_monomorph(args: LowerSingleMonomorphArgs<'_>) {
         .map(|(p, &ty)| (p.name, ty))
         .collect();
     let mangled_name = names.display(instance.mangled_name);
+    let module_id = names.module_of(instance.original_name);
     let vir = lower_monomorphized_function(
         func,
         func_id,
@@ -158,6 +159,7 @@ fn lower_single_monomorph(args: LowerSingleMonomorphArgs<'_>) {
         entities.as_entity_registry(),
         names,
         type_table,
+        module_id,
     );
     vir_functions.push(vir);
 }
@@ -242,6 +244,7 @@ fn lower_module_monomorph(args: LowerModuleMonomorphArgs<'_>) {
         entities.as_entity_registry(),
         names,
         type_table,
+        module_id,
     );
     vir_functions.push(vir);
 }

@@ -59,6 +59,7 @@ pub fn lower_function_default_inits(
         entities: entities.as_entity_registry(),
         name_table: names,
         type_table,
+        module_id,
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
     };
@@ -106,6 +107,7 @@ pub fn lower_module_function_default_inits(
             entities: entities.as_entity_registry(),
             name_table: names,
             type_table,
+            module_id,
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
         };

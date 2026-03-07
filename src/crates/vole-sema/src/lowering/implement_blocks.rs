@@ -44,6 +44,7 @@ pub struct LowerImplementDirectMethodsArgs<'a> {
     pub node_map: &'a NodeMap,
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
+    pub module_id: ModuleId,
 }
 
 pub struct LowerImplementStaticMethodsArgs<'a> {
@@ -56,6 +57,7 @@ pub struct LowerImplementStaticMethodsArgs<'a> {
     pub node_map: &'a NodeMap,
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
+    pub module_id: ModuleId,
 }
 
 pub struct LowerImplementDefaultMethodsArgs<'a> {
@@ -70,6 +72,7 @@ pub struct LowerImplementDefaultMethodsArgs<'a> {
     pub module_programs: Option<&'a FxHashMap<String, (Program, Rc<Interner>)>>,
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
+    pub module_id: ModuleId,
 }
 
 struct LowerSingleImplementBlockArgs<'a> {
@@ -157,6 +160,7 @@ fn lower_single_implement_block(args: LowerSingleImplementBlockArgs<'_>) {
         node_map,
         vir_functions,
         type_table,
+        module_id,
     });
 
     if let Some(ref statics) = impl_block.statics {
@@ -170,6 +174,7 @@ fn lower_single_implement_block(args: LowerSingleImplementBlockArgs<'_>) {
             node_map,
             vir_functions,
             type_table,
+            module_id,
         });
     }
 
@@ -185,6 +190,7 @@ fn lower_single_implement_block(args: LowerSingleImplementBlockArgs<'_>) {
         module_programs: None,
         vir_functions,
         type_table,
+        module_id,
     });
 }
 
@@ -248,6 +254,7 @@ pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>)
         node_map,
         vir_functions,
         type_table,
+        module_id,
     } = args;
 
     let type_name_str = names
@@ -295,6 +302,7 @@ pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>)
             entities.as_entity_registry(),
             names,
             type_table,
+            module_id,
         );
         vir_functions.push(vir);
     }
@@ -312,6 +320,7 @@ pub fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>)
         node_map,
         vir_functions,
         type_table,
+        module_id,
     } = args;
 
     let type_name_str = names
@@ -358,6 +367,7 @@ pub fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>)
             entities.as_entity_registry(),
             names,
             type_table,
+            module_id,
         ) {
             vir_functions.push(vir);
         }
@@ -383,6 +393,7 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
         module_programs,
         vir_functions,
         type_table,
+        module_id,
     } = args;
 
     let type_name_str = names
@@ -432,6 +443,7 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
             entities.as_entity_registry(),
             names,
             type_table,
+            module_id,
         ) {
             vir_functions.push(vir);
         }
@@ -538,6 +550,7 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
         module_path: String,
         impl_decl_index: usize,
         type_def_id: TypeDefId,
+        module_id: ModuleId,
     }
 
     let mut default_work = Vec::new();
@@ -575,6 +588,7 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
                 node_map,
                 vir_functions,
                 type_table,
+                module_id,
             });
 
             if let Some(ref statics) = impl_block.statics {
@@ -588,6 +602,7 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
                     node_map,
                     vir_functions,
                     type_table,
+                    module_id,
                 });
             }
 
@@ -595,6 +610,7 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
                 module_path: module_path.clone(),
                 impl_decl_index: decl_idx,
                 type_def_id,
+                module_id,
             });
         }
     }
@@ -620,6 +636,7 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
             module_programs: Some(module_programs),
             vir_functions,
             type_table,
+            module_id: work.module_id,
         });
     }
 }

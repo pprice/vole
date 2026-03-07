@@ -109,6 +109,7 @@ pub fn lower_top_level_functions(args: LowerTopLevelFunctionsArgs<'_>) -> Vec<Vi
             entities.as_entity_registry(),
             names,
             type_table,
+            module_id,
         );
         vir_functions.push(vir);
     }
@@ -213,6 +214,7 @@ fn lower_module_program_functions(args: LowerModuleProgramFunctionsArgs<'_>) {
             entities.as_entity_registry(),
             names,
             type_table,
+            module_id,
         );
         vir_functions.push(vir);
     }

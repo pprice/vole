@@ -416,16 +416,15 @@ impl Compiler<'_> {
 
         // Register static methods for non-generic types.
         // Generic type statics are emitted from static-method monomorph instances.
-        if !is_generic_type
-            && !static_method_ids.is_empty() {
-                let short = type_name_short.unwrap_or_else(|| {
-                    self.analyzed
-                        .name_table()
-                        .last_segment_str(name_id)
-                        .unwrap_or_else(|| self.analyzed.display_name(name_id))
-                });
-                self.register_module_type_static_methods(&static_method_ids, type_def_id, &short)?;
-            }
+        if !is_generic_type && !static_method_ids.is_empty() {
+            let short = type_name_short.unwrap_or_else(|| {
+                self.analyzed
+                    .name_table()
+                    .last_segment_str(name_id)
+                    .unwrap_or_else(|| self.analyzed.display_name(name_id))
+            });
+            self.register_module_type_static_methods(&static_method_ids, type_def_id, &short)?;
+        }
 
         Ok(())
     }

@@ -121,6 +121,7 @@ fn lower_tests_decl_type_methods(
                         entities.as_entity_registry(),
                         names,
                         type_table,
+                        main_module_id,
                     );
                     vir_functions.push(vir);
                 }
@@ -218,6 +219,7 @@ fn lower_tests_decl_type_methods(
                         node_map,
                         vir_functions,
                         type_table,
+                        module_id: virtual_module_id,
                     });
                     if let Some(ref statics) = impl_block.statics {
                         lower_implement_static_methods(LowerImplementStaticMethodsArgs {
@@ -230,6 +232,7 @@ fn lower_tests_decl_type_methods(
                             node_map,
                             vir_functions,
                             type_table,
+                            module_id: virtual_module_id,
                         });
                     }
                     lower_implement_default_methods(LowerImplementDefaultMethodsArgs {
@@ -244,6 +247,7 @@ fn lower_tests_decl_type_methods(
                         module_programs,
                         vir_functions,
                         type_table,
+                        module_id: virtual_module_id,
                     });
                 }
             }

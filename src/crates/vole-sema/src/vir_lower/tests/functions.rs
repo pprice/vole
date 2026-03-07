@@ -32,6 +32,7 @@ fn lower_empty_block_function() {
         &entities,
         &name_table,
         &mut type_table,
+        name_table.main_module(),
     );
 
     assert_eq!(vir.id, dummy_func_id());
@@ -64,6 +65,7 @@ fn lower_block_function_lowers_control_flow() {
         &entities,
         &name_table,
         &mut type_table,
+        name_table.main_module(),
     );
 
     assert_eq!(vir.body.stmts.len(), 2);
@@ -102,6 +104,7 @@ fn lower_expr_body_function_sets_trailing() {
         &entities,
         &name_table,
         &mut type_table,
+        name_table.main_module(),
     );
 
     assert!(vir.body.stmts.is_empty());
@@ -140,6 +143,7 @@ fn lower_preserves_params_and_return_type() {
         &entities,
         &name_table,
         &mut type_table,
+        name_table.main_module(),
     );
 
     assert_eq!(vir.params.len(), 2);
@@ -215,6 +219,7 @@ fn lower_monomorphized_with_concrete_types() {
         &entities,
         &name_table,
         &mut type_table,
+        name_table.main_module(),
     );
 
     assert_eq!(vir.name, "identity__mono_0");
@@ -248,6 +253,7 @@ fn lower_monomorphized_expr_body() {
         &entities,
         &name_table,
         &mut type_table,
+        name_table.main_module(),
     );
 
     assert_eq!(vir.name, "to_bool__mono_0");
@@ -285,6 +291,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
         &entities,
         &name_table,
         &mut type_table,
+        name_table.main_module(),
     );
 }
 
@@ -315,6 +322,7 @@ fn lower_monomorphized_rejects_type_param_in_return() {
         &entities,
         &name_table,
         &mut type_table,
+        name_table.main_module(),
     );
 }
 

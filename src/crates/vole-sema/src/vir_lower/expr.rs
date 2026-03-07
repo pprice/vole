@@ -1331,6 +1331,8 @@ fn lower_call(
     let target = if ctx.generic {
         generic_call_target(expr, ctx)
             .unwrap_or_else(|| make_unresolved(resolved_call_args, lambda_defaults, monomorph_key))
+    } else if let Some(function_id) = ctx.resolve_callee_function(callee_sym) {
+        CallTarget::Direct { function_id }
     } else {
         make_unresolved(resolved_call_args, lambda_defaults, monomorph_key)
     };
