@@ -878,6 +878,9 @@ fn merge_node_data(dst: &mut NodeData, src: NodeData) {
     if src.struct_literal_info.is_some() {
         dst.struct_literal_info = src.struct_literal_info;
     }
+    if src.callee_var_type.is_some() {
+        dst.callee_var_type = src.callee_var_type;
+    }
 }
 
 // ---------------------------------------------------------------------------
