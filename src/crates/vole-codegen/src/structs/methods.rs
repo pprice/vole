@@ -307,11 +307,12 @@ impl Cg<'_, '_, '_> {
         &mut self,
         receiver: &mut CompiledValue,
         receiver_is_global_init_rc_iface: bool,
+        receiver_is_interface: bool,
     ) -> CodegenResult<()> {
         // Global interface initializers are recompiled per use. They can surface as
         // untracked/borrowed values in method-call paths, but still represent fresh
         // temporary interface boxes that must be released after dispatch.
-        if receiver_is_global_init_rc_iface && self.vir_query_is_interface_v(receiver.type_id) {
+        if receiver_is_global_init_rc_iface && receiver_is_interface {
             self.emit_rc_dec_for_type_v(receiver.value, receiver.type_id)?;
             receiver.mark_consumed();
             return Ok(());
@@ -427,14 +428,22 @@ impl Cg<'_, '_, '_> {
                     self.builtin_method(&obj, method_name_str, concrete_return_hint)?
                 {
                     let mut obj = obj;
-                    self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                    self.consume_method_receiver(
+                        &mut obj,
+                        receiver_is_global_init_rc_iface,
+                        dispatch.receiver_is_interface,
+                    )?;
                     return Ok(result);
                 }
             }
             VirMethodDispatchKind::ArrayPush => {
                 let result = self.array_push_call(&obj, &mc.arg_source())?;
                 let mut obj = obj;
-                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
                 return Ok(result);
             }
             VirMethodDispatchKind::Standard => {
@@ -511,9 +520,7 @@ impl Cg<'_, '_, '_> {
         // resolution as None so the monomorphized-fallback path (which derives dispatch from
         // obj.type_id) handles it correctly.
         let resolution = match resolution {
-            Some(r) if r.is_interface_method() && !self.vir_query_is_interface_v(obj.type_id) => {
-                None
-            }
+            Some(r) if r.is_interface_method() && !dispatch.receiver_is_interface => None,
             other => other,
         };
 
@@ -532,7 +539,11 @@ impl Cg<'_, '_, '_> {
                 // data_ptr so the underlying instance is freed. For borrowed
                 // receivers (variables), consume_rc_value is a no-op.
                 let mut obj = obj;
-                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
                 return Ok(result);
             }
 
@@ -552,7 +563,11 @@ impl Cg<'_, '_, '_> {
                 )?;
                 // Consume the owned RC receiver after the call (same as above).
                 let mut obj = obj;
-                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
                 return Ok(result);
             }
 
@@ -579,7 +594,11 @@ impl Cg<'_, '_, '_> {
                         func_type_id,
                     )?;
                     let mut obj = obj;
-                    self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                    self.consume_method_receiver(
+                        &mut obj,
+                        receiver_is_global_init_rc_iface,
+                        dispatch.receiver_is_interface,
+                    )?;
                     return Ok(result);
                 }
                 // For functional interfaces, the object holds the function ptr or closure.
@@ -592,7 +611,11 @@ impl Cg<'_, '_, '_> {
                     &mc.arg_source(),
                 )?;
                 let mut obj = obj;
-                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
                 return Ok(result);
             }
 
@@ -667,7 +690,11 @@ impl Cg<'_, '_, '_> {
                     // dispatch recompiles with expected type context.
                     self.consume_rc_args(&mut rc_temps)?;
                     let mut obj = obj;
-                    self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                    self.consume_method_receiver(
+                        &mut obj,
+                        receiver_is_global_init_rc_iface,
+                        dispatch.receiver_is_interface,
+                    )?;
                     return self.call_generic_external_intrinsic_method_args(
                         &ext_module_path,
                         &key,
@@ -684,7 +711,11 @@ impl Cg<'_, '_, '_> {
                 // leaks/heap corruption. Similarly, Owned string arguments
                 // (e.g., s.replace("world", "vole")) need cleanup.
                 let mut obj = obj;
-                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
                 self.consume_rc_args(&mut rc_temps)?;
                 return Ok(result);
             }
@@ -783,7 +814,11 @@ impl Cg<'_, '_, '_> {
                     func_type_id,
                 )?;
                 let mut obj = obj;
-                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
                 return Ok(result);
             }
 
@@ -832,7 +867,11 @@ impl Cg<'_, '_, '_> {
                 let result = self.call_external_id(&ext, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call
                 let mut obj = obj;
-                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
                 self.consume_rc_args(&mut rc_temps)?;
                 return Ok(result);
             }
@@ -1232,7 +1271,11 @@ impl Cg<'_, '_, '_> {
                 // owns RC args (closures) and frees them internally. Mark them consumed without
                 // emitting rc_dec to avoid a double-free.
                 let mut obj = obj;
-                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
                 if used_array_iterable_path {
                     for cv in rc_temps.iter_mut() {
                         cv.mark_consumed();
@@ -1258,7 +1301,11 @@ impl Cg<'_, '_, '_> {
         // or borrowing and freeing them in the runtime (find/any/all). The caller must NOT
         // free these args again. Mark them consumed without emitting an rc_dec.
         let mut obj = obj;
-        self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+        self.consume_method_receiver(
+            &mut obj,
+            receiver_is_global_init_rc_iface,
+            dispatch.receiver_is_interface,
+        )?;
         if used_array_iterable_path {
             // Ownership of RC args transferred to the compiled Iterable default method.
             // Mark as consumed to satisfy lifecycle tracking without emitting a double-free.

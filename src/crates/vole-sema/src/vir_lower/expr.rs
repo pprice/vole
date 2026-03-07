@@ -109,7 +109,7 @@ pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                 .iter()
                 .map(|a| lower_call_arg(a.expr(), ctx))
                 .collect();
-            let dispatch = lower_method_dispatch_meta(expr.id, ctx);
+            let dispatch = lower_method_dispatch_meta(expr.id, mc.object.id, ctx);
             let dispatch_ty = dispatch
                 .substituted_return_type
                 .or_else(|| {
@@ -968,7 +968,7 @@ fn lower_optional_method_call(
         .map(|a| lower_call_arg(a.expr(), ctx))
         .collect();
     let vir_inner_type = ctx.translate(info.inner_type);
-    let dispatch = lower_method_dispatch_meta(expr.id, ctx);
+    let dispatch = lower_method_dispatch_meta(expr.id, omc.object.id, ctx);
     // Optional method calls produce an optional result (`Inner?`), not the raw
     // method return type. Keep the expression type from sema (`ty`) and carry
     // method dispatch return info only inside `dispatch`.
@@ -993,6 +993,7 @@ fn lower_optional_method_call(
 /// passes can consume it without NodeId-indexed map lookups.
 fn lower_method_dispatch_meta(
     expr_id: vole_identity::NodeId,
+    receiver_node_id: vole_identity::NodeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirMethodDispatchMeta {
     let dispatch_kind = ctx
@@ -1096,6 +1097,17 @@ fn lower_method_dispatch_meta(
                     .collect(),
             });
 
+    // Pre-compute whether the receiver's type is an interface.
+    // In generic mode the receiver type may be a type parameter, so default
+    // to `false` — rederive will update after monomorphization.
+    let receiver_is_interface = if ctx.generic {
+        false
+    } else {
+        ctx.node_map
+            .get_type(receiver_node_id)
+            .is_some_and(|ty| ctx.type_arena.is_interface(ty))
+    };
+
     VirMethodDispatchMeta {
         dispatch_kind,
         receiver_coercion,
@@ -1106,6 +1118,7 @@ fn lower_method_dispatch_meta(
         resolved_call_args,
         class_method_generic,
         static_method_generic,
+        receiver_is_interface,
     }
 }
 

@@ -895,6 +895,14 @@ pub struct VirMethodDispatchMeta {
     pub resolved_call_args: Option<Vec<Option<usize>>>,
     pub class_method_generic: Option<VirClassMethodMonomorphKey>,
     pub static_method_generic: Option<VirStaticMethodMonomorphKey>,
+    /// Pre-computed: the receiver's type is an interface.
+    ///
+    /// Used by codegen to decide whether `InterfaceMethod` dispatch from sema
+    /// should be trusted (receiver truly is an interface) or overridden
+    /// (receiver is a concrete type implementing the interface, so vtable
+    /// dispatch is wrong).  Set during VIR lowering; re-derived after
+    /// monomorphization when type parameters become concrete.
+    pub receiver_is_interface: bool,
 }
 
 /// A single arm of a `Match` expression.

@@ -167,10 +167,19 @@ fn rederive_expr(
             // Re-derive fallible hint from now-concrete result type.
             *result_is_fallible = table.is_fallible(*vir_ty);
         }
-        VirExpr::MethodCall { receiver, args, .. } => {
+        VirExpr::MethodCall {
+            receiver,
+            args,
+            dispatch,
+            ..
+        } => {
             rederive_ref(receiver, table, ret_ty, entities);
             for arg in args {
                 rederive_ref(arg, table, ret_ty, entities);
+            }
+            // Re-derive receiver_is_interface from the now-concrete receiver type.
+            if let Some(recv_vir_ty) = extract_vir_ty(receiver) {
+                dispatch.receiver_is_interface = table.is_interface(recv_vir_ty);
             }
         }
 
@@ -327,11 +336,16 @@ fn rederive_expr(
         VirExpr::OptionalMethodCall {
             object,
             method_args,
+            dispatch,
             ..
         } => {
             rederive_ref(object, table, ret_ty, entities);
             for arg in method_args {
                 rederive_ref(arg, table, ret_ty, entities);
+            }
+            // Re-derive receiver_is_interface from the now-concrete object type.
+            if let Some(obj_vir_ty) = extract_vir_ty(object) {
+                dispatch.receiver_is_interface = table.is_interface(obj_vir_ty);
             }
         }
         VirExpr::Try { value, .. } => rederive_ref(value, table, ret_ty, entities),

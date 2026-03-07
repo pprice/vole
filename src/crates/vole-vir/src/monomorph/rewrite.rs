@@ -889,6 +889,9 @@ fn rewrite_method_dispatch_meta(
             .static_method_generic
             .as_ref()
             .map(|key| rewrite_static_method_monomorph_key(key, ctx)),
+        // Copied as-is; rederive_decisions will update from the now-concrete
+        // receiver type after substitution.
+        receiver_is_interface: meta.receiver_is_interface,
     }
 }
 
@@ -2189,6 +2192,7 @@ mod tests {
                             method_type_keys: vec![type_id(11)],
                             vir_method_type_keys: vec![param_id],
                         }),
+                        receiver_is_interface: false,
                     },
                     node_id: NodeId::new_for_test(7),
                     ty: type_id(20),
