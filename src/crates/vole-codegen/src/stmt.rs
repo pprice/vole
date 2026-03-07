@@ -672,7 +672,9 @@ impl Cg<'_, '_, '_> {
                 } else if self.vir_query_is_unknown_v(ret_vir_ty) {
                     ReturnConvention::UnknownBox
                 } else if self.vir_query_is_fallible_v(ret_vir_ty) {
-                    if self.vir_query_is_wide_fallible_v(ret_vir_ty) {
+                    let abi =
+                        vole_vir::func::ReturnAbi::classify(ret_vir_ty, self.vir_type_table());
+                    if abi == vole_vir::func::ReturnAbi::WideFallible {
                         ReturnConvention::WideFallible
                     } else {
                         ReturnConvention::Fallible
@@ -885,7 +887,7 @@ impl Cg<'_, '_, '_> {
 
         self.emit_rc_cleanup_all_scopes(None)?;
 
-        if self.vir_query_is_wide_fallible_v(return_vir_ty) {
+        if self.return_abi == vole_vir::func::ReturnAbi::WideFallible {
             let zero = self.iconst_cached(types::I64, 0);
             self.builder.ins().return_(&[tag_val, payload_val, zero]);
         } else {
@@ -914,7 +916,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.iconst_cached(types::I64, 0));
         }
 
-        if error_fields.len() == 1 && !self.vir_query_is_wide_v(error_fields[0].vir_ty) {
+        if error_fields.len() == 1 && !self.vir_type_table().is_wide(error_fields[0].vir_ty) {
             let field_def = &error_fields[0];
             let field_name = self
                 .name_table()

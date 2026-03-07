@@ -224,15 +224,20 @@ impl Cg<'_, '_, '_> {
             sig.params.push(AbiParam::new(ty));
         }
 
-        if !self.vir_query_is_void(return_ty) {
-            if self.vir_query_is_wide_fallible(return_ty) {
+        let abi =
+            vole_vir::func::ReturnAbi::classify(self.vir_lookup(return_ty), self.vir_type_table());
+        match abi {
+            vole_vir::func::ReturnAbi::WideFallible => {
                 sig.returns.push(AbiParam::new(types::I64));
                 sig.returns.push(AbiParam::new(types::I64));
                 sig.returns.push(AbiParam::new(types::I64));
-            } else if self.vir_query_is_fallible(return_ty) {
+            }
+            vole_vir::func::ReturnAbi::Fallible => {
                 sig.returns.push(AbiParam::new(types::I64));
                 sig.returns.push(AbiParam::new(types::I64));
-            } else {
+            }
+            vole_vir::func::ReturnAbi::Void => {}
+            _ => {
                 sig.returns
                     .push(AbiParam::new(self.vir_query_type_to_cranelift(return_ty)));
             }

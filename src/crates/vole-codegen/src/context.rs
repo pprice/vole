@@ -174,6 +174,11 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub field_cache: FxHashMap<(Value, u32), Value>,
     /// Return type of the current function
     pub return_type: Option<VirTypeId>,
+    /// Pre-computed return ABI convention for the current function.
+    ///
+    /// Determined from `return_type` during context construction.  Read by
+    /// return/raise codegen instead of re-querying type width/fallibility.
+    pub return_abi: vole_vir::func::ReturnAbi,
     /// Module being compiled (None for main program)
     pub current_module: Option<ModuleId>,
     /// Type parameter substitutions for monomorphized generics (VirTypeId-native).
@@ -303,6 +308,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self_capture: None,
             field_cache: FxHashMap::default(),
             return_type: None,
+            return_abi: vole_vir::func::ReturnAbi::Void,
             current_module: None,
             substitutions: None,
             callable_backend_preference: CallableBackendPreference::PreferInline,
@@ -335,8 +341,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Set the return type directly from a `VirTypeId`.
+    ///
+    /// Also recomputes `return_abi` from the new return type.
     pub fn with_return_type_v(mut self, return_type: Option<VirTypeId>) -> Self {
         self.return_type = return_type;
+        self.return_abi = match return_type {
+            Some(ret) => vole_vir::func::ReturnAbi::classify(ret, self.vir_type_table()),
+            None => vole_vir::func::ReturnAbi::Void,
+        };
         self
     }
 
@@ -583,24 +595,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_fallible(&self, type_id: TypeId) -> bool {
         self.vir_query_is_fallible_v(self.vir_lookup(type_id))
-    }
-
-    /// Check if a `VirTypeId` is a wide fallible (i128 success type) via VirTypeTable.
-    #[inline]
-    pub fn vir_query_is_wide_fallible_v(&self, vir_ty: VirTypeId) -> bool {
-        crate::types::vir_conversions::vir_is_wide_fallible(vir_ty, self.vir_type_table())
-    }
-
-    /// Check if a sema `TypeId` is a wide fallible (i128 success type) via VirTypeTable.
-    #[inline]
-    pub fn vir_query_is_wide_fallible(&self, type_id: TypeId) -> bool {
-        self.vir_query_is_wide_fallible_v(self.vir_lookup(type_id))
-    }
-
-    /// Check if a `VirTypeId` is a wide type (i128/f128) via VirTypeTable.
-    #[inline]
-    pub fn vir_query_is_wide_v(&self, vir_ty: VirTypeId) -> bool {
-        crate::types::vir_conversions::vir_is_wide(vir_ty, self.vir_type_table())
     }
 
     /// Classify a `VirTypeId` as a `WideType` (i128/f128) via VirTypeTable.
@@ -2131,7 +2125,7 @@ fn build_monomorph_signature(
     ptr_type: Type,
     module: &cranelift_jit::JITModule,
 ) -> cranelift::prelude::Signature {
-    use crate::types::vir_conversions::{vir_is_wide_fallible, vir_type_to_cranelift};
+    use crate::types::vir_conversions::vir_type_to_cranelift;
 
     let vir_lookup = |tid: TypeId| -> VirTypeId {
         table.lookup_type_id(tid).unwrap_or_else(|| {
@@ -2161,9 +2155,13 @@ fn build_monomorph_signature(
     let return_type_id = func_type.return_type_id;
     let ret_vir = vir_lookup(return_type_id);
 
-    // Fallible return type -> multi-value returns
-    if table.unwrap_fallible(ret_vir).is_some() {
-        if vir_is_wide_fallible(ret_vir, table) {
+    // Fallible return type -> multi-value returns (dispatched via ReturnAbi)
+    let abi = vole_vir::func::ReturnAbi::classify(ret_vir, table);
+    if matches!(
+        abi,
+        vole_vir::func::ReturnAbi::Fallible | vole_vir::func::ReturnAbi::WideFallible
+    ) {
+        if abi == vole_vir::func::ReturnAbi::WideFallible {
             // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
             sig.returns.push(AbiParam::new(types::I64));
             sig.returns.push(AbiParam::new(types::I64));

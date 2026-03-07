@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
-use crate::types::vir_conversions::{vir_is_wide, vir_type_to_cranelift};
+use crate::types::vir_conversions::vir_type_to_cranelift;
 use vole_identity::{FunctionId, MethodId, NameId, TypeId, VirTypeId};
 use vole_vir::func::ReturnAbi;
 use vole_vir::types::VirType;
@@ -103,21 +103,24 @@ impl Compiler<'_> {
         if let Some(ret_type_id) = return_type_id
             && self.vir_query_unwrap_fallible(ret_type_id).is_some()
         {
-            // Check if success type is wide (i128/f128)
-            let is_wide = self
-                .vir_query_unwrap_fallible(ret_type_id)
-                .is_some_and(|(success_vir, _)| vir_is_wide(success_vir, self.vir_type_table()));
-            if is_wide {
-                // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
-                return self.jit.create_signature_multi_return(
-                    &cranelift_params,
-                    &[types::I64, types::I64, types::I64],
-                );
+            let ret_vir = self.vir_lookup(ret_type_id);
+            let abi = ReturnAbi::classify(ret_vir, self.vir_type_table());
+            match abi {
+                ReturnAbi::WideFallible => {
+                    // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
+                    return self.jit.create_signature_multi_return(
+                        &cranelift_params,
+                        &[types::I64, types::I64, types::I64],
+                    );
+                }
+                _ => {
+                    // Fallible returns: (tag: i64, payload: i64)
+                    return self.jit.create_signature_multi_return(
+                        &cranelift_params,
+                        &[types::I64, types::I64],
+                    );
+                }
             }
-            // Fallible returns: (tag: i64, payload: i64)
-            return self
-                .jit
-                .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64]);
         }
 
         // Check for struct return types - use multi-value or sret convention

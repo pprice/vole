@@ -83,17 +83,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             sig.params
                 .push(AbiParam::new(self.cranelift_type(param_type_id)));
         }
-        if !self.vir_query_is_void(ret) {
-            // For fallible returns, use multi-value return (tag: i64, payload: i64)
-            // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
-            if self.vir_query_is_wide_fallible(ret) {
-                sig.returns.push(AbiParam::new(types::I64)); // tag
-                sig.returns.push(AbiParam::new(types::I64)); // low
-                sig.returns.push(AbiParam::new(types::I64)); // high
-            } else if self.vir_query_unwrap_fallible(ret).is_some() {
-                sig.returns.push(AbiParam::new(types::I64)); // tag
-                sig.returns.push(AbiParam::new(types::I64)); // payload
-            } else if let Some(flat_count) = self.struct_flat_slot_count(ret) {
+        // Dispatch on return ABI to determine signature return layout.
+        let ret_abi =
+            vole_vir::func::ReturnAbi::classify(self.vir_lookup(ret), self.vir_type_table());
+        if ret_abi == vole_vir::func::ReturnAbi::WideFallible {
+            sig.returns.push(AbiParam::new(types::I64)); // tag
+            sig.returns.push(AbiParam::new(types::I64)); // low
+            sig.returns.push(AbiParam::new(types::I64)); // high
+        } else if ret_abi == vole_vir::func::ReturnAbi::Fallible {
+            sig.returns.push(AbiParam::new(types::I64)); // tag
+            sig.returns.push(AbiParam::new(types::I64)); // payload
+        } else if ret_abi != vole_vir::func::ReturnAbi::Void {
+            if let Some(flat_count) = self.struct_flat_slot_count(ret) {
                 // Struct returns: match the lambda definition's convention
                 if flat_count <= crate::MAX_SMALL_STRUCT_FIELDS {
                     for _ in 0..flat_count {

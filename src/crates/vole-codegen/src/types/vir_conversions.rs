@@ -108,11 +108,6 @@ fn vir_primitive_to_cranelift(kind: VirPrimitiveKind, pointer_type: Type) -> Typ
     }
 }
 
-/// Check if a `VirTypeId` is a wide type (requires 2 register slots).
-pub(crate) fn vir_is_wide(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    table.get_layout(vir_ty).is_some_and(|l| l.is_wide)
-}
-
 /// Check if a `VirTypeId` is reference-counted (needs RC management).
 pub(crate) fn vir_is_rc(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
     table.get_layout(vir_ty).is_some_and(|l| l.is_rc)
@@ -144,12 +139,12 @@ pub(crate) fn vir_storage_class(vir_ty: VirTypeId, table: &VirTypeTable) -> Stor
 
 /// Get the byte size of a field for a `VirTypeId`: 16 for wide types, 8 for all others.
 pub(crate) fn vir_field_byte_size(vir_ty: VirTypeId, table: &VirTypeTable) -> u32 {
-    if vir_is_wide(vir_ty, table) { 16 } else { 8 }
+    (vir_slot_count(vir_ty, table) as u32) * 8
 }
 
 /// Get the slot count of a field for a `VirTypeId`: 2 for wide types, 1 for all others.
 pub(crate) fn vir_field_slot_count(vir_ty: VirTypeId, table: &VirTypeTable) -> usize {
-    if vir_is_wide(vir_ty, table) { 2 } else { 1 }
+    vir_slot_count(vir_ty, table)
 }
 
 /// Check if a `VirTypeId` is an unsigned integer primitive.
@@ -392,15 +387,6 @@ pub(crate) fn vir_unwrap_function_ret(
         VirType::Function { ret, .. } => Some(*ret),
         _ => None,
     }
-}
-
-/// Check if a fallible type has a wide (i128) success type.
-///
-/// Returns true if the type is `Fallible { success, .. }` and `success`
-/// is a wide type.  When true, the fallible return convention uses 3
-/// registers instead of 2: (tag, payload_low, payload_high).
-pub(crate) fn vir_is_wide_fallible(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    vir_unwrap_fallible(vir_ty, table).is_some_and(|(success, _)| vir_is_wide(success, table))
 }
 
 /// Check if a union type has non-sentinel payload variants.
@@ -1826,13 +1812,13 @@ mod tests {
     #[test]
     fn is_wide_i128() {
         let table = test_table();
-        assert!(vir_is_wide(VirTypeId::I128, &table));
+        assert!(table.is_wide(VirTypeId::I128));
     }
 
     #[test]
     fn is_wide_i64_false() {
         let table = test_table();
-        assert!(!vir_is_wide(VirTypeId::I64, &table));
+        assert!(!table.is_wide(VirTypeId::I64));
     }
 
     // -----------------------------------------------------------------------
@@ -2406,11 +2392,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // vir_is_wide_fallible
+    // ReturnAbi::classify for wide fallible
     // -----------------------------------------------------------------------
 
     #[test]
     fn wide_fallible_true() {
+        use vole_vir::func::ReturnAbi;
         let mut table = test_table();
         let err_ty = table.intern(
             VirType::Error {
@@ -2425,11 +2412,15 @@ mod tests {
             },
             None,
         );
-        assert!(vir_is_wide_fallible(fallible, &table));
+        assert_eq!(
+            ReturnAbi::classify(fallible, &table),
+            ReturnAbi::WideFallible
+        );
     }
 
     #[test]
     fn wide_fallible_false_narrow_success() {
+        use vole_vir::func::ReturnAbi;
         let mut table = test_table();
         let err_ty = table.intern(
             VirType::Error {
@@ -2444,13 +2435,17 @@ mod tests {
             },
             None,
         );
-        assert!(!vir_is_wide_fallible(fallible, &table));
+        assert_eq!(ReturnAbi::classify(fallible, &table), ReturnAbi::Fallible);
     }
 
     #[test]
     fn wide_fallible_false_non_fallible() {
+        use vole_vir::func::ReturnAbi;
         let table = test_table();
-        assert!(!vir_is_wide_fallible(VirTypeId::I64, &table));
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::I64, &table),
+            ReturnAbi::Single
+        );
     }
 
     // -----------------------------------------------------------------------

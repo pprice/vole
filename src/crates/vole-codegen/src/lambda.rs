@@ -70,13 +70,14 @@ impl Cg<'_, '_, '_> {
         for &param_ty in param_types {
             sig.params.push(AbiParam::new(param_ty));
         }
-        // For fallible returns, use multi-value return (tag: i64, payload: i64)
-        // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
-        if self.vir_query_is_wide_fallible_v(return_vir_ty) {
+        // Dispatch on return ABI: fallible uses multi-value returns,
+        // wide fallible uses 3-register convention.
+        let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
+        if abi == vole_vir::func::ReturnAbi::WideFallible {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // low
             sig.returns.push(AbiParam::new(types::I64)); // high
-        } else if self.vir_query_unwrap_fallible_v(return_vir_ty).is_some() {
+        } else if abi == vole_vir::func::ReturnAbi::Fallible {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // payload
         } else if let Some(flat_count) = self.vir_struct_flat_slot_count(return_vir_ty) {

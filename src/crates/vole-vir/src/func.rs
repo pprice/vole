@@ -138,25 +138,52 @@ mod tests {
     #[test]
     fn classify_void() {
         let table = VirTypeTable::new();
-        assert_eq!(ReturnAbi::classify(VirTypeId::VOID, &table), ReturnAbi::Void);
-        assert_eq!(ReturnAbi::classify(VirTypeId::NEVER, &table), ReturnAbi::Void);
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::VOID, &table),
+            ReturnAbi::Void
+        );
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::NEVER, &table),
+            ReturnAbi::Void
+        );
     }
 
     #[test]
     fn classify_single() {
         let table = VirTypeTable::new();
-        assert_eq!(ReturnAbi::classify(VirTypeId::I64, &table), ReturnAbi::Single);
-        assert_eq!(ReturnAbi::classify(VirTypeId::BOOL, &table), ReturnAbi::Single);
-        assert_eq!(ReturnAbi::classify(VirTypeId::STRING, &table), ReturnAbi::Single);
-        assert_eq!(ReturnAbi::classify(VirTypeId::F64, &table), ReturnAbi::Single);
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::I64, &table),
+            ReturnAbi::Single
+        );
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::BOOL, &table),
+            ReturnAbi::Single
+        );
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::STRING, &table),
+            ReturnAbi::Single
+        );
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::F64, &table),
+            ReturnAbi::Single
+        );
     }
 
     #[test]
     fn classify_wide() {
         let table = VirTypeTable::new();
-        assert_eq!(ReturnAbi::classify(VirTypeId::I128, &table), ReturnAbi::Wide);
-        assert_eq!(ReturnAbi::classify(VirTypeId::F128, &table), ReturnAbi::Wide);
-        assert_eq!(ReturnAbi::classify(VirTypeId::RANGE, &table), ReturnAbi::Wide);
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::I128, &table),
+            ReturnAbi::Wide
+        );
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::F128, &table),
+            ReturnAbi::Wide
+        );
+        assert_eq!(
+            ReturnAbi::classify(VirTypeId::RANGE, &table),
+            ReturnAbi::Wide
+        );
     }
 
     #[test]
@@ -182,6 +209,9 @@ mod tests {
             },
             None,
         );
-        assert_eq!(ReturnAbi::classify(fallible, &table), ReturnAbi::WideFallible);
+        assert_eq!(
+            ReturnAbi::classify(fallible, &table),
+            ReturnAbi::WideFallible
+        );
     }
 }

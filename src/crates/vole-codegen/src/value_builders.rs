@@ -665,7 +665,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Check for wide fallible multi-value return (3 results: tag, low, high)
         // i128 success values are split across two i64 registers
-        if results.len() == 3 && self.vir_query_is_wide_fallible(return_type_id) {
+        let ret_abi = vole_vir::func::ReturnAbi::classify(
+            self.vir_lookup(return_type_id),
+            self.vir_type_table(),
+        );
+        if results.len() == 3 && ret_abi == vole_vir::func::ReturnAbi::WideFallible {
             let tag = results[0];
             let low = results[1];
             let high = results[2];

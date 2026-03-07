@@ -237,7 +237,7 @@ impl Cg<'_, '_, '_> {
         // For single wide (i128) field or multi-field errors, payload is a pointer to field data
         let has_any_wide = error_fields
             .iter()
-            .any(|f| self.vir_query_is_wide_v(f.vir_ty));
+            .any(|f| self.vir_type_table().is_wide(f.vir_ty));
         let inline_single_field = error_fields.len() == 1 && !has_any_wide;
 
         // Precompute field byte offsets (i128 fields use 16 bytes, others 8)
@@ -264,7 +264,7 @@ impl Cg<'_, '_, '_> {
             };
 
             let field_vir_ty = field_def.vir_ty;
-            let is_wide = self.vir_query_is_wide_v(field_vir_ty);
+            let is_wide = self.vir_type_table().is_wide(field_vir_ty);
 
             // Load the field value
             if inline_single_field {

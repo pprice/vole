@@ -216,18 +216,15 @@ fn emit_implicit_return(
 ) -> CodegenResult<()> {
     if let Some(value) = expr_value {
         // Check if the return type is fallible - need multi-value return
-        let is_fallible_return = cg
-            .return_type
-            .map(|ret_vir_ty| cg.vir_query_is_fallible_v(ret_vir_ty))
-            .unwrap_or(false);
+        let is_fallible_return = matches!(
+            cg.return_abi,
+            vole_vir::func::ReturnAbi::Fallible | vole_vir::func::ReturnAbi::WideFallible
+        );
 
         // Check if the function has a void return type. Expression-bodied default methods
         // like `=> self.iter().for_each(f)` produce a void value that must not be returned.
         // The Cranelift signature for void functions has no return values.
-        let is_void_return = cg
-            .return_type
-            .map(|ret_vir_ty| cg.vir_query_is_void_v(ret_vir_ty))
-            .unwrap_or(false);
+        let is_void_return = cg.return_abi == vole_vir::func::ReturnAbi::Void;
 
         if is_void_return {
             // Void-return expression body: discard the expression value and return nothing.
@@ -242,9 +239,7 @@ fn emit_implicit_return(
                 .ins()
                 .load(types::I64, MemFlags::new(), value.value, 0);
 
-            let is_wide = cg
-                .return_type
-                .is_some_and(|ret| cg.vir_query_is_wide_fallible_v(ret));
+            let is_wide = cg.return_abi == vole_vir::func::ReturnAbi::WideFallible;
 
             if is_wide {
                 // Wide fallible (i128 success): load low/high from offset 8/16
@@ -619,9 +614,10 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
         cg.vars.insert(*name, (*var, *vir_ty));
     }
 
-    // Set return type directly from VIR (already VirTypeId).
+    // Set return type and ABI directly from VIR (already VirTypeId).
     if has_return {
         cg.return_type = Some(vir_func.return_type);
+        cg.return_abi = vir_func.return_abi;
     }
 
     compile_vir_body_with_cg(&mut cg, &vir_func.body, DefaultReturn::Empty)?;
