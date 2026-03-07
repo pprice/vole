@@ -21,7 +21,7 @@ impl Cg<'_, '_, '_> {
     /// Compile and execute a native (FFI) function call.
     ///
     /// Shared logic for module FFI calls, prelude external calls, and module binding calls.
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     pub(super) fn call_native_external(
         &mut self,
         native_func: &NativeFunction,
@@ -50,7 +50,7 @@ impl Cg<'_, '_, '_> {
 
     /// Call a function via destructured module binding.
     /// Looks up the function by module_id and export_name, then calls via FFI or compiled function.
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     pub(super) fn call_module_binding(
         &mut self,
         module_id: ModuleId,
@@ -257,7 +257,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a native function call with known Vole types (for generic external functions).
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     /// This uses the concrete types from the monomorphized FunctionType rather than
     /// inferring types from the native signature.
     fn compile_native_call_with_types_from_source(
@@ -345,7 +345,7 @@ impl Cg<'_, '_, '_> {
 
     /// Call a generic external function as a compiler intrinsic.
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     /// Uses the intrinsic key from type mappings to dispatch to the correct handler.
     fn call_generic_external_intrinsic_with_source(
         &mut self,
@@ -366,8 +366,8 @@ impl Cg<'_, '_, '_> {
 
     /// Call a generic external function as a compiler intrinsic.
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths, as well as method
-    /// call paths, can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation; also used by
+    /// method call paths.
     pub(crate) fn call_generic_external_intrinsic_method_args(
         &mut self,
         module_path: &str,
@@ -417,7 +417,7 @@ impl Cg<'_, '_, '_> {
     /// Try to call a generic external function via monomorphization intrinsic resolution.
     /// Returns Some(result) if the call was handled, None if it should fall through.
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     pub(super) fn try_call_generic_external_intrinsic_from_monomorph(
         &mut self,
         _call_expr_id: NodeId,
@@ -484,7 +484,7 @@ impl Cg<'_, '_, '_> {
 
     /// Try to call a value as a functional interface.
     /// Returns Some(result) if the value is a functional interface, None otherwise.
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     pub(super) fn try_call_functional_interface(
         &mut self,
         obj: &CompiledValue,
@@ -515,7 +515,7 @@ impl Cg<'_, '_, '_> {
     /// Try to call a monomorphized function.
     /// Returns Some(result) if the call was handled, None if it should fall through.
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     pub(super) fn try_call_monomorphized_function(
         &mut self,
         call_expr_id: NodeId,

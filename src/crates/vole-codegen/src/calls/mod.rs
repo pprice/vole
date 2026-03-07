@@ -4,7 +4,6 @@
 //
 // Submodules:
 //   closure_calls  - closure call compilation and signature building
-//   lambda_search  - AST traversal to find lambda expressions by NodeId
 //   native_calls   - native (FFI) call compilation, generic externals, monomorphization
 //   string_ops     - string literal, interpolation, and value-to-string conversion
 
@@ -32,9 +31,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Core call dispatch: routes a call by callee symbol through 15+ dispatch
     /// paths (builtins, closures, modules, monomorphization, FFI, prelude, etc.).
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths share this function.
-    /// The AST path calls via `call()`, the VIR path calls directly from
-    /// `compile_vir_unresolved_call()`.
+    /// Only called from `compile_vir_unresolved_call()` for `CallTarget::Unresolved`
+    /// calls that VIR lowering could not fully classify.
+    ///
+    /// # Remaining Unresolved cases (March 2026)
+    ///
+    /// VIR lowering now classifies many call patterns into concrete `CallTarget`
+    /// variants (Direct, Intrinsic, ClosureVariable, CapturedClosure,
+    /// FunctionalInterface, GlobalClosure, GenericCall, VirDirect).  The
+    /// following cases still fall through to Unresolved:
+    ///
+    /// - **Functions with default parameters** — Direct doesn't fill defaults
+    /// - **Functions returning struct types** — Direct doesn't handle sret
+    /// - **Functions with interface/union params** — Direct doesn't box/coerce
+    /// - **Generator functions** — codegen overrides return type
+    /// - **External/FFI functions** — not in func_registry by NameId
+    /// - **Test-scoped local functions** — not in the main name table
+    /// - **Sema-fallback monomorphized calls** — not in VIR instance index
+    /// - **Module bindings** (destructured imports targeting FFI/generic externals)
+    /// - **Prelude external functions** (panic, etc.)
+    /// - **Generic template calls** (Unresolved in templates, may resolve during monomorph)
     pub fn call_dispatch(
         &mut self,
         callee_sym: Symbol,
@@ -253,7 +269,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Returns `Some(result)` if the callee is a global with a lambda or interface
     /// initializer, `None` otherwise.
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     /// `call_expr_id` is used as a placeholder for default param lookup in closure calls.
     pub(crate) fn try_call_global(
         &mut self,
@@ -339,7 +355,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a function by its FuncId, using Symbol to look up NameId for param types/defaults.
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     pub(super) fn call_func_id(
         &mut self,
         func_key: FunctionKey,
@@ -374,7 +390,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call a function by FuncId using NameId for default parameter lookup.
     /// Used for prelude Vole functions where the callee's NameId is already known.
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     fn call_func_id_by_name_id(
         &mut self,
         func_key: FunctionKey,
@@ -401,10 +417,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Named-arg reordering uses `self.vir_resolved_call_args` (populated
     /// by VIR call dispatch).
-    ///
-    /// Accepts `ArgSource` so that both AST and VIR call sites can share this
-    /// function.  AST callers pass `ArgSource::Ast(&call.args)`, VIR callers
-    /// pass `ArgSource::Vir(&vir_args)`.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn call_func_id_impl(
         &mut self,
@@ -719,9 +731,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Compile call arguments for an external function from an `ArgSource`.
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this
-    /// function.  Defaults for omitted parameters are always compiled from
-    /// AST expressions in the EntityRegistry.
+    /// Defaults for omitted parameters are always compiled from
+    /// VIR expressions in the EntityRegistry.
     pub(super) fn compile_external_call_args_from_source(
         &mut self,
         callee_sym: Symbol,
@@ -781,14 +792,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(args)
     }
 
-    /// Compile an indirect call given a pre-compiled callee value and arguments.
-    ///
-    /// The callee must be a function/closure type.  Dispatches through
-    /// `call_closure_value` and handles RC cleanup of the callee after the call.
-    /// `placeholder_node_id` is used for default-param lookup (indirect calls
     /// Compile print_char builtin for ASCII output.
-    ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     pub(crate) fn call_print_char(
         &mut self,
         arg_source: &ArgSource<'_>,
@@ -820,7 +824,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Uses brif + assert_fail instead of a function call to avoid
     /// a pre-existing class-field-access register clobber bug (v-a1f9).
     ///
-    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// Accepts `ArgSource` for VIR-based argument compilation.
     pub(crate) fn call_assert(
         &mut self,
         arg_source: &ArgSource<'_>,

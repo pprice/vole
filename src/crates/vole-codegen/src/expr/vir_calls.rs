@@ -523,11 +523,16 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an unresolved call by delegating to `call_dispatch()`.
     ///
-    /// The lowering pass emits `CallTarget::Unresolved` for call expressions
-    /// that couldn't be classified without the function registry, variable
-    /// table, and module context.  This method passes the VIR-lowered `args`
-    /// through `ArgSource::Vir` so all dispatch paths compile from VIR
-    /// instead of the original AST.
+    /// VIR lowering emits `CallTarget::Unresolved` for call expressions it
+    /// could not fully classify (functions with defaults/sret/interface params,
+    /// FFI, test-scoped functions, sema-fallback monomorphs, module bindings,
+    /// prelude externals, and generic template calls).  See `CallTarget::Unresolved`
+    /// for the full list.
+    ///
+    /// This method stashes the VIR-resolved named-arg mapping, lambda
+    /// defaults, and return type, then passes the VIR-lowered `args` through
+    /// `ArgSource::Vir` so all dispatch paths compile from VIR instead of
+    /// the original AST.
     #[allow(clippy::too_many_arguments)]
     fn compile_vir_unresolved_call(
         &mut self,

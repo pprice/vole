@@ -120,7 +120,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call an actual closure (with closure pointer).
     ///
-    /// Accepts `ArgSource` so both AST and VIR call sites can share this path.
     /// Lambda defaults come from `self.vir_lambda_defaults` (populated by VIR
     /// call dispatch).
     /// Named-arg reordering comes from `self.vir_resolved_call_args` (populated

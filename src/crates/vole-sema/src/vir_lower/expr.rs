@@ -1323,24 +1323,31 @@ fn classify_single_field_coercion(
 
 /// Lower a call expression to `VirExpr::Call`.
 ///
-/// Call dispatch is complex because sema does not annotate a "call dispatch
-/// kind" on Call nodes.  The full 15+ path dispatch requires the function
-/// registry, variable table, and module context — none of which are available
-/// during lowering.
+/// Classification proceeds through a chain of checks:
 ///
-/// The lowering emits `CallTarget::Unresolved` which carries the callee
-/// symbol, call NodeId, and source line.  Codegen's `call_dispatch()` uses
-/// these plus the VIR-lowered `args` (compiled via `ArgSource::Vir`) to
-/// perform the full 15+ path dispatch.
+/// 1. **Indirect calls** (non-identifier callee, e.g. `array[0]()`) are
+///    lowered as `CallTarget::Lambda` with the callee prepended as the first
+///    arg.  Codegen's `compile_vir_lambda_call` handles these directly.
 ///
-/// **Indirect calls** (non-identifier callee, e.g. `array[0]()`) are lowered
-/// as `CallTarget::Lambda` with the callee prepended as the first arg.
-/// Codegen's `compile_vir_lambda_call` handles these directly, so they bypass
-/// the `call_dispatch()` dispatcher entirely.
+/// 2. **Intrinsics** (`print_char`, `assert`, sema-resolved intrinsic keys)
+///    are classified via `resolve_intrinsic_target()`.
 ///
-/// Over time, specific call patterns will be promoted from Unresolved to
-/// concrete `CallTarget` variants (Direct, Lambda, Intrinsic, etc.) as sema
-/// gains call classification annotations.
+/// 3. **Direct function calls** (same-module, cross-module, prelude) are
+///    classified via `resolve_callee_function()`, which skips functions
+///    with default params, struct returns, interface/union params, generators,
+///    or FFI linkage.
+///
+/// 4. **Closure/captured/functional-interface variables** are classified via
+///    `resolve_closure_variable_target()` using sema's `callee_var_type`.
+///
+/// 5. **Global closures** are classified via `resolve_global_closure_target()`.
+///
+/// 6. **Generic calls** (in generic mode) are classified via
+///    `generic_call_target()` as `CallTarget::GenericCall`.
+///
+/// Calls that don't match any of the above become `CallTarget::Unresolved`,
+/// which codegen resolves via `call_dispatch()`.  See `CallTarget::Unresolved`
+/// for the full list of remaining cases.
 fn lower_call(
     call_expr: &vole_frontend::ast::CallExpr,
     expr: &Expr,

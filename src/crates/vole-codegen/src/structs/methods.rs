@@ -25,10 +25,10 @@ use vole_vir::types::VirType;
 use super::static_methods::StaticMethodCallArgs;
 
 // ============================================================================
-// MethodCallSource: abstraction over AST and VIR method call data
+// ArgSource / MethodCallSource: VIR method call data
 // ============================================================================
 
-/// Source of a method call's arguments: VIR expression refs.
+/// Source of a call's arguments: VIR expression refs.
 pub struct ArgSource<'a>(pub &'a [VirRef]);
 
 impl ArgSource<'_> {
