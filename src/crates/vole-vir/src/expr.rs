@@ -144,6 +144,16 @@ pub enum VirExpr {
         vir_ty: VirTypeId,
         /// Source line for panic messages (division by zero, overflow).
         line: u32,
+        /// Pre-computed: the left operand's type is optional (`T?`).
+        ///
+        /// Used by Eq/Ne comparisons to dispatch to the nil-comparison path
+        /// without querying `vir_query_is_optional_v()` at codegen time.
+        /// Set during VIR lowering; re-derived after monomorphization.
+        lhs_is_optional: bool,
+        /// Pre-computed: the right operand's type is optional (`T?`).
+        ///
+        /// Symmetric with `lhs_is_optional`.
+        rhs_is_optional: bool,
     },
 
     /// Unary operation (negation, logical/bitwise not).
@@ -172,6 +182,13 @@ pub enum VirExpr {
         args: Vec<VirRef>,
         ty: VirTypeId,
         vir_ty: VirTypeId,
+        /// Pre-computed: the result type is fallible (`T!E`).
+        ///
+        /// Used by lambda call result handling to dispatch to the
+        /// tag+payload reconstruction path without querying
+        /// `vir_query_is_fallible()` at codegen time.
+        /// Set during VIR lowering; re-derived after monomorphization.
+        result_is_fallible: bool,
     },
 
     /// Method call on a receiver object.

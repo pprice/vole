@@ -239,6 +239,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             ty,
             vir_ty,
             line,
+            ..
         } => VirExpr::BinaryOp {
             op: *op,
             lhs: rewrite_ref(lhs, ctx),
@@ -246,6 +247,9 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
             line: *line,
+            // Rederive will recompute from concrete types after monomorphization.
+            lhs_is_optional: false,
+            rhs_is_optional: false,
         },
         VirExpr::UnaryOp {
             op,
@@ -269,11 +273,14 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             args,
             ty,
             vir_ty,
+            ..
         } => VirExpr::Call {
             target: rewrite_call_target(target, ctx),
             args: args.iter().map(|a| rewrite_ref(a, ctx)).collect(),
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
+            // Rederive will recompute from concrete types after monomorphization.
+            result_is_fallible: false,
         },
         VirExpr::MethodCall {
             receiver,
@@ -1393,6 +1400,8 @@ mod tests {
                         ty: type_id(10),
                         vir_ty: param_id,
                         line: 1,
+                        lhs_is_optional: false,
+                        rhs_is_optional: false,
                     }),
                     mutable: false,
                     ty: type_id(10),
@@ -2082,6 +2091,7 @@ mod tests {
                     args: vec![],
                     ty: type_id(10),
                     vir_ty: param_id,
+                    result_is_fallible: false,
                 })),
             },
             mangled_name_id: None,

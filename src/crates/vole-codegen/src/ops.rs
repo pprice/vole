@@ -189,25 +189,34 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| CodegenError::internal("to_string method did not return a value"))
     }
 
-    /// Compile a binary operation on two values
+    /// Compile a binary operation on two values.
+    ///
+    /// `lhs_is_optional` / `rhs_is_optional` are VIR-lowering hints that
+    /// short-circuit the type-table lookup for optional nil-comparison
+    /// dispatch.  When the hint is `false`, the fallback query is still
+    /// performed so that generic/unresolved paths remain correct.
     pub fn binary_op(
         &mut self,
         mut left: CompiledValue,
         mut right: CompiledValue,
         op: VirBinOp,
         line: u32,
+        lhs_is_optional: bool,
+        rhs_is_optional: bool,
     ) -> CodegenResult<CompiledValue> {
         // Handle optional/nil comparisons specially
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, VirBinOp::Eq | VirBinOp::Ne) {
             // Check if left is optional and right is nil
-            let left_is_opt = self.vir_query_is_optional_v(left.type_id);
+            let left_is_opt = lhs_is_optional || self.vir_query_is_optional_v(left.type_id);
             let right_is_nil = right.type_id.is_nil();
             if left_is_opt && right_is_nil {
                 return self.optional_nil_compare(left, op);
             }
             // Check if right is optional and left is nil
-            if self.vir_query_is_optional_v(right.type_id) && left.type_id.is_nil() {
+            if (rhs_is_optional || self.vir_query_is_optional_v(right.type_id))
+                && left.type_id.is_nil()
+            {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type (using VirTypeId)

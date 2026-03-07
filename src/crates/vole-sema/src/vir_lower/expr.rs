@@ -216,6 +216,24 @@ fn lower_binary(
     let vir_op = map_binary_op(bin_expr.op);
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
+
+    // Pre-compute optional hints for Eq/Ne comparisons so codegen can
+    // dispatch to the nil-comparison path without querying the type table.
+    let (lhs_is_optional, rhs_is_optional) =
+        if matches!(vir_op, VirBinOp::Eq | VirBinOp::Ne) && !ctx.generic {
+            let lhs_opt = ctx
+                .node_map
+                .get_type(bin_expr.left.id)
+                .is_some_and(|t| ctx.type_arena.is_optional(t));
+            let rhs_opt = ctx
+                .node_map
+                .get_type(bin_expr.right.id)
+                .is_some_and(|t| ctx.type_arena.is_optional(t));
+            (lhs_opt, rhs_opt)
+        } else {
+            (false, false)
+        };
+
     Box::new(VirExpr::BinaryOp {
         op: vir_op,
         lhs,
@@ -223,6 +241,8 @@ fn lower_binary(
         ty: compat_ty,
         vir_ty,
         line: expr.span.line,
+        lhs_is_optional,
+        rhs_is_optional,
     })
 }
 
@@ -490,6 +510,8 @@ fn lower_compound_assign(
                 ty: compat_ty,
                 vir_ty,
                 line: expr.span.line,
+                lhs_is_optional: false,
+                rhs_is_optional: false,
             });
             Box::new(VirExpr::LocalStore {
                 name: *sym,
@@ -515,6 +537,8 @@ fn lower_compound_assign(
                 ty: compat_ty,
                 vir_ty,
                 line: expr.span.line,
+                lhs_is_optional: false,
+                rhs_is_optional: false,
             });
             Box::new(VirExpr::FieldStore {
                 object: obj_for_store,
@@ -543,6 +567,8 @@ fn lower_compound_assign(
                 ty: compat_ty,
                 vir_ty,
                 line: expr.span.line,
+                lhs_is_optional: false,
+                rhs_is_optional: false,
             });
             Box::new(VirExpr::IndexStore {
                 object: obj_for_store,
@@ -1334,11 +1360,13 @@ fn lower_call(
         }
         let compat_ty = ctx.compat_ty(ty);
         let vir_ty = ctx.translate(ty);
+        let result_is_fallible = !ctx.generic && ctx.type_arena.unwrap_fallible(ty).is_some();
         return Box::new(VirExpr::Call {
             target: CallTarget::Lambda,
             args,
             ty: compat_ty,
             vir_ty,
+            result_is_fallible,
         });
     }
 
@@ -1423,11 +1451,13 @@ fn lower_call(
 
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
+    let result_is_fallible = !ctx.generic && ctx.type_arena.unwrap_fallible(ty).is_some();
     Box::new(VirExpr::Call {
         target,
         args,
         ty: compat_ty,
         vir_ty,
+        result_is_fallible,
     })
 }
 

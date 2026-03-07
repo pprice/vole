@@ -359,6 +359,11 @@ impl VirTypeTable {
         matches!(self.get(id), VirType::Optional { .. })
     }
 
+    /// Whether this is a `Fallible` type.
+    pub fn is_fallible(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Fallible { .. })
+    }
+
     /// Whether this is an `Array` type.
     pub fn is_array(&self, id: VirTypeId) -> bool {
         matches!(self.get(id), VirType::Array { .. })

@@ -405,8 +405,16 @@ impl Cg<'_, '_, '_> {
 
             // -- Operators ------------------------------------------------
             VirExpr::BinaryOp {
-                op, lhs, rhs, line, ..
-            } => self.compile_vir_binary_op(*op, lhs, rhs, *line),
+                op,
+                lhs,
+                rhs,
+                line,
+                lhs_is_optional,
+                rhs_is_optional,
+                ..
+            } => {
+                self.compile_vir_binary_op(*op, lhs, rhs, *line, *lhs_is_optional, *rhs_is_optional)
+            }
             VirExpr::UnaryOp { op, operand, .. } => self.compile_vir_unary_op(*op, operand),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
             VirExpr::InterpolatedString { parts } => self.compile_vir_interpolated_string(parts),
@@ -432,8 +440,17 @@ impl Cg<'_, '_, '_> {
 
             // -- Calls ----------------------------------------------------
             VirExpr::Call {
-                target, args, ty, ..
-            } => self.compile_vir_call(target, args, self.try_substitute_type_v(*ty)),
+                target,
+                args,
+                ty,
+                result_is_fallible,
+                ..
+            } => self.compile_vir_call(
+                target,
+                args,
+                self.try_substitute_type_v(*ty),
+                *result_is_fallible,
+            ),
             VirExpr::MethodCall {
                 receiver,
                 method,
@@ -717,13 +734,15 @@ impl Cg<'_, '_, '_> {
         lhs: &VirExpr,
         rhs: &VirExpr,
         line: u32,
+        lhs_is_optional: bool,
+        rhs_is_optional: bool,
     ) -> CodegenResult<CompiledValue> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
         if op == VirBinOp::Add && left.type_id == VirTypeId::STRING {
             return self.string_concat(left, right);
         }
-        self.binary_op(left, right, op, line)
+        self.binary_op(left, right, op, line, lhs_is_optional, rhs_is_optional)
     }
 
     /// Compile a VIR unary operation.

@@ -27,13 +27,14 @@ impl Cg<'_, '_, '_> {
         target: &CallTarget,
         args: &[VirRef],
         vir_ty: VirTypeId,
+        result_is_fallible: bool,
     ) -> CodegenResult<CompiledValue> {
         let ty = self.vir_type_table().vir_to_type_id(vir_ty);
         match target {
             CallTarget::Direct { function_id } => {
                 self.compile_vir_direct_call(*function_id, args, ty)
             }
-            CallTarget::Lambda => self.compile_vir_lambda_call(args, ty),
+            CallTarget::Lambda => self.compile_vir_lambda_call(args, ty, result_is_fallible),
             CallTarget::Intrinsic { key, line } => {
                 self.compile_vir_intrinsic_call(*key, args, ty, *line)
             }
@@ -224,6 +225,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         args: &[VirRef],
         return_ty: TypeId,
+        result_is_fallible: bool,
     ) -> CodegenResult<CompiledValue> {
         assert!(
             !args.is_empty(),
@@ -257,7 +259,7 @@ impl Cg<'_, '_, '_> {
         let mut closure_val = closure_val;
         self.consume_rc_value(&mut closure_val)?;
 
-        self.vir_closure_result(call_inst, return_ty)
+        self.vir_closure_result(call_inst, return_ty, result_is_fallible)
     }
 
     /// Build a Cranelift `Signature` for a VIR lambda call.
@@ -300,17 +302,22 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Extract the result of a closure call, handling fallible/union return types.
+    ///
+    /// `result_is_fallible` is a VIR-lowering hint that short-circuits the
+    /// type-table lookup.  When the hint is `false`, the fallback query is
+    /// still performed so that generic/unresolved paths remain correct.
     fn vir_closure_result(
         &mut self,
         call_inst: cranelift_codegen::ir::Inst,
         return_ty: TypeId,
+        result_is_fallible: bool,
     ) -> CodegenResult<CompiledValue> {
         let results = self.builder.inst_results(call_inst).to_vec();
         if results.is_empty() {
             return Ok(self.void_value());
         }
 
-        if results.len() == 2 && self.vir_query_is_fallible(return_ty) {
+        if results.len() == 2 && (result_is_fallible || self.vir_query_is_fallible(return_ty)) {
             let tag = results[0];
             let payload = results[1];
             let slot = self.alloc_stack(union_layout::STANDARD_SIZE);

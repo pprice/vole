@@ -120,6 +120,8 @@ impl VirBuilder {
             ty,
             vir_ty: ty,
             line,
+            lhs_is_optional: false,
+            rhs_is_optional: false,
         })
     }
 
@@ -140,6 +142,7 @@ impl VirBuilder {
             args,
             ty,
             vir_ty: ty,
+            result_is_fallible: false,
         })
     }
 

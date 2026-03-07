@@ -115,9 +115,25 @@ fn rederive_expr(
         }
 
         // Operators
-        VirExpr::BinaryOp { lhs, rhs, .. } => {
+        VirExpr::BinaryOp {
+            lhs,
+            rhs,
+            op,
+            lhs_is_optional,
+            rhs_is_optional,
+            ..
+        } => {
             rederive_ref(lhs, table, ret_ty, entities);
             rederive_ref(rhs, table, ret_ty, entities);
+            // Re-derive optional hints from now-concrete operand types.
+            if matches!(op, crate::expr::VirBinOp::Eq | crate::expr::VirBinOp::Ne) {
+                if let Some(lhs_vir_ty) = extract_vir_ty(lhs) {
+                    *lhs_is_optional = table.is_optional(lhs_vir_ty);
+                }
+                if let Some(rhs_vir_ty) = extract_vir_ty(rhs) {
+                    *rhs_is_optional = table.is_optional(rhs_vir_ty);
+                }
+            }
         }
         VirExpr::UnaryOp { operand, .. } => {
             rederive_ref(operand, table, ret_ty, entities);
@@ -134,10 +150,17 @@ fn rederive_expr(
         }
 
         // Calls
-        VirExpr::Call { args, .. } => {
+        VirExpr::Call {
+            args,
+            vir_ty,
+            result_is_fallible,
+            ..
+        } => {
             for arg in args {
                 rederive_ref(arg, table, ret_ty, entities);
             }
+            // Re-derive fallible hint from now-concrete result type.
+            *result_is_fallible = table.is_fallible(*vir_ty);
         }
         VirExpr::MethodCall { receiver, args, .. } => {
             rederive_ref(receiver, table, ret_ty, entities);
