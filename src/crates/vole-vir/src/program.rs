@@ -135,6 +135,13 @@ pub struct VirProgram {
     /// Set by `run_vir_monomorphize`; defaults to `usize::MAX` (no VIR monomorphs).
     pub vir_monomorph_base: usize,
 
+    /// Instance index mapping `MonomorphInstance` to absolute function index.
+    ///
+    /// Built by the early VIR monomorph pass and merged with the final pass.
+    /// Used by `resolve_all_calls` to resolve `Unresolved` calls with monomorph
+    /// keys to `VirDirect` targets.
+    pub vir_instance_index: crate::monomorph::InstanceIndex,
+
     /// Entity metadata: type definitions, field definitions, and method
     /// definitions.  Populated during VIR lowering from sema's
     /// `EntityRegistry`.  Replaces `EntityView` as the VIR-native source

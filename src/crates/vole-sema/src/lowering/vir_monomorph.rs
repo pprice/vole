@@ -40,9 +40,13 @@ pub fn build_generic_vir_storage(
 /// seeds, and merges the produced concrete functions back into the working
 /// `vir_functions` vec and `type_table`.
 ///
-/// Returns the set of `FunctionId`s for generic functions that were
-/// successfully monomorphized -- `lower_monomorphized_instances` should skip
-/// all sema cache entries whose `original_name` resolves to one of these.
+/// Returns a tuple of:
+/// - The set of `FunctionId`s for generic functions that were successfully
+///   monomorphized -- `lower_monomorphized_instances` should skip all sema
+///   cache entries whose `original_name` resolves to one of these.
+/// - The instance index mapping `MonomorphInstance` to absolute function
+///   index -- used later by `resolve_all_calls` to resolve `Unresolved`
+///   calls to `VirDirect`.
 #[allow(clippy::too_many_arguments)]
 pub fn run_early_vir_monomorphize(
     vir_functions: &mut Vec<VirFunction>,
@@ -51,7 +55,7 @@ pub fn run_early_vir_monomorphize(
     type_table: &mut VirTypeTable,
     entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
-) -> HashSet<FunctionId> {
+) -> (HashSet<FunctionId>, vole_vir::InstanceIndex) {
     use crate::vir_lower::type_translate::translate_type_id;
 
     let mut handled = HashSet::new();
@@ -97,7 +101,7 @@ pub fn run_early_vir_monomorphize(
     }
 
     if seeds.is_empty() {
-        return handled;
+        return (handled, FxHashMap::default());
     }
 
     // Build a temporary VirProgram for VIR monomorphization.
@@ -117,6 +121,8 @@ pub fn run_early_vir_monomorphize(
             func.mangled_name_id = Some(mangled_name_id);
         }
     }
+
+    let mut early_instance_index = vole_vir::InstanceIndex::default();
 
     if !result.functions.is_empty() {
         // Record which generic FunctionIds were handled.
@@ -140,13 +146,16 @@ pub fn run_early_vir_monomorphize(
 
         // Resolve GenericCall -> VirDirect in all concrete functions.
         vole_vir::resolve_generic_calls(&mut temp_program.functions, &abs_index);
+
+        // Preserve the instance index for the final resolve pass.
+        early_instance_index = abs_index;
     }
 
     // Move the (possibly updated) type_table and functions back.
     *type_table = temp_program.type_table;
     *vir_functions = temp_program.functions;
 
-    handled
+    (handled, early_instance_index)
 }
 
 /// Run the VIR monomorphization pass: discover generic calls in concrete
@@ -158,30 +167,47 @@ pub fn run_early_vir_monomorphize(
 /// them to `VirDirect` call targets.
 pub fn run_vir_monomorphize(program: &mut VirProgram) {
     let result = vole_vir::monomorphize(program);
-    if result.functions.is_empty() {
-        return;
-    }
 
-    // Compute the base index where new functions will be appended.
-    let base_index = program.functions.len();
-    // Preserve the earliest VIR monomorph base if an earlier pass already
-    // appended VIR monomorphized functions (e.g. early seeded monomorphize).
-    if program.vir_monomorph_base == usize::MAX {
-        program.vir_monomorph_base = base_index;
-    }
+    // Build the instance index from this pass's results (may be empty).
+    let abs_index: vole_vir::InstanceIndex = if result.functions.is_empty() {
+        FxHashMap::default()
+    } else {
+        // Compute the base index where new functions will be appended.
+        let base_index = program.functions.len();
+        // Preserve the earliest VIR monomorph base if an earlier pass already
+        // appended VIR monomorphized functions (e.g. early seeded monomorphize).
+        if program.vir_monomorph_base == usize::MAX {
+            program.vir_monomorph_base = base_index;
+        }
 
-    // Build the absolute instance index (base + relative offset).
-    let abs_index: vole_vir::InstanceIndex = result
-        .instance_map
-        .into_iter()
-        .map(|(instance, rel_idx)| (instance, base_index + rel_idx))
-        .collect();
+        let index = result
+            .instance_map
+            .into_iter()
+            .map(|(instance, rel_idx)| (instance, base_index + rel_idx))
+            .collect();
 
-    // Append the monomorphized functions to the program.
-    program.functions.extend(result.functions);
+        // Append the monomorphized functions to the program.
+        program.functions.extend(result.functions);
 
-    // Resolve GenericCall -> VirDirect in all concrete functions.
-    vole_vir::resolve_generic_calls(&mut program.functions, &abs_index);
+        index
+    };
+
+    // Merge the early pass instance index with this pass's index.
+    // This gives resolve_all_calls visibility into ALL VIR-monomorphized
+    // functions, not just those from the final pass.
+    let mut merged_index = std::mem::take(&mut program.vir_instance_index);
+    merged_index.extend(abs_index);
+
+    // Resolve GenericCall -> VirDirect and Unresolved (with monomorph key)
+    // -> VirDirect in all concrete functions.  Only resolves Unresolved calls
+    // whose targets are VIR-monomorphized (present in the instance index).
+    // Functions monomorphized by the sema fallback path remain Unresolved
+    // for codegen to handle via call_dispatch().
+    vole_vir::resolve_all_calls(
+        &mut program.functions,
+        &merged_index,
+        &program.entity_metadata,
+    );
 }
 
 /// Build an empty VirProgram shell for temporary use during monomorphization.
@@ -212,6 +238,7 @@ fn build_empty_vir_program(
         module_constants: FxHashMap::default(),
         module_exports: FxHashMap::default(),
         vir_monomorph_base: usize::MAX,
+        vir_instance_index: FxHashMap::default(),
         entity_metadata: VirEntityMetadata::new(),
         implement_dispatch: VirImplementDispatch::new(),
         free_monomorphs: FxHashMap::default(),

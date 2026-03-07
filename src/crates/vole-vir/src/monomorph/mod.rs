@@ -13,6 +13,6 @@ pub mod substitute;
 pub use fixpoint::{MonomorphInstance, MonomorphResult, monomorphize, monomorphize_with_seeds};
 pub use instance::{VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo};
 pub use rederive::{classify_capture_rc_kind, classify_rc_cleanup, rederive_decisions};
-pub use resolve::{InstanceIndex, resolve_generic_calls};
+pub use resolve::{InstanceIndex, resolve_all_calls, resolve_generic_calls};
 pub use rewrite::{RewriteCtx, rewrite_function};
 pub use substitute::{TypeSubstitution, substitute_types};

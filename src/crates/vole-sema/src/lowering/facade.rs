@@ -482,7 +482,7 @@ where
     // -----------------------------------------------------------------------
 
     let (generic_vir_functions, generic_vir_map) = build_generic_vir_storage(generic_vir_functions);
-    let vir_handled_function_ids = run_early_vir_monomorphize(
+    let (vir_handled_function_ids, early_instance_index) = run_early_vir_monomorphize(
         &mut vir_functions,
         &generic_vir_functions,
         &generic_vir_map,
@@ -769,6 +769,7 @@ where
         monomorph_info,
         entity_metadata,
         module_interners,
+        early_instance_index,
         type_table,
         type_arena,
     })
@@ -812,6 +813,7 @@ struct AssembleVirProgramArgs<'a> {
     monomorph_info: super::monomorph_info::PopulatedMonomorphInfo,
     entity_metadata: vole_vir::entity_metadata::VirEntityMetadata,
     module_interners: FxHashMap<String, Rc<Interner>>,
+    early_instance_index: vole_vir::InstanceIndex,
     type_table: &'a mut VirTypeTable,
     type_arena: &'a TypeArena,
 }
@@ -840,6 +842,7 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         monomorph_info,
         entity_metadata,
         module_interners,
+        early_instance_index,
         type_table,
         type_arena,
     } = args;
@@ -865,6 +868,7 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         module_constants,
         module_exports,
         vir_monomorph_base: usize::MAX,
+        vir_instance_index: early_instance_index,
         entity_metadata,
         implement_dispatch: module_implement_dispatch,
         free_monomorphs: monomorph_info.free_monomorphs,
