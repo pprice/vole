@@ -68,8 +68,8 @@ impl StmtRule for DefaultParamFunc {
 // ---------------------------------------------------------------------------
 
 fn emit_i64_one_default(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
-    let fn_name = scope.fresh_name();
-    let fn_label = format!("dpf_{}", fn_name);
+    let uid = emit.gen_range(10000..99999);
+    let fn_label = format!("dpf_{}", uid);
 
     let default_factor = emit.gen_i64_range(2, 9);
 
@@ -101,8 +101,8 @@ fn emit_i64_one_default(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 fn emit_i64_two_defaults(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
-    let fn_name = scope.fresh_name();
-    let fn_label = format!("dpf_{}", fn_name);
+    let uid = emit.gen_range(10000..99999);
+    let fn_label = format!("dpf_{}", uid);
 
     let default_mult = emit.gen_i64_range(2, 6);
     let default_add = emit.gen_i64_range(1, 20);
@@ -152,8 +152,8 @@ const DEFAULT_PREFIXES: &[&str] = &["item", "key", "tag", "node", "row"];
 const OVERRIDE_PREFIXES: &[&str] = &["val", "obj", "ref", "src", "out"];
 
 fn emit_string_one_default(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
-    let fn_name = scope.fresh_name();
-    let fn_label = format!("dpf_{}", fn_name);
+    let uid = emit.gen_range(10000..99999);
+    let fn_label = format!("dpf_{}", uid);
 
     let default_prefix = DEFAULT_PREFIXES[emit.gen_range(0..DEFAULT_PREFIXES.len())];
 
