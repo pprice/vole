@@ -55,6 +55,7 @@ mod empty_string_iter_let;
 mod empty_string_ops;
 mod f64_comparison_edge;
 mod f64_literal_ops;
+mod fallible_closure_call;
 mod field_closure;
 mod field_default_construct;
 mod filter_iter_tostring;
@@ -453,6 +454,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         // -- SymbolTable-dependent rules (batch 15) -----------------------------------
         Box::new(raise_stmt::RaiseStmt),
         Box::new(try_let::TryLet),
+        Box::new(fallible_closure_call::FallibleClosureCall),
         Box::new(discard_stmt::DiscardStmt),
         Box::new(static_call::StaticCall),
         Box::new(method_call::MethodCall),
