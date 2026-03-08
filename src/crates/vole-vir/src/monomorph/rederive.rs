@@ -597,25 +597,30 @@ fn rederive_call_target(
     let rca = resolved_call_args.clone();
     let ld = *lambda_defaults;
 
+    // Resolve the callee symbol to a string first. If the interner can't
+    // resolve it (e.g. during early monomorphization with a temporary empty
+    // interner), leave the call as Unresolved for later resolution.
+    let Some(callee_name) = ctx.interner.try_resolve(callee_sym) else {
+        return;
+    };
+
     // 1. Hardcoded intrinsics (assert, print_char).
-    if let Some(callee_name) = ctx.interner.try_resolve(callee_sym) {
-        match callee_name {
-            "assert" => {
-                *target = CallTarget::Intrinsic {
-                    key: IntrinsicKey::Assert,
-                    line,
-                };
-                return;
-            }
-            "print_char" => {
-                *target = CallTarget::Intrinsic {
-                    key: IntrinsicKey::PrintChar,
-                    line,
-                };
-                return;
-            }
-            _ => {}
+    match callee_name {
+        "assert" => {
+            *target = CallTarget::Intrinsic {
+                key: IntrinsicKey::Assert,
+                line,
+            };
+            return;
         }
+        "print_char" => {
+            *target = CallTarget::Intrinsic {
+                key: IntrinsicKey::PrintChar,
+                line,
+            };
+            return;
+        }
+        _ => {}
     }
 
     // 2. Closure variable call: callee matches a function-typed parameter.
@@ -632,9 +637,9 @@ fn rederive_call_target(
     }
 
     // 3. Direct function call: look up in the name table.
-    if let Some(name_id) = ctx
-        .name_table
-        .name_id(ctx.module_id, &[callee_sym], ctx.interner)
+    // Use name_id_raw (string-based) instead of name_id (Symbol-based)
+    // to avoid panicking when the interner doesn't contain the symbol.
+    if let Some(name_id) = ctx.name_table.name_id_raw(ctx.module_id, &[callee_name])
         && let Some(func_id) = entities.function_by_name(name_id)
         && let Some(func_def) = entities.get_function_def(func_id)
         && !func_def.is_generic
@@ -647,9 +652,7 @@ fn rederive_call_target(
     }
 
     // 4. Compiler intrinsics via implement-dispatch (e.g. `panic`).
-    if let Some(callee_name) = ctx.interner.try_resolve(callee_sym)
-        && let Some(ext_info) = ctx.implement_dispatch.external_func_by_name(callee_name)
-    {
+    if let Some(ext_info) = ctx.implement_dispatch.external_func_by_name(callee_name) {
         let module_path_str = ctx
             .name_table
             .last_segment_str(ext_info.module_path)
