@@ -45,6 +45,7 @@ mod compound_assignment;
 mod compound_bool;
 mod dead_code;
 mod deep_optional_chain;
+mod diamond_interface;
 mod discard_stmt;
 mod early_return;
 mod edge_case_for_loop;
@@ -308,6 +309,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(higher_order_closure::HigherOrderClosure),
         Box::new(closure_struct_method::ClosureStructMethod),
         Box::new(multi_interface_extend::MultiInterfaceExtend),
+        Box::new(diamond_interface::DiamondInterface),
         // -- Match rules --------------------------------------------------------
         Box::new(match_let::MatchLet),
         Box::new(match_method::MatchMethod),
