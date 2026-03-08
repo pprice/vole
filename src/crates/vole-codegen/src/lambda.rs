@@ -295,9 +295,20 @@ impl Cg<'_, '_, '_> {
             // to break the reference cycle: closure -> self-capture -> closure.
             let is_rc = !is_self_capture && self.capture_is_rc(capture, vole_vir_ty);
 
-            // If the capture is RC, increment its refcount (the closure now shares ownership)
+            // Check for union/optional captures with RC variants (e.g. Box?, string?)
+            let union_rc = if !is_self_capture && !is_rc {
+                self.rc_state_v(vole_vir_ty).union_variants().map(Vec::from)
+            } else {
+                None
+            };
+
+            // Emit RC management for the capture
             if is_rc {
                 self.builder.ins().call(rc_inc_ref, &[current_value]);
+            } else if let Some(ref rc_variants) = union_rc {
+                // Union/optional with RC variants: conditionally rc_inc the
+                // inner value based on the current tag.
+                self.emit_union_rc_inc(current_value, rc_variants)?;
             }
 
             let size = self.type_size_v(vole_vir_ty);
@@ -316,8 +327,9 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
 
-            // Set the capture kind so closure_drop knows which captures need rc_dec
-            let kind_val = self.iconst_cached(types::I8, is_rc as i64);
+            // Compute capture kind for closure_drop
+            let kind = self.compute_capture_kind(is_rc, &union_rc);
+            let kind_val = self.iconst_cached(types::I8, kind as i64);
             self.builder
                 .ins()
                 .call(set_kind_ref, &[closure_ptr, index_val, kind_val]);
@@ -330,6 +342,42 @@ impl Cg<'_, '_, '_> {
         }
 
         Ok(())
+    }
+
+    /// Compute the capture kind byte for closure_drop.
+    ///
+    /// For simple RC: kind=1 (CAPTURE_KIND_RC).
+    /// For union/optional with one RC variant: encodes the tag in the kind byte
+    /// so closure_drop can conditionally rc_dec the payload.
+    fn compute_capture_kind(&self, is_rc: bool, union_rc: &Option<Vec<(u8, bool)>>) -> u8 {
+        use vole_runtime::closure::{
+            CAPTURE_KIND_RC, CAPTURE_KIND_UNION_IFACE_RC_BASE, CAPTURE_KIND_UNION_RC_BASE,
+            CAPTURE_KIND_VALUE,
+        };
+        if is_rc {
+            return CAPTURE_KIND_RC;
+        }
+        if let Some(rc_variants) = union_rc {
+            if rc_variants.len() == 1 {
+                let (tag, is_interface) = rc_variants[0];
+                return if is_interface {
+                    CAPTURE_KIND_UNION_IFACE_RC_BASE + tag
+                } else {
+                    CAPTURE_KIND_UNION_RC_BASE + tag
+                };
+            }
+            // Multi-RC-variant unions: handle each variant separately.
+            // Use the first non-interface variant's tag. This handles the most
+            // common case (e.g. string | Box captured as optional).
+            // TODO: support multi-RC-variant union captures with per-closure drop
+            if let Some(&(tag, false)) = rc_variants.iter().find(|(_, is_iface)| !is_iface) {
+                return CAPTURE_KIND_UNION_RC_BASE + tag;
+            }
+            if let Some(&(tag, true)) = rc_variants.first() {
+                return CAPTURE_KIND_UNION_IFACE_RC_BASE + tag;
+            }
+        }
+        CAPTURE_KIND_VALUE
     }
 
     /// Check whether a capture needs RC management.

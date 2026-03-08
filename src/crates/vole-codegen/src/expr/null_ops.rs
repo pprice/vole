@@ -79,7 +79,12 @@ impl Cg<'_, '_, '_> {
         let ptr_bytes = self.ptr_type().bytes();
         if size > ptr_bytes {
             let ptr_type = self.ptr_type();
-            let cv = CompiledValue::new(heap_ptr, ptr_type, binding.vole_type);
+            let mut cv = CompiledValue::new(heap_ptr, ptr_type, binding.vole_type);
+            // Mark as borrowed so extraction code (coalesce, pattern match)
+            // properly rc_inc's inner RC values. The closure's capture slot
+            // retains the Optional/union data, so extracted RC values need
+            // their own reference.
+            self.mark_borrowed_if_rc(&mut cv);
             return Ok(cv);
         }
 

@@ -29,6 +29,15 @@ pub const CAPTURE_KIND_RC: u8 = 1;
 /// Interface capture: the heap slot holds a fat pointer [data_ptr, vtable_ptr].
 /// On drop, load data_ptr from offset 0 and rc_dec it (the underlying class instance).
 pub const CAPTURE_KIND_INTERFACE: u8 = 2;
+/// Union/optional capture with a non-interface RC variant.
+/// The heap slot holds a union value: [tag: u8 at offset 0] [padding] [payload: ptr at offset 8].
+/// The RC variant's tag = `kind - CAPTURE_KIND_UNION_RC_BASE`.
+/// On drop: if tag matches, load ptr from offset 8 and rc_dec.
+pub const CAPTURE_KIND_UNION_RC_BASE: u8 = 4;
+/// Union/optional capture with an interface RC variant.
+/// The RC variant's tag = `kind - CAPTURE_KIND_UNION_IFACE_RC_BASE`.
+/// On drop: if tag matches, load fat_ptr from offset 8, load data_ptr from offset 0, rc_dec.
+pub const CAPTURE_KIND_UNION_IFACE_RC_BASE: u8 = 68;
 
 /// Runtime representation of a closure
 ///
@@ -296,6 +305,31 @@ unsafe extern "C" fn closure_drop(ptr: *mut u8) {
                     let data_ptr = *(fat_ptr as *const *mut u8);
                     if !data_ptr.is_null() {
                         rc_dec(data_ptr);
+                    }
+                }
+            } else if (CAPTURE_KIND_UNION_RC_BASE..CAPTURE_KIND_UNION_IFACE_RC_BASE).contains(&kind)
+            {
+                // Union/optional with a non-interface RC variant.
+                // Layout: [tag: u8 at offset 0] [padding] [payload at offset 8].
+                let rc_tag = kind - CAPTURE_KIND_UNION_RC_BASE;
+                let tag_byte = *capture_ptr;
+                if tag_byte == rc_tag {
+                    let payload = *(capture_ptr.add(8) as *const *mut u8);
+                    if !payload.is_null() {
+                        rc_dec(payload);
+                    }
+                }
+            } else if kind >= CAPTURE_KIND_UNION_IFACE_RC_BASE {
+                // Union/optional with an interface RC variant.
+                let rc_tag = kind - CAPTURE_KIND_UNION_IFACE_RC_BASE;
+                let tag_byte = *capture_ptr;
+                if tag_byte == rc_tag {
+                    let fat_ptr = *(capture_ptr.add(8) as *const *mut u8);
+                    if !fat_ptr.is_null() {
+                        let data_ptr = *(fat_ptr as *const *mut u8);
+                        if !data_ptr.is_null() {
+                            rc_dec(data_ptr);
+                        }
                     }
                 }
             }

@@ -1,0 +1,49 @@
+class Box {
+    value: i64,
+}
+
+tests "capture optional RC types" {
+    test "capture optional class and coalesce" {
+        let b: Box? = Box { value: 42 }
+        let getVal = () -> i64 => (b ?? Box { value: 0 }).value
+        assert(getVal() == 42)
+    }
+
+    test "capture nil optional class and coalesce" {
+        let b: Box? = nil
+        let getVal = () -> i64 => (b ?? Box { value: 99 }).value
+        assert(getVal() == 99)
+    }
+
+    test "capture optional class and nil check" {
+        let b: Box? = Box { value: 10 }
+        let check = () -> bool => b != nil
+        assert(check())
+    }
+
+    test "capture nil optional class and nil check" {
+        let b: Box? = nil
+        let check = () -> bool => b == nil
+        assert(check())
+    }
+
+    test "capture optional string and coalesce" {
+        let s: string? = "hello"
+        let get = () -> string => s ?? "default"
+        assert(get() == "hello")
+    }
+
+    test "capture nil optional string and coalesce" {
+        let s: string? = nil
+        let get = () -> string => s ?? "default"
+        assert(get() == "default")
+    }
+
+    test "capture optional class used multiple times" {
+        let b: Box? = Box { value: 7 }
+        let getVal = () -> i64 => (b ?? Box { value: 0 }).value
+        assert(getVal() == 7)
+        assert(getVal() == 7)
+        assert(getVal() == 7)
+    }
+}
