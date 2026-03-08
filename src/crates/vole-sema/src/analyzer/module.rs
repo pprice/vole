@@ -644,6 +644,16 @@ impl Analyzer {
             .merged_node_map
             .borrow_mut()
             .merge(sub_analyzer.results.node_map);
+
+        // Merge generic VIR templates from the module sub-analyzer so that
+        // the VIR monomorphization pass can find templates for module-originating
+        // generic functions.  Without this, cross-module generic calls fall back
+        // to the AST lowering path which reads stale NodeMap entries (e.g.,
+        // StringConversion from generic body analysis with abstract TypeParam
+        // types, not the concrete instantiation types).
+        self.results
+            .generic_vir_functions
+            .extend(sub_analyzer.results.generic_vir_functions);
     }
 
     /// Resolve parameter and return types into a function ArenaTypeId.

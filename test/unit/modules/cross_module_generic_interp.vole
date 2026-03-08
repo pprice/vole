@@ -1,0 +1,18 @@
+// Regression test for cross-module generic string interpolation.
+// Previously, when a generic function with string interpolation was called
+// cross-module, the StringConversion for type parameter T was incorrectly
+// set to I64ToString (from the generic body analysis) instead of being
+// rederived to the correct conversion for each concrete instantiation.
+// This caused string values to be treated as raw pointers.
+//
+// Root cause: store_sub_analyzer_results did not propagate generic VIR
+// templates from module sub-analyzers, so cross-module generic functions
+// fell through to the AST fallback path which read stale NodeMap entries.
+
+let lib = import "./cross_module_generic_interp_lib.vole"
+
+tests "cross-module generic interpolation" {
+    test "cross-module caller invokes both monomorphs" {
+        lib.caller("test")
+    }
+}

@@ -509,6 +509,14 @@ impl Compiler<'_> {
         // demand-driven fixpoint loop handles them.
         self.declare_all_monomorphized_instances()?;
 
+        // Pass 1.5b: Declare VIR-monomorphized functions (produced by
+        // run_vir_monomorphize).  Module function bodies may contain
+        // CallTarget::VirDirect references to these monomorphized functions
+        // (e.g., a concrete module function calling a generic function like
+        // wrap<string>).  Without declaring them here, compile_module_function_bodies
+        // would fail with "VirDirect function not found".
+        self.declare_vir_monomorphized_functions()?;
+
         // Pass 1.6: Expand abstract class method templates into concrete instances.
         // Abstract templates are created by sema when generic code (e.g. Task.stream<T>)
         // calls instance methods on generic classes (e.g. Channel<T>.close()).
@@ -524,6 +532,12 @@ impl Compiler<'_> {
         // Passes false for is_program_phase — instances from the main program are
         // silently skipped and compiled later in compile_program_body.
         self.compile_all_monomorphized_instances(false)?;
+
+        // Pass 1.8: Compile VIR-monomorphized function bodies.  These are the
+        // concrete functions produced by VIR monomorphization (e.g., wrap<string>,
+        // wrap<i64>).  Must be compiled before module function bodies so that
+        // VirDirect calls from module functions can be resolved.
+        self.compile_vir_monomorphized_functions()?;
 
         // Pass 2: Compile all function bodies (cross-module calls now resolved)
         // When lazy_modules is enabled, skip body compilation — functions are declared
@@ -1083,6 +1097,19 @@ impl Compiler<'_> {
         }
         for idx in indices {
             let vir_func = &self.analyzed.functions[idx];
+
+            // If this VIR-monomorphized function was also declared by
+            // declare_monomorphized_instances (via its mangled NameId), reuse
+            // that FuncId so that VirDirect calls and name-based calls both
+            // resolve to the same compiled body.
+            if let Some(mangled_name_id) = vir_func.mangled_name_id {
+                let func_key = self.func_registry.intern_name_id(mangled_name_id);
+                if let Some(existing_func_id) = self.func_registry.func_id(func_key) {
+                    self.state.vir_direct_func_ids.insert(idx, existing_func_id);
+                    continue;
+                }
+            }
+
             let sig = self.build_signature_for_vir_func(vir_func);
             let jit_name = format!("__vir_monomorph_{}", vir_func.name);
             let func_id = self.jit.declare_function(&jit_name, &sig);

@@ -1,0 +1,20 @@
+// Library module for cross-module generic string interpolation test.
+// The wrap<T> function uses string interpolation with a generic type parameter.
+
+func wrap<T>(x: T, label: string) -> string {
+    let result = "{label}: {x}"
+    return result
+}
+
+func caller(s: string) {
+    let r1 = wrap(129, "count")
+    assert(r1 == "count: 129")
+    let r2 = wrap("hello", "item")
+    assert(r2 == "item: hello")
+}
+
+tests "lib" {
+    test "local call" {
+        caller("test")
+    }
+}
