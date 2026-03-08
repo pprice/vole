@@ -13,6 +13,7 @@ mod array_let;
 mod array_of_structs;
 mod array_push;
 mod array_uniform_ops;
+mod as_cast_let;
 mod assert_stmt;
 mod bool_chain;
 mod bool_chain_edge;
@@ -501,6 +502,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(string_match_let::StringMatchLet),
         Box::new(when_let::WhenLet),
         Box::new(union_match_let::UnionMatchLet),
+        Box::new(as_cast_let::AsCastLet),
         Box::new(sentinel_union_let::SentinelUnionLet),
         Box::new(optional_destructure_match::OptionalDestructureMatch),
         Box::new(optional_chain_call::OptionalChainCall),
