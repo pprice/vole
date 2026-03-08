@@ -181,10 +181,15 @@ impl Analyzer {
         subs
     }
 
-    /// Recursively collect generic function ASTs from declarations.
+    /// Collect generic function ASTs from top-level declarations.
     ///
-    /// Walks `Decl::Function` entries and recurses into `Decl::Tests` blocks
-    /// so that test-scoped generic functions are included.
+    /// Only walks `Decl::Function` entries; does NOT recurse into
+    /// `Decl::Tests` blocks.  Test-scoped generics are handled by the
+    /// sub-analyzer's own `lower_generic_bodies_to_vir` call inside
+    /// `analyze_virtual_module`, which has the correct scope for
+    /// test-scoped types.  Recursing here would re-analyze them in the
+    /// parent scope where test-scoped types are not visible, causing
+    /// spurious errors and lost VIR templates.
     fn collect_generic_func_asts_for_vir<'a>(
         &mut self,
         decls: &'a [Decl],
@@ -192,34 +197,28 @@ impl Analyzer {
         map: &mut FxHashMap<NameId, &'a FuncDecl>,
     ) {
         for decl in decls {
-            match decl {
-                Decl::Function(func) => {
-                    let name_id = self.name_table_mut().intern(
-                        self.module.current_module,
-                        &[func.name],
-                        interner,
-                    );
+            if let Decl::Function(func) = decl {
+                let name_id = self.name_table_mut().intern(
+                    self.module.current_module,
+                    &[func.name],
+                    interner,
+                );
 
-                    let has_explicit_type_params = !func.type_params.is_empty();
-                    let has_implicit_generic_info = self
-                        .entity_registry()
-                        .function_by_name(name_id)
-                        .map(|func_id| {
-                            self.entity_registry()
-                                .get_function(func_id)
-                                .generic_info
-                                .is_some()
-                        })
-                        .unwrap_or(false);
+                let has_explicit_type_params = !func.type_params.is_empty();
+                let has_implicit_generic_info = self
+                    .entity_registry()
+                    .function_by_name(name_id)
+                    .map(|func_id| {
+                        self.entity_registry()
+                            .get_function(func_id)
+                            .generic_info
+                            .is_some()
+                    })
+                    .unwrap_or(false);
 
-                    if has_explicit_type_params || has_implicit_generic_info {
-                        map.insert(name_id, func);
-                    }
+                if has_explicit_type_params || has_implicit_generic_info {
+                    map.insert(name_id, func);
                 }
-                Decl::Tests(tests_decl) => {
-                    self.collect_generic_func_asts_for_vir(&tests_decl.decls, interner, map);
-                }
-                _ => {}
             }
         }
     }

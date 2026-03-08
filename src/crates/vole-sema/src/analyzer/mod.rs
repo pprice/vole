@@ -533,7 +533,12 @@ impl Analyzer {
         // and lower them to VIR templates.  These templates are consumed by
         // the VIR monomorph pass (in codegen's `from_analysis`) which handles
         // free-function monomorphization via type substitution.
-        self.results.generic_vir_functions = self.lower_generic_bodies_to_vir(program, interner);
+        //
+        // Use extend (not assignment) to preserve test-scoped generic VIR
+        // templates that were already lowered during check_declaration_bodies
+        // (via analyze_virtual_module → lower_generic_bodies_to_vir).
+        let top_level_vir_fns = self.lower_generic_bodies_to_vir(program, interner);
+        self.results.generic_vir_functions.extend(top_level_vir_fns);
 
         // Pass 2.5: Propagate concrete substitutions to class method monomorphs.
         // Generic class bodies record identity monomorphs for self-calls (T -> TypeParam(T)).
