@@ -11,8 +11,8 @@
 
 use std::path::Path;
 
-use vole_frontend::Parser;
 use vole_frontend::ast::Decl;
+use vole_frontend::{ModuleId, Parser};
 
 use crate::oracle::MatchResult;
 use crate::reducer::Reducer;

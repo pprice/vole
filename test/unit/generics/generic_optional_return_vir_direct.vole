@@ -1,0 +1,55 @@
+// Regression test: generic functions with optional return types (T?)
+// called via VirDirect from non-generic wrapper functions.
+//
+// The bug was in compile_vir_direct_call_by_index: rc_dec cleanup for
+// temporary args ran BEFORE the optional return value was copied out of
+// the callee's stack frame, clobbering the result.
+
+func find_first<T>(items: [T], pred: (T) -> bool) -> T? {
+    for item in items {
+        if pred(item) {
+            return item
+        }
+    }
+    return nil
+}
+
+func wrapper_found() -> i64? {
+    return find_first([ 1, 2, 3, 4, 5 ], (v: i64) => v > 3)
+}
+
+func wrapper_not_found() -> i64? {
+    return find_first([ 1, 2, 3, 4, 5 ], (v: i64) => v > 100)
+}
+
+tests "generic optional return via VirDirect" {
+    test "found value through wrapper" {
+        let found = wrapper_found()
+        assert(found == 4)
+        assert(found != nil)
+    }
+
+    test "nil result through wrapper" {
+        let found = wrapper_not_found()
+        assert(found == nil)
+    }
+
+    test "inline call with rc temporaries" {
+        // Inline array + lambda args create rc temporaries that must be
+        // cleaned up AFTER copying the optional result.
+        let found = find_first([ 10, 20, 30, 40 ], (v: i64) => v > 25)
+        assert(found == 30)
+    }
+
+    test "inline call returning nil" {
+        let found = find_first([ 10, 20, 30 ], (v: i64) => v > 100)
+        assert(found == nil)
+    }
+
+    test "wrapper assert inside called function" {
+        // This was the original failing pattern: assert(found == 4)
+        // inside a non-generic wrapper called from a test block.
+        let found = find_first([ 1, 2, 3, 4, 5 ], (v: i64) => v > 3)
+        assert(found == 4)
+    }
+}

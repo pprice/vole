@@ -212,10 +212,11 @@ fn pick_i64_find(emit: &mut Emit) -> (String, String, i64, String) {
     let op = emit.gen_range(0..3);
     match op {
         0 => {
-            // Find first value > threshold
-            let threshold = emit.gen_i64_range(2, 8);
+            // Find first value > threshold.  Keep threshold in 1..=3 so at
+            // least one element of [1,2,3,4,5] always satisfies `x > threshold`.
+            let threshold = emit.gen_i64_range(1, 3);
             let elems: Vec<i64> = (1..=5).collect();
-            let expected = elems.iter().copied().find(|&x| x > threshold).unwrap_or(5);
+            let expected = elems.iter().copied().find(|&x| x > threshold).unwrap();
             let array_str = format!(
                 "[{}]",
                 elems

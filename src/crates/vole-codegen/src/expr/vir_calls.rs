@@ -255,7 +255,24 @@ impl Cg<'_, '_, '_> {
 
         let (arg_values, mut rc_temps) = self.compile_vir_args(args)?;
         let call_inst = self.emit_call(func_ref, &arg_values);
+
+        // For union/optional returns, copy the value out of the callee's stack
+        // frame BEFORE RC temp cleanup — rc_dec calls may clobber the callee's
+        // return slot (same ordering as compile_vir_direct_call).
+        let union_copy = if self.vir_query_is_union(return_ty) {
+            let results = self.builder.inst_results(call_inst);
+            let src_ptr = results[0];
+            Some(self.copy_union_ptr_to_local(src_ptr, return_ty))
+        } else {
+            None
+        };
+
         self.consume_rc_args(&mut rc_temps)?;
+
+        if let Some(result) = union_copy {
+            return Ok(result);
+        }
+
         self.call_result(call_inst, return_ty)
     }
 

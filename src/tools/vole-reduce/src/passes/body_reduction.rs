@@ -12,7 +12,7 @@ use vole_frontend::ast::{
     Block, ClassDecl, Decl, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, InterfaceMethod,
     StaticsBlock, Stmt, StructDecl, TestsDecl,
 };
-use vole_frontend::{Interner, Parser};
+use vole_frontend::{Interner, ModuleId, Parser};
 
 use crate::oracle::MatchResult;
 use crate::reducer::Reducer;
