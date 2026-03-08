@@ -220,6 +220,7 @@ mod string_iter_let;
 mod string_length_edge;
 mod string_lines;
 mod string_match_let;
+mod string_method_call;
 mod string_method_let;
 mod string_predicate;
 mod string_replace;
@@ -284,6 +285,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(range_when_accum::RangeWhenAccum),
         Box::new(string_build_match::StringBuildMatch),
         Box::new(while_string_build::WhileStringBuild),
+        Box::new(string_method_call::StringMethodCall),
         // -- Arithmetic rules ---------------------------------------------------
         Box::new(checked_arithmetic::CheckedArithmetic),
         Box::new(modulo_edge::ModuloEdge),
