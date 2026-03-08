@@ -204,6 +204,7 @@ mod sorted_iter_accum;
 mod split_for_loop;
 mod split_transform;
 mod static_call;
+mod static_method_call;
 mod string_build_match;
 mod string_char_at;
 mod string_concat;
@@ -482,6 +483,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(fallible_closure_call::FallibleClosureCall),
         Box::new(discard_stmt::DiscardStmt),
         Box::new(static_call::StaticCall),
+        Box::new(static_method_call::StaticMethodCall),
         Box::new(method_call::MethodCall),
         Box::new(interface_method_call::InterfaceMethodCall),
         Box::new(iface_function_call::IfaceFunctionCall),
