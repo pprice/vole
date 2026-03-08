@@ -1,8 +1,8 @@
 //! Rule: string compare expression.
 //!
 //! Generates `str1.compare(str2)` when two string-typed variables are in
-//! scope and the expected type is `i64`. Returns negative, zero, or
-//! positive for lexicographic ordering. Optionally chains a string
+//! scope and the expected type is `i32`. Returns negative, zero, or
+//! positive i32 for lexicographic ordering. Optionally chains a string
 //! transform before `.compare()`.
 
 use crate::emit::Emit;
@@ -38,7 +38,7 @@ impl ExprRule for StringCompare {
         params: &Params,
         expected_type: &TypeInfo,
     ) -> Option<String> {
-        if !matches!(expected_type, TypeInfo::Primitive(PrimitiveType::I64)) {
+        if !matches!(expected_type, TypeInfo::Primitive(PrimitiveType::I32)) {
             return None;
         }
 
@@ -101,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn returns_none_for_non_i64() {
+    fn returns_none_for_non_i32() {
         let table = SymbolTable::new();
         let mut scope = Scope::new(&[], &table);
         scope.add_local(
@@ -130,6 +130,17 @@ mod tests {
             &TypeInfo::Primitive(PrimitiveType::Bool),
         );
         assert!(result.is_none());
+
+        // Also reject i64
+        let mut rng2 = rand::rngs::StdRng::seed_from_u64(42);
+        let mut emit2 = test_emit(&mut rng2, &resolved);
+        let result2 = StringCompare.generate(
+            &scope,
+            &mut emit2,
+            &params,
+            &TypeInfo::Primitive(PrimitiveType::I64),
+        );
+        assert!(result2.is_none());
     }
 
     #[test]
@@ -154,7 +165,7 @@ mod tests {
             &scope,
             &mut emit,
             &params,
-            &TypeInfo::Primitive(PrimitiveType::I64),
+            &TypeInfo::Primitive(PrimitiveType::I32),
         );
         assert!(result.is_none());
     }
@@ -186,7 +197,7 @@ mod tests {
             &scope,
             &mut emit,
             &params,
-            &TypeInfo::Primitive(PrimitiveType::I64),
+            &TypeInfo::Primitive(PrimitiveType::I32),
         );
         assert!(result.is_some());
         let text = result.unwrap();
@@ -223,7 +234,7 @@ mod tests {
             &scope,
             &mut emit,
             &params,
-            &TypeInfo::Primitive(PrimitiveType::I64),
+            &TypeInfo::Primitive(PrimitiveType::I32),
         );
         assert!(result.is_some());
         let text = result.unwrap();
