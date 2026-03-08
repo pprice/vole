@@ -33,6 +33,7 @@ mod closure_extend_method;
 mod closure_iter_capture;
 mod closure_match_guard;
 mod closure_result_concat;
+mod closure_return;
 mod closure_return_func;
 mod closure_struct_capture;
 mod closure_struct_method;
@@ -293,6 +294,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(closure_class_call::ClosureClassCall),
         Box::new(closure_when_capture::ClosureWhenCapture),
         Box::new(match_closure_call::MatchClosureCall),
+        Box::new(closure_return::ClosureReturn),
         Box::new(closure_return_func::ClosureReturnFunc),
         Box::new(closure_iter_capture::ClosureIterCapture),
         Box::new(closure_extend_method::ClosureExtendMethod),
