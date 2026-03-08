@@ -171,6 +171,7 @@ mod nested_closure;
 mod nested_for_loop;
 mod nested_func_calls;
 mod nested_func_def;
+mod nested_loop_break_continue;
 mod nested_match;
 mod nested_tostring;
 mod nested_when;
@@ -539,5 +540,6 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(for_stmt::ForStmt),
         Box::new(for_break_iter::ForBreakIter),
         Box::new(nested_for_loop::NestedForLoop),
+        Box::new(nested_loop_break_continue::NestedLoopBreakContinue),
     ]
 }
