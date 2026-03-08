@@ -83,6 +83,7 @@ mod generic_closure_iter;
 mod generic_closure_param;
 mod generic_interface_call;
 mod generic_iter_call;
+mod generic_optional_return;
 mod generic_struct_closure;
 mod higher_order_closure;
 mod i32_boundary;
@@ -282,6 +283,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(generic_struct_closure::GenericStructClosure),
         Box::new(generic_interface_call::GenericInterfaceCall),
         Box::new(generic_iter_call::GenericIterCall),
+        Box::new(generic_optional_return::GenericOptionalReturn),
         Box::new(closure_class_call::ClosureClassCall),
         Box::new(closure_when_capture::ClosureWhenCapture),
         Box::new(match_closure_call::MatchClosureCall),
