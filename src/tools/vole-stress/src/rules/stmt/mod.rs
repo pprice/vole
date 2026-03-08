@@ -235,6 +235,7 @@ mod string_split;
 mod struct_copy;
 mod struct_destructure;
 mod struct_extend_methods;
+mod struct_field_array_iter;
 mod struct_field_interpolation;
 mod struct_iter_fields;
 mod struct_let;
@@ -552,6 +553,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(struct_extend_methods::StructExtendMethods),
         Box::new(array_of_structs::ArrayOfStructs),
         Box::new(iter_struct_pipeline::IterStructPipeline),
+        Box::new(struct_field_array_iter::StructFieldArrayIter),
         Box::new(closure_struct_capture::ClosureStructCapture),
         Box::new(closure_struct_return::ClosureStructReturn),
         Box::new(struct_method_closure::StructMethodClosure),
