@@ -25,6 +25,7 @@ mod chained_string_methods;
 mod checked_arithmetic;
 mod class_destructure;
 mod class_let;
+mod closure_as_cast;
 mod closure_capture;
 mod closure_capture_is_check;
 mod closure_capture_let;
@@ -310,6 +311,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(closure_match_guard::ClosureMatchGuard),
         Box::new(closure_when_iter::ClosureWhenIter),
         Box::new(closure_capture_is_check::ClosureCaptureIsCheck),
+        Box::new(closure_as_cast::ClosureAsCast),
         Box::new(higher_order_closure::HigherOrderClosure),
         Box::new(closure_struct_method::ClosureStructMethod),
         Box::new(multi_interface_extend::MultiInterfaceExtend),
