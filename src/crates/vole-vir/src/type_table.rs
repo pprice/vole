@@ -189,15 +189,16 @@ impl VirTypeTable {
         // Propagate sentinel rebinding (see merge_from_additive for rationale).
         for &sentinel_id in &[VirTypeId::NIL, VirTypeId::DONE] {
             let idx = sentinel_id.raw() as usize;
-            if idx < other.types.len() && idx < self.types.len()
+            if idx < other.types.len()
+                && idx < self.types.len()
                 && let VirType::Struct { def: other_def, .. } = &other.types[idx]
-                    && let VirType::Struct { def: self_def, .. } = &self.types[idx]
-                        && *self_def != *other_def
-                            && other_def.index() != u32::MAX - 1
-                            && other_def.index() != u32::MAX
-                        {
-                            self.rebind_sentinel(sentinel_id, *other_def);
-                        }
+                && let VirType::Struct { def: self_def, .. } = &self.types[idx]
+                && *self_def != *other_def
+                && other_def.index() != u32::MAX - 1
+                && other_def.index() != u32::MAX
+            {
+                self.rebind_sentinel(sentinel_id, *other_def);
+            }
         }
 
         mapping
@@ -265,18 +266,20 @@ impl VirTypeTable {
         // inconsistent variant orders across modules.
         for &sentinel_id in &[VirTypeId::NIL, VirTypeId::DONE] {
             let idx = sentinel_id.raw() as usize;
-            if idx < other.types.len() && idx < self.types.len()
+            if idx < other.types.len()
+                && idx < self.types.len()
                 && let VirType::Struct { def: other_def, .. } = &other.types[idx]
-                    && let VirType::Struct { def: self_def, .. } = &self.types[idx] {
-                        // If other has a real TypeDefId and self still has the placeholder,
-                        // propagate the rebinding.
-                        if *self_def != *other_def
-                            && other_def.index() != u32::MAX - 1
-                            && other_def.index() != u32::MAX
-                        {
-                            self.rebind_sentinel(sentinel_id, *other_def);
-                        }
-                    }
+                && let VirType::Struct { def: self_def, .. } = &self.types[idx]
+            {
+                // If other has a real TypeDefId and self still has the placeholder,
+                // propagate the rebinding.
+                if *self_def != *other_def
+                    && other_def.index() != u32::MAX - 1
+                    && other_def.index() != u32::MAX
+                {
+                    self.rebind_sentinel(sentinel_id, *other_def);
+                }
+            }
         }
 
         mapping
@@ -539,15 +542,6 @@ impl VirTypeTable {
     ///
     /// Sort is descending by `(category, tiebreaker)`.
     pub fn union_sort_key(&self, id: VirTypeId) -> (u32, u64) {
-        // Sentinel types (nil, Done, user-defined) must use a stable sort key
-        // based on their fixed VirTypeId, not the TypeDefId which may be a
-        // placeholder (u32::MAX - 1) before rebind_sentinel() is called.
-        // Without this, expand_optional_variants() can compute different
-        // variant orders depending on whether sentinel rebinding has occurred,
-        // causing cross-module match expressions to use wrong discriminant tags.
-        if self.sentinel_ids.contains(&id) {
-            return (50, id.raw() as u64);
-        }
         match self.get(id) {
             VirType::Primitive(_) => (100, id.raw() as u64),
             VirType::Array { .. } | VirType::FixedArray { .. } => (90, id.raw() as u64),
