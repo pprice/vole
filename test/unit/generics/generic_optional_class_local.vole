@@ -1,0 +1,40 @@
+// Regression: generic function with optional-class local bound to nil
+// was misidentified as needing a struct copy during monomorphization
+// because the Nil sentinel type is VirType::Struct internally.
+// (vol-n6of)
+
+class MyClass {
+    x: i64,
+}
+
+func f<T>(a: T) -> f64 {
+    let local0: MyClass? = nil
+    return 1.0
+}
+
+func g<T>(a: T) -> MyClass? {
+    let local0: MyClass? = nil
+    return local0
+}
+
+tests {
+    test "generic with optional class local returns f64" {
+        let result = f(true)
+        assert(result == 1.0)
+    }
+
+    test "generic with optional class local returns nil" {
+        let result = g(42)
+        assert(result == nil)
+    }
+
+    test "generic with optional class local returns f64 with string arg" {
+        let result = f("hello")
+        assert(result == 1.0)
+    }
+
+    test "generic with optional class local returns nil with f64 arg" {
+        let result = g(3.14)
+        assert(result == nil)
+    }
+}

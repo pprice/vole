@@ -430,8 +430,12 @@ fn rederive_stmt(
             *storage = rederive_let_storage(*vir_ty, init_vir_ty, storage, table);
             // Re-derive struct copy flag: after monomorphization a type param
             // may have been substituted with a concrete struct type.
+            // Sentinels (Nil, Done, user-defined empties) are stored as
+            // VirType::Struct internally but are NOT value-type structs —
+            // exclude them to match codegen's `vir_is_struct()` semantics.
             if !*needs_struct_copy && let Some(init_vir_ty) = init_vir_ty {
-                *needs_struct_copy = table.is_struct(init_vir_ty);
+                *needs_struct_copy =
+                    !table.is_sentinel(init_vir_ty) && table.is_struct(init_vir_ty);
             }
             rederive_ref(value, table, ret_ty, entities, call_ctx);
         }
