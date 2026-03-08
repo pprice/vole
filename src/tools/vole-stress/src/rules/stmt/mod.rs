@@ -32,6 +32,7 @@ mod closure_capture_let;
 mod closure_class_call;
 mod closure_concat;
 mod closure_extend_method;
+mod closure_interface_call;
 mod closure_iter_capture;
 mod closure_match_guard;
 mod closure_result_concat;
@@ -322,6 +323,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(multi_interface_extend::MultiInterfaceExtend),
         Box::new(multi_extend_interface::MultiExtendInterface),
         Box::new(diamond_interface::DiamondInterface),
+        Box::new(closure_interface_call::ClosureInterfaceCall),
         // -- Match rules --------------------------------------------------------
         Box::new(match_let::MatchLet),
         Box::new(match_method::MatchMethod),
