@@ -98,6 +98,7 @@ mod interface_method_call;
 mod interpolation_concat;
 mod interpolation_expr;
 mod interpolation_with_iter;
+mod is_check_optional;
 mod iter_chunks_windows;
 mod iter_enumerate_collect;
 mod iter_factory_let;
@@ -488,6 +489,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(optional_destructure_match::OptionalDestructureMatch),
         Box::new(optional_chain_call::OptionalChainCall),
         Box::new(deep_optional_chain::DeepOptionalChain),
+        Box::new(is_check_optional::IsCheckOptional),
         Box::new(match_on_method_result::MatchOnMethodResult),
         // -- Remaining let-binding rules (batch 18) -----------------------------------
         Box::new(string_interpolation_let::StringInterpolationLet),
