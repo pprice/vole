@@ -133,10 +133,13 @@ fn emit_coalesce_as_cast(
         default_val,
     ));
     lines.push(format!("let {} = {}()", result_name, closure_name));
-    lines.push(format!(
-        "assert({} != nil || {} == nil)",
-        result_name, result_name,
-    ));
+    // Result is concrete (coalesced) -- use value-based assert, not nil check.
+    let default_check = match target {
+        PrimitiveType::Bool => format!("assert({r} == true || {r} == false)", r = result_name),
+        PrimitiveType::String => format!("assert({r}.length() >= 0)", r = result_name),
+        _ => format!("assert({r} >= 0 || {r} < 0 || {r} == 0)", r = result_name),
+    };
+    lines.push(default_check);
 
     Some(lines.join("\n"))
 }
