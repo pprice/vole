@@ -37,6 +37,7 @@ mod string_chain;
 mod string_chars;
 mod string_compare;
 mod string_concat;
+mod string_hash;
 mod string_length;
 mod string_lines_count;
 mod string_split;
@@ -105,6 +106,7 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         Box::new(string_substring::StringSubstring),
         Box::new(string_lines_count::StringLinesCount),
         Box::new(string_compare::StringCompare),
+        Box::new(string_hash::StringHash),
         // -- batch 5: static type methods --------------------------------------
         Box::new(static_type_method::StaticTypeMethod),
     ]
