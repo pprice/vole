@@ -120,6 +120,7 @@ mod iter_while_accum;
 mod iter_zip_collect;
 mod lambda_let;
 mod large_class_instance;
+mod large_struct_let;
 mod large_tuple_let;
 mod last_elem_access;
 mod length_comparison;
@@ -480,6 +481,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(large_class_instance::LargeClassInstance),
         Box::new(field_default_construct::FieldDefaultConstruct),
         Box::new(struct_let::StructLet),
+        Box::new(large_struct_let::LargeStructLet),
         Box::new(interface_let::InterfaceLet),
         Box::new(struct_destructure::StructDestructure),
         Box::new(class_destructure::ClassDestructure),
