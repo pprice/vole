@@ -205,8 +205,8 @@ const TEMPLATES: &[NarrowTemplate] = &[
 // ---------------------------------------------------------------------------
 
 fn emit_narrow_func(scope: &mut Scope, emit: &mut Emit, tmpl: &NarrowTemplate) -> Option<String> {
-    let fn_name = scope.fresh_name();
-    let fn_label = format!("{}_{}", tmpl.label, fn_name);
+    let uid = emit.gen_range(10000..99999);
+    let fn_label = format!("{}_{}", tmpl.label, uid);
 
     let first_type_str = tmpl.first_type.as_str();
     let second_type_str = tmpl.second_type.as_str();
