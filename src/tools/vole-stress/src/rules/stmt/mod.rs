@@ -226,6 +226,7 @@ mod struct_extend_methods;
 mod struct_field_interpolation;
 mod struct_iter_fields;
 mod struct_let;
+mod struct_method_closure;
 mod substring_let;
 mod tautological_when;
 mod to_string_let;
@@ -526,6 +527,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(iter_struct_pipeline::IterStructPipeline),
         Box::new(closure_struct_capture::ClosureStructCapture),
         Box::new(closure_struct_return::ClosureStructReturn),
+        Box::new(struct_method_closure::StructMethodClosure),
         Box::new(iter_method_map::IterMethodMap),
         Box::new(range_iter_let::RangeIterLet),
         Box::new(lambda_let::LambdaLet),
