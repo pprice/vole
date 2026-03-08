@@ -91,8 +91,8 @@ fn args_str(args: &[i64]) -> String {
 // ---------------------------------------------------------------------------
 
 fn emit_8_param_sum(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
-    let fn_name = scope.fresh_name();
-    let fn_label = format!("mpf_{}", fn_name);
+    let uid = emit.gen_range(10000..99999);
+    let fn_label = format!("mpf_{}", uid);
 
     let body_expr = (0..8)
         .map(|i| format!("p{}", i))
@@ -125,8 +125,8 @@ fn emit_8_param_sum(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 fn emit_10_param_arithmetic(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
-    let fn_name = scope.fresh_name();
-    let fn_label = format!("mpf_{}", fn_name);
+    let uid = emit.gen_range(10000..99999);
+    let fn_label = format!("mpf_{}", uid);
 
     // p0 + p1 + p2 + p3 + p4 + p5 * p6 + p7 + p8 + p9
     let body_expr = "p0 + p1 + p2 + p3 + p4 + p5 * p6 + p7 + p8 + p9";
@@ -165,8 +165,8 @@ fn emit_10_param_arithmetic(scope: &mut Scope, emit: &mut Emit) -> Option<String
 // ---------------------------------------------------------------------------
 
 fn emit_12_param_chain(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
-    let fn_name = scope.fresh_name();
-    let fn_label = format!("mpf_{}", fn_name);
+    let uid = emit.gen_range(10000..99999);
+    let fn_label = format!("mpf_{}", uid);
 
     let body_expr = "p0 + p1 * p2 - p3 + p4 * p5 - p6 + p7 * p8 - p9 + p10 * p11";
 

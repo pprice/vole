@@ -246,7 +246,7 @@ fn emit_string_i64_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String>
         concat!(
             "struct {} {{\n",
             "    name: string,\n",
-            "    val: i64,\n",
+            "    num: i64,\n",
             "}}"
         ),
         struct_name
@@ -258,7 +258,7 @@ fn emit_string_i64_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String>
         concat!(
             "func {}(v: {}?) -> string {{\n",
             "    return match v {{\n",
-            "        {} {{ name: n, val: w }} => \"{{n}}={{w}}\"\n",
+            "        {} {{ name: n, num: w }} => \"{{n}}={{w}}\"\n",
             "        nil => \"nil\"\n",
             "    }}\n",
             "}}"
@@ -286,7 +286,7 @@ fn emit_string_i64_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String>
     let expected = format!("{}={}", name_val, num_val);
 
     let code = format!(
-        "let {r1} = {fn_name}({struct_name} {{ name: \"{name_val}\", val: {num_val} }})\n\
+        "let {r1} = {fn_name}({struct_name} {{ name: \"{name_val}\", num: {num_val} }})\n\
          {indent}assert({r1} == \"{expected}\")\n\
          {indent}let {r2} = {fn_name}(nil)\n\
          {indent}assert({r2} == \"nil\")",
