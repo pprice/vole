@@ -350,6 +350,7 @@ impl Analyzer {
                 method_name_id,
                 param_name_id,
                 method_name_str,
+                &iface_item.type_args,
             ) {
                 return Some(resolved);
             }
@@ -372,6 +373,7 @@ impl Analyzer {
         method_name_id: NameId,
         param_name_id: NameId,
         method_name_str: &str,
+        constraint_type_args: &[ArenaTypeId],
     ) -> Option<ResolvedMethod> {
         let method_ids = self.entity_registry().type_methods(interface_type_id);
         tracing::trace!(
@@ -416,6 +418,7 @@ impl Analyzer {
                 method_name_id,
                 param_name_id,
                 method_signature_id,
+                constraint_type_args,
             );
         }
 
@@ -431,6 +434,7 @@ impl Analyzer {
         method_name_id: NameId,
         param_name_id: NameId,
         method_signature_id: ArenaTypeId,
+        constraint_type_args: &[ArenaTypeId],
     ) -> Option<ResolvedMethod> {
         // Substitute SelfType placeholders with the type parameter.
         // The interface signature has Self as placeholder, but when
@@ -443,12 +447,38 @@ impl Analyzer {
             (params.clone(), ret, is_closure)
         };
 
-        // Substitute SelfType in params and return type
+        // Build substitution map for the interface's type parameters.
+        // e.g. for W: Wrapper<A>, maps Wrapper's T -> A so that
+        // unwrap() -> T becomes unwrap() -> A.
+        let iface_type_param_subs: FxHashMap<NameId, ArenaTypeId> = {
+            let iface_type_params = self.entity_registry().type_params(interface_type_id);
+            iface_type_params
+                .iter()
+                .zip(constraint_type_args.iter())
+                .map(|(&param_name, &arg_type)| (param_name, arg_type))
+                .collect()
+        };
+
+        // Substitute both SelfType and interface type params in params and return type
         let substituted_params: smallvec::SmallVec<[_; 4]> = params
             .iter()
-            .map(|&p| self.type_arena_mut().substitute_self(p, self_type_id))
+            .map(|&p| {
+                let p = self.type_arena_mut().substitute_self(p, self_type_id);
+                if !iface_type_param_subs.is_empty() {
+                    self.type_arena_mut().substitute(p, &iface_type_param_subs)
+                } else {
+                    p
+                }
+            })
             .collect();
-        let substituted_ret = self.type_arena_mut().substitute_self(ret, self_type_id);
+        let substituted_ret = {
+            let r = self.type_arena_mut().substitute_self(ret, self_type_id);
+            if !iface_type_param_subs.is_empty() {
+                self.type_arena_mut().substitute(r, &iface_type_param_subs)
+            } else {
+                r
+            }
+        };
         let func_type = FunctionType {
             is_closure,
             params_id: substituted_params,
