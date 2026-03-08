@@ -50,6 +50,7 @@ mod deep_optional_chain;
 mod diamond_interface;
 mod discard_stmt;
 mod early_return;
+mod early_return_when;
 mod edge_case_for_loop;
 mod edge_case_split;
 mod empty_array_iter;
@@ -466,6 +467,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(array_compound_assign::ArrayCompoundAssign),
         // -- Control flow & call rules (batch 13) ---------------------------------
         Box::new(early_return::EarlyReturn),
+        Box::new(early_return_when::EarlyReturnWhen),
         Box::new(break_continue::BreakContinue),
         Box::new(fn_param_call::FnParamCall),
         Box::new(many_params_call::ManyParamsCall),
