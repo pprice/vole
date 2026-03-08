@@ -175,6 +175,7 @@ where
                 module_programs: &mut module_programs,
                 modules_with_errors,
                 type_table: &mut type_table,
+                implements,
             });
 
             // Store in cache for subsequent files.
@@ -345,6 +346,7 @@ where
     module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
     modules_with_errors: &'a HashSet<String>,
     type_table: &'a mut VirTypeTable,
+    implements: &'a ImplementRegistry,
 }
 
 // ---------------------------------------------------------------------------
@@ -394,7 +396,16 @@ where
         module_programs,
         modules_with_errors,
         type_table,
+        implements,
     } = args;
+
+    // Compute prelude module IDs so each module's CrossModuleCtx can find
+    // sibling prelude functions (e.g. assert calling panic).
+    let prelude_module_ids: Vec<ModuleId> = module_programs
+        .keys()
+        .filter(|path| path.starts_with("std:prelude/"))
+        .filter_map(|path| names.module_id_if_known(path))
+        .collect();
 
     let mut module_vir_functions = Vec::new();
     lower_module_functions(LowerModuleFunctionsArgs {
@@ -406,6 +417,8 @@ where
         modules_with_errors,
         vir_functions: &mut module_vir_functions,
         type_table,
+        prelude_module_ids: &prelude_module_ids,
+        implements,
     });
     lower_module_type_methods(
         module_programs,

@@ -8,7 +8,7 @@ use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{CrossModuleCtx, lower_function};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
-use vole_identity::{ModuleId, NameTable, NamerLookup};
+use vole_identity::{ModuleId, NameTable, NamerLookup, Symbol};
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
@@ -34,6 +34,8 @@ pub struct LowerModuleFunctionsArgs<'a> {
     pub modules_with_errors: &'a HashSet<String>,
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
+    pub prelude_module_ids: &'a [ModuleId],
+    pub implements: &'a ImplementRegistry,
 }
 
 struct LowerModuleProgramFunctionsArgs<'a> {
@@ -46,6 +48,8 @@ struct LowerModuleProgramFunctionsArgs<'a> {
     module_id: ModuleId,
     vir_functions: &'a mut Vec<VirFunction>,
     type_table: &'a mut VirTypeTable,
+    cross_module: &'a CrossModuleCtx,
+    implements: &'a ImplementRegistry,
 }
 
 /// Lower top-level non-generic functions to VIR.
@@ -140,6 +144,8 @@ pub fn lower_module_functions(args: LowerModuleFunctionsArgs<'_>) {
         modules_with_errors,
         vir_functions,
         type_table,
+        prelude_module_ids,
+        implements,
     } = args;
 
     for (module_path, (program, module_interner)) in module_programs.iter_mut() {
@@ -150,6 +156,11 @@ pub fn lower_module_functions(args: LowerModuleFunctionsArgs<'_>) {
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
+        let module_bindings = build_module_bindings(program, node_map, type_arena);
+        let cross_module = CrossModuleCtx {
+            module_bindings,
+            prelude_module_ids: prelude_module_ids.to_vec(),
+        };
         lower_module_program_functions(LowerModuleProgramFunctionsArgs {
             program,
             interner,
@@ -160,6 +171,8 @@ pub fn lower_module_functions(args: LowerModuleFunctionsArgs<'_>) {
             module_id,
             vir_functions,
             type_table,
+            cross_module: &cross_module,
+            implements,
         });
     }
 }
@@ -176,6 +189,8 @@ fn lower_module_program_functions(args: LowerModuleProgramFunctionsArgs<'_>) {
         module_id,
         vir_functions,
         type_table,
+        cross_module,
+        implements,
     } = args;
 
     let resolved: Vec<_> = {
@@ -201,8 +216,6 @@ fn lower_module_program_functions(args: LowerModuleProgramFunctionsArgs<'_>) {
             .collect()
     };
 
-    let empty_xmod = CrossModuleCtx::empty();
-    let empty_impl = ImplementRegistry::new();
     for (func, func_id, func_def) in resolved {
         let param_types: Vec<_> = func
             .params
@@ -224,9 +237,24 @@ fn lower_module_program_functions(args: LowerModuleProgramFunctionsArgs<'_>) {
             names,
             type_table,
             module_id,
-            &empty_xmod,
-            &empty_impl,
+            cross_module,
+            implements,
         );
         vir_functions.push(vir);
     }
+}
+
+/// Extract lightweight module bindings (Symbol -> (ModuleId, Symbol)) from a
+/// module program's destructured imports.
+///
+/// Delegates to `extract_cross_module_bindings` which extracts bindings from
+/// `let { ... } = import "..."` declarations.  Used to populate
+/// `CrossModuleCtx` for each imported module during VIR lowering so that
+/// cross-module call resolution works for prelude/stdlib functions.
+fn build_module_bindings(
+    program: &Program,
+    node_map: &NodeMap,
+    type_arena: &TypeArena,
+) -> FxHashMap<Symbol, (ModuleId, Symbol)> {
+    super::module_bindings::extract_cross_module_bindings(program, node_map, type_arena)
 }
