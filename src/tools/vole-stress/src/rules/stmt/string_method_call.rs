@@ -11,7 +11,7 @@
 //! - Variant 2: `replace` -- replace a known substring
 //! - Variant 3: `split(",").collect()` -- split, assert length and elements
 //! - Variant 4: `trim` -- trim whitespace
-//! - Variant 5: `substring(start, length)` -- extract known substring
+//! - Variant 5: `substring(start, end)` -- extract known substring (end exclusive)
 
 use crate::emit::Emit;
 use crate::rule::{Param, Params, StmtRule};
@@ -237,13 +237,13 @@ fn emit_trim(emit: &mut Emit, _indent: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Variant 5 -- substring(start, length)
+// Variant 5 -- substring(start, end) where end is exclusive
 // ---------------------------------------------------------------------------
 
 struct SubstringTemplate {
     input: &'static str,
     start: usize,
-    length: usize,
+    end: usize,
     expected: &'static str,
 }
 
@@ -251,19 +251,19 @@ const SUBSTRING_TEMPLATES: &[SubstringTemplate] = &[
     SubstringTemplate {
         input: "hello",
         start: 1,
-        length: 3,
+        end: 4,
         expected: "ell",
     },
     SubstringTemplate {
         input: "abcdef",
         start: 2,
-        length: 3,
+        end: 5,
         expected: "cde",
     },
     SubstringTemplate {
         input: "vole lang",
         start: 0,
-        length: 4,
+        end: 4,
         expected: "vole",
     },
 ];
@@ -272,7 +272,7 @@ fn emit_substring(emit: &mut Emit, _indent: &str) -> Option<String> {
     let t = &SUBSTRING_TEMPLATES[emit.gen_range(0..SUBSTRING_TEMPLATES.len())];
     Some(format!(
         "assert(\"{}\".substring({}, {}) == \"{}\")",
-        t.input, t.start, t.length, t.expected,
+        t.input, t.start, t.end, t.expected,
     ))
 }
 
