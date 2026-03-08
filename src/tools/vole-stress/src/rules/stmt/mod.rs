@@ -59,6 +59,7 @@ mod fallible_closure_call;
 mod field_closure;
 mod field_default_construct;
 mod filter_iter_tostring;
+mod filter_map_collect;
 mod fixed_array_let;
 mod fn_param_call;
 mod for_break_iter;
@@ -415,6 +416,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(for_reduce_pattern::ForReducePattern),
         Box::new(sorted_iter_accum::SortedIterAccum),
         Box::new(filter_iter_tostring::FilterIterTostring),
+        Box::new(filter_map_collect::FilterMapCollect),
         Box::new(widening_let::WideningLet),
         Box::new(empty_string_iter_let::EmptyStringIterLet),
         // -- Additional let_bindings rules (batch 10) ---------------------------
