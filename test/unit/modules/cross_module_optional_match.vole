@@ -1,0 +1,35 @@
+// Regression test: cross-module match on optional struct types.
+//
+// When two modules both have match expressions that destructure optional
+// struct/class types, the second module's match could take the wrong branch
+// (nil branch) even when a non-nil value is passed. This was caused by the
+// VIR type table's sentinel (nil) TypeDefId not being propagated during
+// module VIR cache merging, leading to inconsistent union variant ordering
+// between sema (which computed the CheckTag) and codegen (which expanded
+// Optional variants using a different sort order).
+
+let lib = import "./cross_module_optional_match_lib"
+
+struct Pair {
+    first: string,
+    second: i64,
+}
+
+func format_pair(p: Pair?) -> string {
+    return match p {
+        Pair { first: f, second: s } => "{f}={s}"
+        nil => "nil"
+    }
+}
+
+tests "cross-module optional match" {
+    test "local optional struct match - some" {
+        let result = format_pair(Pair { first: "key", second: 99 })
+        assert(result == "key=99")
+    }
+
+    test "local optional struct match - nil" {
+        let result = format_pair(nil)
+        assert(result == "nil")
+    }
+}

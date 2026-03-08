@@ -1,0 +1,28 @@
+// Library module for cross-module optional match regression test.
+//
+// This module defines a struct and a function that uses match on an optional
+// struct type. When both this module and an importing module have match
+// expressions on optional struct types, the discriminant tags must agree
+// between construction and pattern matching.
+
+struct Item {
+    name: string,
+    value: i64,
+}
+
+func describe(item: Item?) -> string {
+    return match item {
+        Item { name: n, value: v } => "{n}:{v}"
+        nil => "none"
+    }
+}
+
+tests "lib optional match" {
+    test "lib describe some" {
+        assert(describe(Item { name: "a", value: 1 }) == "a:1")
+    }
+
+    test "lib describe nil" {
+        assert(describe(nil) == "none")
+    }
+}
