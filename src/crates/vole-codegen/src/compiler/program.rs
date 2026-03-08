@@ -537,7 +537,9 @@ impl Compiler<'_> {
         // concrete functions produced by VIR monomorphization (e.g., wrap<string>,
         // wrap<i64>).  Must be compiled before module function bodies so that
         // VirDirect calls from module functions can be resolved.
-        self.compile_vir_monomorphized_functions()?;
+        // Passes false for is_program_phase — functions from the main program are
+        // skipped and compiled later in compile_program_body.
+        self.compile_vir_monomorphized_functions_phased(false)?;
 
         // Pass 2: Compile all function bodies (cross-module calls now resolved)
         // When lazy_modules is enabled, skip body compilation — functions are declared
@@ -1123,10 +1125,24 @@ impl Compiler<'_> {
     /// Must be called after [`declare_vir_monomorphized_functions`] so that
     /// all VirDirect targets have FuncIds for cross-referencing.
     fn compile_vir_monomorphized_functions(&mut self) -> CodegenResult<()> {
+        self.compile_vir_monomorphized_functions_phased(true)
+    }
+
+    /// Phase-aware compilation of VIR-monomorphized function bodies.
+    ///
+    /// When `is_program_phase` is false (module compilation), functions whose
+    /// original generic template belongs to the main program module are skipped
+    /// — their types (classes, structs) aren't registered in `type_metadata`
+    /// yet and will be compiled later in `compile_program_body`.
+    fn compile_vir_monomorphized_functions_phased(
+        &mut self,
+        is_program_phase: bool,
+    ) -> CodegenResult<()> {
         let indices = self.vir_monomorph_indices();
         if indices.is_empty() {
             return Ok(());
         }
+        let program_module = self.program_module();
         for idx in indices {
             let Some(&func_id) = self.state.vir_direct_func_ids.get(&idx) else {
                 continue;
@@ -1135,6 +1151,20 @@ impl Compiler<'_> {
                 continue;
             }
             let vir_func = &self.analyzed.functions[idx];
+
+            // Determine the module of the original generic template.
+            // During the module phase, skip functions that belong to the
+            // program module — their types aren't in type_metadata yet.
+            let func_module = self
+                .analyzed
+                .entity_metadata
+                .get_function_def(vir_func.id)
+                .map(|fd| fd.module);
+            let is_program_func = func_module.map(|m| m == program_module).unwrap_or(true); // conservatively treat unknown as program-owned
+            if is_program_func && !is_program_phase {
+                continue;
+            }
+
             let sig = self.build_signature_for_vir_func(vir_func);
             self.jit.ctx.func.signature = sig;
 

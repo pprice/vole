@@ -1,0 +1,50 @@
+// Regression test for vol-wr44: type_metadata lookup failure for generic
+// structs returned from generic functions called inside other generic
+// functions.  The issue was that VIR-monomorphized functions belonging to the
+// main program were compiled during the module phase, before program-level
+// struct type metadata was registered.
+
+struct Pair<T> {
+    first: T
+    second: T
+}
+
+func make_pair<T>(a: T, b: T) -> Pair<T> {
+    return Pair { first: a, second: b }
+}
+
+// Calling make_pair (generic, returns generic struct) from inside another
+// generic function is the pattern that triggered the bug.
+func caller<U>(x: U) -> i64 {
+    let p = make_pair(39, 8)
+    return p.first + p.second
+}
+
+// Non-generic wrapper that also exercises the same pattern.
+func direct_caller() -> i64 {
+    let p = make_pair(10, 20)
+    return p.first + p.second
+}
+
+tests "generic struct from nested generic calls" {
+    test "generic struct returned from nested generic call" {
+        let result = caller(6.27)
+        assert(result == 47)
+    }
+
+    test "generic struct returned from direct call" {
+        assert(direct_caller() == 30)
+    }
+
+    test "generic struct with string type arg in nested call" {
+        let p = make_pair("hello", "world")
+        assert(p.first == "hello")
+        assert(p.second == "world")
+    }
+
+    test "multiple nested generic calls" {
+        let p1 = make_pair(1, 2)
+        let p2 = make_pair(3, 4)
+        assert(p1.first + p2.second == 5)
+    }
+}
