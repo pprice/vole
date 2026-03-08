@@ -236,6 +236,7 @@ mod tostring_length;
 mod try_let;
 mod tuple_let;
 mod union_match_let;
+mod union_return_func;
 mod variable_shadow;
 mod variable_shadow_type_change;
 mod when_array_iter;
@@ -514,6 +515,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(union_match_let::UnionMatchLet),
         Box::new(as_cast_let::AsCastLet),
         Box::new(sentinel_union_let::SentinelUnionLet),
+        Box::new(union_return_func::UnionReturnFunc),
         Box::new(optional_destructure_match::OptionalDestructureMatch),
         Box::new(optional_chain_call::OptionalChainCall),
         Box::new(deep_optional_chain::DeepOptionalChain),
