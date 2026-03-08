@@ -251,7 +251,7 @@ fn lower_module_program_functions(args: LowerModuleProgramFunctionsArgs<'_>) {
 /// `let { ... } = import "..."` declarations.  Used to populate
 /// `CrossModuleCtx` for each imported module during VIR lowering so that
 /// cross-module call resolution works for prelude/stdlib functions.
-fn build_module_bindings(
+pub(super) fn build_module_bindings(
     program: &Program,
     node_map: &NodeMap,
     type_arena: &TypeArena,

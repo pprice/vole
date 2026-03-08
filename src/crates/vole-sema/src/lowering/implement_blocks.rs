@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 use crate::LoweringEntityLookup;
 use crate::implement_registry::ImplementRegistry;
-use crate::vir_lower::{lower_interface_method, lower_method};
+use crate::vir_lower::{CrossModuleCtx, lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{MethodId, ModuleId, NameTable, NamerLookup, TypeDefId};
@@ -22,6 +22,8 @@ pub struct LowerImplementBlockMethodsArgs<'a> {
     pub module_id: ModuleId,
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
+    pub cross_module: &'a CrossModuleCtx,
+    pub implements: &'a ImplementRegistry,
 }
 
 pub struct LowerModuleImplementBlockMethodsArgs<'a> {
@@ -33,6 +35,8 @@ pub struct LowerModuleImplementBlockMethodsArgs<'a> {
     pub modules_with_errors: &'a HashSet<String>,
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
+    pub prelude_module_ids: &'a [ModuleId],
+    pub implements: &'a ImplementRegistry,
 }
 
 pub struct LowerImplementDirectMethodsArgs<'a> {
@@ -46,6 +50,8 @@ pub struct LowerImplementDirectMethodsArgs<'a> {
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
     pub module_id: ModuleId,
+    pub cross_module: &'a CrossModuleCtx,
+    pub implements: &'a ImplementRegistry,
 }
 
 pub struct LowerImplementStaticMethodsArgs<'a> {
@@ -59,6 +65,8 @@ pub struct LowerImplementStaticMethodsArgs<'a> {
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
     pub module_id: ModuleId,
+    pub cross_module: &'a CrossModuleCtx,
+    pub implements: &'a ImplementRegistry,
 }
 
 pub struct LowerImplementDefaultMethodsArgs<'a> {
@@ -74,6 +82,8 @@ pub struct LowerImplementDefaultMethodsArgs<'a> {
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
     pub module_id: ModuleId,
+    pub cross_module: &'a CrossModuleCtx,
+    pub implements: &'a ImplementRegistry,
 }
 
 struct LowerSingleImplementBlockArgs<'a> {
@@ -87,6 +97,8 @@ struct LowerSingleImplementBlockArgs<'a> {
     program: &'a Program,
     vir_functions: &'a mut Vec<VirFunction>,
     type_table: &'a mut VirTypeTable,
+    cross_module: &'a CrossModuleCtx,
+    implements: &'a ImplementRegistry,
 }
 
 /// Lower implement block methods (direct + statics) to VIR.
@@ -106,6 +118,8 @@ pub fn lower_implement_block_methods(args: LowerImplementBlockMethodsArgs<'_>) {
         module_id,
         vir_functions,
         type_table,
+        cross_module,
+        implements,
     } = args;
 
     for decl in &program.declarations {
@@ -123,6 +137,8 @@ pub fn lower_implement_block_methods(args: LowerImplementBlockMethodsArgs<'_>) {
             program,
             vir_functions,
             type_table,
+            cross_module,
+            implements,
         });
     }
 }
@@ -139,6 +155,8 @@ fn lower_single_implement_block(args: LowerSingleImplementBlockArgs<'_>) {
         program,
         vir_functions,
         type_table,
+        cross_module,
+        implements,
     } = args;
 
     let Some(type_def_id) = resolve_implement_target(
@@ -162,6 +180,8 @@ fn lower_single_implement_block(args: LowerSingleImplementBlockArgs<'_>) {
         vir_functions,
         type_table,
         module_id,
+        cross_module,
+        implements,
     });
 
     if let Some(ref statics) = impl_block.statics {
@@ -176,6 +196,8 @@ fn lower_single_implement_block(args: LowerSingleImplementBlockArgs<'_>) {
             vir_functions,
             type_table,
             module_id,
+            cross_module,
+            implements,
         });
     }
 
@@ -192,6 +214,8 @@ fn lower_single_implement_block(args: LowerSingleImplementBlockArgs<'_>) {
         vir_functions,
         type_table,
         module_id,
+        cross_module,
+        implements,
     });
 }
 
@@ -256,6 +280,8 @@ pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>)
         vir_functions,
         type_table,
         module_id,
+        cross_module,
+        implements,
     } = args;
 
     let type_name_str = names
@@ -291,8 +317,6 @@ pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>)
             .map(|param| (param.name, vole_identity::TypeId::UNKNOWN))
             .collect();
 
-        let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-        let empty_impl = ImplementRegistry::new();
         let vir = lower_method(
             method,
             method_id,
@@ -306,8 +330,8 @@ pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>)
             names,
             type_table,
             module_id,
-            &empty_xmod,
-            &empty_impl,
+            cross_module,
+            implements,
         );
         vir_functions.push(vir);
     }
@@ -326,6 +350,8 @@ pub fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>)
         vir_functions,
         type_table,
         module_id,
+        cross_module,
+        implements,
     } = args;
 
     let type_name_str = names
@@ -352,8 +378,6 @@ pub fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>)
             .collect()
     };
 
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = ImplementRegistry::new();
     for (method, method_id, method_def) in resolved {
         let method_name_str = interner.resolve(method.name);
         let display_name = format!("{}::{}", type_name_str, method_name_str);
@@ -375,8 +399,8 @@ pub fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>)
             names,
             type_table,
             module_id,
-            &empty_xmod,
-            &empty_impl,
+            cross_module,
+            implements,
         ) {
             vir_functions.push(vir);
         }
@@ -403,6 +427,8 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
         vir_functions,
         type_table,
         module_id,
+        cross_module,
+        implements,
     } = args;
 
     let type_name_str = names
@@ -440,8 +466,6 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
             .map(|param| (param.name, vole_identity::TypeId::UNKNOWN))
             .collect();
 
-        let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-        let empty_impl = ImplementRegistry::new();
         if let Some(vir) = lower_interface_method(
             iface_method,
             impl_method_id,
@@ -455,8 +479,8 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
             names,
             type_table,
             module_id,
-            &empty_xmod,
-            &empty_impl,
+            cross_module,
+            implements,
         ) {
             vir_functions.push(vir);
         }
@@ -557,6 +581,8 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
         modules_with_errors,
         vir_functions,
         type_table,
+        prelude_module_ids,
+        implements,
     } = args;
 
     struct ImplDefaultWork {
@@ -576,6 +602,12 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
+        let module_bindings =
+            super::functions::build_module_bindings(program, node_map, type_arena);
+        let cross_module = CrossModuleCtx {
+            module_bindings,
+            prelude_module_ids: prelude_module_ids.to_vec(),
+        };
 
         for (decl_idx, decl) in program.declarations.iter().enumerate() {
             let Decl::Implement(impl_block) = decl else {
@@ -602,6 +634,8 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
                 vir_functions,
                 type_table,
                 module_id,
+                cross_module: &cross_module,
+                implements,
             });
 
             if let Some(ref statics) = impl_block.statics {
@@ -616,6 +650,8 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
                     vir_functions,
                     type_table,
                     module_id,
+                    cross_module: &cross_module,
+                    implements,
                 });
             }
 
@@ -633,6 +669,12 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
             continue;
         };
         let mut interner_clone = (**module_interner_rc).clone();
+        let module_bindings =
+            super::functions::build_module_bindings(program, node_map, type_arena);
+        let cross_module = CrossModuleCtx {
+            module_bindings,
+            prelude_module_ids: prelude_module_ids.to_vec(),
+        };
         let Decl::Implement(impl_block) = &program.declarations[work.impl_decl_index] else {
             continue;
         };
@@ -650,6 +692,8 @@ pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMetho
             vir_functions,
             type_table,
             module_id: work.module_id,
+            cross_module: &cross_module,
+            implements,
         });
     }
 }

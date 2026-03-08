@@ -23,6 +23,8 @@ pub struct LowerLambdaDefaultInitsArgs<'a> {
     pub type_arena: &'a TypeArena,
     pub modules_with_errors: &'a HashSet<String>,
     pub type_table: &'a mut VirTypeTable,
+    pub cross_module: &'a crate::vir_lower::CrossModuleCtx,
+    pub implements: &'a crate::implement_registry::ImplementRegistry,
 }
 
 struct LowerSingleLambdaDefaultInitArgs<'a> {
@@ -36,6 +38,8 @@ struct LowerSingleLambdaDefaultInitArgs<'a> {
     type_table: &'a mut VirTypeTable,
     module_id: ModuleId,
     map: &'a mut FxHashMap<(NodeId, usize), VirRef>,
+    cross_module: &'a crate::vir_lower::CrossModuleCtx,
+    implements: &'a crate::implement_registry::ImplementRegistry,
 }
 
 /// Lower default parameter expressions for lambdas referenced by call-site
@@ -55,6 +59,8 @@ pub fn lower_lambda_default_inits(
         type_arena,
         modules_with_errors,
         type_table,
+        cross_module,
+        implements,
     } = args;
 
     let mut map = FxHashMap::default();
@@ -105,6 +111,8 @@ pub fn lower_lambda_default_inits(
                 type_table,
                 module_id: main_module_id,
                 map: &mut map,
+                cross_module,
+                implements,
             });
         }
     }
@@ -134,6 +142,8 @@ pub fn lower_lambda_default_inits(
                 type_table,
                 module_id: ext_module_id,
                 map: &mut map,
+                cross_module,
+                implements,
             });
         }
     }
@@ -156,10 +166,10 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         type_table,
         module_id,
         map,
+        cross_module,
+        implements,
     } = args;
 
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = crate::implement_registry::ImplementRegistry::new();
     let mut ctx = crate::vir_lower::LoweringCtx {
         node_map,
         interner,
@@ -171,8 +181,8 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
-        cross_module: &empty_xmod,
-        implements: &empty_impl,
+        cross_module,
+        implements,
     };
 
     for (slot, param) in lambda.params.iter().enumerate() {

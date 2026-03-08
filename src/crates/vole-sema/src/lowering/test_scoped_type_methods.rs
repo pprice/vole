@@ -11,7 +11,7 @@ use super::implement_blocks::{
 use super::type_methods::{lower_type_default_methods, lower_type_methods};
 use crate::LoweringEntityLookup;
 use crate::implement_registry::ImplementRegistry;
-use crate::vir_lower::lower_function;
+use crate::vir_lower::{CrossModuleCtx, lower_function};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{ModuleId, NameTable, NamerLookup, Span};
@@ -36,6 +36,8 @@ pub fn lower_test_scoped_type_methods(
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
+    cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) {
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
@@ -52,6 +54,8 @@ pub fn lower_test_scoped_type_methods(
                 module_id,
                 vir_functions,
                 type_table,
+                cross_module,
+                implements,
             );
         }
     }
@@ -72,6 +76,8 @@ fn lower_tests_decl_type_methods(
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
+    cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) {
     let virtual_module_id = tests_virtual_modules
         .get(&tests_decl.span)
@@ -110,8 +116,6 @@ fn lower_tests_decl_type_methods(
                         .zip(func_def.signature.params_id.iter())
                         .map(|(p, &ty)| (p.name, ty))
                         .collect();
-                    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-                    let empty_impl = ImplementRegistry::new();
                     let vir = lower_function(
                         func,
                         func_id,
@@ -125,8 +129,8 @@ fn lower_tests_decl_type_methods(
                         names,
                         type_table,
                         main_module_id,
-                        &empty_xmod,
-                        &empty_impl,
+                        cross_module,
+                        implements,
                     );
                     vir_functions.push(vir);
                 }
@@ -147,6 +151,8 @@ fn lower_tests_decl_type_methods(
                     virtual_module_id,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
                 let direct_method_names: HashSet<String> = class
                     .methods
@@ -166,6 +172,8 @@ fn lower_tests_decl_type_methods(
                     module_programs,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
             }
             Decl::Struct(s) => {
@@ -184,6 +192,8 @@ fn lower_tests_decl_type_methods(
                     virtual_module_id,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
                 let direct_method_names: HashSet<String> = s
                     .methods
@@ -203,6 +213,8 @@ fn lower_tests_decl_type_methods(
                     module_programs,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
             }
             Decl::Implement(impl_block) => {
@@ -225,6 +237,8 @@ fn lower_tests_decl_type_methods(
                         vir_functions,
                         type_table,
                         module_id: virtual_module_id,
+                        cross_module,
+                        implements,
                     });
                     if let Some(ref statics) = impl_block.statics {
                         lower_implement_static_methods(LowerImplementStaticMethodsArgs {
@@ -238,6 +252,8 @@ fn lower_tests_decl_type_methods(
                             vir_functions,
                             type_table,
                             module_id: virtual_module_id,
+                            cross_module,
+                            implements,
                         });
                     }
                     lower_implement_default_methods(LowerImplementDefaultMethodsArgs {
@@ -253,6 +269,8 @@ fn lower_tests_decl_type_methods(
                         vir_functions,
                         type_table,
                         module_id: virtual_module_id,
+                        cross_module,
+                        implements,
                     });
                 }
             }
@@ -270,6 +288,8 @@ fn lower_tests_decl_type_methods(
                     module_id,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
             }
             _ => {}

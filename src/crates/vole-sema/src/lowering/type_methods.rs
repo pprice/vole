@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use super::implement_blocks::{collect_default_method_ids, find_interface_method_ast};
 use crate::LoweringEntityLookup;
 use crate::implement_registry::ImplementRegistry;
-use crate::vir_lower::{lower_interface_method, lower_method};
+use crate::vir_lower::{CrossModuleCtx, lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{MethodId, ModuleId, NameTable};
@@ -29,6 +29,8 @@ pub fn lower_top_level_type_methods(
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
+    cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) {
     for decl in &program.declarations {
         match decl {
@@ -48,6 +50,8 @@ pub fn lower_top_level_type_methods(
                     module_id,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
                 // Also lower default methods from implemented interfaces
                 let direct_method_names: HashSet<String> = class
@@ -68,6 +72,8 @@ pub fn lower_top_level_type_methods(
                     module_programs,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
             }
             Decl::Struct(s) => {
@@ -86,6 +92,8 @@ pub fn lower_top_level_type_methods(
                     module_id,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
                 // Also lower default methods from implemented interfaces
                 let direct_method_names: HashSet<String> = s
@@ -106,6 +114,8 @@ pub fn lower_top_level_type_methods(
                     module_programs,
                     vir_functions,
                     type_table,
+                    cross_module,
+                    implements,
                 );
             }
             _ => {}
@@ -127,6 +137,8 @@ pub fn lower_type_methods(
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
+    cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) {
     // Resolve all name lookups first while interner is borrowed immutably
     let (type_def_id, resolved_methods, resolved_statics) = {
@@ -196,11 +208,11 @@ pub fn lower_type_methods(
             vir_functions,
             type_table,
             module_id,
+            cross_module,
+            implements,
         );
     }
 
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = ImplementRegistry::new();
     for (method, mid, method_def) in resolved_statics {
         let method_name_str = interner.resolve(method.name);
         let display_name = format!("{}::{}", type_name_str, method_name_str);
@@ -222,8 +234,8 @@ pub fn lower_type_methods(
             names,
             type_table,
             module_id,
-            &empty_xmod,
-            &empty_impl,
+            cross_module,
+            implements,
         ) {
             vir_functions.push(vir);
         }
@@ -250,6 +262,8 @@ pub fn lower_type_default_methods(
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
+    cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) {
     // Resolve type_def_id
     let Some(type_name_id) = names.name_id(module_id, &[type_name], interner) else {
@@ -288,8 +302,6 @@ pub fn lower_type_default_methods(
             .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
             .collect();
 
-        let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-        let empty_impl = ImplementRegistry::new();
         if let Some(vir) = lower_interface_method(
             iface_method,
             impl_method_id,
@@ -303,8 +315,8 @@ pub fn lower_type_default_methods(
             names,
             type_table,
             module_id,
-            &empty_xmod,
-            &empty_impl,
+            cross_module,
+            implements,
         ) {
             vir_functions.push(vir);
         }
@@ -326,6 +338,8 @@ fn lower_single_method(
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &CrossModuleCtx,
+    implements: &ImplementRegistry,
 ) {
     let arena_sig = method_def.signature_id;
     // We need the type arena to unwrap the signature, but we don't have it here.
@@ -344,8 +358,6 @@ fn lower_single_method(
         .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
         .collect();
 
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = ImplementRegistry::new();
     let vir = lower_method(
         method,
         method_id,
@@ -359,8 +371,8 @@ fn lower_single_method(
         names,
         type_table,
         module_id,
-        &empty_xmod,
-        &empty_impl,
+        cross_module,
+        implements,
     );
     vir_functions.push(vir);
 }
@@ -382,6 +394,8 @@ pub fn lower_module_type_methods(
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
+    prelude_module_ids: &[ModuleId],
+    implements: &ImplementRegistry,
 ) {
     // --- Pass 1: lower direct + static methods (needs &mut interner) ---
     // Also collect (module_path, type_name, direct_method_names) for pass 2.
@@ -400,6 +414,12 @@ pub fn lower_module_type_methods(
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
+        let module_bindings =
+            super::functions::build_module_bindings(program, node_map, type_arena);
+        let cross_module = CrossModuleCtx {
+            module_bindings,
+            prelude_module_ids: prelude_module_ids.to_vec(),
+        };
 
         for decl in &program.declarations {
             match decl {
@@ -419,6 +439,8 @@ pub fn lower_module_type_methods(
                         module_id,
                         vir_functions,
                         type_table,
+                        &cross_module,
+                        implements,
                     );
                     let direct_method_names: HashSet<String> = class
                         .methods
@@ -447,6 +469,8 @@ pub fn lower_module_type_methods(
                         module_id,
                         vir_functions,
                         type_table,
+                        &cross_module,
+                        implements,
                     );
                     let direct_method_names: HashSet<String> = s
                         .methods
@@ -473,6 +497,12 @@ pub fn lower_module_type_methods(
             .module_id_if_known(&work.module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
+        let module_bindings =
+            super::functions::build_module_bindings(program, node_map, type_arena);
+        let cross_module = CrossModuleCtx {
+            module_bindings,
+            prelude_module_ids: prelude_module_ids.to_vec(),
+        };
 
         // For module types, pass only the module's own program for interface lookup.
         // Cross-module interface lookup is not available here (borrow limitation),
@@ -492,6 +522,8 @@ pub fn lower_module_type_methods(
             None, // cross-module lookup not available in this pass
             vir_functions,
             type_table,
+            &cross_module,
+            implements,
         );
     }
 }

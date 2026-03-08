@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use super::monomorph_functions::body_has_sema_data;
 use crate::LoweringEntityLookup;
 use crate::implement_registry::ImplementRegistry;
-use crate::vir_lower::{lower_interface_method, lower_method};
+use crate::vir_lower::{CrossModuleCtx, lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{MethodId, ModuleId, NameId, NameTable, Span};
@@ -20,6 +20,8 @@ pub struct MethodMonomorphLoweringCtx<'a> {
     pub type_arena: &'a TypeArena,
     pub node_map: &'a NodeMap,
     pub modules_with_errors: &'a HashSet<String>,
+    pub cross_module: &'a CrossModuleCtx,
+    pub implements: &'a ImplementRegistry,
 }
 
 /// Mutable state used while lowering class/static method monomorphs to VIR.
@@ -204,8 +206,6 @@ fn lower_class_method_monomorph_vir(
         .zip(instance.func_type.params_id.iter())
         .map(|(p, &ty)| (p.name, ty))
         .collect();
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = ImplementRegistry::new();
     let mut vir = lower_method(
         method,
         MethodId::new(0),
@@ -219,8 +219,8 @@ fn lower_class_method_monomorph_vir(
         ctx.names,
         type_table,
         module_id,
-        &empty_xmod,
-        &empty_impl,
+        ctx.cross_module,
+        ctx.implements,
     );
     // Monomorphized method instances are looked up via mangled name map, not MethodId.
     vir.method_id = None;
@@ -250,8 +250,6 @@ fn lower_static_method_monomorph_vir(
         .zip(instance.func_type.params_id.iter())
         .map(|(p, &ty)| (p.name, ty))
         .collect();
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = ImplementRegistry::new();
     let mut vir = lower_interface_method(
         method,
         MethodId::new(0),
@@ -265,8 +263,8 @@ fn lower_static_method_monomorph_vir(
         ctx.names,
         type_table,
         module_id,
-        &empty_xmod,
-        &empty_impl,
+        ctx.cross_module,
+        ctx.implements,
     )?;
     // Monomorphized method instances are looked up via mangled name map, not MethodId.
     vir.method_id = None;

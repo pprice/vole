@@ -24,12 +24,12 @@ pub fn lower_global_inits(
     names: &NameTable,
     type_table: &mut VirTypeTable,
     module_id: ModuleId,
+    cross_module: &crate::vir_lower::CrossModuleCtx,
+    implements: &crate::implement_registry::ImplementRegistry,
 ) -> FxHashMap<Symbol, VirRef> {
     use crate::vir_lower::LoweringCtx;
     use crate::vir_lower::expr::lower_expr;
 
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = crate::implement_registry::ImplementRegistry::new();
     let mut ctx = LoweringCtx {
         node_map,
         interner,
@@ -41,8 +41,8 @@ pub fn lower_global_inits(
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
-        cross_module: &empty_xmod,
-        implements: &empty_impl,
+        cross_module,
+        implements,
     };
 
     let mut map = FxHashMap::default();
@@ -73,6 +73,8 @@ pub fn lower_module_global_inits(
     entities: &impl LoweringEntityLookup,
     modules_with_errors: &HashSet<String>,
     type_table: &mut VirTypeTable,
+    prelude_module_ids: &[ModuleId],
+    implements: &crate::implement_registry::ImplementRegistry,
 ) -> FxHashMap<String, FxHashMap<Symbol, VirRef>> {
     use crate::vir_lower::expr::lower_expr;
 
@@ -85,8 +87,12 @@ pub fn lower_module_global_inits(
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
-        let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-        let empty_impl = crate::implement_registry::ImplementRegistry::new();
+        let module_bindings =
+            super::functions::build_module_bindings(program, node_map, type_arena);
+        let cross_module = crate::vir_lower::CrossModuleCtx {
+            module_bindings,
+            prelude_module_ids: prelude_module_ids.to_vec(),
+        };
         let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
             interner,
@@ -98,8 +104,8 @@ pub fn lower_module_global_inits(
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
             captures: rustc_hash::FxHashSet::default(),
-            cross_module: &empty_xmod,
-            implements: &empty_impl,
+            cross_module: &cross_module,
+            implements,
         };
 
         let mut map = FxHashMap::default();

@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use crate::LoweringEntityLookup;
 use crate::generic::MonomorphInstance;
 use crate::implement_registry::ImplementRegistry;
-use crate::vir_lower::lower_monomorphized_function;
+use crate::vir_lower::{CrossModuleCtx, lower_monomorphized_function};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::ast::{FuncBody, Stmt};
 use vole_frontend::{Decl, FuncDecl, Interner, Program};
@@ -26,6 +26,8 @@ pub struct LowerMonomorphizedInstancesArgs<'a, 'decl> {
     pub vir_functions: &'a mut Vec<VirFunction>,
     pub type_table: &'a mut VirTypeTable,
     pub vir_handled_function_ids: &'a HashSet<FunctionId>,
+    pub cross_module: &'a CrossModuleCtx,
+    pub implements: &'a ImplementRegistry,
 }
 
 struct LowerSingleMonomorphArgs<'a> {
@@ -38,6 +40,8 @@ struct LowerSingleMonomorphArgs<'a> {
     interner: &'a mut Interner,
     vir_functions: &'a mut Vec<VirFunction>,
     type_table: &'a mut VirTypeTable,
+    cross_module: &'a CrossModuleCtx,
+    implements: &'a ImplementRegistry,
 }
 
 struct LowerModuleMonomorphArgs<'a> {
@@ -50,6 +54,8 @@ struct LowerModuleMonomorphArgs<'a> {
     modules_with_errors: &'a HashSet<String>,
     vir_functions: &'a mut Vec<VirFunction>,
     type_table: &'a mut VirTypeTable,
+    cross_module: &'a CrossModuleCtx,
+    implements: &'a ImplementRegistry,
 }
 
 /// AST-based fallback for monomorphized instances not handled by VIR monomorph.
@@ -78,6 +84,8 @@ pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '
         vir_functions,
         type_table,
         vir_handled_function_ids,
+        cross_module,
+        implements,
     } = args;
 
     // Iterate all monomorphized instances in the cache
@@ -103,6 +111,8 @@ pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '
                 interner,
                 vir_functions,
                 type_table,
+                cross_module,
+                implements,
             });
             continue;
         }
@@ -118,6 +128,8 @@ pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '
             modules_with_errors,
             vir_functions,
             type_table,
+            cross_module,
+            implements,
         });
     }
 }
@@ -134,6 +146,8 @@ fn lower_single_monomorph(args: LowerSingleMonomorphArgs<'_>) {
         interner,
         vir_functions,
         type_table,
+        cross_module,
+        implements,
     } = args;
 
     let Some(func_id) = entities.function_by_name(instance.original_name) else {
@@ -147,8 +161,6 @@ fn lower_single_monomorph(args: LowerSingleMonomorphArgs<'_>) {
         .collect();
     let mangled_name = names.display(instance.mangled_name);
     let module_id = names.module_of(instance.original_name);
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = ImplementRegistry::new();
     let vir = lower_monomorphized_function(
         func,
         func_id,
@@ -163,8 +175,8 @@ fn lower_single_monomorph(args: LowerSingleMonomorphArgs<'_>) {
         names,
         type_table,
         module_id,
-        &empty_xmod,
-        &empty_impl,
+        cross_module,
+        implements,
     );
     vir_functions.push(vir);
 }
@@ -187,6 +199,8 @@ fn lower_module_monomorph(args: LowerModuleMonomorphArgs<'_>) {
         modules_with_errors,
         vir_functions,
         type_table,
+        cross_module,
+        implements,
     } = args;
 
     let Some(func_id) = entities.function_by_name(instance.original_name) else {
@@ -236,8 +250,6 @@ fn lower_module_monomorph(args: LowerModuleMonomorphArgs<'_>) {
         .map(|(p, &ty)| (p.name, ty))
         .collect();
     let mangled_name = names.display(instance.mangled_name);
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = ImplementRegistry::new();
     let vir = lower_monomorphized_function(
         func,
         func_id,
@@ -252,8 +264,8 @@ fn lower_module_monomorph(args: LowerModuleMonomorphArgs<'_>) {
         names,
         type_table,
         module_id,
-        &empty_xmod,
-        &empty_impl,
+        cross_module,
+        implements,
     );
     vir_functions.push(vir);
 }

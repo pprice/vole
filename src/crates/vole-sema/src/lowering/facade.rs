@@ -429,6 +429,8 @@ where
         modules_with_errors,
         &mut module_vir_functions,
         type_table,
+        &prelude_module_ids,
+        implements,
     );
     lower_module_implement_block_methods(LowerModuleImplementBlockMethodsArgs {
         module_programs,
@@ -439,6 +441,8 @@ where
         modules_with_errors,
         vir_functions: &mut module_vir_functions,
         type_table,
+        prelude_module_ids: &prelude_module_ids,
+        implements,
     });
 
     module_vir_functions
@@ -498,7 +502,7 @@ where
 
     let cross_module_ctx = crate::vir_lower::CrossModuleCtx {
         module_bindings: xmod_bindings,
-        prelude_module_ids,
+        prelude_module_ids: prelude_module_ids.clone(),
     };
 
     // -----------------------------------------------------------------------
@@ -554,6 +558,8 @@ where
         vir_functions: &mut vir_functions,
         type_table,
         vir_handled_function_ids: &vir_handled_function_ids,
+        cross_module: &cross_module_ctx,
+        implements,
     });
 
     // -----------------------------------------------------------------------
@@ -571,6 +577,8 @@ where
         Some(&module_programs),
         &mut vir_functions,
         type_table,
+        &cross_module_ctx,
+        implements,
     );
     // Note: module type methods and module implement-block methods are now
     // handled in the module phase (cached).
@@ -584,6 +592,8 @@ where
         module_id,
         vir_functions: &mut vir_functions,
         type_table,
+        cross_module: &cross_module_ctx,
+        implements,
     });
 
     // -----------------------------------------------------------------------
@@ -602,6 +612,8 @@ where
         module_id,
         &mut vir_functions,
         type_table,
+        &cross_module_ctx,
+        implements,
     );
     let method_monomorph_ctx = MethodMonomorphLoweringCtx {
         names,
@@ -609,6 +621,8 @@ where
         type_arena,
         node_map,
         modules_with_errors,
+        cross_module: &cross_module_ctx,
+        implements,
     };
     let mut method_monomorph_work = MethodMonomorphLoweringWork {
         program,
@@ -646,7 +660,16 @@ where
         implements,
     );
     let vir_global_inits = lower_global_inits(
-        program, interner, node_map, type_arena, entities, names, type_table, module_id,
+        program,
+        interner,
+        node_map,
+        type_arena,
+        entities,
+        names,
+        type_table,
+        module_id,
+        &cross_module_ctx,
+        implements,
     );
     // Module global inits (type-table-dependent, logically module-only).
     let module_vir_global_inits = lower_module_global_inits(
@@ -657,6 +680,8 @@ where
         entities,
         modules_with_errors,
         type_table,
+        &prelude_module_ids,
+        implements,
     );
     let vir_module_bindings =
         lower_module_bindings(program, node_map, type_arena, names, interner, type_table);
@@ -685,6 +710,8 @@ where
             node_map,
             type_arena,
             type_table,
+            cross_module: &cross_module_ctx,
+            implements,
         });
     // Module function defaults (type-table-dependent, logically module-only).
     // Uses the main interner so that VIR StringLiteral symbols are resolvable
@@ -699,6 +726,8 @@ where
             type_arena,
             modules_with_errors,
             type_table,
+            prelude_module_ids: &prelude_module_ids,
+            implements,
         });
     vir_function_default_inits.extend(module_vir_function_default_inits);
 
@@ -712,6 +741,8 @@ where
         node_map,
         type_arena,
         type_table,
+        cross_module: &cross_module_ctx,
+        implements,
     });
     // Module method defaults (type-table-dependent, logically module-only).
     // Uses the main interner for the same cross-module re-interning reason.
@@ -725,6 +756,8 @@ where
             type_arena,
             modules_with_errors,
             type_table,
+            prelude_module_ids: &prelude_module_ids,
+            implements,
         });
     vir_method_default_inits.extend(module_vir_method_default_inits);
 
@@ -741,6 +774,8 @@ where
         type_arena,
         modules_with_errors,
         type_table,
+        cross_module: &cross_module_ctx,
+        implements,
     });
 
     let mut vir_field_default_inits = lower_field_default_inits(LowerFieldDefaultInitsArgs {
@@ -753,6 +788,8 @@ where
         node_map,
         type_arena,
         type_table,
+        cross_module: &cross_module_ctx,
+        implements,
     });
     // Module field defaults (type-table-dependent, logically module-only).
     let module_vir_field_default_inits =
@@ -764,6 +801,8 @@ where
             type_arena,
             modules_with_errors,
             type_table,
+            prelude_module_ids: &prelude_module_ids,
+            implements,
         });
     vir_field_default_inits.extend(module_vir_field_default_inits);
 

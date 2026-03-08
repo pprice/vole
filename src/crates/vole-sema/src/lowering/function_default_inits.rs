@@ -21,6 +21,8 @@ pub struct LowerFunctionDefaultInitsArgs<'a> {
     pub node_map: &'a NodeMap,
     pub type_arena: &'a TypeArena,
     pub type_table: &'a mut VirTypeTable,
+    pub cross_module: &'a crate::vir_lower::CrossModuleCtx,
+    pub implements: &'a crate::implement_registry::ImplementRegistry,
 }
 
 pub struct LowerModuleFunctionDefaultInitsArgs<'a> {
@@ -34,6 +36,8 @@ pub struct LowerModuleFunctionDefaultInitsArgs<'a> {
     pub type_arena: &'a TypeArena,
     pub modules_with_errors: &'a HashSet<String>,
     pub type_table: &'a mut VirTypeTable,
+    pub prelude_module_ids: &'a [ModuleId],
+    pub implements: &'a crate::implement_registry::ImplementRegistry,
 }
 
 /// Lower default parameter expressions for functions in the main program.
@@ -50,10 +54,10 @@ pub fn lower_function_default_inits(
         node_map,
         type_arena,
         type_table,
+        cross_module,
+        implements,
     } = args;
 
-    let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-    let empty_impl = crate::implement_registry::ImplementRegistry::new();
     let mut ctx = crate::vir_lower::LoweringCtx {
         node_map,
         interner,
@@ -65,8 +69,8 @@ pub fn lower_function_default_inits(
         generic: false,
         func_return_type: vole_identity::TypeId::VOID,
         captures: rustc_hash::FxHashSet::default(),
-        cross_module: &empty_xmod,
-        implements: &empty_impl,
+        cross_module,
+        implements,
     };
     let mut map = FxHashMap::default();
     lower_function_default_inits_in_decls(
@@ -94,6 +98,8 @@ pub fn lower_module_function_default_inits(
         type_arena,
         modules_with_errors,
         type_table,
+        prelude_module_ids,
+        implements,
     } = args;
 
     let mut map = FxHashMap::default();
@@ -105,8 +111,12 @@ pub fn lower_module_function_default_inits(
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
-        let empty_xmod = crate::vir_lower::CrossModuleCtx::empty();
-        let empty_impl = crate::implement_registry::ImplementRegistry::new();
+        let module_bindings =
+            super::functions::build_module_bindings(program, node_map, type_arena);
+        let cross_module = crate::vir_lower::CrossModuleCtx {
+            module_bindings,
+            prelude_module_ids: prelude_module_ids.to_vec(),
+        };
         let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
             interner,
@@ -118,8 +128,8 @@ pub fn lower_module_function_default_inits(
             generic: false,
             func_return_type: vole_identity::TypeId::VOID,
             captures: rustc_hash::FxHashSet::default(),
-            cross_module: &empty_xmod,
-            implements: &empty_impl,
+            cross_module: &cross_module,
+            implements,
         };
         let before_keys: Vec<(FunctionId, usize)> = map.keys().copied().collect();
         lower_function_default_inits_in_decls(
