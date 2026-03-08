@@ -164,6 +164,7 @@ mod match_string_value;
 mod match_to_string_arms;
 mod match_tostring_arms;
 mod match_when_arm;
+mod match_when_closure;
 mod method_call;
 mod modulo_edge;
 mod multi_arm_when;
@@ -313,6 +314,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(closure_class_call::ClosureClassCall),
         Box::new(closure_when_capture::ClosureWhenCapture),
         Box::new(match_closure_call::MatchClosureCall),
+        Box::new(match_when_closure::MatchWhenClosure),
         Box::new(closure_return::ClosureReturn),
         Box::new(closure_return_func::ClosureReturnFunc),
         Box::new(closure_iter_capture::ClosureIterCapture),
