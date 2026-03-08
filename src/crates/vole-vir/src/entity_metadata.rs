@@ -54,11 +54,6 @@ impl VirFieldTypeTag {
 /// semantics: Unknown → UnknownHeap, Interface → Interface, RC types → Rc,
 /// unions/optionals with RC variants → UnionHeap, everything else → Value.
 pub fn compute_field_type_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> VirFieldTypeTag {
-    // F128 is reserved as VirType::Unknown (no VirPrimitiveKind::F128 yet)
-    // but is a plain value type — must check before the Unknown arm.
-    if vir_ty == VirTypeId::F128 {
-        return VirFieldTypeTag::Value;
-    }
     match table.get(vir_ty) {
         VirType::Unknown => VirFieldTypeTag::UnknownHeap,
         VirType::Interface { .. } => VirFieldTypeTag::Interface,

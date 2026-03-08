@@ -26,11 +26,6 @@ pub(crate) fn get_type_def_id_from_vir_type_id(
 
     let name_table = analyzed.name_table();
 
-    // F128 is stored as VirType::Unknown in the type table but has a reserved VirTypeId.
-    if vir_ty == VirTypeId::F128 {
-        return analyzed.try_type_def_id(name_table.primitives.f128);
-    }
-
     // Primitives and Array require NameTable lookup.
     let primitive_name_id = match table.get(vir_ty) {
         VirType::Primitive(kind) => match kind {
@@ -45,6 +40,7 @@ pub(crate) fn get_type_def_id_from_vir_type_id(
             VirPrimitiveKind::U64 => Some(name_table.primitives.u64),
             VirPrimitiveKind::F32 => Some(name_table.primitives.f32),
             VirPrimitiveKind::F64 => Some(name_table.primitives.f64),
+            VirPrimitiveKind::F128 => Some(name_table.primitives.f128),
             VirPrimitiveKind::Bool => Some(name_table.primitives.bool),
             VirPrimitiveKind::String => Some(name_table.primitives.string),
             VirPrimitiveKind::Handle => {

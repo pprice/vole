@@ -350,17 +350,11 @@ pub(crate) fn vir_struct_total_byte_size(
 /// so callers can use `fcmp` instead of `icmp`. All other types are
 /// compared as I64.
 ///
-/// Note: F128 is stored as `VirType::Unknown` in the type table (no
-/// `VirPrimitiveKind::F128` yet), so it must be checked by constant
-/// before the table lookup.
 fn vir_leaf_cranelift_type(vir_ty: VirTypeId, table: &VirTypeTable) -> Type {
-    // F128 is registered as VirType::Unknown (wide_layout) - check by ID.
-    if vir_ty == VirTypeId::F128 {
-        return types::F128;
-    }
     match table.get(vir_ty) {
         VirType::Primitive(VirPrimitiveKind::F32) => types::F32,
         VirType::Primitive(VirPrimitiveKind::F64) => types::F64,
+        VirType::Primitive(VirPrimitiveKind::F128) => types::F128,
         VirType::Primitive(VirPrimitiveKind::I128) => types::I128,
         _ => types::I64,
     }

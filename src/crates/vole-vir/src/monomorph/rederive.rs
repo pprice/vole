@@ -784,6 +784,7 @@ fn derive_string_conversion_from_vir_type(
             VirPrimitiveKind::I128 => StringConversion::I128ToString,
             VirPrimitiveKind::F32 => StringConversion::F32ToString,
             VirPrimitiveKind::F64 => StringConversion::F64ToString,
+            VirPrimitiveKind::F128 => StringConversion::F128ToString,
             VirPrimitiveKind::Bool => StringConversion::BoolToString,
             VirPrimitiveKind::Handle => StringConversion::I64ToString,
         },

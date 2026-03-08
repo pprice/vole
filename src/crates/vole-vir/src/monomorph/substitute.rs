@@ -351,7 +351,7 @@ fn primitive_layout(kind: VirPrimitiveKind) -> VirTypeLayout {
             storage: StorageClass::Word,
         },
 
-        VirPrimitiveKind::I128 => VirTypeLayout {
+        VirPrimitiveKind::I128 | VirPrimitiveKind::F128 => VirTypeLayout {
             is_rc: false,
             is_heap: false,
             is_wide: true,

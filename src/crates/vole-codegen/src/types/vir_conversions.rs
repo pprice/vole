@@ -37,10 +37,6 @@ pub(crate) fn vir_type_to_cranelift(
     table: &VirTypeTable,
     pointer_type: Type,
 ) -> Type {
-    if vir_ty == VirTypeId::F128 {
-        return types::F128;
-    }
-
     // Sentinel types (nil, Done, user-defined) are zero-sized, I8 tag placeholder.
     if table.is_sentinel(vir_ty) {
         return types::I8;
@@ -100,6 +96,7 @@ fn vir_primitive_to_cranelift(kind: VirPrimitiveKind, pointer_type: Type) -> Typ
         VirPrimitiveKind::I32 | VirPrimitiveKind::U32 => types::I32,
         VirPrimitiveKind::I64 | VirPrimitiveKind::U64 => types::I64,
         VirPrimitiveKind::I128 => types::I128,
+        VirPrimitiveKind::F128 => types::F128,
         VirPrimitiveKind::F32 => types::F32,
         VirPrimitiveKind::F64 => types::F64,
         VirPrimitiveKind::Bool => types::I8,
@@ -463,6 +460,7 @@ pub(crate) fn vir_display_basic(vir_ty: VirTypeId, table: &VirTypeTable) -> Stri
             VirPrimitiveKind::U64 => "u64".into(),
             VirPrimitiveKind::F32 => "f32".into(),
             VirPrimitiveKind::F64 => "f64".into(),
+            VirPrimitiveKind::F128 => "f128".into(),
             VirPrimitiveKind::Bool => "bool".into(),
             VirPrimitiveKind::String => "string".into(),
             VirPrimitiveKind::Handle => "handle".into(),
@@ -519,6 +517,7 @@ pub(crate) fn vir_display_named(
             VirPrimitiveKind::U64 => "u64".into(),
             VirPrimitiveKind::F32 => "f32".into(),
             VirPrimitiveKind::F64 => "f64".into(),
+            VirPrimitiveKind::F128 => "f128".into(),
             VirPrimitiveKind::Bool => "bool".into(),
             VirPrimitiveKind::String => "string".into(),
             VirPrimitiveKind::Handle => "handle".into(),
@@ -831,7 +830,7 @@ pub(crate) fn vir_type_id_size(
             VirPrimitiveKind::I16 | VirPrimitiveKind::U16 => 2,
             VirPrimitiveKind::I32 | VirPrimitiveKind::U32 | VirPrimitiveKind::F32 => 4,
             VirPrimitiveKind::I64 | VirPrimitiveKind::U64 | VirPrimitiveKind::F64 => 8,
-            VirPrimitiveKind::I128 => 16,
+            VirPrimitiveKind::I128 | VirPrimitiveKind::F128 => 16,
             VirPrimitiveKind::String | VirPrimitiveKind::Handle => pointer_type.bytes(),
         },
 
@@ -970,11 +969,6 @@ pub(crate) fn vir_array_element_tag_id(vir_ty: VirTypeId, table: &VirTypeTable) 
     if table.is_sentinel(vir_ty) {
         return RuntimeTypeId::I64 as i64;
     }
-    // F128 is stored as VirType::Unknown placeholder (no VirPrimitiveKind::F128 yet),
-    // but it's a wide type that uses 2-slot storage like i128.
-    if vir_ty == VirTypeId::F128 {
-        return RuntimeTypeId::Wide128 as i64;
-    }
     match table.get(vir_ty) {
         VirType::Primitive(VirPrimitiveKind::String) => RuntimeTypeId::String as i64,
         VirType::Primitive(
@@ -983,7 +977,9 @@ pub(crate) fn vir_array_element_tag_id(vir_ty: VirTypeId, table: &VirTypeTable) 
             | VirPrimitiveKind::I16
             | VirPrimitiveKind::I8,
         ) => RuntimeTypeId::I64 as i64,
-        VirType::Primitive(VirPrimitiveKind::I128) => RuntimeTypeId::Wide128 as i64,
+        VirType::Primitive(VirPrimitiveKind::I128 | VirPrimitiveKind::F128) => {
+            RuntimeTypeId::Wide128 as i64
+        }
         VirType::Primitive(VirPrimitiveKind::F64 | VirPrimitiveKind::F32) => {
             RuntimeTypeId::F64 as i64
         }
@@ -1557,7 +1553,7 @@ fn vir_compute_type_size_aligned(
             VirPrimitiveKind::I16 | VirPrimitiveKind::U16 => 2,
             VirPrimitiveKind::I32 | VirPrimitiveKind::U32 | VirPrimitiveKind::F32 => 4,
             VirPrimitiveKind::I64 | VirPrimitiveKind::U64 | VirPrimitiveKind::F64 => 8,
-            VirPrimitiveKind::I128 => 16,
+            VirPrimitiveKind::I128 | VirPrimitiveKind::F128 => 16,
             VirPrimitiveKind::String | VirPrimitiveKind::Handle => 8,
         },
 

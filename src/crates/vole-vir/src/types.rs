@@ -94,6 +94,7 @@ pub enum VirPrimitiveKind {
     U64,
     F32,
     F64,
+    F128,
     Bool,
     String,
     Handle,

@@ -798,8 +798,7 @@ impl VirTypeTable {
         // 10-12: Floating point
         self.push_reserved(VirType::Primitive(P::F32), float_layout(), VirTypeId::F32);
         self.push_reserved(VirType::Primitive(P::F64), float_layout(), VirTypeId::F64);
-        // F128: no VirPrimitiveKind::F128 yet, use Unknown as placeholder
-        self.push_reserved(VirType::Unknown, wide_layout(), VirTypeId::F128);
+        self.push_reserved(VirType::Primitive(P::F128), wide_layout(), VirTypeId::F128);
 
         // 13-14: Bool, String
         self.push_reserved(VirType::Primitive(P::Bool), word_layout(), VirTypeId::BOOL);
@@ -856,7 +855,7 @@ impl VirTypeTable {
         self.push_reserved(VirType::Never, void_layout(), VirTypeId::NEVER);
 
         // 22: Unknown — boxed TaggedValue, heap pointer.
-        // This overwrites the intern_map entry for VirType::Unknown from INVALID/F128,
+        // This overwrites the intern_map entry for VirType::Unknown from INVALID,
         // so future `intern(VirType::Unknown)` returns UNKNOWN (index 22).
         self.push_reserved(VirType::Unknown, pointer_layout(false), VirTypeId::UNKNOWN);
 
