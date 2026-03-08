@@ -1068,10 +1068,28 @@ impl Cg<'_, '_, '_> {
         }
 
         // 2. Captured variable — load from closure environment.
+        //    After loading, apply union narrowing when the VIR usage type
+        //    differs from the capture's declared type (e.g. `x: i64?` used
+        //    as `x: i64` inside an `is` check branch).
         if self.has_captures()
             && let Some(binding) = self.get_capture(&sym).copied()
         {
-            return self.load_capture(&binding);
+            let captured = self.load_capture(&binding)?;
+            let captured_vir = self.try_substitute_type_v(captured.type_id);
+            let narrowed_vir = self.try_substitute_type_v(vir_ty);
+            if self.vir_query_is_union_v(captured_vir)
+                && !self.vir_query_is_union_v(narrowed_vir)
+                && narrowed_vir != captured_vir
+                && let Some(narrowed_variant) =
+                    self.find_union_variant_v(captured_vir, narrowed_vir)
+            {
+                let payload_ty = self.cranelift_type_v(narrowed_variant);
+                let payload = self.load_union_payload_v(captured.value, captured_vir, payload_ty);
+                let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
+                self.mark_borrowed_if_rc(&mut cv);
+                return Ok(cv);
+            }
+            return Ok(captured);
         }
 
         // 3. Local variable — vars map lookup with narrowing.

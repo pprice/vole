@@ -1,0 +1,111 @@
+// Regression tests for closure capture of optional values with is-check narrowing.
+// Bug: closures that capture optional values and use `is` type checks produced
+// wrong results (i64?) or crashed (string?) because:
+// 1. copy_value_to_heap_v stored just the stack pointer instead of copying the
+//    full union data (tag + payload) for optional/union types
+// 2. load_capture returned the raw optional pointer without applying union
+//    narrowing when the usage type was narrowed (e.g. i64? -> i64 inside is-check)
+
+func test_capture_optional_i64() -> i64 {
+    let x: i64? = 42
+    let check = () -> i64 => {
+        if x is i64 {
+            return x + 1
+        }
+        return -1
+    }
+    return check()
+}
+
+func test_capture_optional_string() -> string {
+    let name: string? = "hello"
+    let describe = () -> string => {
+        if name is string {
+            return "has: {name}"
+        }
+        return "empty"
+    }
+    return describe()
+}
+
+func test_capture_optional_nil_i64() -> i64 {
+    let x: i64? = nil
+    let check = () -> i64 => {
+        if x is i64 {
+            return x + 1
+        }
+        return -1
+    }
+    return check()
+}
+
+func test_capture_optional_nil_string() -> string {
+    let name: string? = nil
+    let describe = () -> string => {
+        if name is string {
+            return "has: {name}"
+        }
+        return "empty"
+    }
+    return describe()
+}
+
+func test_capture_optional_is_check_in_multiple_branches() -> i64 {
+    let a: i64? = 10
+    let b: i64? = nil
+    let compute = () -> i64 => {
+        var result = 0
+        if a is i64 {
+            result = result + a
+        }
+        if b is i64 {
+            result = result + b
+        }
+        return result
+    }
+    return compute()
+}
+
+tests "closure capture optional is-check" {
+    test "capture optional i64 with value" {
+        assert(test_capture_optional_i64() == 43)
+    }
+
+    test "capture optional string with value" {
+        assert(test_capture_optional_string() == "has: hello")
+    }
+
+    test "capture optional i64 nil" {
+        assert(test_capture_optional_nil_i64() == -1)
+    }
+
+    test "capture optional string nil" {
+        assert(test_capture_optional_nil_string() == "empty")
+    }
+
+    test "capture multiple optionals with is-check" {
+        assert(test_capture_optional_is_check_in_multiple_branches() == 10)
+    }
+
+    test "inline closure capture optional i64" {
+        let num: i64? = 99
+        let f = () -> i64 => {
+            if num is i64 {
+                return num
+            }
+            return 0
+        }
+        assert(f() == 99)
+    }
+
+    test "inline closure capture optional string" {
+        let s: string? = "world"
+        let f = () -> string => {
+            if s is string {
+                return s
+            }
+            return "none"
+        }
+        assert(f() == "world")
+    }
+}

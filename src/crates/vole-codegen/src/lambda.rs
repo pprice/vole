@@ -426,11 +426,15 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Copy a value into a heap allocation, handling structs with multiple slots.
+    /// Copy a value into a heap allocation, handling multi-slot types.
     ///
-    /// Uses VirTypeId to determine struct layout via VirTypeDef.field_types.
+    /// Structs use `vir_struct_flat_slot_count` for slot count.
+    /// Other stack composites (optionals, unions, tuples, fallibles, etc.)
+    /// use `type_size_v` to determine how many 8-byte slots to copy.
+    /// Scalar values (primitives, heap-allocated RC types) are stored directly.
     fn copy_value_to_heap_v(&mut self, value: Value, heap_ptr: Value, vir_ty: VirTypeId) {
         if let Some(flat_count) = self.vir_struct_flat_slot_count(vir_ty) {
+            // Structs: copy all flat slots from the stack pointer.
             for slot in 0..flat_count {
                 let offset = (slot as i32) * 8;
                 let val = self
@@ -442,9 +446,29 @@ impl Cg<'_, '_, '_> {
                     .store(MemFlags::new(), val, heap_ptr, offset);
             }
         } else {
-            self.builder
-                .ins()
-                .store(MemFlags::new(), value, heap_ptr, 0);
+            let size = self.type_size_v(vir_ty);
+            let ptr_bytes = self.ptr_type().bytes();
+            if size > ptr_bytes {
+                // Stack composites (optionals, unions, tuples, fallibles, ranges, etc.):
+                // the value is a pointer to stack-allocated data. Copy the full
+                // data into the heap allocation so it survives the creating frame.
+                let slot_count = (size as usize).div_ceil(8);
+                for slot in 0..slot_count {
+                    let offset = (slot as i32) * 8;
+                    let val = self
+                        .builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), value, offset);
+                    self.builder
+                        .ins()
+                        .store(MemFlags::new(), val, heap_ptr, offset);
+                }
+            } else {
+                // Scalar values (primitives, heap-allocated RC pointers): store directly.
+                self.builder
+                    .ins()
+                    .store(MemFlags::new(), value, heap_ptr, 0);
+            }
         }
     }
 }

@@ -71,6 +71,18 @@ impl Cg<'_, '_, '_> {
             return Ok(cv);
         }
 
+        // Stack composites (optionals, unions, tuples, fallibles, ranges, etc.)
+        // are captured by value — the heap slot contains the full data (tag +
+        // payload for unions, all elements for tuples, etc.). Return heap_ptr
+        // directly as the composite pointer, just like structs.
+        let size = self.type_size_v(binding.vole_type);
+        let ptr_bytes = self.ptr_type().bytes();
+        if size > ptr_bytes {
+            let ptr_type = self.ptr_type();
+            let cv = CompiledValue::new(heap_ptr, ptr_type, binding.vole_type);
+            return Ok(cv);
+        }
+
         let cranelift_ty = self.cranelift_type_v(binding.vole_type);
         let value = self
             .builder
@@ -103,6 +115,28 @@ impl Cg<'_, '_, '_> {
         // Structs: copy all flat slots from value (stack ptr) to heap slot.
         if let Some(flat_count) = self.vir_struct_flat_slot_count(binding.vole_type) {
             for slot in 0..flat_count {
+                let offset = (slot as i32) * 8;
+                let val = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value.value, offset);
+                self.builder
+                    .ins()
+                    .store(MemFlags::new(), val, heap_ptr, offset);
+            }
+            value.mark_consumed();
+            value.debug_assert_rc_handled("closure capture assign");
+            let ptr_type = self.ptr_type();
+            return Ok(CompiledValue::new(heap_ptr, ptr_type, binding.vole_type));
+        }
+
+        // Stack composites (optionals, unions, tuples, fallibles, ranges, etc.):
+        // copy all 8-byte slots from the value pointer to the heap slot.
+        let size = self.type_size_v(binding.vole_type);
+        let ptr_bytes = self.ptr_type().bytes();
+        if size > ptr_bytes {
+            let slot_count = (size as usize).div_ceil(8);
+            for slot in 0..slot_count {
                 let offset = (slot as i32) * 8;
                 let val = self
                     .builder
