@@ -53,7 +53,6 @@
 use crate::emit::Emit;
 use crate::rule::{Param, Params, StmtRule};
 use crate::scope::Scope;
-use crate::symbols::{PrimitiveType, TypeInfo};
 
 pub struct GenericStructLet;
 
@@ -105,12 +104,10 @@ fn emit_wrapper(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     );
     scope.add_module_decl(fn_decl);
 
+    // Do NOT add the result to scope — the type is a generic struct, not a
+    // primitive. Other rules (e.g. array_index, compound_assignment) would
+    // misuse it if registered as I64.
     let result_name = scope.fresh_name();
-    scope.add_local(
-        result_name.clone(),
-        TypeInfo::Primitive(PrimitiveType::I64),
-        false,
-    );
 
     let indent = emit.indent_str();
 
@@ -155,12 +152,8 @@ fn emit_pair(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     );
     scope.add_module_decl(sum_decl);
 
+    // Do NOT add the result to scope — the type is a generic struct.
     let result_name = scope.fresh_name();
-    scope.add_local(
-        result_name.clone(),
-        TypeInfo::Primitive(PrimitiveType::I64),
-        false,
-    );
 
     let indent = emit.indent_str();
 
@@ -193,12 +186,8 @@ fn emit_box_string(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     );
     scope.add_module_decl(fn_decl);
 
+    // Do NOT add the result to scope — the type is a generic struct.
     let result_name = scope.fresh_name();
-    scope.add_local(
-        result_name.clone(),
-        TypeInfo::Primitive(PrimitiveType::String),
-        false,
-    );
 
     let indent = emit.indent_str();
 
@@ -417,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn adds_result_to_scope() {
+    fn does_not_add_result_to_scope() {
         let table = SymbolTable::new();
         let mut scope = Scope::new(&[], &table);
         scope.module_id = Some(crate::symbols::ModuleId(0));
@@ -427,17 +416,11 @@ mod tests {
 
         let result = GenericStructLet.generate(&mut scope, &mut emit, &test_params());
         assert!(result.is_some());
+        // Generic struct results must NOT be added to scope — other rules
+        // would misuse them as primitives.
         assert!(
-            !scope.locals.is_empty(),
-            "expected result local added to scope"
-        );
-        let result_local = scope.locals.last().expect("should add result local");
-        // Result type depends on variant but should be either I64 or String.
-        assert!(
-            result_local.1 == TypeInfo::Primitive(PrimitiveType::I64)
-                || result_local.1 == TypeInfo::Primitive(PrimitiveType::String),
-            "result must be i64 or string, got: {:?}",
-            result_local.1,
+            scope.locals.is_empty(),
+            "generic struct result should not be added to scope"
         );
     }
 }
