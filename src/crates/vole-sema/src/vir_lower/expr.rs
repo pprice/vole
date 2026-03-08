@@ -1722,6 +1722,17 @@ fn resolve_closure_variable_target(
     let callee_type = ctx.node_map.get_callee_var_type(call_expr_id)?;
     let vir_type = ctx.translate(callee_type);
 
+    // Module-level globals should be handled by `resolve_global_closure_target()`,
+    // not classified as local closure variables or functional interfaces.
+    let is_global = ctx
+        .name_table
+        .name_id(ctx.module_id, &[callee_sym], ctx.interner)
+        .and_then(|nid| ctx.entities.global_by_name(nid))
+        .is_some();
+    if is_global {
+        return None;
+    }
+
     // Check if the callee is a functional interface (single-method interface).
     // Sema sets callee_var_type to the interface type for these.
     if let Some((type_def_id, _)) = ctx.type_arena.unwrap_interface(callee_type)

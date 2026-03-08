@@ -647,8 +647,26 @@ impl Cg<'_, '_, '_> {
         args: &[VirRef],
         resolved_call_args: Option<&[Option<usize>]>,
         lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
-        _return_ty: TypeId,
+        return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
+        // Fall back to module bindings — VIR lowering may classify a destructured
+        // module import (e.g. `let { sin } = import "std:math"`) as ClosureVariable
+        // because sema sets callee_var_type for it.
+        if !self.vars.contains_key(&var_name)
+            && let Some(&(module_id, export_name, _)) = self.lookup_module_binding(&var_name) {
+                let arg_source = crate::structs::methods::ArgSource(args);
+                self.vir_resolved_call_args = resolved_call_args.map(|m| m.to_vec());
+                self.vir_lambda_defaults = lambda_defaults;
+                self.vir_call_return_type = Some(return_ty);
+                let dummy_node = vole_identity::NodeId::new(vole_identity::ModuleId::new(0), 0);
+                let result =
+                    self.call_module_binding(module_id, export_name, &arg_source, dummy_node);
+                self.vir_resolved_call_args = None;
+                self.vir_lambda_defaults = None;
+                self.vir_call_return_type = None;
+                return result.map(|r| self.mark_rc_owned(r));
+            }
+
         let (var, var_vir_ty) = self.vars.get(&var_name).copied().ok_or_else(|| {
             CodegenError::not_found("closure variable", self.interner().resolve(var_name))
         })?;

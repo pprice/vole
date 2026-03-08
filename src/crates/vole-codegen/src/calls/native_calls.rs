@@ -51,7 +51,7 @@ impl Cg<'_, '_, '_> {
     /// Call a function via destructured module binding.
     /// Looks up the function by module_id and export_name, then calls via FFI or compiled function.
     /// Accepts `ArgSource` for VIR-based argument compilation.
-    pub(super) fn call_module_binding(
+    pub(crate) fn call_module_binding(
         &mut self,
         module_id: ModuleId,
         export_name: Symbol,
