@@ -324,9 +324,10 @@ impl Cg<'_, '_, '_> {
     fn method_name_id(&self, name: Symbol) -> CodegenResult<NameId> {
         let name_table = self.name_table();
         let namer = NamerLookup::new(name_table, self.interner());
-        namer
-            .method(name)
-            .ok_or_else(|| CodegenError::not_found("method name_id", self.interner().resolve(name)))
+        namer.method(name).ok_or_else(|| {
+            let resolved = self.interner().resolve(name);
+            CodegenError::not_found("method name_id", resolved)
+        })
     }
 
     #[tracing::instrument(skip(self, mc), fields(method = %self.interner().resolve(mc.method)))]
@@ -528,11 +529,17 @@ impl Cg<'_, '_, '_> {
         if let Some(resolved) = resolution {
             // Interface dispatch with pre-computed slot (optimized path)
             if let Some(method_index) = resolved.method_index() {
+                // Use the substituted (concrete) return type for iterator
+                // conversion, since the method signature may be generic.
+                let concrete_return_vir = dispatch
+                    .substituted_return_type
+                    .map(|ty| self.try_substitute_type_v(ty));
                 let result = self.interface_dispatch_call_args_by_slot(
                     &obj,
                     &mc.arg_source(),
                     method_index,
                     self.resolved_dispatch_func_type_id(resolved),
+                    concrete_return_vir,
                 )?;
                 // Consume the owned RC receiver after the call. For temporaries
                 // (e.g. make_nums().collect()), this rc_dec's the interface's

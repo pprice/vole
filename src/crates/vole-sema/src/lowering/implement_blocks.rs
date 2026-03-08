@@ -447,15 +447,34 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
         let iface_name_str = names
             .last_segment_str(entities.get_type(interface_tdef_id).name_id)
             .unwrap_or_default();
-        let iface_method = find_interface_method_ast(
+        let result = find_interface_method_ast(
             &iface_name_str,
             &method_name_str,
             program,
             interner,
             module_programs,
         );
-        let Some(iface_method) = iface_method else {
+        let Some(FoundInterfaceMethod {
+            method: iface_method,
+            foreign_interner,
+        }) = result
+        else {
             continue;
+        };
+
+        // When the method body comes from a foreign module (e.g. stdlib
+        // prelude), its AST Symbol values are indices into that module's
+        // interner.  For module-level lowering (this path), codegen will
+        // also use the interface's interner, so we lower with the foreign
+        // interner to keep VIR symbols consistent.
+        // (The file-level path in lower_type_default_methods remaps symbols
+        // to the user module's interner instead, since codegen uses that.)
+        let mut foreign_clone;
+        let lowering_interner: &mut Interner = if let Some(ref foreign) = foreign_interner {
+            foreign_clone = (**foreign).clone();
+            &mut foreign_clone
+        } else {
+            &mut *interner
         };
 
         let method_def = entities.get_method(impl_method_id);
@@ -473,7 +492,7 @@ pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_
             &param_types,
             method_def.signature_id,
             node_map,
-            interner,
+            lowering_interner,
             type_arena,
             entities.as_entity_registry(),
             names,
@@ -524,13 +543,17 @@ pub fn collect_default_method_ids(
 /// Find an interface method AST node by interface and method name.
 ///
 /// Searches the main program and, when provided, imported module programs.
+/// When the method is found in a foreign module, `foreign_interner` is `Some`
+/// with that module's `Rc<Interner>`.  Callers MUST use this interner
+/// (via `Rc::make_mut`) when lowering the body — the AST symbols are indices
+/// into that interner, not the current module's.
 pub fn find_interface_method_ast<'a>(
     interface_name: &str,
     method_name: &str,
     program: &'a Program,
     interner: &Interner,
     module_programs: Option<&'a FxHashMap<String, (Program, Rc<Interner>)>>,
-) -> Option<&'a vole_frontend::ast::InterfaceMethod> {
+) -> Option<FoundInterfaceMethod<'a>> {
     for decl in &program.declarations {
         if let Decl::Interface(iface) = decl {
             if interner.resolve(iface.name) != interface_name {
@@ -538,7 +561,10 @@ pub fn find_interface_method_ast<'a>(
             }
             for method in &iface.methods {
                 if interner.resolve(method.name) == method_name && method.body.is_some() {
-                    return Some(method);
+                    return Some(FoundInterfaceMethod {
+                        method,
+                        foreign_interner: None,
+                    });
                 }
             }
         }
@@ -555,7 +581,10 @@ pub fn find_interface_method_ast<'a>(
                         if module_interner.resolve(method.name) == method_name
                             && method.body.is_some()
                         {
-                            return Some(method);
+                            return Some(FoundInterfaceMethod {
+                                method,
+                                foreign_interner: Some(Rc::clone(module_interner)),
+                            });
                         }
                     }
                 }
@@ -564,6 +593,14 @@ pub fn find_interface_method_ast<'a>(
     }
 
     None
+}
+
+/// Result of [`find_interface_method_ast`].
+pub struct FoundInterfaceMethod<'a> {
+    pub method: &'a vole_frontend::ast::InterfaceMethod,
+    /// When `Some`, the method body's AST symbols belong to this interner.
+    /// Use `Rc::make_mut` to get `&mut Interner` for VIR lowering.
+    pub foreign_interner: Option<Rc<Interner>>,
 }
 
 /// Lower implement block methods from imported modules to VIR.

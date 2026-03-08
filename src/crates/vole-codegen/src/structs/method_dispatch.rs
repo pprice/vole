@@ -470,19 +470,28 @@ impl Cg<'_, '_, '_> {
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let slot = self.interface_method_slot(interface_type_id, method_name_id)?;
-        self.interface_dispatch_call_args_inner(obj, arg_source, slot, func_type_id)
+        self.interface_dispatch_call_args_inner(obj, arg_source, slot, func_type_id, None)
     }
 
     /// Dispatch an interface method call with pre-computed vtable slot index.
     /// This is the optimized path where sema has already computed the slot.
+    /// `concrete_return_vir` is the concrete (post-substitution) return VirTypeId
+    /// for iterator return type conversion when the method signature is generic.
     pub(crate) fn interface_dispatch_call_args_by_slot(
         &mut self,
         obj: &CompiledValue,
         arg_source: &ArgSource<'_>,
         slot: u32,
         func_type_id: TypeId,
+        concrete_return_vir: Option<VirTypeId>,
     ) -> CodegenResult<CompiledValue> {
-        self.interface_dispatch_call_args_inner(obj, arg_source, slot as usize, func_type_id)
+        self.interface_dispatch_call_args_inner(
+            obj,
+            arg_source,
+            slot as usize,
+            func_type_id,
+            concrete_return_vir,
+        )
     }
 
     fn interface_dispatch_call_args_inner(
@@ -491,6 +500,7 @@ impl Cg<'_, '_, '_> {
         arg_source: &ArgSource<'_>,
         slot: usize,
         func_type_id: TypeId,
+        concrete_return_vir: Option<VirTypeId>,
     ) -> CodegenResult<CompiledValue> {
         let word_type = self.ptr_type();
         let word_bytes = word_type.bytes() as i32;
@@ -586,8 +596,12 @@ impl Cg<'_, '_, '_> {
         let value = self.convert_from_i64_storage(word, return_type_id);
 
         // Convert Iterator return types to RuntimeIterator for interface dispatch
-        // since external iterator methods return raw iterator pointers, not boxed interfaces
-        let return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
+        // since external iterator methods return raw iterator pointers, not boxed
+        // interfaces. Prefer the concrete (post-substitution) VIR type over the
+        // generic method signature type, since the signature may have unresolved
+        // type parameters (e.g., Iterator<T> instead of Iterator<i64>).
+        let iter_convert_vir = concrete_return_vir.unwrap_or(return_vir);
+        let return_type_id = self.maybe_convert_iterator_return_type_v(iter_convert_vir);
 
         Ok(self.compiled(value, return_type_id))
     }

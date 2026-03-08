@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use super::implement_blocks::{collect_default_method_ids, find_interface_method_ast};
+use super::implement_blocks::{
+    FoundInterfaceMethod, collect_default_method_ids, find_interface_method_ast,
+};
 use crate::LoweringEntityLookup;
 use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{CrossModuleCtx, lower_interface_method, lower_method};
@@ -283,15 +285,32 @@ pub fn lower_type_default_methods(
         let iface_name_str = names
             .last_segment_str(entities.get_type(interface_tdef_id).name_id)
             .unwrap_or_default();
-        let iface_method = find_interface_method_ast(
+        let result = find_interface_method_ast(
             &iface_name_str,
             &method_name_str,
             program,
             interner,
             module_programs,
         );
-        let Some(iface_method) = iface_method else {
+        let Some(FoundInterfaceMethod {
+            method: iface_method,
+            foreign_interner,
+        }) = result
+        else {
             continue;
+        };
+
+        // When the method body comes from a foreign module (e.g. stdlib
+        // prelude), its AST Symbol values are indices into that module's
+        // interner.  Codegen compiles these bodies using the interface's
+        // interner (via find_interface_method_interner), so we must lower
+        // with the same interner to keep VIR symbols consistent.
+        let mut foreign_clone;
+        let lowering_interner: &mut Interner = if let Some(ref foreign) = foreign_interner {
+            foreign_clone = (**foreign).clone();
+            &mut foreign_clone
+        } else {
+            &mut *interner
         };
 
         let method_def = entities.get_method(impl_method_id);
@@ -309,7 +328,7 @@ pub fn lower_type_default_methods(
             &param_types,
             method_def.signature_id,
             node_map,
-            interner,
+            lowering_interner,
             type_arena,
             entities.as_entity_registry(),
             names,

@@ -14,7 +14,7 @@ use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
-use vole_identity::{NodeId, TypeDefId, TypeId};
+use vole_identity::{NodeId, TypeDefId, TypeId, VirTypeId};
 
 use super::methods::ArgSource;
 
@@ -410,8 +410,8 @@ impl Cg<'_, '_, '_> {
         self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
     }
 
-    /// Convert Iterator<T> return types to RuntimeIterator(T), using well-known type metadata
-    /// Takes and returns TypeId for O(1) equality; converts internally for matching
+    /// Convert Iterator<T> return types to RuntimeIterator(T), using well-known type metadata.
+    /// Takes and returns TypeId for O(1) equality; converts internally for matching.
     pub(crate) fn maybe_convert_iterator_return_type(&self, ty: TypeId) -> TypeId {
         // Look up the Iterator interface via well-known type metadata
         if let Some(iterator_type_id) = self.name_table().well_known.iterator_type_def {
@@ -419,6 +419,24 @@ impl Cg<'_, '_, '_> {
         } else {
             ty
         }
+    }
+
+    /// VirTypeId-native version of iterator return type conversion.
+    /// Avoids sema TypeId round-tripping which can fail when VirTypeTable
+    /// mappings are incomplete.
+    pub(crate) fn maybe_convert_iterator_return_type_v(&self, vir_ty: VirTypeId) -> TypeId {
+        if let Some(iterator_type_id) = self.name_table().well_known.iterator_type_def
+            && let Some((type_def_id, vir_type_args)) = self.vir_query_unwrap_interface_v(vir_ty)
+            && type_def_id == iterator_type_id
+            && let Some(&elem_vir) = vir_type_args.first()
+            && let Some(runtime_iter_id) = self.vir_query_lookup_runtime_iterator_v(elem_vir)
+        {
+            let table = self.vir_type_table();
+            if let Some(sema_id) = table.lookup_vir_type_id(runtime_iter_id) {
+                return sema_id;
+            }
+        }
+        self.vir_type_table().vir_to_type_id(vir_ty)
     }
 
     /// Core implementation of iterator return type conversion

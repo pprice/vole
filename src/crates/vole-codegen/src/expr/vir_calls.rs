@@ -41,7 +41,9 @@ impl Cg<'_, '_, '_> {
             CallTarget::IntrinsicRuntime { key } => {
                 self.compile_vir_intrinsic_runtime_call(*key, args, ty)
             }
-            CallTarget::VtableMethod { slot } => self.compile_vir_vtable_call(*slot, args, ty),
+            CallTarget::VtableMethod { slot } => {
+                self.compile_vir_vtable_call(*slot, args, ty, vir_ty)
+            }
             CallTarget::BuiltinMethod { method } => {
                 self.compile_vir_builtin_method_call(*method, args, ty)
             }
@@ -435,6 +437,7 @@ impl Cg<'_, '_, '_> {
         slot: usize,
         args: &[VirRef],
         return_ty: TypeId,
+        return_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         assert!(
             !args.is_empty(),
@@ -491,7 +494,9 @@ impl Cg<'_, '_, '_> {
             .copied()
             .ok_or_else(|| CodegenError::internal("vtable call missing return value"))?;
         let value = self.convert_from_i64_storage(word, return_ty);
-        let return_ty = self.maybe_convert_iterator_return_type(return_ty);
+        // Use VirTypeId-native conversion to avoid sema TypeId round-trip
+        // failures when VirTypeTable reverse mappings are incomplete.
+        let return_ty = self.maybe_convert_iterator_return_type_v(return_vir_ty);
         Ok(self.compiled(value, return_ty))
     }
 
