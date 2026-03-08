@@ -77,10 +77,7 @@ fn emit_when_func(scope: &mut Scope, emit: &mut Emit, num_arms: usize) -> Option
     // Build when arms: x == 0 => "val_0", x == 1 => "val_1", ...
     let mut arms = Vec::with_capacity(num_arms + 1);
     for i in 0..num_arms {
-        arms.push(format!(
-            "        {} == {} => \"val_{}\"",
-            param_name, i, i
-        ));
+        arms.push(format!("        {} == {} => \"val_{}\"", param_name, i, i));
     }
     // Wildcard default arm.
     arms.push("        _ => \"other\"".to_string());
@@ -220,10 +217,7 @@ mod tests {
                         decl.contains("_ => \"other\""),
                         "expected wildcard arm in decl: {decl}"
                     );
-                    assert!(
-                        text.contains("assert("),
-                        "expected assert in code: {text}"
-                    );
+                    assert!(text.contains("assert("), "expected assert in code: {text}");
                     break;
                 }
             }
@@ -265,10 +259,7 @@ mod tests {
                         decl.contains("x == 29 => \"val_29\""),
                         "expected last value arm in decl: {decl}"
                     );
-                    assert!(
-                        text.contains("assert("),
-                        "expected assert in code: {text}"
-                    );
+                    assert!(text.contains("assert("), "expected assert in code: {text}");
                     break;
                 }
             }
