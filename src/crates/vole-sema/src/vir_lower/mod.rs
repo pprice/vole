@@ -520,9 +520,10 @@ impl LoweringCtx<'_> {
 
         let field_name = self.interner.resolve(field);
 
-        // Try struct first (value-type, stack-allocated).
-        // Exception: annotation structs (@annotation) are heap-allocated via
-        // InstanceNew at runtime, so their fields must use Heap storage.
+        // Struct types are generally value-type, stack-allocated (Direct storage).
+        // Exception: annotation structs (@annotation) may be heap-allocated via
+        // InstanceNew (e.g. retrieved from FieldMeta.annotations array after an
+        // `is` check), so their fields use Heap storage to match class instance layout.
         if let Some((type_def_id, type_args)) = self.type_arena.unwrap_struct(object_type) {
             let is_annotation = self.entities.get_type(type_def_id).is_annotation;
             if is_annotation {

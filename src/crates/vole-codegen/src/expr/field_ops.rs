@@ -44,8 +44,20 @@ impl Cg<'_, '_, '_> {
             }
             FieldStorage::Heap { slot } => {
                 let field_name = self.interner().resolve(field);
-                let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
-                self.heap_field_load(obj, slot as usize, field_type_id)
+                let (struct_slot, field_type_id) =
+                    self.vir_field_slot_and_type(obj.type_id, field_name)?;
+                // Annotation structs use Heap storage because they may be
+                // heap-allocated (e.g. from FieldMeta.annotations after `is`
+                // check narrowing from `unknown`).  When the object is a
+                // stack-allocated struct value (not narrowed), use direct
+                // struct field access with the struct-layout slot.
+                if self.vir_query_is_struct_v(obj.type_id)
+                    && !Self::object_is_narrowed_from_unknown(object, &self.vars)
+                {
+                    self.struct_field_load(obj.value, struct_slot, field_type_id, obj.type_id)
+                } else {
+                    self.heap_field_load(obj, slot as usize, field_type_id)
+                }
             }
             FieldStorage::Module { module_id } => {
                 self.try_module_field_load_by_id(obj, field, module_id)
@@ -82,8 +94,15 @@ impl Cg<'_, '_, '_> {
             }
             FieldStorage::Heap { slot } => {
                 let field_name = self.interner().resolve(field);
-                let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
-                self.vir_class_field_store(obj, slot as usize, field_type_id, value)
+                let (struct_slot, field_type_id) =
+                    self.vir_field_slot_and_type(obj.type_id, field_name)?;
+                if self.vir_query_is_struct_v(obj.type_id)
+                    && !Self::object_is_narrowed_from_unknown(object, &self.vars)
+                {
+                    self.vir_struct_field_store(obj, struct_slot, field_type_id, value)
+                } else {
+                    self.vir_class_field_store(obj, slot as usize, field_type_id, value)
+                }
             }
             FieldStorage::Module { .. } => Err(CodegenError::unsupported("store to module field")),
             FieldStorage::ByName => {
@@ -98,6 +117,20 @@ impl Cg<'_, '_, '_> {
                 }
             }
         }
+    }
+
+    /// Check if a VIR `LocalLoad` refers to a variable declared as `unknown`,
+    /// meaning the value was narrowed from `unknown` (e.g. via `is` check)
+    /// and is heap-allocated even though its narrowed type is a struct.
+    fn object_is_narrowed_from_unknown(
+        object: &VirExpr,
+        vars: &rustc_hash::FxHashMap<Symbol, (Variable, VirTypeId)>,
+    ) -> bool {
+        if let VirExpr::LocalLoad { name, .. } = object
+            && let Some((_, var_vir_ty)) = vars.get(name) {
+                return *var_vir_ty == VirTypeId::UNKNOWN;
+            }
+        false
     }
 
     /// Resolve a module field access using a pre-resolved `ModuleId`.
