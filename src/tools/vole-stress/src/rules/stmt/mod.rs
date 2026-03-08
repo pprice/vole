@@ -240,6 +240,7 @@ mod to_string_let;
 mod tostring_length;
 mod try_let;
 mod tuple_let;
+mod union_is_narrow;
 mod union_match_let;
 mod union_return_func;
 mod variable_shadow;
@@ -526,6 +527,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(as_cast_let::AsCastLet),
         Box::new(sentinel_union_let::SentinelUnionLet),
         Box::new(union_return_func::UnionReturnFunc),
+        Box::new(union_is_narrow::UnionIsNarrow),
         Box::new(optional_destructure_match::OptionalDestructureMatch),
         Box::new(optional_chain_call::OptionalChainCall),
         Box::new(deep_optional_chain::DeepOptionalChain),
