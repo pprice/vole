@@ -165,6 +165,7 @@ mod match_sorted;
 mod match_sorted_length;
 mod match_string_length;
 mod match_string_value;
+mod match_struct_destructure;
 mod match_to_string_arms;
 mod match_tostring_arms;
 mod match_when_arm;
@@ -354,6 +355,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(many_arm_match::ManyArmMatch),
         Box::new(many_match_arms::ManyMatchArms),
         Box::new(match_guard_let::MatchGuardLet),
+        Box::new(match_struct_destructure::MatchStructDestructure),
         // -- Let-binding rules --------------------------------------------------
         Box::new(dead_code::DeadCodeAssert),
         Box::new(while_false::WhileFalse),
