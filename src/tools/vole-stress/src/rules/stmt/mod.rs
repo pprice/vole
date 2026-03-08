@@ -48,6 +48,7 @@ mod compound_assignment;
 mod compound_bool;
 mod dead_code;
 mod deep_optional_chain;
+mod default_param_func;
 mod diamond_interface;
 mod discard_stmt;
 mod early_return;
@@ -485,6 +486,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(many_param_call::ManyParamCall),
         Box::new(many_params::ManyParams),
         Box::new(many_params_func::ManyParamsFunc),
+        Box::new(default_param_func::DefaultParamFunc),
         Box::new(many_when_arms::ManyWhenArms),
         Box::new(nested_func_def::NestedFuncDef),
         Box::new(nested_func_calls::NestedFuncCalls),
