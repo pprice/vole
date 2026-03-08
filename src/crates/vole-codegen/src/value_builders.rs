@@ -370,7 +370,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let rc_depth = self.rc_scope_depth();
         self.cf.push_loop(exit_block, continue_block, rc_depth);
         self.push_rc_scope();
+        // Save vars so that `let` bindings inside the loop body that shadow
+        // outer variables do not leak into the outer scope after the loop.
+        let saved_vars = self.vars.clone();
         let (terminated, _) = self.compile_vir_body(body)?;
+        self.vars = saved_vars;
         self.cf.pop_loop();
         if !terminated {
             self.pop_rc_scope_with_cleanup(None)?;

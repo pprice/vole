@@ -1,0 +1,69 @@
+// Tests for variable shadowing inside loop bodies.
+// A `let` binding inside a loop body that shadows an outer variable
+// must not overwrite the outer variable after the loop exits.
+
+tests "shadow in loops" {
+    test "for range: inner let does not overwrite outer" {
+        let x = "hello"
+        for i in 0..1 {
+            let x = x + "!"
+        }
+        assert(x == "hello")
+    }
+
+    test "for range: multiple iterations" {
+        let x = "hello"
+        for i in 0..3 {
+            let x = x + "!"
+        }
+        assert(x == "hello")
+    }
+
+    test "for array: inner let does not overwrite outer" {
+        let items = ["a", "b", "c"]
+        let result = "start"
+        for item in items {
+            let result = result + item
+        }
+        assert(result == "start")
+    }
+
+    test "while loop: inner let does not overwrite outer" {
+        let x = 10
+        var counter = 0
+        while counter < 3 {
+            let x = x + 1
+            counter = counter + 1
+        }
+        assert(x == 10)
+    }
+
+    test "nested loops: shadow scoping" {
+        let x = "outer"
+        for i in 0..2 {
+            let x = "inner"
+            for j in 0..2 {
+                let x = "innermost"
+            }
+            assert(x == "inner")
+        }
+        assert(x == "outer")
+    }
+
+    test "for range: outer var after inner shadow with method call" {
+        let x = "hello"
+        for i in 0..1 {
+            let x = x + "!"
+            assert(x == "hello!")
+        }
+        assert(x.length() == 5)
+    }
+
+    test "for range: integer shadow" {
+        let n = 42
+        for i in 0..3 {
+            let n = n + i
+        }
+        assert(n == 42)
+    }
+}

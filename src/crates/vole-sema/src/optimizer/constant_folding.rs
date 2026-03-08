@@ -451,11 +451,21 @@ impl<'a> ConstantFolder<'a> {
             }
             Stmt::While(while_stmt) => {
                 self.fold_expr(&mut while_stmt.condition);
+                // Save constant bindings so that `let` bindings inside the loop
+                // body that shadow outer variables do not leak their constant
+                // values into the outer scope after the loop.
+                let saved = self.constant_bindings.clone();
                 self.fold_block(&mut while_stmt.body);
+                self.constant_bindings = saved;
             }
             Stmt::For(for_stmt) => {
                 self.fold_expr(&mut for_stmt.iterable);
+                // Save constant bindings so that `let` bindings inside the loop
+                // body that shadow outer variables do not leak their constant
+                // values into the outer scope after the loop.
+                let saved = self.constant_bindings.clone();
                 self.fold_block(&mut for_stmt.body);
+                self.constant_bindings = saved;
             }
             Stmt::If(if_stmt) => {
                 self.fold_expr(&mut if_stmt.condition);

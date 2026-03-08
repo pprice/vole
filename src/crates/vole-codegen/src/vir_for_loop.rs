@@ -145,7 +145,11 @@ impl Cg<'_, '_, '_> {
         let rc_depth = self.rc_scope_depth();
         self.cf.push_loop(exit_block, header, rc_depth);
         self.push_rc_scope();
+        // Save vars so that `let` bindings inside the loop body that shadow
+        // outer variables do not leak into the outer scope after the loop.
+        let saved_vars = self.vars.clone();
         let (terminated, _) = self.compile_vir_body(&vir_for.body)?;
+        self.vars = saved_vars;
         self.cf.pop_loop();
 
         if !terminated {
