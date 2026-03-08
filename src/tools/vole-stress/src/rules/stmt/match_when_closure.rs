@@ -118,10 +118,13 @@ fn emit_match_closure(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
         false,
     );
 
-    // Add closure to scope as string-returning
+    // Add closure to scope as function type
     scope.add_local(
         closure_name.clone(),
-        TypeInfo::Primitive(PrimitiveType::String),
+        TypeInfo::Function {
+            param_types: vec![TypeInfo::Primitive(PrimitiveType::I64)],
+            return_type: Box::new(TypeInfo::Primitive(PrimitiveType::String)),
+        },
         false,
     );
 
@@ -205,10 +208,13 @@ fn emit_when_closure(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
         false,
     );
 
-    // Add closure to scope as string-returning
+    // Add closure to scope as function type
     scope.add_local(
         closure_name.clone(),
-        TypeInfo::Primitive(PrimitiveType::String),
+        TypeInfo::Function {
+            param_types: vec![TypeInfo::Primitive(PrimitiveType::I64)],
+            return_type: Box::new(TypeInfo::Primitive(PrimitiveType::String)),
+        },
         false,
     );
 
@@ -305,10 +311,16 @@ fn emit_nested_match_closure(scope: &mut Scope, emit: &mut Emit) -> Option<Strin
         false,
     );
 
-    // Add closure to scope as i64-returning
+    // Add closure to scope as function type
     scope.add_local(
         closure_name.clone(),
-        TypeInfo::Primitive(PrimitiveType::I64),
+        TypeInfo::Function {
+            param_types: vec![
+                TypeInfo::Primitive(PrimitiveType::I64),
+                TypeInfo::Primitive(PrimitiveType::Bool),
+            ],
+            return_type: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),
+        },
         false,
     );
 

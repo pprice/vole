@@ -141,10 +141,10 @@ const REPLACE_TEMPLATES: &[ReplaceTemplate] = &[
         expected: "aaXXcc",
     },
     ReplaceTemplate {
-        input: "foo bar foo",
+        input: "foo bar baz",
         from: "foo",
-        to: "baz",
-        expected: "baz bar baz",
+        to: "qux",
+        expected: "qux bar baz",
     },
 ];
 
