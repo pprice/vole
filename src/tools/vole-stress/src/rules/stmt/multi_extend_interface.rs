@@ -110,7 +110,7 @@
 //!
 //! extend Triple_12345 with Maxable_12345 {
 //!     func max_val(self: Triple_12345) -> i64 {
-//!         let result = self.p
+//!         var result = self.p
 //!         if self.q > result {
 //!             result = self.q
 //!         }
@@ -513,7 +513,7 @@ fn emit_max_format_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String>
     // --- Module decl 5: extend with interface B (max_val method) ---
     // Use a simple if-chain to find the max of 3 values
     let max_body = format!(
-        "let result = self.{f0}\n\
+        "var result = self.{f0}\n\
          \x20       if self.{f1} > result {{\n\
          \x20           result = self.{f1}\n\
          \x20       }}\n\
@@ -891,7 +891,7 @@ mod tests {
                 found_product = true;
             }
             // Variant 2 uses max logic with if statements
-            if extend_b.contains("let result =") && extend_b.contains("> result") {
+            if extend_b.contains("var result =") && extend_b.contains("> result") {
                 found_max = true;
             }
 
