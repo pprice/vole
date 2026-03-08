@@ -1,12 +1,37 @@
-//! Rule: nested closure capture where one closure captures and invokes another.
+//! Rule: closures that return closures, then call both layers and assert the
+//! result.
 //!
-//! Finds a closure-typed local `(i64) -> i64` already in scope, creates an
-//! outer closure that captures and calls it, then invokes the outer closure.
+//! This stresses capture handling and RC lifecycle when captures flow through
+//! nested closure boundaries.
 //!
+//! **Variant 0 -- i64 adder factory:**
 //! ```vole
-//! let f = (x: i64) -> i64 => x + 1
-//! let g = (y: i64) -> i64 => f(y) + 2
-//! let result = g(5)
+//! let local0 = (n: i64) => {
+//!     return (x: i64) => x + n
+//! }
+//! let local1 = local0(5)
+//! let local2 = local1(10)
+//! assert(local2 == 15)
+//! ```
+//!
+//! **Variant 1 -- string prefixer:**
+//! ```vole
+//! let local0 = (prefix: string) => {
+//!     return (s: string) => prefix + " " + s
+//! }
+//! let local1 = local0("Hello")
+//! let local2 = local1("World")
+//! assert(local2 == "Hello World")
+//! ```
+//!
+//! **Variant 2 -- i64 multiplier:**
+//! ```vole
+//! let local0 = (factor: i64) => {
+//!     return (x: i64) => x * factor
+//! }
+//! let local1 = local0(3)
+//! let local2 = local1(7)
+//! assert(local2 == 21)
 //! ```
 
 use crate::emit::Emit;
@@ -16,71 +41,154 @@ use crate::symbols::{PrimitiveType, TypeInfo};
 
 pub struct NestedClosure;
 
+/// Fixed prefixes for the string prefixer variant.
+const PREFIXES: &[&str] = &["Hello", "Hi", "Hey", "Dear"];
+
+/// Fixed names for the string prefixer variant.
+const NAMES: &[&str] = &["World", "Vole", "Alice", "Bob"];
+
 impl StmtRule for NestedClosure {
     fn name(&self) -> &'static str {
         "nested_closure"
     }
 
     fn params(&self) -> Vec<Param> {
-        vec![Param::prob("probability", 0.10)]
+        vec![Param::prob("probability", 0.03)]
     }
 
     fn precondition(&self, scope: &Scope, _params: &Params) -> bool {
-        !scope.is_in_generic_class_method()
+        scope.module_id.is_some()
     }
 
     fn generate(&self, scope: &mut Scope, emit: &mut Emit, _params: &Params) -> Option<String> {
-        // Find closure-typed locals: (i64) -> i64
-        let candidates: Vec<String> = scope
-            .vars_matching(|v| {
-                matches!(
-                    &v.type_info,
-                    TypeInfo::Function { param_types, return_type }
-                    if param_types.len() == 1
-                        && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
-                        && matches!(return_type.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
-                )
-            })
-            .into_iter()
-            .map(|v| v.name)
-            .collect();
-
-        if candidates.is_empty() {
-            return None;
+        let variant = emit.gen_range(0..3);
+        match variant {
+            0 => emit_adder_factory(scope, emit),
+            1 => emit_string_prefixer(scope, emit),
+            _ => emit_multiplier_factory(scope, emit),
         }
-
-        let idx = emit.gen_range(0..candidates.len());
-        let inner_fn = candidates[idx].clone();
-
-        // Create the outer closure that captures the inner closure
-        let outer_fn = scope.fresh_name();
-        let offset_val = emit.random_in(1, 20);
-        let op = match emit.gen_range(0..3) {
-            0 => format!("{}(y) + {}", inner_fn, offset_val),
-            1 => format!("{}(y) * {}", inner_fn, offset_val),
-            _ => format!("{}(y + {})", inner_fn, offset_val),
-        };
-
-        let outer_closure = format!("let {} = (y: i64) -> i64 => {}", outer_fn, op);
-        scope.add_local(
-            outer_fn.clone(),
-            TypeInfo::Function {
-                param_types: vec![TypeInfo::Primitive(PrimitiveType::I64)],
-                return_type: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),
-            },
-            false,
-        );
-
-        // Invoke the outer closure
-        let result_name = scope.fresh_name();
-        let arg_val = emit.random_in(1, 50);
-        let call_stmt = format!("let {} = {}({})", result_name, outer_fn, arg_val);
-        scope.add_local(result_name, TypeInfo::Primitive(PrimitiveType::I64), false);
-
-        let indent = emit.indent_str();
-        Some(format!("{}\n{}{}", outer_closure, indent, call_stmt))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Variant 0 -- i64 adder factory
+// ---------------------------------------------------------------------------
+
+fn emit_adder_factory(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
+    let factory_name = scope.fresh_name();
+    let closure_name = scope.fresh_name();
+    let result_name = scope.fresh_name();
+
+    let n = emit.gen_i64_range(1, 20);
+    let arg = emit.gen_i64_range(1, 50);
+    let expected = n + arg;
+
+    scope.add_local(
+        result_name.clone(),
+        TypeInfo::Primitive(PrimitiveType::I64),
+        false,
+    );
+
+    let indent = emit.indent_str();
+
+    Some(format!(
+        "let {} = (n: i64) => {{\n{indent}    return (x: i64) => x + n\n{indent}}}\n\
+         {indent}let {} = {}({})\n\
+         {indent}let {} = {}({})\n\
+         {indent}assert({} == {})",
+        factory_name,
+        closure_name,
+        factory_name,
+        n,
+        result_name,
+        closure_name,
+        arg,
+        result_name,
+        expected,
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Variant 1 -- string prefixer
+// ---------------------------------------------------------------------------
+
+fn emit_string_prefixer(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
+    let factory_name = scope.fresh_name();
+    let closure_name = scope.fresh_name();
+    let result_name = scope.fresh_name();
+
+    let prefix_idx = emit.gen_range(0..PREFIXES.len());
+    let name_idx = emit.gen_range(0..NAMES.len());
+    let prefix = PREFIXES[prefix_idx];
+    let name = NAMES[name_idx];
+    let expected = format!("{} {}", prefix, name);
+
+    scope.add_local(
+        result_name.clone(),
+        TypeInfo::Primitive(PrimitiveType::String),
+        false,
+    );
+
+    let indent = emit.indent_str();
+
+    Some(format!(
+        "let {} = (prefix: string) => {{\n{indent}    return (s: string) => prefix + \" \" + s\n{indent}}}\n\
+         {indent}let {} = {}(\"{}\")\n\
+         {indent}let {} = {}(\"{}\")\n\
+         {indent}assert({} == \"{}\")",
+        factory_name,
+        closure_name,
+        factory_name,
+        prefix,
+        result_name,
+        closure_name,
+        name,
+        result_name,
+        expected,
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Variant 2 -- i64 multiplier factory
+// ---------------------------------------------------------------------------
+
+fn emit_multiplier_factory(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
+    let factory_name = scope.fresh_name();
+    let closure_name = scope.fresh_name();
+    let result_name = scope.fresh_name();
+
+    let factor = emit.gen_i64_range(2, 10);
+    let arg = emit.gen_i64_range(1, 20);
+    let expected = factor * arg;
+
+    scope.add_local(
+        result_name.clone(),
+        TypeInfo::Primitive(PrimitiveType::I64),
+        false,
+    );
+
+    let indent = emit.indent_str();
+
+    Some(format!(
+        "let {} = (factor: i64) => {{\n{indent}    return (x: i64) => x * factor\n{indent}}}\n\
+         {indent}let {} = {}({})\n\
+         {indent}let {} = {}({})\n\
+         {indent}assert({} == {})",
+        factory_name,
+        closure_name,
+        factory_name,
+        factor,
+        result_name,
+        closure_name,
+        arg,
+        result_name,
+        expected,
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -102,75 +210,165 @@ mod tests {
         )
     }
 
+    fn test_params() -> Params {
+        Params::from_iter([("probability", ParamValue::Probability(1.0))])
+    }
+
     #[test]
     fn name_is_correct() {
         assert_eq!(NestedClosure.name(), "nested_closure");
     }
 
     #[test]
-    fn returns_none_without_closure_in_scope() {
+    fn precondition_requires_module() {
         let table = SymbolTable::new();
         let mut scope = Scope::new(&[], &table);
-        scope.add_local("x".into(), TypeInfo::Primitive(PrimitiveType::I64), false);
+        let params = test_params();
 
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-        let resolved = ResolvedParams::new();
-        let mut emit = test_emit(&mut rng, &resolved);
-        let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
+        // No module => precondition fails
+        assert!(!NestedClosure.precondition(&scope, &params));
 
+        // With module_id
+        scope.module_id = Some(crate::symbols::ModuleId(0));
+        assert!(NestedClosure.precondition(&scope, &params));
+    }
+
+    #[test]
+    fn generates_adder_variant() {
+        let table = SymbolTable::new();
+        let mut found = false;
+        for seed in 0..100 {
+            let mut scope = Scope::new(&[], &table);
+            scope.module_id = Some(crate::symbols::ModuleId(0));
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let resolved = ResolvedParams::new();
+            let mut emit = test_emit(&mut rng, &resolved);
+
+            if let Some(text) = NestedClosure.generate(&mut scope, &mut emit, &test_params()) {
+                if text.contains("x + n") {
+                    found = true;
+                    assert!(
+                        text.contains("return (x: i64) => x + n"),
+                        "expected inner closure body in text: {text}"
+                    );
+                    assert!(text.contains("assert("), "expected assert in code: {text}");
+                    // No module decls for this rule
+                    assert_eq!(
+                        scope.module_decls.len(),
+                        0,
+                        "expected no module_decls for nested_closure"
+                    );
+                    break;
+                }
+            }
+        }
+        assert!(found, "never generated adder variant in 100 seeds");
+    }
+
+    #[test]
+    fn generates_string_prefixer_variant() {
+        let table = SymbolTable::new();
+        let mut found = false;
+        for seed in 0..100 {
+            let mut scope = Scope::new(&[], &table);
+            scope.module_id = Some(crate::symbols::ModuleId(0));
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let resolved = ResolvedParams::new();
+            let mut emit = test_emit(&mut rng, &resolved);
+
+            if let Some(text) = NestedClosure.generate(&mut scope, &mut emit, &test_params()) {
+                if text.contains("prefix + \" \" + s") {
+                    found = true;
+                    assert!(
+                        text.contains("return (s: string) => prefix + \" \" + s"),
+                        "expected inner closure body in text: {text}"
+                    );
+                    assert!(text.contains("assert("), "expected assert in code: {text}");
+                    assert_eq!(
+                        scope.module_decls.len(),
+                        0,
+                        "expected no module_decls for nested_closure"
+                    );
+                    break;
+                }
+            }
+        }
         assert!(
-            NestedClosure
-                .generate(&mut scope, &mut emit, &params)
-                .is_none()
+            found,
+            "never generated string prefixer variant in 100 seeds"
         );
     }
 
     #[test]
-    fn generates_with_closure_in_scope() {
+    fn generates_multiplier_variant() {
+        let table = SymbolTable::new();
+        let mut found = false;
+        for seed in 0..100 {
+            let mut scope = Scope::new(&[], &table);
+            scope.module_id = Some(crate::symbols::ModuleId(0));
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let resolved = ResolvedParams::new();
+            let mut emit = test_emit(&mut rng, &resolved);
+
+            if let Some(text) = NestedClosure.generate(&mut scope, &mut emit, &test_params()) {
+                if text.contains("x * factor") {
+                    found = true;
+                    assert!(
+                        text.contains("return (x: i64) => x * factor"),
+                        "expected inner closure body in text: {text}"
+                    );
+                    assert!(text.contains("assert("), "expected assert in code: {text}");
+                    assert_eq!(
+                        scope.module_decls.len(),
+                        0,
+                        "expected no module_decls for nested_closure"
+                    );
+                    break;
+                }
+            }
+        }
+        assert!(found, "never generated multiplier variant in 100 seeds");
+    }
+
+    #[test]
+    fn adds_result_to_scope() {
         let table = SymbolTable::new();
         let mut scope = Scope::new(&[], &table);
-        scope.add_local(
-            "f".into(),
-            TypeInfo::Function {
-                param_types: vec![TypeInfo::Primitive(PrimitiveType::I64)],
-                return_type: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),
-            },
-            false,
-        );
-
+        scope.module_id = Some(crate::symbols::ModuleId(0));
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let resolved = ResolvedParams::new();
         let mut emit = test_emit(&mut rng, &resolved);
-        let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
 
-        let result = NestedClosure.generate(&mut scope, &mut emit, &params);
+        let result = NestedClosure.generate(&mut scope, &mut emit, &test_params());
         assert!(result.is_some());
-        let text = result.unwrap();
-        assert!(text.contains("f("), "got: {text}");
-        assert!(text.contains("let local"), "got: {text}");
+        assert!(
+            !scope.locals.is_empty(),
+            "expected result local added to scope"
+        );
+        let result_local = scope.locals.last().expect("should add result local");
+        // Result type depends on variant but should be either I64 or String.
+        assert!(
+            result_local.1 == TypeInfo::Primitive(PrimitiveType::I64)
+                || result_local.1 == TypeInfo::Primitive(PrimitiveType::String),
+            "result must be i64 or string, got: {:?}",
+            result_local.1,
+        );
     }
 
     #[test]
-    fn adds_two_locals() {
+    fn no_module_decls_added() {
         let table = SymbolTable::new();
         let mut scope = Scope::new(&[], &table);
-        scope.add_local(
-            "f".into(),
-            TypeInfo::Function {
-                param_types: vec![TypeInfo::Primitive(PrimitiveType::I64)],
-                return_type: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),
-            },
-            false,
-        );
-        let initial_len = scope.locals.len();
-
+        scope.module_id = Some(crate::symbols::ModuleId(0));
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let resolved = ResolvedParams::new();
         let mut emit = test_emit(&mut rng, &resolved);
-        let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
 
-        NestedClosure.generate(&mut scope, &mut emit, &params);
-        // Should add outer closure + result = 2 new locals
-        assert_eq!(scope.locals.len(), initial_len + 2);
+        NestedClosure.generate(&mut scope, &mut emit, &test_params());
+        assert_eq!(
+            scope.module_decls.len(),
+            0,
+            "nested_closure should not add module decls"
+        );
     }
 }
