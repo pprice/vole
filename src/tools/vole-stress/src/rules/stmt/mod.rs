@@ -185,6 +185,7 @@ mod range_tostring;
 mod range_when_accum;
 mod reassign_from_when;
 mod reassignment;
+mod recursive_func;
 mod reiterate_let;
 mod repeat_literal;
 mod repeated_string_ops;
@@ -461,6 +462,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(many_when_arms::ManyWhenArms),
         Box::new(nested_func_def::NestedFuncDef),
         Box::new(nested_func_calls::NestedFuncCalls),
+        Box::new(recursive_func::RecursiveFunc),
         Box::new(bool_match_let::BoolMatchLet),
         // -- Match/when expression rules (batch 14) --------------------------------
         Box::new(match_iter_terminal::MatchIterTerminal),
