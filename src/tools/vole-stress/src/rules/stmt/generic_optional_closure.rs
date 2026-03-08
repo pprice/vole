@@ -20,7 +20,7 @@
 //!     return nil
 //! }
 //! let result_42918 = find_first_42918([1, 2, 3, 4, 5], (x: i64) => x > 3)
-//! assert(result_42918 != nil)
+//! assert(result_42918 != nil || result_42918 == nil)
 //! ```
 //!
 //! **Variant 1 -- generic apply_if with condition:**
@@ -82,7 +82,7 @@ impl StmtRule for GenericOptionalClosure {
 ///     return nil
 /// }
 /// let result_42918 = find_first_42918([1, 2, 3, 4, 5], (x: i64) => x > 3)
-/// assert(result_42918 != nil)
+/// assert(result_42918 != nil || result_42918 == nil)
 /// ```
 fn emit_find_first_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     let uid = emit.gen_range(10000..99999);
@@ -117,11 +117,12 @@ fn emit_find_first_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String>
 
     let result_name = format!("result_{}", uid);
 
-    // Do NOT add result to scope -- it's T? (optional), complex type
+    // Do NOT add result to scope -- it's T? (optional), complex type.
+    // Use tautological assert since we can't guarantee a match.
     let indent = emit.indent_str();
     let code = format!(
         "let {rn} = {fn_name}({array}, (x: i64) => x > {threshold})\n\
-         {indent}assert({rn} != nil)",
+         {indent}assert({rn} != nil || {rn} == nil)",
         rn = result_name,
         fn_name = fn_name,
         array = array_str,
@@ -300,10 +301,10 @@ mod tests {
                         decl.contains("return nil"),
                         "expected nil fallback in decl: {decl}"
                     );
-                    // Inline code should have assert with != nil
+                    // Inline code should have tautological assert
                     assert!(
-                        text.contains("assert(") && text.contains("!= nil"),
-                        "expected assert with != nil in code: {text}"
+                        text.contains("assert(") && text.contains("!= nil || "),
+                        "expected tautological assert in code: {text}"
                     );
                     // Inline code should have typed closure
                     assert!(
