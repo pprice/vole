@@ -8,20 +8,33 @@
 //! [`Scope::add_module_decl`] because nested `func<T>` is rewritten to
 //! `let = lambda` by vole-fmt, and lambdas don't support type parameters.
 //!
-//! **Variant 1 -- apply_twice: `(T, (T) -> T) -> T`**
-//! ```vole
-//! func apply_twice_local0<T>(x: T, f: (T) -> T) -> T {
-//!     return f(f(x))
-//! }
-//! let local1 = apply_twice_local0(5, (n: i64) => n + 1)
-//! ```
+//! Three variants:
 //!
-//! **Variant 2 -- transform: `(T, (T) -> string) -> string`**
+//! **Variant 0 -- apply -> string: `(T, (T) -> string) -> string`**
 //! ```vole
-//! func transform_local2<T>(x: T, f: (T) -> string) -> string {
+//! func apply_to_str_local0<T>(x: T, f: (T) -> string) -> string {
 //!     return f(x)
 //! }
-//! let local3 = transform_local2(42, (n: i64) => "v:{n}")
+//! let local1 = apply_to_str_local0(42, (x: i64) => x.to_string())
+//! assert(local1 == "42")
+//! ```
+//!
+//! **Variant 1 -- apply -> i64: `(T, (T) -> i64) -> i64`**
+//! ```vole
+//! func apply_to_i64_local0<T>(x: T, f: (T) -> i64) -> i64 {
+//!     return f(x)
+//! }
+//! let local1 = apply_to_i64_local0("hello", (s: string) => s.length())
+//! assert(local1 == 5)
+//! ```
+//!
+//! **Variant 2 -- double apply: `(T, (T) -> T) -> T`**
+//! ```vole
+//! func double_apply_local0<T>(x: T, f: (T) -> T) -> T {
+//!     return f(f(x))
+//! }
+//! let local1 = double_apply_local0(5, (x: i64) => x + 1)
+//! assert(local1 == 7)
 //! ```
 
 use crate::emit::Emit;
@@ -37,123 +50,72 @@ impl StmtRule for GenericClosureCall {
     }
 
     fn params(&self) -> Vec<Param> {
-        vec![Param::prob("probability", 0.02)]
+        vec![Param::prob("probability", 0.03)]
     }
 
     fn precondition(&self, scope: &Scope, _params: &Params) -> bool {
-        // Only fire at the top level of a free function (not inside class
-        // methods, where module-level decls cannot be spliced).
-        scope.current_class_sym_id.is_none()
+        scope.module_id.is_some() && scope.current_class_sym_id.is_none()
     }
 
     fn generate(&self, scope: &mut Scope, emit: &mut Emit, _params: &Params) -> Option<String> {
-        let variant = emit.gen_range(0..2);
+        let variant = emit.gen_range(0..3);
         match variant {
-            0 => emit_apply_twice(scope, emit),
-            _ => emit_transform(scope, emit),
+            0 => emit_apply_to_str(scope, emit),
+            1 => emit_apply_to_i64(scope, emit),
+            _ => emit_double_apply(scope, emit),
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Variant 1: apply_twice -- `(T, (T) -> T) -> T`
+// Variant 0: apply -> string -- `(T, (T) -> string) -> string`
 // ---------------------------------------------------------------------------
 
-/// Generate `apply_twice_<N>` at module level and a call with a closure.
+/// Generate `apply_to_str_<N>` at module level and a call with a closure that
+/// converts the argument to a string.
 ///
-/// For i64:
-/// ```vole
-/// func apply_twice_local0<T>(x: T, f: (T) -> T) -> T {
-///     return f(f(x))
-/// }
-/// let local1 = apply_twice_local0(5, (n: i64) => n + 1)
-/// ```
-///
-/// For string:
-/// ```vole
-/// func apply_twice_local0<T>(x: T, f: (T) -> T) -> T {
-///     return f(f(x))
-/// }
-/// let local1 = apply_twice_local0("hi", (s: string) => s + "!")
-/// ```
-fn emit_apply_twice(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
-    let prim = pick_apply_type(emit);
-    let type_name = prim_type_name(prim);
+/// Picks a random concrete type (i64, bool, or i32), generates a matching
+/// literal and `.to_string()` closure, then asserts the result equals the
+/// expected string representation.
+fn emit_apply_to_str(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
+    let fn_name = scope.fresh_name();
+    let fn_label = format!("apply_to_str_{}", fn_name);
 
-    let fn_id = emit.gen_range(10000..99999);
-    let fn_name = format!("apply_twice_{}", fn_id);
-
-    // Module-level generic function declaration
-    let decl = format!(
-        "func {}<T>(x: T, f: (T) -> T) -> T {{\n    return f(f(x))\n}}",
-        fn_name
-    );
-    scope.add_module_decl(decl);
-
-    // Build the closure and argument
-    let (arg_literal, closure) = match prim {
-        PrimitiveType::String => {
-            let lit = pick_string_literal(emit);
-            (lit, format!("(s: string) => s + \"!\""))
-        }
-        _ => {
-            // i64
-            let val = emit.gen_i64_range(0, 20);
-            (format!("{}", val), format!("(n: {}) => n + 1", type_name))
-        }
-    };
-
-    let result_name = scope.fresh_name();
-    scope.add_local(result_name.clone(), TypeInfo::Primitive(prim), false);
-
-    Some(format!(
-        "let {} = {}({}, {})",
-        result_name, fn_name, arg_literal, closure,
-    ))
-}
-
-// ---------------------------------------------------------------------------
-// Variant 2: transform -- `(T, (T) -> string) -> string`
-// ---------------------------------------------------------------------------
-
-/// Generate `transform_<N>` at module level and a call with a closure.
-///
-/// ```vole
-/// func transform_local2<T>(x: T, f: (T) -> string) -> string {
-///     return f(x)
-/// }
-/// let local3 = transform_local2(42, (n: i64) => "v:{n}")
-/// ```
-fn emit_transform(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
-    let prim = pick_transform_type(emit);
-    let type_name = prim_type_name(prim);
-
-    let fn_id = emit.gen_range(10000..99999);
-    let fn_name = format!("transform_{}", fn_id);
-
-    // Module-level generic function declaration
     let decl = format!(
         "func {}<T>(x: T, f: (T) -> string) -> string {{\n    return f(x)\n}}",
-        fn_name
+        fn_label
     );
     scope.add_module_decl(decl);
 
-    // Build the closure and argument
-    let (arg_literal, closure) = match prim {
-        PrimitiveType::Bool => {
-            let val = if emit.gen_bool(0.5) { "true" } else { "false" };
-            (val.to_string(), format!("(b: bool) => \"val:{{b}}\""))
-        }
-        PrimitiveType::String => {
-            let lit = pick_string_literal(emit);
-            (lit, format!("(s: string) => \"val:{{s}}\""))
-        }
-        _ => {
+    // Pick a concrete type and build the argument + closure + expected value.
+    let concrete_type = emit.gen_range(0..3);
+    let (arg_literal, closure, expected) = match concrete_type {
+        0 => {
             // i64
             let val = emit.gen_i64_range(0, 100);
             (
                 format!("{}", val),
-                format!("(n: {}) => \"v:{{n}}\"", type_name),
+                "(x: i64) => x.to_string()".to_string(),
+                format!("{}", val),
+            )
+        }
+        1 => {
+            // bool
+            let val = emit.gen_bool(0.5);
+            let lit = if val { "true" } else { "false" };
+            (
+                lit.to_string(),
+                "(b: bool) => b.to_string()".to_string(),
+                lit.to_string(),
+            )
+        }
+        _ => {
+            // i32
+            let val = emit.gen_i64_range(0, 100) as i32;
+            (
+                format!("{}_i32", val),
+                "(x: i32) => x.to_string()".to_string(),
+                format!("{}", val),
             )
         }
     };
@@ -165,48 +127,82 @@ fn emit_transform(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
         false,
     );
 
+    let indent = emit.indent_str();
+
     Some(format!(
-        "let {} = {}({}, {})",
-        result_name, fn_name, arg_literal, closure,
+        "let {} = {}({}, {})\n{}assert({} == \"{}\")",
+        result_name, fn_label, arg_literal, closure, indent, result_name, expected,
     ))
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Variant 1: apply -> i64 -- `(T, (T) -> i64) -> i64`
 // ---------------------------------------------------------------------------
 
-/// Pick a type for the apply_twice variant (i64 or string).
-fn pick_apply_type(emit: &mut Emit) -> PrimitiveType {
-    if emit.gen_bool(0.6) {
-        PrimitiveType::I64
-    } else {
-        PrimitiveType::String
-    }
+/// Generate `apply_to_i64_<N>` at module level and a call with a closure that
+/// computes the length of a string argument.
+fn emit_apply_to_i64(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
+    let fn_name = scope.fresh_name();
+    let fn_label = format!("apply_to_i64_{}", fn_name);
+
+    let decl = format!(
+        "func {}<T>(x: T, f: (T) -> i64) -> i64 {{\n    return f(x)\n}}",
+        fn_label
+    );
+    scope.add_module_decl(decl);
+
+    let words = ["hello", "world", "vole", "test", "abc"];
+    let idx = emit.gen_range(0..words.len());
+    let word = words[idx];
+    let expected = word.len() as i64;
+
+    let result_name = scope.fresh_name();
+    scope.add_local(
+        result_name.clone(),
+        TypeInfo::Primitive(PrimitiveType::I64),
+        false,
+    );
+
+    let indent = emit.indent_str();
+
+    Some(format!(
+        "let {} = {}(\"{}\", (s: string) => s.length())\n{}assert({} == {})",
+        result_name, fn_label, word, indent, result_name, expected,
+    ))
 }
 
-/// Pick a type for the transform variant (i64, string, or bool).
-fn pick_transform_type(emit: &mut Emit) -> PrimitiveType {
-    match emit.gen_range(0..3) {
-        0 => PrimitiveType::I64,
-        1 => PrimitiveType::String,
-        _ => PrimitiveType::Bool,
-    }
-}
+// ---------------------------------------------------------------------------
+// Variant 2: double apply -- `(T, (T) -> T) -> T`
+// ---------------------------------------------------------------------------
 
-fn prim_type_name(prim: PrimitiveType) -> &'static str {
-    match prim {
-        PrimitiveType::I64 => "i64",
-        PrimitiveType::String => "string",
-        PrimitiveType::Bool => "bool",
-        _ => "i64",
-    }
-}
+/// Generate `double_apply_<N>` at module level and a call with a `+1` closure.
+/// The function applies the closure twice, so the expected result is `initial + 2`.
+fn emit_double_apply(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
+    let fn_name = scope.fresh_name();
+    let fn_label = format!("double_apply_{}", fn_name);
 
-/// Pick a short string literal.
-fn pick_string_literal(emit: &mut Emit) -> String {
-    let choices = ["\"hi\"", "\"ok\"", "\"ab\"", "\"yo\""];
-    let idx = emit.gen_range(0..choices.len());
-    choices[idx].to_string()
+    let decl = format!(
+        "func {}<T>(x: T, f: (T) -> T) -> T {{\n    return f(f(x))\n}}",
+        fn_label
+    );
+    scope.add_module_decl(decl);
+
+    let initial = emit.gen_i64_range(1, 10);
+    let expected = initial + 2;
+
+    let result_name = scope.fresh_name();
+    scope.add_local(
+        result_name.clone(),
+        TypeInfo::Primitive(PrimitiveType::I64),
+        false,
+    );
+
+    let indent = emit.indent_str();
+
+    Some(format!(
+        "let {} = {}({}, (x: i64) => x + 1)\n{}assert({} == {})",
+        result_name, fn_label, initial, indent, result_name, expected,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -233,18 +229,28 @@ mod tests {
         )
     }
 
+    fn test_params() -> Params {
+        Params::from_iter([("probability", ParamValue::Probability(1.0))])
+    }
+
     #[test]
     fn name_is_correct() {
         assert_eq!(GenericClosureCall.name(), "generic_closure_call");
     }
 
     #[test]
-    fn precondition_rejects_class_methods() {
+    fn precondition_requires_module_and_no_class() {
         let table = SymbolTable::new();
         let mut scope = Scope::new(&[], &table);
-        let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
-        // No class => precondition passes
+        let params = test_params();
+
+        // No module => precondition fails
+        assert!(!GenericClosureCall.precondition(&scope, &params));
+
+        // With module_id
+        scope.module_id = Some(crate::symbols::ModuleId(0));
         assert!(GenericClosureCall.precondition(&scope, &params));
+
         // Inside a class method => precondition fails
         scope.current_class_sym_id =
             Some((crate::symbols::ModuleId(0), crate::symbols::SymbolId(0)));
@@ -252,23 +258,104 @@ mod tests {
     }
 
     #[test]
-    fn generates_apply_twice_variant() {
+    fn generates_apply_to_str_variant() {
         let table = SymbolTable::new();
         let mut found = false;
         for seed in 0..100 {
             let mut scope = Scope::new(&[], &table);
+            scope.module_id = Some(crate::symbols::ModuleId(0));
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let resolved = ResolvedParams::new();
             let mut emit = test_emit(&mut rng, &resolved);
-            let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
 
-            if let Some(text) = GenericClosureCall.generate(&mut scope, &mut emit, &params) {
-                if text.contains("apply_twice_") {
+            if let Some(text) = GenericClosureCall.generate(&mut scope, &mut emit, &test_params()) {
+                if text.contains("apply_to_str_") {
                     found = true;
-                    // Verify module decl was registered
+                    assert_eq!(
+                        scope.module_decls.len(),
+                        1,
+                        "expected 1 module_decl for apply_to_str variant"
+                    );
+                    let decl = &scope.module_decls[0];
                     assert!(
-                        !scope.module_decls.is_empty(),
-                        "expected module_decl for apply_twice"
+                        decl.contains("<T>"),
+                        "expected generic type param in decl: {decl}"
+                    );
+                    assert!(
+                        decl.contains("-> string"),
+                        "expected string return type in decl: {decl}"
+                    );
+                    assert!(decl.contains("f(x)"), "expected f(x) body: {decl}");
+                    assert!(
+                        text.contains(".to_string()"),
+                        "expected to_string closure in code: {text}"
+                    );
+                    assert!(text.contains("assert("), "expected assert in code: {text}");
+                    break;
+                }
+            }
+        }
+        assert!(found, "never generated apply_to_str variant in 100 seeds");
+    }
+
+    #[test]
+    fn generates_apply_to_i64_variant() {
+        let table = SymbolTable::new();
+        let mut found = false;
+        for seed in 0..100 {
+            let mut scope = Scope::new(&[], &table);
+            scope.module_id = Some(crate::symbols::ModuleId(0));
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let resolved = ResolvedParams::new();
+            let mut emit = test_emit(&mut rng, &resolved);
+
+            if let Some(text) = GenericClosureCall.generate(&mut scope, &mut emit, &test_params()) {
+                if text.contains("apply_to_i64_") {
+                    found = true;
+                    assert_eq!(
+                        scope.module_decls.len(),
+                        1,
+                        "expected 1 module_decl for apply_to_i64 variant"
+                    );
+                    let decl = &scope.module_decls[0];
+                    assert!(
+                        decl.contains("<T>"),
+                        "expected generic type param in decl: {decl}"
+                    );
+                    assert!(
+                        decl.contains("-> i64"),
+                        "expected i64 return type in decl: {decl}"
+                    );
+                    assert!(
+                        text.contains("s.length()"),
+                        "expected length closure in code: {text}"
+                    );
+                    assert!(text.contains("assert("), "expected assert in code: {text}");
+                    break;
+                }
+            }
+        }
+        assert!(found, "never generated apply_to_i64 variant in 100 seeds");
+    }
+
+    #[test]
+    fn generates_double_apply_variant() {
+        let table = SymbolTable::new();
+        let mut found = false;
+        for seed in 0..100 {
+            let mut scope = Scope::new(&[], &table);
+            scope.module_id = Some(crate::symbols::ModuleId(0));
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let resolved = ResolvedParams::new();
+            let mut emit = test_emit(&mut rng, &resolved);
+
+            if let Some(text) = GenericClosureCall.generate(&mut scope, &mut emit, &test_params()) {
+                if text.contains("double_apply_") {
+                    found = true;
+                    assert_eq!(
+                        scope.module_decls.len(),
+                        1,
+                        "expected 1 module_decl for double_apply variant"
                     );
                     let decl = &scope.module_decls[0];
                     assert!(
@@ -277,67 +364,48 @@ mod tests {
                     );
                     assert!(
                         decl.contains("f(f(x))"),
-                        "expected apply twice body: {decl}"
+                        "expected double apply body: {decl}"
                     );
+                    assert!(
+                        text.contains("x + 1"),
+                        "expected +1 closure in code: {text}"
+                    );
+                    assert!(text.contains("assert("), "expected assert in code: {text}");
                     break;
                 }
             }
         }
-        assert!(found, "never generated apply_twice variant in 100 seeds");
+        assert!(found, "never generated double_apply variant in 100 seeds");
     }
 
     #[test]
-    fn generates_transform_variant() {
+    fn adds_module_decl() {
         let table = SymbolTable::new();
-        let mut found = false;
-        for seed in 0..100 {
-            let mut scope = Scope::new(&[], &table);
-            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let resolved = ResolvedParams::new();
-            let mut emit = test_emit(&mut rng, &resolved);
-            let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
+        let mut scope = Scope::new(&[], &table);
+        scope.module_id = Some(crate::symbols::ModuleId(0));
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let resolved = ResolvedParams::new();
+        let mut emit = test_emit(&mut rng, &resolved);
 
-            if let Some(text) = GenericClosureCall.generate(&mut scope, &mut emit, &params) {
-                if text.contains("transform_") {
-                    found = true;
-                    // Verify module decl was registered
-                    assert!(
-                        !scope.module_decls.is_empty(),
-                        "expected module_decl for transform"
-                    );
-                    let decl = &scope.module_decls[0];
-                    assert!(
-                        decl.contains("<T>"),
-                        "expected generic type param in decl: {decl}"
-                    );
-                    assert!(decl.contains("f(x)"), "expected transform body: {decl}");
-                    // Result type should be string
-                    let result_local = scope.locals.last().expect("should add result local");
-                    assert_eq!(
-                        result_local.1,
-                        TypeInfo::Primitive(PrimitiveType::String),
-                        "transform result must be string"
-                    );
-                    break;
-                }
-            }
-        }
-        assert!(found, "never generated transform variant in 100 seeds");
+        GenericClosureCall.generate(&mut scope, &mut emit, &test_params());
+        assert_eq!(
+            scope.module_decls.len(),
+            1,
+            "expected exactly one module decl"
+        );
     }
 
     #[test]
     fn adds_result_to_scope() {
         let table = SymbolTable::new();
         let mut scope = Scope::new(&[], &table);
+        scope.module_id = Some(crate::symbols::ModuleId(0));
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let resolved = ResolvedParams::new();
         let mut emit = test_emit(&mut rng, &resolved);
-        let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
 
-        let result = GenericClosureCall.generate(&mut scope, &mut emit, &params);
+        let result = GenericClosureCall.generate(&mut scope, &mut emit, &test_params());
         assert!(result.is_some());
-        // The func name consumes one fresh_name, the result consumes another.
-        // Verify at least one local was added.
         assert!(
             !scope.locals.is_empty(),
             "expected result local added to scope"
