@@ -1009,6 +1009,23 @@ impl Compiler<'_> {
                     continue; // return type unresolvable for this elem_type; skip
                 };
 
+                // Also verify the substituted return type has a sema TypeId mapping.
+                // VIR substitution may succeed (e.g. Optional<bool> exists at VIR level)
+                // but the sema TypeId may be absent when the element type arose from an
+                // iterator transformation like .map() rather than a direct Iterable<T>
+                // implementation. Without a sema TypeId, inner runtime iterator method
+                // calls (e.g. self.iter().find(pred)) would fail in
+                // derive_iterator_return_type. Skip this method for this element type;
+                // the method is only needed if user code actually calls it on this type.
+                {
+                    let table = self.vir_type_table();
+                    if table.lookup_vir_type_id(return_vir_ty).is_none()
+                        && return_vir_ty.raw() >= VirTypeId::FIRST_DYNAMIC
+                    {
+                        continue;
+                    }
+                }
+
                 let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
                 let sig = self.build_signature_from_vir_types(
                     &subst_param_virs,
@@ -1194,6 +1211,25 @@ impl Compiler<'_> {
                 // Substitute VirTypeIds and build signature (same as compile path).
                 // Returns None if return type unresolvable for this elem_type; skip.
                 let method_def = self.analyzed.get_method_def(*semantic_method_id);
+                let Some((_, return_vir_ty)) = self.substitute_method_vir_types(
+                    &method_def.param_types,
+                    method_def.return_type,
+                    self_vir_ty,
+                    &concrete_vir_subs,
+                ) else {
+                    continue;
+                };
+
+                // Check sema TypeId mapping (same guard as compile path).
+                {
+                    let table = self.vir_type_table();
+                    if table.lookup_vir_type_id(return_vir_ty).is_none()
+                        && return_vir_ty.raw() >= VirTypeId::FIRST_DYNAMIC
+                    {
+                        continue;
+                    }
+                }
+
                 let Some(sig) = self.build_substituted_method_sig(
                     &method_def.param_types,
                     method_def.return_type,

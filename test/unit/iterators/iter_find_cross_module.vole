@@ -1,0 +1,43 @@
+// Regression test: cross-module import with RuntimeIterator<bool> from .map()
+//
+// When module A creates RuntimeIterator<bool> via .map((x) => x > 0) and
+// module B imports A, codegen tries to compile Iterable default methods
+// (find, first, last, nth) for ALL RuntimeIterator element types including
+// bool. These methods return T? (Optional<bool>), but if no code ever uses
+// bool? directly, the sema TypeId for Optional<bool> may not exist.
+//
+// Previously this caused:
+//   "compilation error: iterator method return type not found: find (expr_id=None)"
+//
+// The fix: skip compiling Iterable default methods for element types whose
+// return type has no sema TypeId mapping.
+//
+// Tracked: vol-dasd
+
+let helper = import "./iter_find_cross_module_helper"
+
+tests "cross-module iterator with .map() producing bool" {
+    test "map to bools works cross-module" {
+        let result = helper.map_to_bools([1, -2, 3, -4])
+        assert(result.length() == 4)
+        assert(result[0] == true)
+        assert(result[1] == false)
+        assert(result[2] == true)
+        assert(result[3] == false)
+    }
+
+    test "count positives works cross-module" {
+        let n = helper.count_positives([1, -2, 3, -4, 5])
+        assert(n == 3)
+    }
+
+    test "local map to bools also works" {
+        let arr = [10, -5, 0, 7]
+        let bools = arr.iter().map((x) => x > 0).collect()
+        assert(bools.length() == 4)
+        assert(bools[0] == true)
+        assert(bools[1] == false)
+        assert(bools[2] == false)
+        assert(bools[3] == true)
+    }
+}
