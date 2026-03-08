@@ -88,6 +88,7 @@ mod generic_interpolation;
 mod generic_iter_call;
 mod generic_optional_return;
 mod generic_struct_closure;
+mod generic_struct_let;
 mod higher_order_closure;
 mod i32_boundary;
 mod i64_boundary;
@@ -289,6 +290,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(generic_closure_iter::GenericClosureIter),
         Box::new(generic_closure_param::GenericClosureParam),
         Box::new(generic_struct_closure::GenericStructClosure),
+        Box::new(generic_struct_let::GenericStructLet),
         Box::new(generic_interface_call::GenericInterfaceCall),
         Box::new(generic_interpolation::GenericInterpolation),
         Box::new(generic_iter_call::GenericIterCall),
