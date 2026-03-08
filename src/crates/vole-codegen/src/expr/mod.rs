@@ -379,7 +379,7 @@ impl Cg<'_, '_, '_> {
             }
             VirExpr::BoolLiteral(b) => Ok(self.bool_const(*b)),
             VirExpr::StringLiteral(sym) => {
-                let s = self.interner().resolve(*sym).to_string();
+                let s = self.resolve_symbol(*sym).to_string();
                 self.string_literal(&s)
             }
             VirExpr::NilLiteral => {
@@ -851,7 +851,7 @@ impl Cg<'_, '_, '_> {
         for part in parts {
             let (str_val, is_owned) = match part {
                 VirStringPart::Literal(sym) => {
-                    let s = self.interner().resolve(*sym).to_string();
+                    let s = self.resolve_symbol(*sym).to_string();
                     (self.string_literal(&s)?.value, true)
                 }
                 VirStringPart::Expr { value, conversion } => {

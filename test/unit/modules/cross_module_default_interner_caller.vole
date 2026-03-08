@@ -1,0 +1,28 @@
+// Module that imports cross_module_default_interner_lib and calls its
+// functions with omitted string-default parameters.
+// When compiled as a module, default parameter VIR expressions are compiled
+// with the module interner, exercising the cross-interner resolution path.
+
+let lib = import "./cross_module_default_interner_lib"
+
+func call_greet_with_default() -> string {
+    return lib.greet("World")
+}
+
+func call_tag_with_defaults() -> string {
+    return lib.tag(42)
+}
+
+func call_greet_with_override() -> string {
+    return lib.greet("World", "Hi")
+}
+
+tests "caller module" {
+    test "local call omitting string default" {
+        assert(call_greet_with_default() == "Hello, World!")
+    }
+
+    test "local call omitting multiple string defaults" {
+        assert(call_tag_with_defaults() == "val=42")
+    }
+}

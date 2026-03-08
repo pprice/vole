@@ -1384,6 +1384,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.interner
     }
 
+    /// Resolve a symbol, trying the current interner first and then falling
+    /// back to the main program interner.
+    ///
+    /// This is needed because VIR default-parameter expressions are
+    /// re-interned into the main interner during lowering, but codegen may
+    /// compile them in a module context whose interner has different indices.
+    #[inline]
+    pub fn resolve_symbol(&self, sym: Symbol) -> &str {
+        self.env
+            .interner
+            .try_resolve(sym)
+            .unwrap_or_else(|| self.analyzed().interner().resolve(sym))
+    }
+
     /// Get unified method function key map
     /// Keyed by (type_name_id, method_name_id) for stable lookup across analyzer instances
     #[inline]

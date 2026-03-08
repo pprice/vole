@@ -1,0 +1,31 @@
+// Regression test: cross-module default parameter interner mismatch (vol-vge5).
+//
+// When a module function calls another module's function with omitted
+// string-default parameters, the VIR default expression contains a Symbol
+// that was re-interned into the *main* interner during lowering.  If
+// codegen resolves that Symbol using the *module* interner instead, it
+// panics with "index out of bounds" or silently produces a wrong string.
+//
+// The caller module has non-generic wrappers that call into the library
+// module with omitted defaults.  The test file imports the caller module
+// and calls its wrapper functions, triggering cross-module default
+// compilation in the module interner context.
+
+let caller = import "./cross_module_default_interner_caller"
+
+tests "cross-module default interner" {
+    test "module wrapper omitting string default" {
+        let result = caller.call_greet_with_default()
+        assert(result == "Hello, World!")
+    }
+
+    test "module wrapper omitting multiple string defaults" {
+        let result = caller.call_tag_with_defaults()
+        assert(result == "val=42")
+    }
+
+    test "module wrapper overriding string default" {
+        let result = caller.call_greet_with_override()
+        assert(result == "Hi, World!")
+    }
+}

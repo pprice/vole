@@ -127,9 +127,10 @@ impl Cg<'_, '_, '_> {
         vars: &rustc_hash::FxHashMap<Symbol, (Variable, VirTypeId)>,
     ) -> bool {
         if let VirExpr::LocalLoad { name, .. } = object
-            && let Some((_, var_vir_ty)) = vars.get(name) {
-                return *var_vir_ty == VirTypeId::UNKNOWN;
-            }
+            && let Some((_, var_vir_ty)) = vars.get(name)
+        {
+            return *var_vir_ty == VirTypeId::UNKNOWN;
+        }
         false
     }
 

@@ -1,0 +1,11 @@
+// Library module exporting functions with string default parameters.
+// Used by cross_module_default_interner.vole to test cross-module
+// default parameter compilation when the caller is in a module context.
+
+func greet(name: string, greeting: string = "Hello") -> string {
+    return greeting + ", " + name + "!"
+}
+
+func tag(value: i64, prefix: string = "val", suffix: string = "") -> string {
+    return prefix + "=" + value.to_string() + suffix
+}
