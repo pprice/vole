@@ -11,6 +11,7 @@
 // and tail-calls it via `call_indirect`.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use cranelift::prelude::*;
@@ -28,7 +29,7 @@ use vole_vir::VirProgram;
 /// it compiles all functions in the module, fills in the fn_ptr slots,
 /// and sets the compiled flag to true.
 ///
-/// The table is heap-allocated (`Box<LazyDispatchTable>`) so that
+/// The table is heap-allocated (`Arc<LazyDispatchTable>`) so that
 /// pointers to its fields are stable across the lifetime of the JIT.
 pub struct LazyDispatchTable {
     /// Function pointer slots (one per module function).
@@ -119,7 +120,7 @@ impl LazyDispatchTable {
 /// 4. Removed from thread-local via `deactivate()` after execution.
 pub struct LazyCompilationState {
     /// The dispatch table (fn_ptrs and compiled_flags).
-    pub dispatch_table: Box<LazyDispatchTable>,
+    pub dispatch_table: Arc<LazyDispatchTable>,
     /// Reference to the analyzed program (for module compilation).
     ///
     /// # Safety
@@ -155,7 +156,7 @@ impl LazyCompilationState {
     /// The caller must ensure `analyzed` outlives the execution of JIT code
     /// (i.e., until `deactivate()` is called and all JIT code has finished).
     pub unsafe fn new(
-        dispatch_table: Box<LazyDispatchTable>,
+        dispatch_table: Arc<LazyDispatchTable>,
         analyzed: *const VirProgram,
         jit_options: JitOptions,
     ) -> Self {

@@ -49,6 +49,8 @@ pub(crate) enum DeclareMode {
     Import,
 }
 
+use std::sync::Arc;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use cranelift::prelude::types as clif_types;
@@ -101,7 +103,7 @@ pub struct Compiler<'a> {
     last_expansion_cache_size: usize,
     /// Dispatch table for lazy module codegen.
     /// Present only when `lazy_modules=true`. Heap-allocated for stable addresses.
-    dispatch_table: Option<Box<lazy::LazyDispatchTable>>,
+    dispatch_table: Option<Arc<lazy::LazyDispatchTable>>,
 }
 
 impl<'a> Compiler<'a> {
@@ -242,6 +244,11 @@ impl<'a> Compiler<'a> {
                 jit_options,
             )
         })
+    }
+
+    /// Extract the dispatch table Arc for sharing with CompiledModules.
+    pub fn take_dispatch_table(&mut self) -> Option<Arc<lazy::LazyDispatchTable>> {
+        self.dispatch_table.take()
     }
 
     /// Define a function and clear the JIT context.

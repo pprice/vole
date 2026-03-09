@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashSet};
+use std::sync::Arc;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
@@ -578,7 +579,7 @@ impl Compiler<'_> {
 
         // Build the dispatch table by iterating module functions that were
         // declared (in func_ids) but not defined (not in defined_functions).
-        let mut table = Box::new(LazyDispatchTable::new());
+        let mut table = LazyDispatchTable::new();
 
         // Collect (module_path, func_id, display_name) for each undeclared module function.
         let mut stub_entries: Vec<(usize, cranelift_module::FuncId, String)> = Vec::new();
@@ -668,8 +669,10 @@ impl Compiler<'_> {
             "generate_lazy_stubs: dispatch table built"
         );
 
-        // Store the dispatch table for later use by compile_trigger
-        self.dispatch_table = Some(table);
+        // Store the dispatch table for later use by compile_trigger.
+        // Wrap in Arc for shared ownership — all mutations are done; from here
+        // the table is only read (via atomic loads/stores in stubs and compile_trigger).
+        self.dispatch_table = Some(Arc::new(table));
 
         Ok(())
     }
