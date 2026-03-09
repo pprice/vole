@@ -276,9 +276,15 @@ pub extern "C" fn compile_trigger(module_idx: i64) {
             }
         }
 
-        // Mark ALL modules as compiled (we compiled everything).
-        for flag in &state.dispatch_table.compiled_flags {
-            flag.store(true, Ordering::Release);
+        // Only mark modules that were actually compiled. The current file's
+        // VirProgram may cover a subset of the dispatch table's modules (e.g.
+        // file imports Map but not Set). Setting flags for uncompiled modules
+        // would cause subsequent files to skip compile_trigger and call
+        // through fn_ptrs that are still 0 (null), resulting in segfaults.
+        for module_path in analyzed.module_paths() {
+            if let Some(&mod_idx) = state.dispatch_table.module_index.get(&module_path) {
+                state.dispatch_table.compiled_flags[mod_idx].store(true, Ordering::Release);
+            }
         }
 
         // Keep the JitContext alive — its machine code is referenced by

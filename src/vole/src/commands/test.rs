@@ -628,22 +628,15 @@ fn run_source_tests_with_modules(
     };
     options.lazy_modules = config.lazy;
 
-    // On cache miss, compile modules into the cache first so we can use the
-    // fast import path for the main program (avoids double compilation).
-    // Force lazy_modules=false for the cache because lazy stubs only cover
-    // top-level functions — type methods (class/struct instance and static
-    // methods, implement block methods) are declared but not stubbed,
-    // causing "can't resolve symbol" panics at finalization.
+    // Module compilation: respects --lazy flag. Dispatch tables are
+    // preserved in CompiledModules via Arc (vol-nijg, vol-q4j1).
     if !can_use_cache && !analyzed.module_paths().is_empty() {
-        let mut cache_options = options;
-        cache_options.lazy_modules = false;
-        let mut modules_jit = JitContext::with_options(cache_options);
+        let mut modules_jit = JitContext::with_options(options);
         let compile_result = {
             let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
             let result = modules_compiler.compile_modules_only();
             // Extract dispatch table before compiler drops.
-            // Currently None (lazy_modules=false), but will be populated
-            // once lazy stubs cover all function kinds (not just top-level).
+            // Populated when lazy_modules=true; holds stub→real mappings.
             let dt = modules_compiler.take_dispatch_table();
             (result, dt)
         };
