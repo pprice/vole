@@ -255,18 +255,20 @@ fn compile_fresh(
         let mut modules_jit = JitContext::with_options(options);
         let compile_result = {
             let mut modules_compiler = Compiler::new(&mut modules_jit, analyzed);
-            modules_compiler.compile_modules_only()
+            let result = modules_compiler.compile_modules_only();
+            let dt = modules_compiler.take_dispatch_table();
+            (result, dt)
         };
         match compile_result {
-            Ok(()) => {
+            (Ok(()), dt) => {
                 let module_paths: Vec<String> = analyzed.module_paths();
-                if let Ok(modules) = CompiledModules::new(modules_jit, module_paths) {
+                if let Ok(modules) = CompiledModules::new(modules_jit, module_paths, dt) {
                     *compiled_modules = Some(modules);
                 } else {
                     eprintln!("warning: failed to cache compiled modules for {file_path}");
                 }
             }
-            Err(e) => {
+            (Err(e), _) => {
                 eprintln!("warning: module cache compilation failed for {file_path}: {e}");
                 std::mem::forget(modules_jit);
             }

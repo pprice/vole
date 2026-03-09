@@ -1,10 +1,13 @@
 // src/codegen/jit.rs
 
+use std::sync::Arc;
+
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::compiler::lazy;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::runtime_registry::{
     AbiTy, SigSpec, all_linkable_symbols, codegen_symbols, signature_for,
@@ -23,6 +26,9 @@ pub struct CompiledModules {
     pub functions: FxHashMap<String, *const u8>,
     /// Module paths that have been processed (even if they only have external functions)
     compiled_module_paths: FxHashSet<String>,
+    /// Lazy dispatch table for lazy module compilation.
+    /// Preserved so that cached modules can use lazy stubs across test files.
+    dispatch_table: Option<Arc<lazy::LazyDispatchTable>>,
 }
 
 // SAFETY: CompiledModules contains `*const u8` function pointers (not Send/Sync by default).
@@ -37,7 +43,12 @@ impl CompiledModules {
     /// Create a new CompiledModules from a finalized JitContext.
     /// Extracts function pointers for all declared functions.
     /// `module_paths` is the list of module paths that were processed.
-    pub fn new(mut jit: JitContext, module_paths: Vec<String>) -> CodegenResult<Self> {
+    /// `dispatch_table` is an optional lazy dispatch table to preserve across cached modules.
+    pub fn new(
+        mut jit: JitContext,
+        module_paths: Vec<String>,
+        dispatch_table: Option<Arc<lazy::LazyDispatchTable>>,
+    ) -> CodegenResult<Self> {
         // Finalize to get function pointers
         jit.finalize()?;
 
@@ -58,13 +69,20 @@ impl CompiledModules {
             jit_contexts: vec![jit],
             functions,
             compiled_module_paths: module_paths.into_iter().collect(),
+            dispatch_table,
         })
     }
 
     /// Add a new JIT context's compiled functions to this cache.
     /// The JIT context is kept alive so its function pointers remain valid.
     /// New functions and module paths are merged into the existing maps.
-    pub fn extend(&mut self, mut jit: JitContext, module_paths: Vec<String>) -> CodegenResult<()> {
+    /// If a new `dispatch_table` is provided and self doesn't have one yet, stores it.
+    pub fn extend(
+        &mut self,
+        mut jit: JitContext,
+        module_paths: Vec<String>,
+        dispatch_table: Option<Arc<lazy::LazyDispatchTable>>,
+    ) -> CodegenResult<()> {
         // Finalize to get function pointers
         jit.finalize()?;
 
@@ -78,6 +96,17 @@ impl CompiledModules {
 
         // Merge module paths
         self.compiled_module_paths.extend(module_paths);
+
+        // Preserve dispatch table: adopt if we don't have one, keep existing otherwise
+        if dispatch_table.is_some() {
+            if self.dispatch_table.is_none() {
+                self.dispatch_table = dispatch_table;
+            } else {
+                tracing::warn!(
+                    "CompiledModules::extend: both self and new context have dispatch tables; keeping existing"
+                );
+            }
+        }
 
         // Keep the JIT context alive
         self.jit_contexts.push(jit);
@@ -93,6 +122,11 @@ impl CompiledModules {
     /// Check if a module has been processed (compiled or registered external functions)
     pub fn has_module(&self, module_path: &str) -> bool {
         self.compiled_module_paths.contains(module_path)
+    }
+
+    /// Get the preserved lazy dispatch table, if any.
+    pub fn dispatch_table(&self) -> Option<&Arc<lazy::LazyDispatchTable>> {
+        self.dispatch_table.as_ref()
     }
 }
 
@@ -250,7 +284,7 @@ impl JitContext {
         if options.lazy_modules {
             builder.symbol(
                 "vole_compile_trigger",
-                crate::compiler::lazy::compile_trigger as *const u8,
+                lazy::compile_trigger as *const u8,
             );
         }
 

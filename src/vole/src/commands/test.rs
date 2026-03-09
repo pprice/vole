@@ -640,17 +640,22 @@ fn run_source_tests_with_modules(
         let mut modules_jit = JitContext::with_options(cache_options);
         let compile_result = {
             let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
-            modules_compiler.compile_modules_only()
+            let result = modules_compiler.compile_modules_only();
+            // Extract dispatch table before compiler drops.
+            // Currently None (lazy_modules=false), but will be populated
+            // once vol-qhpp removes the lazy_modules override.
+            let dt = modules_compiler.take_dispatch_table();
+            (result, dt)
         };
         match compile_result {
-            Ok(()) => {
+            (Ok(()), dt) => {
                 let module_paths: Vec<String> = analyzed.module_paths();
                 if let Some(existing) = compiled_modules.as_mut() {
-                    if let Err(e) = existing.extend(modules_jit, module_paths) {
+                    if let Err(e) = existing.extend(modules_jit, module_paths, dt) {
                         tracing::warn!("Modules cache extension failed: {}", e);
                     }
                 } else {
-                    match CompiledModules::new(modules_jit, module_paths) {
+                    match CompiledModules::new(modules_jit, module_paths, dt) {
                         Ok(modules) => *compiled_modules = Some(modules),
                         Err(e) => {
                             tracing::warn!("Modules finalization failed: {}", e);
@@ -658,7 +663,7 @@ fn run_source_tests_with_modules(
                     }
                 }
             }
-            Err(e) => {
+            (Err(e), _) => {
                 tracing::warn!("Modules compilation failed: {}", e);
                 std::mem::forget(modules_jit);
             }
