@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::common::{
-    BoxStyle, PipelineOptions, TermColors, compile_source, print_labeled_box, read_stdin,
-    render_pipeline_error,
+    BoxStyle, PipelineOptions, TermColors, VirProgram, compile_source, print_labeled_box,
+    read_stdin, render_pipeline_error,
 };
 use crate::cli::{ColorMode, expand_paths, should_skip_path};
 use crate::codegen::{
@@ -630,10 +630,10 @@ fn run_source_tests_with_modules(
 
     // On cache miss, compile modules into the cache first so we can use the
     // fast import path for the main program (avoids double compilation).
-    // Always compile real function bodies for the cache (lazy_modules=false),
-    // because lazy stubs embed dispatch table pointers that would be freed
-    // when the temporary Compiler is dropped, and the compile_trigger
-    // callback infrastructure is not preserved through the cache path.
+    // Force lazy_modules=false for the cache because lazy stubs only cover
+    // top-level functions — type methods (class/struct instance and static
+    // methods, implement block methods) are declared but not stubbed,
+    // causing "can't resolve symbol" panics at finalization.
     if !can_use_cache && !analyzed.module_paths().is_empty() {
         let mut cache_options = options;
         cache_options.lazy_modules = false;
@@ -643,7 +643,7 @@ fn run_source_tests_with_modules(
             let result = modules_compiler.compile_modules_only();
             // Extract dispatch table before compiler drops.
             // Currently None (lazy_modules=false), but will be populated
-            // once vol-qhpp removes the lazy_modules override.
+            // once lazy stubs cover all function kinds (not just top-level).
             let dt = modules_compiler.take_dispatch_table();
             (result, dt)
         };
@@ -692,8 +692,20 @@ fn run_source_tests_with_modules(
         let result = compiler.compile_program_only();
 
         let tests = compiler.take_tests();
-        // No lazy state in import path (modules already compiled)
-        (jit, result, tests, None)
+        // Construct lazy state from the cached dispatch table so that any
+        // lazily-stubbed module functions can still trigger compilation.
+        // SAFETY: `analyzed` outlives execution (lives on caller's stack).
+        let lazy_state = if options.lazy_modules {
+            compiled_modules
+                .as_ref()
+                .and_then(|m| m.dispatch_table())
+                .map(|dt| unsafe {
+                    LazyCompilationState::new(dt.clone(), &analyzed as *const VirProgram, options)
+                })
+        } else {
+            None
+        };
+        (jit, result, tests, lazy_state)
     } else {
         // Fallback: no modules or cache population failed — compile everything
         let mut jit = JitContext::with_options(options);
@@ -740,15 +752,24 @@ fn run_source_tests_with_modules(
 
         // Execute tests with progress output
         let results = execute_tests_with_progress(tests, &jit, path, config, Some(p));
-        let _lazy_state = LazyCompilationState::deactivate();
+        // Deactivate lazy state and absorb compiled JIT contexts into the
+        // module cache so dispatch table function pointers stay valid.
+        if let Some(state) = LazyCompilationState::deactivate()
+            && let Some(modules) = compiled_modules.as_mut() {
+                modules.absorb_lazy_jits(state);
+            }
         return Ok(results);
     }
 
     // Execute tests (verbose mode - no progress line)
     let results = execute_tests_with_progress(tests, &jit, path, config, None);
 
-    // Deactivate lazy compilation state (cleanup)
-    let _lazy_state = LazyCompilationState::deactivate();
+    // Deactivate lazy state and absorb compiled JIT contexts into the
+    // module cache so dispatch table function pointers stay valid.
+    if let Some(state) = LazyCompilationState::deactivate()
+        && let Some(modules) = compiled_modules.as_mut() {
+            modules.absorb_lazy_jits(state);
+        }
 
     Ok(results)
 }

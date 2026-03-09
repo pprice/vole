@@ -190,6 +190,15 @@ impl LazyCompilationState {
     pub fn deactivate() -> Option<Self> {
         LAZY_STATE.with(|cell| cell.borrow_mut().take())
     }
+
+    /// Consume this state and return the compiled JIT contexts.
+    ///
+    /// These contexts hold the machine code compiled by `compile_trigger`.
+    /// They must be kept alive as long as the dispatch table's function
+    /// pointers are in use.
+    pub fn into_compiled_jits(self) -> Vec<JitContext> {
+        self.compiled_jits
+    }
 }
 
 thread_local! {

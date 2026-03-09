@@ -26,9 +26,12 @@ pub struct CompiledModules {
     pub functions: FxHashMap<String, *const u8>,
     /// Module paths that have been processed (even if they only have external functions)
     compiled_module_paths: FxHashSet<String>,
-    /// Lazy dispatch table for lazy module compilation.
-    /// Preserved so that cached modules can use lazy stubs across test files.
-    dispatch_table: Option<Arc<lazy::LazyDispatchTable>>,
+    /// Lazy dispatch tables for lazy module compilation.
+    /// Each cache-miss compilation may create its own dispatch table with stubs
+    /// that embed raw pointers to that table's internal arrays.  All tables must
+    /// be kept alive so those pointers remain valid.  The last entry is the
+    /// "active" table used to construct new LazyCompilationState instances.
+    dispatch_tables: Vec<Arc<lazy::LazyDispatchTable>>,
 }
 
 // SAFETY: CompiledModules contains `*const u8` function pointers (not Send/Sync by default).
@@ -69,14 +72,15 @@ impl CompiledModules {
             jit_contexts: vec![jit],
             functions,
             compiled_module_paths: module_paths.into_iter().collect(),
-            dispatch_table,
+            dispatch_tables: dispatch_table.into_iter().collect(),
         })
     }
 
     /// Add a new JIT context's compiled functions to this cache.
     /// The JIT context is kept alive so its function pointers remain valid.
     /// New functions and module paths are merged into the existing maps.
-    /// If a new `dispatch_table` is provided and self doesn't have one yet, stores it.
+    /// Any new dispatch table is appended (all must be kept alive because
+    /// stubs embed raw pointers to their table's internal arrays).
     pub fn extend(
         &mut self,
         mut jit: JitContext,
@@ -97,15 +101,10 @@ impl CompiledModules {
         // Merge module paths
         self.compiled_module_paths.extend(module_paths);
 
-        // Preserve dispatch table: adopt if we don't have one, keep existing otherwise
-        if dispatch_table.is_some() {
-            if self.dispatch_table.is_none() {
-                self.dispatch_table = dispatch_table;
-            } else {
-                tracing::warn!(
-                    "CompiledModules::extend: both self and new context have dispatch tables; keeping existing"
-                );
-            }
+        // Append dispatch table (stubs embed raw pointers to table internals,
+        // so all tables must be kept alive).
+        if let Some(dt) = dispatch_table {
+            self.dispatch_tables.push(dt);
         }
 
         // Keep the JIT context alive
@@ -124,9 +123,24 @@ impl CompiledModules {
         self.compiled_module_paths.contains(module_path)
     }
 
-    /// Get the preserved lazy dispatch table, if any.
+    /// Get the most recent lazy dispatch table, if any.
+    ///
+    /// Returns the last dispatch table added, which corresponds to the newest
+    /// set of module stubs. Used to construct `LazyCompilationState` in the
+    /// cache-hit path.
     pub fn dispatch_table(&self) -> Option<&Arc<lazy::LazyDispatchTable>> {
-        self.dispatch_table.as_ref()
+        self.dispatch_tables.last()
+    }
+
+    /// Absorb JIT contexts from a deactivated `LazyCompilationState`.
+    ///
+    /// When `compile_trigger` compiles module functions lazily, the resulting
+    /// JIT contexts are stored in `LazyCompilationState::compiled_jits`.
+    /// After deactivation, those contexts must be kept alive here so that the
+    /// dispatch table's function pointers remain valid across test files.
+    pub fn absorb_lazy_jits(&mut self, lazy_state: lazy::LazyCompilationState) {
+        let jits = lazy_state.into_compiled_jits();
+        self.jit_contexts.extend(jits);
     }
 }
 
@@ -282,10 +296,7 @@ impl JitContext {
 
         // Register lazy compilation trigger symbol when lazy_modules is enabled
         if options.lazy_modules {
-            builder.symbol(
-                "vole_compile_trigger",
-                lazy::compile_trigger as *const u8,
-            );
+            builder.symbol("vole_compile_trigger", lazy::compile_trigger as *const u8);
         }
 
         // Register pre-compiled module functions as external symbols
