@@ -1,0 +1,19 @@
+// Integration tests for lazy module compilation: unused module skipping.
+// With --lazy, modules that are imported but never called should have
+// their compilation deferred (lazy stubs only).
+
+let used = import "./lazy_unused_used"
+let skip = import "./lazy_unused_skip"
+
+tests "lazy unused module" {
+    test "only calls used module" {
+        // Only calls lazy_unused_used, lazy_unused_skip should be lazily compiled
+        assert(used.double(5) == 10)
+        assert(used.double(0) == 0)
+    }
+
+    test "calls both modules" {
+        assert(used.double(5) == 10)
+        assert(skip.triple(3) == 9)
+    }
+}

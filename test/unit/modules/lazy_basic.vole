@@ -1,0 +1,19 @@
+// Integration tests for lazy module compilation: basic cross-module calls.
+// Verifies that --lazy mode correctly compiles and executes cross-module
+// function calls and class usage.
+
+let lib = import "./lazy_basic_lib"
+
+tests "lazy basic cross-module calls" {
+    test "cross-module function calls" {
+        assert(lib.add(1, 2) == 3)
+        assert(lib.add(0, 0) == 0)
+        assert(lib.greet("world") == "hello world")
+    }
+
+    test "cross-module class usage" {
+        let c = lib.Counter.new(0)
+        let c2 = c.increment().increment().increment()
+        assert(c2.value() == 3)
+    }
+}

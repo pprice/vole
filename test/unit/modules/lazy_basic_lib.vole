@@ -1,0 +1,23 @@
+// Library module for lazy compilation basic tests.
+// Exports functions and a class with static/instance methods.
+
+func add(a: i64, b: i64) -> i64 => a + b
+func greet(name: string) -> string => "hello " + name
+
+class Counter {
+    count: i64,
+
+    statics {
+        func new(start: i64) -> Counter {
+            return Counter { count: start }
+        }
+    }
+
+    func increment() -> Counter {
+        return Counter { count: self.count + 1 }
+    }
+
+    func value() -> i64 {
+        return self.count
+    }
+}

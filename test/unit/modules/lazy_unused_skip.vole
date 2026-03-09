@@ -1,0 +1,10 @@
+// Module that may or may not be called in lazy_unused tests.
+// With lazy compilation, this should only be compiled when actually called.
+
+func triple(x: i64) -> i64 => x * 3
+
+func expensive() -> i64 {
+    var sum = 0
+    for i in 0..1000 { sum = sum + i }
+    return sum
+}

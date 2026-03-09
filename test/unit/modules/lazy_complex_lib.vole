@@ -1,0 +1,19 @@
+// Library module for lazy compilation complex tests.
+// Exports an interface, a struct that implements it, and a factory function.
+
+interface Describable {
+    func describe() -> string
+}
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+extend Point with Describable {
+    func describe() -> string {
+        return "Point(" + self.x.to_string() + ", " + self.y.to_string() + ")"
+    }
+}
+
+func make_point(x: i64, y: i64) -> Point => Point { x: x, y: y }

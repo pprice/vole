@@ -1,0 +1,18 @@
+// Integration tests for lazy module compilation: complex interactions.
+// Tests interfaces, structs, and extend blocks across module boundaries
+// with --lazy compilation.
+
+let lib = import "./lazy_complex_lib"
+
+tests "lazy complex cross-module" {
+    test "cross-module interface methods" {
+        let p = lib.make_point(3, 4)
+        assert(p.describe() == "Point(3, 4)")
+    }
+
+    test "cross-module struct creation" {
+        let p = lib.Point { x: 10, y: 20 }
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+}

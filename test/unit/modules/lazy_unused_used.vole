@@ -1,0 +1,4 @@
+// Module that is actually called in lazy_unused tests.
+// Provides a simple double function.
+
+func double(x: i64) -> i64 => x * 2
