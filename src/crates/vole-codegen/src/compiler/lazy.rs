@@ -110,7 +110,7 @@ impl LazyDispatchTable {
 ///
 /// Holds everything `compile_trigger` needs to compile modules on demand:
 /// the dispatch table, a reference to the analyzed program, JIT options,
-/// and bookkeeping for compiled JIT contexts.
+/// and a single overflow JIT context for lazily-compiled function bodies.
 ///
 /// # Lifecycle
 ///
@@ -137,15 +137,17 @@ pub struct LazyCompilationState {
     /// Function display_name -> dispatch table func_idx.
     /// Copied from the dispatch table for quick lookup during compilation.
     func_name_to_idx: FxHashMap<String, usize>,
-    /// Compiled module JitContexts kept alive because their code is in use.
-    compiled_jits: Vec<JitContext>,
+    /// Single overflow JitContext for all lazily-compiled function bodies.
+    /// Created on first compile_trigger call; subsequent triggers define
+    /// additional functions into it and call finalize_definitions() again.
+    overflow_jit: Option<JitContext>,
 }
 
 // SAFETY: LazyCompilationState contains `*const VirProgram` which is not
 // Send/Sync by default. The pointer is only dereferenced on the thread that
 // created it (via the thread-local LAZY_STATE), and the VirProgram is
-// guaranteed to outlive execution by the caller. The compiled_jits Vec
-// contains JitContexts with immutable finalized machine code.
+// guaranteed to outlive execution by the caller. The overflow_jit Option
+// contains a JitContext with immutable finalized machine code.
 unsafe impl Send for LazyCompilationState {}
 
 impl LazyCompilationState {
@@ -174,7 +176,7 @@ impl LazyCompilationState {
             jit_options,
             module_paths,
             func_name_to_idx,
-            compiled_jits: Vec::new(),
+            overflow_jit: None,
         }
     }
 
@@ -191,13 +193,13 @@ impl LazyCompilationState {
         LAZY_STATE.with(|cell| cell.borrow_mut().take())
     }
 
-    /// Consume this state and return the compiled JIT contexts.
+    /// Consume this state and return the overflow JIT context, if any.
     ///
-    /// These contexts hold the machine code compiled by `compile_trigger`.
-    /// They must be kept alive as long as the dispatch table's function
+    /// The context holds the machine code compiled by `compile_trigger`.
+    /// It must be kept alive as long as the dispatch table's function
     /// pointers are in use.
-    pub fn into_compiled_jits(self) -> Vec<JitContext> {
-        self.compiled_jits
+    pub fn into_overflow_jit(self) -> Option<JitContext> {
+        self.overflow_jit
     }
 }
 
@@ -211,11 +213,10 @@ thread_local! {
 /// the stub calls this function with the module index. This function:
 ///
 /// 1. Checks if the module is already compiled (double-check after the stub's check).
-/// 2. Creates a fresh `JitContext` and `Compiler`.
+/// 2. Reuses (or creates) the single overflow `JitContext`.
 /// 3. Compiles ALL module functions (not just the triggered module).
 /// 4. Extracts function pointers and patches the dispatch table.
 /// 5. Sets ALL compiled flags so subsequent calls are no-ops.
-/// 6. Keeps the new `JitContext` alive so function pointers remain valid.
 ///
 /// # Safety
 ///
@@ -253,13 +254,18 @@ pub extern "C" fn compile_trigger(module_idx: i64) {
         );
         let analyzed = unsafe { &*state.analyzed };
 
-        // Create a new JIT context with the same options, but with lazy_modules
-        // disabled so compile_modules_only compiles real bodies (not stubs).
+        // Reuse the overflow JIT context (created on first trigger), or create
+        // one with lazy_modules disabled so compile_modules_only compiles real
+        // bodies (not stubs). Cranelift's finalize_definitions() can be called
+        // multiple times — each call only processes functions defined since the
+        // last finalize (it uses std::mem::take on functions_to_finalize).
         let mut lazy_off_options = state.jit_options;
         lazy_off_options.lazy_modules = false;
-        let mut jit = JitContext::with_options(lazy_off_options);
+        let jit = state
+            .overflow_jit
+            .get_or_insert_with(|| JitContext::with_options(lazy_off_options));
 
-        let mut compiler = super::Compiler::new(&mut jit, analyzed);
+        let mut compiler = super::Compiler::new(jit, analyzed);
         compiler
             .compile_modules_only()
             .expect("INTERNAL: lazy module compilation failed");
@@ -286,10 +292,6 @@ pub extern "C" fn compile_trigger(module_idx: i64) {
                 state.dispatch_table.compiled_flags[mod_idx].store(true, Ordering::Release);
             }
         }
-
-        // Keep the JitContext alive — its machine code is referenced by
-        // the dispatch table function pointers.
-        state.compiled_jits.push(jit);
     });
 }
 

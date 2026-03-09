@@ -132,15 +132,16 @@ impl CompiledModules {
         self.dispatch_tables.last()
     }
 
-    /// Absorb JIT contexts from a deactivated `LazyCompilationState`.
+    /// Absorb the overflow JIT context from a deactivated `LazyCompilationState`.
     ///
     /// When `compile_trigger` compiles module functions lazily, the resulting
-    /// JIT contexts are stored in `LazyCompilationState::compiled_jits`.
-    /// After deactivation, those contexts must be kept alive here so that the
+    /// code lives in a single overflow JitContext inside LazyCompilationState.
+    /// After deactivation, that context must be kept alive here so that the
     /// dispatch table's function pointers remain valid across test files.
     pub fn absorb_lazy_jits(&mut self, lazy_state: lazy::LazyCompilationState) {
-        let jits = lazy_state.into_compiled_jits();
-        self.jit_contexts.extend(jits);
+        if let Some(jit) = lazy_state.into_overflow_jit() {
+            self.jit_contexts.push(jit);
+        }
     }
 }
 
