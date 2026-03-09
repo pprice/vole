@@ -574,6 +574,7 @@ impl Compiler<'_> {
     /// 4. Tail-calls it via `call_indirect`
     fn generate_lazy_stubs(&mut self, module_paths: &[String]) -> CodegenResult<()> {
         use super::lazy::{LazyDispatchTable, generate_lazy_stub};
+        use vole_vir::entity_metadata::VirTypeDefKind;
 
         tracing::debug!("generate_lazy_stubs: building dispatch table");
 
@@ -581,13 +582,33 @@ impl Compiler<'_> {
         // declared (in func_ids) but not defined (not in defined_functions).
         let mut table = LazyDispatchTable::new();
 
-        // Collect (module_path, func_id, display_name) for each undeclared module function.
+        // Collect (func_idx, func_id, display_name) for each declared-but-not-defined
+        // module function. Covers top-level functions, class/struct methods (instance
+        // and static), implement block methods, and interface default methods.
         let mut stub_entries: Vec<(usize, cranelift_module::FuncId, String)> = Vec::new();
+
+        // Helper: try to register a FuncId as a stub entry if it's declared but not defined.
+        // Uses a macro because we need mutable access to table and stub_entries while
+        // borrowing self immutably for display_name lookup.
+        macro_rules! try_register_stub {
+            ($func_id:expr, $display_name:expr, $module_idx:expr) => {
+                let func_id = $func_id;
+                if !self.defined_functions.contains(&func_id) {
+                    // Skip if already registered in the dispatch table (e.g. method
+                    // appears in both type_def.methods and implement_block.instance_methods)
+                    if !table.func_index.contains_key(&func_id) {
+                        let func_idx = table.register_function(func_id, $module_idx);
+                        stub_entries.push((func_idx, func_id, $display_name));
+                    }
+                }
+            };
+        }
 
         for module_path in module_paths {
             let module_id = self.analyzed.module_id_or_main(module_path);
             let module_idx = table.register_module(module_path);
 
+            // --- Top-level module functions ---
             // Find non-generic, non-external functions in this module
             let func_defs: Vec<_> = self
                 .analyzed
@@ -607,12 +628,68 @@ impl Compiler<'_> {
                 };
 
                 // Skip functions that are already defined (e.g. array iterable defaults)
-                if self.defined_functions.contains(&func_id) {
-                    continue;
-                }
+                try_register_stub!(func_id, display_name, module_idx);
+            }
 
-                let func_idx = table.register_function(func_id, module_idx);
-                stub_entries.push((func_idx, func_id, display_name));
+            // --- Class instance and static methods ---
+            // Use has_type_params() (not is_generic) to match finalize_module_type_by_id's
+            // filter: generic types are compiled via monomorphized instances, not directly.
+            let class_type_defs: Vec<_> = self
+                .analyzed
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Class)
+                .into_iter()
+                .filter(|td| {
+                    !td.has_type_params()
+                        && (!td.methods.is_empty() || !td.static_methods.is_empty())
+                })
+                .map(|td| (td.methods.clone(), td.static_methods.clone()))
+                .collect();
+            for (method_ids, static_method_ids) in &class_type_defs {
+                self.collect_type_method_stubs(
+                    method_ids,
+                    static_method_ids,
+                    module_idx,
+                    &mut table,
+                    &mut stub_entries,
+                );
+            }
+
+            // --- Struct instance and static methods ---
+            let struct_type_defs: Vec<_> = self
+                .analyzed
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Struct)
+                .into_iter()
+                .filter(|td| {
+                    !td.has_type_params()
+                        && (!td.methods.is_empty() || !td.static_methods.is_empty())
+                })
+                .map(|td| (td.methods.clone(), td.static_methods.clone()))
+                .collect();
+            for (method_ids, static_method_ids) in &struct_type_defs {
+                self.collect_type_method_stubs(
+                    method_ids,
+                    static_method_ids,
+                    module_idx,
+                    &mut table,
+                    &mut stub_entries,
+                );
+            }
+
+            // --- Implement block methods (instance, static, and interface defaults) ---
+            let impl_entries: Vec<_> = self
+                .analyzed
+                .entity_metadata
+                .module_implement_blocks(module_path)
+                .to_vec();
+            for entry in &impl_entries {
+                self.collect_implement_block_stubs(
+                    entry,
+                    module_idx,
+                    &mut table,
+                    &mut stub_entries,
+                );
             }
         }
 
@@ -675,6 +752,142 @@ impl Compiler<'_> {
         self.dispatch_table = Some(Arc::new(table));
 
         Ok(())
+    }
+
+    /// Collect lazy stub entries for type instance and static methods.
+    ///
+    /// Iterates the given method_ids and static_method_ids, looks up each in the
+    /// func_registry, and registers declared-but-not-defined ones as stub entries.
+    fn collect_type_method_stubs(
+        &self,
+        method_ids: &[vole_identity::MethodId],
+        static_method_ids: &[vole_identity::MethodId],
+        module_idx: usize,
+        table: &mut super::lazy::LazyDispatchTable,
+        stub_entries: &mut Vec<(usize, cranelift_module::FuncId, String)>,
+    ) {
+        // Instance methods
+        for &method_id in method_ids {
+            let method_def = self.analyzed.get_method_def(method_id);
+            // Skip inherited default methods — they are handled via implement block path
+            if method_def.has_default {
+                continue;
+            }
+            let func_key = self.func_registry.lookup_name_id(method_def.full_name_id);
+            let Some(func_key) = func_key else { continue };
+            let Some(func_id) = self.func_registry.func_id(func_key) else {
+                continue;
+            };
+
+            if !self.defined_functions.contains(&func_id)
+                && !table.func_index.contains_key(&func_id)
+            {
+                let display_name = self.func_registry.display(func_key);
+                let func_idx = table.register_function(func_id, module_idx);
+                stub_entries.push((func_idx, func_id, display_name));
+            }
+        }
+
+        // Static methods
+        for &method_id in static_method_ids {
+            let method_def = self.analyzed.get_method_def(method_id);
+            // Skip external-only statics (no Vole body to compile)
+            if method_def.external_binding.is_some() {
+                continue;
+            }
+            let func_key = self.func_registry.lookup_name_id(method_def.full_name_id);
+            let Some(func_key) = func_key else { continue };
+            let Some(func_id) = self.func_registry.func_id(func_key) else {
+                continue;
+            };
+
+            if !self.defined_functions.contains(&func_id)
+                && !table.func_index.contains_key(&func_id)
+            {
+                let display_name = self.func_registry.display(func_key);
+                let func_idx = table.register_function(func_id, module_idx);
+                stub_entries.push((func_idx, func_id, display_name));
+            }
+        }
+    }
+
+    /// Collect lazy stub entries for implement block methods (instance, static, default).
+    ///
+    /// Mirrors the methods registered in `register_implement_block_inner`:
+    /// explicit instance methods, interface default methods, and static methods.
+    fn collect_implement_block_stubs(
+        &self,
+        entry: &vole_vir::VirImplementBlockEntry,
+        module_idx: usize,
+        table: &mut super::lazy::LazyDispatchTable,
+        stub_entries: &mut Vec<(usize, cranelift_module::FuncId, String)>,
+    ) {
+        // Helper closure to try registering a method
+        let mut try_register = |method_id: vole_identity::MethodId| {
+            let full_name_id = self.analyzed.method_full_name(method_id);
+            let func_key = self.func_registry.lookup_name_id(full_name_id);
+            let Some(func_key) = func_key else { return };
+            let Some(func_id) = self.func_registry.func_id(func_key) else {
+                return;
+            };
+
+            if !self.defined_functions.contains(&func_id)
+                && !table.func_index.contains_key(&func_id)
+            {
+                let display_name = self.func_registry.display(func_key);
+                let func_idx = table.register_function(func_id, module_idx);
+                stub_entries.push((func_idx, func_id, display_name));
+            }
+        };
+
+        // Instance methods
+        for &method_id in &entry.instance_methods {
+            try_register(method_id);
+        }
+
+        // Interface default methods (same logic as register_implement_block_inner)
+        let type_def_id = entry.type_def_id;
+        let direct_method_name_ids: HashSet<NameId> = entry
+            .instance_methods
+            .iter()
+            .map(|&mid| self.analyzed.get_method_def(mid).name_id)
+            .collect();
+
+        for interface_tdef_id in self.analyzed.implemented_interfaces(type_def_id) {
+            for iface_method_id in self.analyzed.type_methods(interface_tdef_id) {
+                let method_def = self.analyzed.get_method_def(iface_method_id);
+                if !method_def.has_default {
+                    continue;
+                }
+                if method_def.external_binding.is_some() {
+                    continue;
+                }
+                if direct_method_name_ids.contains(&method_def.name_id) {
+                    continue;
+                }
+                // Skip abstract/generic default methods (not registered in pass 1)
+                let vir_subs = self
+                    .analyzed
+                    .interface_impl_type_param_vir_subs(type_def_id, interface_tdef_id);
+                if !vir_subs.is_empty()
+                    && vir_subs
+                        .values()
+                        .any(|&v| self.vir_query_unwrap_type_param_v(v).is_some())
+                {
+                    continue;
+                }
+                if let Some(impl_method_id) =
+                    self.analyzed.find_method(type_def_id, method_def.name_id)
+                {
+                    try_register(impl_method_id);
+                }
+            }
+        }
+
+        // Static methods
+        for &method_id in &entry.static_methods {
+            try_register(method_id);
+        }
     }
 
     /// Compile all function bodies for a single module.

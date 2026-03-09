@@ -755,9 +755,10 @@ fn run_source_tests_with_modules(
         // Deactivate lazy state and absorb compiled JIT contexts into the
         // module cache so dispatch table function pointers stay valid.
         if let Some(state) = LazyCompilationState::deactivate()
-            && let Some(modules) = compiled_modules.as_mut() {
-                modules.absorb_lazy_jits(state);
-            }
+            && let Some(modules) = compiled_modules.as_mut()
+        {
+            modules.absorb_lazy_jits(state);
+        }
         return Ok(results);
     }
 
@@ -767,9 +768,10 @@ fn run_source_tests_with_modules(
     // Deactivate lazy state and absorb compiled JIT contexts into the
     // module cache so dispatch table function pointers stay valid.
     if let Some(state) = LazyCompilationState::deactivate()
-        && let Some(modules) = compiled_modules.as_mut() {
-            modules.absorb_lazy_jits(state);
-        }
+        && let Some(modules) = compiled_modules.as_mut()
+    {
+        modules.absorb_lazy_jits(state);
+    }
 
     Ok(results)
 }

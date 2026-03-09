@@ -64,6 +64,12 @@ impl FunctionRegistry {
         key
     }
 
+    /// Look up a FunctionKey by NameId without creating a new entry.
+    /// Returns `None` if the name has not been interned.
+    pub fn lookup_name_id(&self, name_id: NameId) -> Option<FunctionKey> {
+        self.qualified_lookup.get(&name_id).copied()
+    }
+
     pub fn intern_runtime(&mut self, runtime: RuntimeKey) -> FunctionKey {
         if let Some(key) = self.runtime_lookup.get(&runtime) {
             return *key;
