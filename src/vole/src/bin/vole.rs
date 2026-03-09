@@ -89,7 +89,7 @@ fn main() -> ExitCode {
 
     match cli.command {
         Commands::Run { file, root } => {
-            run_file(&file, root.as_deref(), cli.release, cli.lazy, cli.color)
+            run_file(&file, root.as_deref(), cli.release, !cli.aot, cli.color)
         }
         Commands::Check { paths } => check_files(&paths, cli.color),
         Commands::Test {
@@ -111,7 +111,7 @@ fn main() -> ExitCode {
                 project_root: root.as_deref(),
                 color: cli.color,
                 release: cli.release,
-                lazy: cli.lazy,
+                lazy: !cli.aot,
             },
         ),
         Commands::Inspect {
@@ -152,7 +152,7 @@ fn main() -> ExitCode {
             check,
             stdout,
         } => format_files(&paths, FmtOptions { check, stdout }),
-        Commands::External(args) => handle_external_args(&args, cli.release, cli.lazy, cli.color),
+        Commands::External(args) => handle_external_args(&args, cli.release, !cli.aot, cli.color),
     }
 }
 

@@ -189,7 +189,8 @@ fn compile_and_run_tests(
             .all(|module_path| modules.has_module(module_path))
     });
 
-    let options = JitOptions::debug();
+    let mut options = JitOptions::debug();
+    options.lazy_modules = false; // Leak checker needs eager compilation
 
     let (jit, compile_result, tests) = if can_use_cache {
         compile_with_cached_modules(&analyzed, compiled_modules, options, &file_path)

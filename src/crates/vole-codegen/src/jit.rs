@@ -168,7 +168,7 @@ impl JitOptions {
             disasm: false,
             loop_param_opt: true, // Enable loop optimization in all modes
             capture_ir: false,
-            lazy_modules: false,
+            lazy_modules: true,
         }
     }
 
@@ -179,7 +179,7 @@ impl JitOptions {
             disasm: false,
             loop_param_opt: true,
             capture_ir: false,
-            lazy_modules: false,
+            lazy_modules: true,
         }
     }
 

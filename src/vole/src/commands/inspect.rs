@@ -133,6 +133,7 @@ pub fn inspect_files(
                     JitOptions::default()
                 };
                 options.capture_ir = true;
+                options.lazy_modules = false; // Inspect needs all bodies compiled
                 let mut jit = JitContext::with_options(options);
                 let mut compiler = Compiler::new(&mut jit, &analyzed);
                 compiler.set_skip_tests(no_tests);
