@@ -630,8 +630,19 @@ fn run_source_tests_with_modules(
 
     // Module compilation: respects --lazy flag. Dispatch tables are
     // preserved in CompiledModules via Arc (vol-nijg, vol-q4j1).
+    //
+    // When extending the cache (compiled_modules already exists), always
+    // compile eagerly to avoid creating multiple dispatch tables. Multiple
+    // dispatch tables cause module index mismatches: stubs from table A
+    // pass table-A indices to compile_trigger, which interprets them using
+    // table B from the LazyCompilationState.
     if !can_use_cache && !analyzed.module_paths().is_empty() {
-        let mut modules_jit = JitContext::with_options(options);
+        let is_extending = compiled_modules.is_some();
+        let mut module_options = options;
+        if is_extending {
+            module_options.lazy_modules = false;
+        }
+        let mut modules_jit = JitContext::with_options(module_options);
         let compile_result = {
             let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
             let result = modules_compiler.compile_modules_only();
@@ -692,8 +703,20 @@ fn run_source_tests_with_modules(
             compiled_modules
                 .as_ref()
                 .and_then(|m| m.dispatch_table())
-                .map(|dt| unsafe {
-                    LazyCompilationState::new(dt.clone(), &analyzed as *const VirProgram, options)
+                .map(|dt| {
+                    let mut state = unsafe {
+                        LazyCompilationState::new(
+                            dt.clone(),
+                            &analyzed as *const VirProgram,
+                            options,
+                        )
+                    };
+                    // Populate stub symbols from the module cache so the overflow
+                    // JitContext can resolve cross-module function references.
+                    if let Some(modules) = compiled_modules.as_ref() {
+                        state.populate_stub_symbols_from_cache(&modules.functions);
+                    }
+                    state
                 })
         } else {
             None
@@ -725,7 +748,8 @@ fn run_source_tests_with_modules(
 
     // Activate lazy compilation state (if any) so compile_trigger can fire
     // when JIT code calls a lazily-stubbed module function.
-    if let Some(state) = lazy_state {
+    if let Some(mut state) = lazy_state {
+        state.populate_stub_symbols(&jit);
         state.activate();
     }
 
@@ -849,7 +873,8 @@ fn run_source_tests_with_progress(
 
     // Activate lazy compilation state (if any) so compile_trigger can fire
     // when JIT code calls a lazily-stubbed module function.
-    if let Some(state) = lazy_state {
+    if let Some(mut state) = lazy_state {
+        state.populate_stub_symbols(&jit);
         state.activate();
     }
 

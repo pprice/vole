@@ -3,6 +3,7 @@
 // Opaque function identity registry for codegen.
 
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use rustc_hash::FxHashMap;
 
@@ -10,6 +11,11 @@ use cranelift_module::FuncId;
 
 use crate::runtime_registry::RuntimeKey;
 use vole_identity::{ModuleId, NameId, NameTable, TypeId};
+
+/// Global counter for string data names, shared across all FunctionRegistry instances.
+/// Ensures unique names when multiple Compiler instances compile into the same JitContext
+/// (e.g., successive lazy `compile_trigger` calls reusing the overflow JitContext).
+static GLOBAL_STRING_DATA_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionKey(u32);
@@ -36,8 +42,6 @@ pub struct FunctionRegistry {
     entries: Vec<FunctionEntry>,
     qualified_lookup: FxHashMap<NameId, FunctionKey>,
     runtime_lookup: FxHashMap<RuntimeKey, FunctionKey>,
-    /// Counter for unique string data names in JIT module
-    string_data_counter: u32,
 }
 
 impl FunctionRegistry {
@@ -47,7 +51,6 @@ impl FunctionRegistry {
             entries: Vec::new(),
             qualified_lookup: FxHashMap::default(),
             runtime_lookup: FxHashMap::default(),
-            string_data_counter: 0,
         }
     }
 
@@ -155,9 +158,12 @@ impl FunctionRegistry {
     }
 
     /// Generate a unique name for string data in the JIT module.
+    ///
+    /// Uses a global atomic counter to ensure uniqueness across multiple
+    /// `Compiler` instances that may compile into the same `JitContext`
+    /// (e.g., successive lazy `compile_trigger` calls).
     pub fn next_string_data_name(&mut self) -> String {
-        let id = self.string_data_counter;
-        self.string_data_counter += 1;
+        let id = GLOBAL_STRING_DATA_COUNTER.fetch_add(1, Ordering::Relaxed);
         format!("__vole_string_data_{id}")
     }
 }

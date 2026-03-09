@@ -446,7 +446,10 @@ pub fn compile_and_run(analyzed: &VirProgram, opts: &RunOptions) -> Result<(), P
 
     // Activate lazy compilation state (if any) so compile_trigger can fire
     // when JIT code calls a lazily-stubbed module function.
-    if let Some(state) = lazy_state {
+    if let Some(mut state) = lazy_state {
+        // Populate stub symbols from the finalized main JitContext so the
+        // overflow JitContext can resolve cross-module function references.
+        state.populate_stub_symbols(&jit);
         state.activate();
     }
 

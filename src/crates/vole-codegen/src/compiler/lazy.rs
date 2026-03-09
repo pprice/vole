@@ -141,6 +141,19 @@ pub struct LazyCompilationState {
     /// Created on first compile_trigger call; subsequent triggers define
     /// additional functions into it and call finalize_definitions() again.
     overflow_jit: Option<JitContext>,
+    /// Whether the global compilation passes (array Iterable defaults,
+    /// monomorphized instances, VIR monomorphs, abstract class methods)
+    /// have been run. These are shared across all modules and only need
+    /// to execute once — on the first compile_trigger call.
+    global_passes_done: bool,
+    /// Stub function pointers from the main JitContext.
+    ///
+    /// Maps `display_name -> stub_ptr` for all module functions that have
+    /// lazy stubs in the main JitContext. These are registered as JIT symbols
+    /// in the overflow JitContext so cross-module calls from a compiled module
+    /// resolve to the main JitContext's stubs (which check the compiled flag
+    /// and dispatch through the table).
+    stub_symbols: FxHashMap<String, *const u8>,
 }
 
 // SAFETY: LazyCompilationState contains `*const VirProgram` which is not
@@ -177,7 +190,52 @@ impl LazyCompilationState {
             module_paths,
             func_name_to_idx,
             overflow_jit: None,
+            global_passes_done: false,
+            stub_symbols: FxHashMap::default(),
         }
+    }
+
+    /// Populate stub symbols from the finalized main JitContext.
+    ///
+    /// Must be called AFTER `jit.finalize()` so that stub addresses are valid.
+    /// Extracts the finalized pointer for each function in the dispatch table's
+    /// `func_name_to_idx` map (these are the lazy stubs generated in Pass 2).
+    /// Populate stub symbols from the finalized main JitContext.
+    ///
+    /// Extracts the finalized pointer for each function in the dispatch table's
+    /// `func_name_to_idx` map. Must be called AFTER `jit.finalize()`.
+    pub fn populate_stub_symbols(&mut self, jit: &JitContext) {
+        for name in self.func_name_to_idx.keys() {
+            if let Some(&func_id) = jit.func_ids.get(name) {
+                // Only extract pointers for functions that were actually
+                // defined (compiled as stubs) in the main JitContext.
+                if jit.defined_func_ids.contains(&func_id) {
+                    let ptr = jit.module.get_finalized_function(func_id);
+                    self.stub_symbols.insert(name.clone(), ptr);
+                }
+            }
+        }
+        tracing::debug!(
+            count = self.stub_symbols.len(),
+            "populate_stub_symbols: registered from main JitContext"
+        );
+    }
+
+    /// Populate stub symbols from pre-compiled module functions.
+    ///
+    /// Used in the module cache path: module functions are already compiled
+    /// and their pointers are in the `CompiledModules.functions` map.
+    /// Cross-module calls in the overflow JitContext resolve to these pointers.
+    pub fn populate_stub_symbols_from_cache(&mut self, functions: &FxHashMap<String, *const u8>) {
+        for name in self.func_name_to_idx.keys() {
+            if let Some(&ptr) = functions.get(name) {
+                self.stub_symbols.insert(name.clone(), ptr);
+            }
+        }
+        tracing::debug!(
+            count = self.stub_symbols.len(),
+            "populate_stub_symbols: registered from module cache"
+        );
     }
 
     /// Store this state in the thread-local for use by `compile_trigger`.
@@ -214,9 +272,14 @@ thread_local! {
 ///
 /// 1. Checks if the module is already compiled (double-check after the stub's check).
 /// 2. Reuses (or creates) the single overflow `JitContext`.
-/// 3. Compiles ALL module functions (not just the triggered module).
-/// 4. Extracts function pointers and patches the dispatch table.
-/// 5. Sets ALL compiled flags so subsequent calls are no-ops.
+/// 3. Compiles ONLY the triggered module's function bodies (incremental).
+/// 4. Extracts function pointers and patches the dispatch table for that module.
+/// 5. Sets the triggered module's compiled flag so subsequent calls are no-ops.
+///
+/// Global declaration/compilation passes (type declarations, monomorphized
+/// instances, array Iterable defaults) run on the first trigger only. They
+/// cover all modules for cross-reference resolution. Subsequent triggers
+/// re-run declarations (idempotent) but skip global compilation passes.
 ///
 /// # Safety
 ///
@@ -232,66 +295,70 @@ pub extern "C" fn compile_trigger(module_idx: i64) {
         let module_idx = module_idx as usize;
 
         // Double-check: the stub already checked, but another call may have
-        // compiled all modules between the stub's check and this point.
+        // compiled this module between the stub's check and this point.
         if state.dispatch_table.compiled_flags[module_idx].load(Ordering::Acquire) {
             return;
         }
 
-        // Compile ALL modules at once. Module functions share entities/types,
-        // so compiling them together is simpler and correct. The first call
-        // to any lazy module function pays the full cost; subsequent calls
-        // are no-ops because all compiled_flags are set.
         let trigger_module = state
             .module_paths
             .get(module_idx)
-            .map(String::as_str)
-            .unwrap_or("<unknown>");
+            .cloned()
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let first_trigger = !state.global_passes_done;
         tracing::debug!(
             module_idx,
-            trigger_module,
+            %trigger_module,
+            first_trigger,
             total_modules = state.module_paths.len(),
-            "compile_trigger: compiling all modules"
+            "compile_trigger: compiling single module"
         );
         let analyzed = unsafe { &*state.analyzed };
 
         // Reuse the overflow JIT context (created on first trigger), or create
-        // one with lazy_modules disabled so compile_modules_only compiles real
-        // bodies (not stubs). Cranelift's finalize_definitions() can be called
-        // multiple times — each call only processes functions defined since the
-        // last finalize (it uses std::mem::take on functions_to_finalize).
+        // one with lazy_modules disabled so compile_single_module_lazy compiles
+        // real bodies (not stubs). The overflow JitContext is pre-seeded with
+        // stub symbols from the main JitContext so cross-module calls resolve
+        // to the main stubs (which dispatch through the table). Cranelift's
+        // finalize_definitions() can be called multiple times — each call only
+        // processes functions defined since the last finalize.
         let mut lazy_off_options = state.jit_options;
         lazy_off_options.lazy_modules = false;
-        let jit = state
-            .overflow_jit
-            .get_or_insert_with(|| JitContext::with_options(lazy_off_options));
+        let stub_symbols = &state.stub_symbols;
+        let jit = state.overflow_jit.get_or_insert_with(|| {
+            JitContext::with_symbols_and_options(stub_symbols, lazy_off_options)
+        });
 
         let mut compiler = super::Compiler::new(jit, analyzed);
         compiler
-            .compile_modules_only()
-            .expect("INTERNAL: lazy module compilation failed");
+            .compile_single_module_lazy(&trigger_module, first_trigger)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "INTERNAL: lazy module compilation failed for '{}': {:?}",
+                    trigger_module, e
+                )
+            });
         jit.finalize()
             .expect("INTERNAL: lazy module JIT finalization failed");
 
-        // Extract function pointers and update dispatch table slots.
+        state.global_passes_done = true;
+
+        // Extract function pointers and update dispatch table slots
+        // ONLY for functions belonging to the triggered module.
         for (name, &func_id) in &jit.func_ids {
             if jit.defined_func_ids.contains(&func_id)
                 && let Some(&func_idx) = state.func_name_to_idx.get(name)
             {
-                let ptr = jit.module.get_finalized_function(func_id);
-                state.dispatch_table.fn_ptrs[func_idx].store(ptr as u64, Ordering::Release);
+                // Only patch entries that belong to the triggered module.
+                if state.dispatch_table.func_to_module[func_idx] == module_idx {
+                    let ptr = jit.module.get_finalized_function(func_id);
+                    state.dispatch_table.fn_ptrs[func_idx].store(ptr as u64, Ordering::Release);
+                }
             }
         }
 
-        // Only mark modules that were actually compiled. The current file's
-        // VirProgram may cover a subset of the dispatch table's modules (e.g.
-        // file imports Map but not Set). Setting flags for uncompiled modules
-        // would cause subsequent files to skip compile_trigger and call
-        // through fn_ptrs that are still 0 (null), resulting in segfaults.
-        for module_path in analyzed.module_paths() {
-            if let Some(&mod_idx) = state.dispatch_table.module_index.get(&module_path) {
-                state.dispatch_table.compiled_flags[mod_idx].store(true, Ordering::Release);
-            }
-        }
+        // Set the compiled flag ONLY for the triggered module.
+        state.dispatch_table.compiled_flags[module_idx].store(true, Ordering::Release);
     });
 }
 

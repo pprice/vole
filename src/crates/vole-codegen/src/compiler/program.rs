@@ -100,6 +100,95 @@ impl Compiler<'_> {
         self.compile_module_functions()
     }
 
+    /// Compile a single module's function bodies during lazy compilation.
+    ///
+    /// This is the per-module counterpart of `compile_modules_only()`. When
+    /// `compile_trigger(module_idx)` fires, only the triggered module needs
+    /// its bodies compiled.
+    ///
+    /// # Passes
+    ///
+    /// - **Pass 1** (declarations): always runs for ALL modules so cross-module
+    ///   references resolve. Declarations are idempotent on JitContext.
+    /// - **Passes 1.5a–1.8** (global passes): run on `first_trigger` only.
+    ///   Subsequent triggers skip them because the bodies they compile are
+    ///   already in the overflow JitContext (guarded by `defined_functions`).
+    /// - **Pass 2** (body compilation): runs ONLY for `target_module`.
+    /// - **Pending monomorphs**: drained after body compilation.
+    pub fn compile_single_module_lazy(
+        &mut self,
+        target_module: &str,
+        first_trigger: bool,
+    ) -> CodegenResult<()> {
+        // Bail early if any modules had sema errors.
+        if !self.analyzed.modules_with_errors.is_empty() {
+            let module_list: Vec<_> = self.analyzed.modules_with_errors.iter().cloned().collect();
+            return Err(CodegenError::internal_with_context(
+                "module(s) with type errors",
+                module_list.join(", "),
+            ));
+        }
+
+        // Pre-populate defined_functions from the overflow JitContext so that
+        // re-running declaration/compilation passes correctly skips functions
+        // that were compiled by previous triggers.
+        self.init_defined_from_jit();
+
+        let module_paths = self.analyzed.module_paths();
+
+        // Pass 1: Declare types and functions for all modules.
+        //
+        // Target module: Export linkage (will be defined).
+        // Other modules: Import linkage (resolved via stub symbols registered
+        // in the overflow JitContext's symbol table from the main JitContext).
+        //
+        // On subsequent triggers, functions previously compiled (now in
+        // defined_func_ids) are redeclared — Cranelift returns the existing
+        // FuncId, and the function is already defined, so linkage is irrelevant.
+        let target_paths: Vec<String> = vec![target_module.to_string()];
+        let other_paths: Vec<String> = module_paths
+            .iter()
+            .filter(|p| p.as_str() != target_module)
+            .cloned()
+            .collect();
+
+        // Declare target module with Export linkage (bodies will be compiled).
+        self.declare_module_types_and_functions(&target_paths)?;
+        // Import other modules with Import linkage (resolved via stub symbols).
+        self.import_module_types_and_functions(&other_paths)?;
+
+        if first_trigger {
+            // Passes 1.5a–1.8: global passes (array Iterable defaults, monomorphs,
+            // VIR monomorphs, abstract class method expansion, monomorph index).
+            // Only needed on first trigger; subsequent triggers see the compiled
+            // results via defined_functions.
+            self.compile_array_iterable_default_methods()?;
+            self.declare_all_monomorphized_instances()?;
+            self.declare_vir_monomorphized_functions()?;
+            self.expand_abstract_class_method_monomorphs()?;
+            self.build_monomorph_index();
+            self.compile_all_monomorphized_instances(false)?;
+            self.compile_vir_monomorphized_functions_phased(false)?;
+        } else {
+            // On subsequent triggers we still need the monomorph declarations
+            // and index so that demand-declaration during body compilation works.
+            self.declare_all_monomorphized_instances()?;
+            self.declare_vir_monomorphized_functions()?;
+            self.expand_abstract_class_method_monomorphs()?;
+            self.build_monomorph_index();
+        }
+
+        // Pass 2: Compile function bodies ONLY for the target module.
+        self.compile_module_function_bodies(target_module)?;
+
+        // Compile any monomorphs lazily declared during the target module's
+        // body compilation.
+        self.compile_pending_monomorphs()?;
+
+        tracing::debug!(target_module, "compile_single_module_lazy complete");
+        Ok(())
+    }
+
     /// Import pre-compiled module functions without compiling them.
     /// Use this when modules were already compiled in a shared CompiledModules cache.
     pub fn import_modules(&mut self) -> CodegenResult<()> {
@@ -195,7 +284,7 @@ impl Compiler<'_> {
                     .map(|td| td.id)
                     .collect();
                 for type_def_id in class_ids {
-                    self.finalize_module_type_by_id(type_def_id)?;
+                    self.finalize_module_type_by_id(type_def_id, DeclareMode::Declare)?;
                 }
             }
         }
@@ -444,7 +533,7 @@ impl Compiler<'_> {
                 .map(|td| td.id)
                 .collect();
             for type_def_id in class_ids {
-                self.finalize_module_type_by_id(type_def_id)?;
+                self.finalize_module_type_by_id(type_def_id, DeclareMode::Declare)?;
             }
 
             // Finalize module structs (register type metadata, declare methods)
@@ -456,7 +545,7 @@ impl Compiler<'_> {
                 .map(|td| td.id)
                 .collect();
             for type_def_id in struct_ids {
-                self.finalize_module_type_by_id(type_def_id)?;
+                self.finalize_module_type_by_id(type_def_id, DeclareMode::Declare)?;
             }
 
             // Register module sentinels (zero-field struct types like Done, nil)
@@ -482,6 +571,89 @@ impl Compiler<'_> {
                 // The interner_override parameter is unused in the inner implementation,
                 // so we can use register_implement_block directly.
                 self.register_implement_block(entry)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Declare types and import functions for modules using Import linkage.
+    ///
+    /// Used by `compile_single_module_lazy` for non-target modules. Functions
+    /// are declared with Import linkage so Cranelift resolves them via the
+    /// overflow JitContext's symbol table (stub pointers from the main JitContext).
+    /// Type finalization and implement block registration are identical to the
+    /// Export path since they only produce metadata, not linkage-sensitive code.
+    fn import_module_types_and_functions(&mut self, module_paths: &[String]) -> CodegenResult<()> {
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
+        for module_path in module_paths {
+            tracing::debug!(module_path, "lazy: importing module types and functions");
+            let module_id = self.analyzed.module_id_or_main(module_path);
+
+            // Import functions with Import linkage (resolved via symbol table).
+            let func_defs: Vec<_> = self
+                .analyzed
+                .entity_metadata
+                .module_function_defs(module_id)
+                .into_iter()
+                .filter(|fd| !fd.is_generic && !fd.is_external)
+                .map(|fd| fd.name_id)
+                .collect();
+            for name_id in func_defs {
+                let display_name = self.analyzed.display_name(name_id);
+                let func_key =
+                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
+                // Override generator return types for imported module functions
+                if let Some(func_key) = func_key {
+                    self.override_generator_return_type(name_id, func_key);
+                }
+            }
+
+            // Finalize module classes (register type metadata, import methods)
+            let class_ids: Vec<_> = self
+                .analyzed
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Class)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in class_ids {
+                self.finalize_module_type_by_id(type_def_id, DeclareMode::Import)?;
+            }
+
+            // Finalize module structs (register type metadata, import methods)
+            let struct_ids: Vec<_> = self
+                .analyzed
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Struct)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in struct_ids {
+                self.finalize_module_type_by_id(type_def_id, DeclareMode::Import)?;
+            }
+
+            // Register module sentinels
+            let sentinel_ids: Vec<_> = self
+                .analyzed
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Sentinel)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in sentinel_ids {
+                self.finalize_module_sentinel_by_id(type_def_id)?;
+            }
+
+            // Import implement block methods with Import linkage
+            let entries = self
+                .analyzed
+                .entity_metadata
+                .module_implement_blocks(module_path)
+                .to_vec();
+            for entry in &entries {
+                self.import_module_implement_block(entry)?;
             }
         }
 
@@ -1019,7 +1191,7 @@ impl Compiler<'_> {
                 .map(|td| td.id)
                 .collect();
             for type_def_id in class_ids {
-                self.finalize_module_type_by_id(type_def_id)?;
+                self.finalize_module_type_by_id(type_def_id, DeclareMode::Import)?;
             }
 
             // Finalize module structs (register type metadata, import methods)
@@ -1031,7 +1203,7 @@ impl Compiler<'_> {
                 .map(|td| td.id)
                 .collect();
             for type_def_id in struct_ids {
-                self.finalize_module_type_by_id(type_def_id)?;
+                self.finalize_module_type_by_id(type_def_id, DeclareMode::Import)?;
             }
 
             // Import implement block methods from VIR metadata (using Linkage::Import)

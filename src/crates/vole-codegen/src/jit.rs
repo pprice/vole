@@ -243,6 +243,19 @@ impl JitContext {
         Self::new_internal(Some(&modules.functions), options)
     }
 
+    /// Create a new JitContext with pre-registered external symbols and custom options.
+    ///
+    /// Used by lazy compilation: the overflow JitContext needs to resolve
+    /// cross-module function references to the main JitContext's stubs.
+    /// The `symbols` map provides `display_name -> stub_ptr` entries that
+    /// are registered as JIT symbols so Cranelift can link calls to them.
+    pub fn with_symbols_and_options(
+        symbols: &FxHashMap<String, *const u8>,
+        options: JitOptions,
+    ) -> Self {
+        Self::new_internal(Some(symbols), options)
+    }
+
     fn new_internal(
         precompiled: Option<&FxHashMap<String, *const u8>>,
         options: JitOptions,

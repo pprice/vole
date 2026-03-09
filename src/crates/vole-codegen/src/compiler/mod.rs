@@ -140,6 +140,18 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Pre-populate `defined_functions` from `jit.defined_func_ids`.
+    ///
+    /// Used by lazy compilation: when a new `Compiler` is created for a
+    /// subsequent `compile_trigger` call, the overflow `JitContext` already
+    /// contains functions defined by previous triggers. Copying those IDs
+    /// into `defined_functions` prevents `finalize_function` from attempting
+    /// duplicate definitions.
+    fn init_defined_from_jit(&mut self) {
+        self.defined_functions
+            .extend(self.jit.defined_func_ids.iter().copied());
+    }
+
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {

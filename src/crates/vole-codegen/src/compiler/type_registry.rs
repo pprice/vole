@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use super::{Compiler, SelfParam};
+use super::{Compiler, DeclareMode, SelfParam};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{MethodInfo, TypeMetadata};
@@ -348,9 +348,14 @@ impl Compiler<'_> {
     ///
     /// Used when iterating VirEntityMetadata type definitions by module,
     /// where we already have the TypeDefId without needing name resolution.
+    ///
+    /// `declare_mode` controls method linkage:
+    /// - `Declare` (Export): methods will be compiled in this JitContext.
+    /// - `Import`: methods are pre-compiled elsewhere, resolved via symbol table.
     pub(super) fn finalize_module_type_by_id(
         &mut self,
         type_def_id: TypeDefId,
+        declare_mode: DeclareMode,
     ) -> CodegenResult<()> {
         // Skip if already registered — check first before any allocations.
         if self.state.type_metadata.contains_key(&type_def_id) {
@@ -390,8 +395,12 @@ impl Compiler<'_> {
                 .name_table()
                 .last_segment_str(name_id)
                 .unwrap_or_else(|| self.analyzed.display_name(name_id));
-            let infos =
-                self.register_module_type_instance_methods(&method_ids, type_def_id, &short)?;
+            let infos = self.register_module_type_instance_methods(
+                &method_ids,
+                type_def_id,
+                &short,
+                declare_mode,
+            )?;
             (infos, Some(short))
         };
 
@@ -423,7 +432,12 @@ impl Compiler<'_> {
                     .last_segment_str(name_id)
                     .unwrap_or_else(|| self.analyzed.display_name(name_id))
             });
-            self.register_module_type_static_methods(&static_method_ids, type_def_id, &short)?;
+            self.register_module_type_static_methods(
+                &static_method_ids,
+                type_def_id,
+                &short,
+                declare_mode,
+            )?;
         }
 
         Ok(())
@@ -502,11 +516,15 @@ impl Compiler<'_> {
     /// Iterates MethodId from VirTypeDef.methods to register each method in the
     /// JIT function registry.  Inherited default methods (has_default=true) are
     /// skipped — they are declared and compiled through the implement block path.
+    ///
+    /// `declare_mode` controls linkage: `Declare` uses Export (bodies compiled locally),
+    /// `Import` uses Import (resolved via symbol table for lazy/cached compilation).
     fn register_module_type_instance_methods(
         &mut self,
         method_ids: &[MethodId],
         type_def_id: TypeDefId,
         type_name_str: &str,
+        declare_mode: DeclareMode,
     ) -> CodegenResult<FxHashMap<NameId, MethodInfo>> {
         let mut method_infos = FxHashMap::default();
 
@@ -537,7 +555,10 @@ impl Compiler<'_> {
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
-            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            let jit_func_id = match declare_mode {
+                DeclareMode::Declare => self.jit.declare_function(&display_name, &sig),
+                DeclareMode::Import => self.jit.import_function(&display_name, &sig),
+            };
             self.func_registry.set_func_id(func_key, jit_func_id);
 
             tracing::debug!(
@@ -563,11 +584,15 @@ impl Compiler<'_> {
     ///
     /// Iterates MethodId from VirTypeDef.static_methods to register each static
     /// method in the JIT function registry.
+    ///
+    /// `declare_mode` controls linkage: `Declare` uses Export (bodies compiled locally),
+    /// `Import` uses Import (resolved via symbol table for lazy/cached compilation).
     fn register_module_type_static_methods(
         &mut self,
         static_method_ids: &[MethodId],
         type_def_id: TypeDefId,
         type_name_str: &str,
+        declare_mode: DeclareMode,
     ) -> CodegenResult<()> {
         for &method_id in static_method_ids {
             let method_def = self.analyzed.get_method_def(method_id);
@@ -586,7 +611,10 @@ impl Compiler<'_> {
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
-            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            let jit_func_id = match declare_mode {
+                DeclareMode::Declare => self.jit.declare_function(&display_name, &sig),
+                DeclareMode::Import => self.jit.import_function(&display_name, &sig),
+            };
             self.func_registry.set_func_id(func_key, jit_func_id);
 
             tracing::debug!(
