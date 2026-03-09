@@ -215,6 +215,14 @@ fn emit_implicit_return(
     default_return: DefaultReturn,
 ) -> CodegenResult<()> {
     if let Some(value) = expr_value {
+        // If the expression is never-typed (e.g. `unreachable`), a trap was
+        // already emitted.  The builder auto-started a new dead block after
+        // the trap; just emit another trap to fill it — no real return needed.
+        if value.type_id == VirTypeId::NEVER {
+            cg.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+            return Ok(());
+        }
+
         // Check if the return type is fallible - need multi-value return
         let is_fallible_return = matches!(
             cg.return_abi,

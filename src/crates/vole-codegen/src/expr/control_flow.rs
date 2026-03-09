@@ -156,10 +156,12 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(then_block);
         let (then_flag, then_val) = self.compile_vir_body(then_body)?;
         let then_terminated = then_flag && then_val.is_none();
+        let mut then_never = false;
         if !then_terminated {
             let then_result = then_val.unwrap_or_else(|| self.void_value());
             if then_result.type_id == VirTypeId::NEVER {
                 self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+                then_never = true;
             } else if !is_void {
                 self.jump_with_owned_result(
                     then_result,
@@ -175,6 +177,7 @@ impl Cg<'_, '_, '_> {
 
         // Compile else branch
         self.switch_and_seal(else_block);
+        let mut else_never = false;
         let else_terminated = if let Some(else_body) = else_body {
             let (flag, val) = self.compile_vir_body(else_body)?;
             let terminated = flag && val.is_none();
@@ -182,6 +185,7 @@ impl Cg<'_, '_, '_> {
                 let else_result = val.unwrap_or_else(|| self.void_value());
                 if else_result.type_id == VirTypeId::NEVER {
                     self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+                    else_never = true;
                 } else if !is_void {
                     self.jump_with_owned_result(
                         else_result,
@@ -203,11 +207,13 @@ impl Cg<'_, '_, '_> {
         // Continue in merge block
         self.switch_and_seal(merge_block);
 
-        // If both branches terminated, the merge block is unreachable.
-        // Cranelift still requires it to be filled, so emit a trap.
-        // Return a NEVER-typed value so callers know this code path
-        // is dead (e.g., VirStmt::Expr propagates termination).
-        if then_terminated && else_terminated {
+        // If both branches are dead (terminated or trapped via never/unreachable),
+        // the merge block is unreachable. Cranelift still requires it to be
+        // filled, so emit a trap. Return a NEVER-typed value so callers know
+        // this code path is dead.
+        let then_dead = then_terminated || then_never;
+        let else_dead = else_terminated || else_never;
+        if then_dead && else_dead {
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
             let dummy = self.cached_void_val;
             return Ok(CompiledValue::new(dummy, types::I64, VirTypeId::NEVER));
