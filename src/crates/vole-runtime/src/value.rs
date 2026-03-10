@@ -411,7 +411,12 @@ pub extern "C" fn vole_tagged_value_new(tag: u64, value: u64) -> *mut u8 {
         Ok(l) => l,
         Err(_) => panic!("tagged value layout"),
     };
+    // SAFETY: LAYOUT is a valid, non-zero-sized layout (16 bytes, 8-byte aligned)
+    // computed at compile time. The returned pointer is non-null on success
+    // (alloc aborts on OOM).
     let ptr = unsafe { std::alloc::alloc(LAYOUT) };
+    // SAFETY: `ptr` is a freshly allocated 16-byte buffer with 8-byte alignment,
+    // so writing a u64 at offset 0 and offset 8 is within bounds and properly aligned.
     unsafe {
         *(ptr as *mut u64) = tag;
         *(ptr.add(8) as *mut u64) = value;
@@ -433,6 +438,10 @@ pub extern "C" fn vole_tagged_value_new(tag: u64, value: u64) -> *mut u8 {
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_tagged_value_clone(ptr: *mut u8) -> *mut u8 {
     debug_assert!(!ptr.is_null(), "tagged_value_clone: null pointer");
+    // SAFETY: `ptr` is a valid 16-byte TaggedValue buffer per the function's safety
+    // contract. Reading u64 values at offsets 0 (tag) and 8 (value) is within bounds
+    // and properly aligned. The rc_inc on the inner payload is safe because rc_inc
+    // handles null and validates the RcHeader pointer per its own contract.
     unsafe {
         let tag = *(ptr as *const u64);
         let value = *(ptr.add(8) as *const u64);
