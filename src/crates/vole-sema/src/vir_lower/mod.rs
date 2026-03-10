@@ -729,7 +729,7 @@ pub fn lower_monomorphized_function(
     cross_module: &CrossModuleCtx,
     implements: &ImplementRegistry,
 ) -> VirFunction {
-    debug_assert_concrete_types(param_types, return_type, type_arena, &name);
+    assert_concrete_types(param_types, return_type, type_arena, &name);
     let mut vir = lower_function(
         func,
         func_id,
@@ -940,25 +940,23 @@ pub fn lower_generic_function(
     }
 }
 
-/// Assert (debug-only) that all types in a monomorphized function signature
-/// are concrete — no `TypeParam` or `TypeParamRef` remains.
-fn debug_assert_concrete_types(
+/// Assert that all types in a monomorphized function signature are concrete —
+/// no `TypeParam` or `TypeParamRef` remains. This is an invariant violation
+/// (not a recoverable error), so we assert unconditionally.
+fn assert_concrete_types(
     param_types: &[(Symbol, TypeId)],
     return_type: TypeId,
     arena: &TypeArena,
     func_name: &str,
 ) {
-    if !cfg!(debug_assertions) {
-        return;
-    }
     for (i, (_sym, ty)) in param_types.iter().enumerate() {
-        debug_assert!(
+        assert!(
             !arena.contains_type_param(*ty),
             "VIR monomorph `{func_name}`: param {i} still contains a type parameter \
              (TypeId={ty:?})"
         );
     }
-    debug_assert!(
+    assert!(
         !arena.contains_type_param(return_type),
         "VIR monomorph `{func_name}`: return type still contains a type parameter \
          (TypeId={return_type:?})"
