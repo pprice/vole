@@ -159,7 +159,9 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 
     // Codegen phase - always use release mode for benchmarks
     let codegen_start = Instant::now();
-    let mut jit = JitContext::with_options(JitOptions::release());
+    let mut options = JitOptions::release();
+    options.lazy_modules = false; // Benchmarks need eager compilation for accurate timing
+    let mut jit = JitContext::with_options(options);
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler
@@ -211,7 +213,9 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     let analyzed = build_analyzed_program(program, interner, output, None);
 
     // Compile - always use release mode for benchmarks
-    let mut jit = JitContext::with_options(JitOptions::release());
+    let mut options = JitOptions::release();
+    options.lazy_modules = false; // Benchmarks need eager compilation for accurate timing
+    let mut jit = JitContext::with_options(options);
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler

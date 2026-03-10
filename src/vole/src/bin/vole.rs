@@ -87,9 +87,11 @@ fn main() -> ExitCode {
     )
     .expect("failed to parse arguments");
 
+    let lazy = !cli.aot;
+
     match cli.command {
         Commands::Run { file, root } => {
-            run_file(&file, root.as_deref(), cli.release, !cli.aot, cli.color)
+            run_file(&file, root.as_deref(), cli.release, lazy, cli.color)
         }
         Commands::Check { paths } => check_files(&paths, cli.color),
         Commands::Test {
@@ -111,7 +113,7 @@ fn main() -> ExitCode {
                 project_root: root.as_deref(),
                 color: cli.color,
                 release: cli.release,
-                lazy: !cli.aot,
+                lazy,
             },
         ),
         Commands::Inspect {
@@ -152,7 +154,7 @@ fn main() -> ExitCode {
             check,
             stdout,
         } => format_files(&paths, FmtOptions { check, stdout }),
-        Commands::External(args) => handle_external_args(&args, cli.release, !cli.aot, cli.color),
+        Commands::External(args) => handle_external_args(&args, cli.release, lazy, cli.color),
     }
 }
 
