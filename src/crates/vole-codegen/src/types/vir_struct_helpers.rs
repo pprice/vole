@@ -825,11 +825,10 @@ mod tests {
 
         let type_def_id = TypeDefId::new(0);
 
-        let mut generic_field_names = Vec::new();
-        for &fname in field_names {
-            let field_name = names.intern_raw(builtin_mod, &[fname]);
-            generic_field_names.push(field_name);
-        }
+        let generic_field_names: Vec<_> = field_names
+            .iter()
+            .map(|&fname| names.intern_raw(builtin_mod, &[fname]))
+            .collect();
 
         let vir_type_def = VirTypeDef {
             id: type_def_id,
