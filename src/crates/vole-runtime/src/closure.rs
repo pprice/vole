@@ -97,6 +97,9 @@ impl Closure {
     /// # Safety
     /// The closure pointer must be valid and properly initialized.
     unsafe fn capture_kinds_ptr(closure: *mut Closure) -> *mut u8 {
+        // SAFETY: `closure` was allocated via `Closure::alloc` with `layout(num_captures)`,
+        // which includes space for capture_kinds starting at FIXED_SIZE. The pointer
+        // arithmetic stays within the allocation.
         unsafe { (closure as *mut u8).add(Self::FIXED_SIZE) }
     }
 
@@ -105,6 +108,10 @@ impl Closure {
     /// # Safety
     /// The closure pointer must be valid and properly initialized.
     unsafe fn capture_sizes_ptr(closure: *mut Closure) -> *mut u32 {
+        // SAFETY: `closure` is valid and initialized (caller contract). Dereferencing
+        // to read `num_captures` is safe because the fixed fields are initialized in
+        // `alloc`. The offset (FIXED_SIZE + kinds_size) stays within the allocation
+        // because `layout()` reserves space for all three trailing arrays.
         unsafe {
             let num = (*closure).num_captures;
             let kinds_size = align_to_ptr(num);
@@ -117,6 +124,11 @@ impl Closure {
     /// # Safety
     /// The closure pointer must be valid and properly initialized.
     unsafe fn captures_ptr(closure: *mut Closure) -> *mut *mut u8 {
+        // SAFETY: `closure` is valid and initialized (caller contract). The offset
+        // (FIXED_SIZE + kinds_size + sizes_size) is within the allocation because
+        // `layout()` reserves space for all three trailing arrays. The resulting
+        // pointer is properly aligned to pointer size since both kinds_size and
+        // sizes_size are rounded up to pointer alignment via `align_to_ptr`.
         unsafe {
             let num = (*closure).num_captures;
             let kinds_size = align_to_ptr(num);
@@ -130,6 +142,12 @@ impl Closure {
     /// # Safety
     /// The func_ptr must be a valid function pointer or null.
     pub unsafe fn alloc(func_ptr: *const u8, num_captures: usize) -> *mut Closure {
+        // SAFETY: `layout()` produces a valid, non-zero-sized layout (minimum
+        // FIXED_SIZE = 32 bytes). After allocation, `ptr` is non-null (checked),
+        // properly aligned, and exclusively owned. All fields are initialized
+        // before the pointer is returned: RcHeader via `ptr::write`, func_ptr
+        // and num_captures via direct assignment, and trailing arrays via
+        // `write_bytes`/loop initialization.
         unsafe {
             let layout = Self::layout(num_captures);
             let ptr = alloc(layout) as *mut Closure;
@@ -166,6 +184,9 @@ impl Closure {
     /// - The index must be less than num_captures.
     #[inline]
     pub unsafe fn get_capture(closure: *const Closure, index: usize) -> *mut u8 {
+        // SAFETY: Caller guarantees `closure` is valid and `index < num_captures`.
+        // `captures_ptr` returns a valid pointer to the captures array, and
+        // `.add(index)` stays within the allocation.
         unsafe {
             debug_assert!(index < (*closure).num_captures);
             let captures = Self::captures_ptr(closure as *mut Closure);
@@ -181,6 +202,10 @@ impl Closure {
     /// - The ptr must be valid or null.
     #[inline]
     pub unsafe fn set_capture(closure: *mut Closure, index: usize, ptr: *mut u8) {
+        // SAFETY: Caller guarantees `closure` is valid and `index < num_captures`.
+        // `captures_ptr` returns a valid pointer to the captures array, and
+        // `.add(index)` stays within the allocation. The write is to an
+        // exclusively-owned slot within the closure's trailing array.
         unsafe {
             debug_assert!(index < (*closure).num_captures);
             let captures = Self::captures_ptr(closure);
@@ -195,6 +220,9 @@ impl Closure {
     /// - The index must be less than num_captures.
     #[inline]
     pub unsafe fn set_capture_kind(closure: *mut Closure, index: usize, kind: u8) {
+        // SAFETY: Caller guarantees `closure` is valid and `index < num_captures`.
+        // `capture_kinds_ptr` returns a valid pointer to the kinds array, and
+        // `.add(index)` stays within the allocation.
         unsafe {
             debug_assert!(index < (*closure).num_captures);
             let kinds = Self::capture_kinds_ptr(closure);
@@ -209,6 +237,10 @@ impl Closure {
     /// - The index must be less than num_captures.
     #[inline]
     pub unsafe fn get_capture_kind(closure: *const Closure, index: usize) -> u8 {
+        // SAFETY: Caller guarantees `closure` is valid and `index < num_captures`.
+        // `capture_kinds_ptr` returns a valid pointer to the kinds array, and
+        // `.add(index)` stays within the allocation. The read is from an
+        // initialized slot (zero-initialized in `alloc`, or set via `set_capture_kind`).
         unsafe {
             debug_assert!(index < (*closure).num_captures);
             let kinds = Self::capture_kinds_ptr(closure as *mut Closure);
@@ -223,6 +255,9 @@ impl Closure {
     /// - The index must be less than num_captures.
     #[inline]
     pub unsafe fn set_capture_size(closure: *mut Closure, index: usize, size: u32) {
+        // SAFETY: Caller guarantees `closure` is valid and `index < num_captures`.
+        // `capture_sizes_ptr` returns a valid pointer to the sizes array, and
+        // `.add(index)` stays within the allocation.
         unsafe {
             debug_assert!(index < (*closure).num_captures);
             let sizes = Self::capture_sizes_ptr(closure);
@@ -237,6 +272,10 @@ impl Closure {
     /// - The index must be less than num_captures.
     #[inline]
     pub unsafe fn get_capture_size(closure: *const Closure, index: usize) -> u32 {
+        // SAFETY: Caller guarantees `closure` is valid and `index < num_captures`.
+        // `capture_sizes_ptr` returns a valid pointer to the sizes array, and
+        // `.add(index)` stays within the allocation. The read is from an
+        // initialized slot (zero-initialized in `alloc`, or set via `set_capture_size`).
         unsafe {
             debug_assert!(index < (*closure).num_captures);
             let sizes = Self::capture_sizes_ptr(closure as *mut Closure);
@@ -250,6 +289,8 @@ impl Closure {
     /// The closure pointer must be valid and properly initialized.
     #[inline]
     pub unsafe fn get_func(closure: *const Closure) -> *const u8 {
+        // SAFETY: Caller guarantees `closure` is valid and initialized.
+        // `func_ptr` is set during `alloc` before the pointer is returned.
         unsafe { (*closure).func_ptr }
     }
 
@@ -277,6 +318,13 @@ impl Closure {
 /// `ptr` must point to a valid `Closure` allocation with refcount at zero.
 unsafe extern "C" fn closure_drop(ptr: *mut u8) {
     alloc_track::track_dealloc(RuntimeTypeId::Closure as u32);
+    // SAFETY: `ptr` is a valid `Closure` allocation with refcount at zero (guaranteed
+    // by `rc_dec` which only calls the drop function on zero). The closure was allocated
+    // via `Closure::alloc`, so its fixed fields, capture_kinds, capture_sizes, and
+    // captures arrays are all properly initialized. Each capture pointer is either null
+    // (skipped) or a valid heap allocation made via `vole_heap_alloc` with the size
+    // recorded in capture_sizes. The layout passed to `dealloc` matches the original
+    // allocation layout because `num_captures` is unchanged since allocation.
     unsafe {
         let closure = ptr as *mut Closure;
         let num = (*closure).num_captures;
