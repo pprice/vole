@@ -247,12 +247,12 @@ impl EntityRegistry {
     }
 
     /// Return a read-only reference to the methods-by-type lookup map.
-    pub fn methods_by_type_map(&self) -> &FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>> {
+    pub fn methods_by_type_map(&self) -> &super::MethodsByName {
         &self.methods_by_type
     }
 
     /// Return a read-only reference to the static-methods-by-type lookup map.
-    pub fn static_methods_by_type_map(&self) -> &FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>> {
+    pub fn static_methods_by_type_map(&self) -> &super::MethodsByName {
         &self.static_methods_by_type
     }
 }

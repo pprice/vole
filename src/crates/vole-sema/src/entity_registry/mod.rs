@@ -32,6 +32,9 @@ use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, T
 
 pub use fields::{FieldSubstitutionCache, FieldSubstitutionKey};
 
+/// Maps each type to its named methods (instance or static).
+pub(crate) type MethodsByName = FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>>;
+
 /// Incremental short-name cache: maps last segment of a qualified name to TypeDefIds.
 ///
 /// Instead of rebuilding from scratch when new types are registered, this cache
@@ -64,10 +67,10 @@ pub struct EntityRegistry {
     pub(crate) global_by_name: FxHashMap<NameId, GlobalId>,
 
     // Scoped lookups: (type, method_name) -> MethodId
-    pub(crate) methods_by_type: FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>>,
+    pub(crate) methods_by_type: MethodsByName,
     pub(crate) fields_by_type: FxHashMap<TypeDefId, FxHashMap<NameId, FieldId>>,
     // Static method lookups: (type, static_method_name) -> MethodId
-    pub(crate) static_methods_by_type: FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>>,
+    pub(crate) static_methods_by_type: MethodsByName,
 
     // Alias index: maps a TypeId to all aliases that resolve to that type
     pub(crate) alias_index: FxHashMap<ArenaTypeId, Vec<TypeDefId>>,
