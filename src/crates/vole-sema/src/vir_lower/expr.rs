@@ -799,7 +799,7 @@ fn lower_meta_access(
         MetaAccessKind::Static { type_def_id } => {
             // Determine whether this is a type-name access (no object needed)
             // or a value-expression access (object needed for re-derivation).
-            #[allow(clippy::wildcard_enum_match_arm)] // AST ExprKind, not VIR dispatch
+            #[expect(clippy::wildcard_enum_match_arm)] // AST ExprKind, not VIR dispatch
             let object = match &meta_access.object.kind {
                 ExprKind::TypeLiteral(_) => None,
                 ExprKind::Identifier(_) => {

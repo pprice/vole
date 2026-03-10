@@ -646,7 +646,7 @@ impl LoweringCtx<'_> {
 ///
 /// `type_arena` and `entities` are threaded into the lowering context for
 /// future use by pattern lowering.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_function(
     func: &FuncDecl,
     func_id: FunctionId,
@@ -711,7 +711,7 @@ pub fn lower_function(
 /// In debug builds, asserts that no `TypeId` in the output still
 /// contains a type parameter — all types must be concrete after
 /// monomorphization.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_monomorphized_function(
     func: &FuncDecl,
     func_id: FunctionId,
@@ -756,7 +756,7 @@ pub fn lower_monomorphized_function(
 /// using the `FunctionId` for lookup.  The `func_id` is a dummy value
 /// (methods don't have a `FunctionId` in the entity registry); the real
 /// identity is carried by `method_id`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_method(
     func: &FuncDecl,
     method_id: MethodId,
@@ -815,7 +815,7 @@ pub fn lower_method(
 ///
 /// Interface methods use `InterfaceMethod` AST nodes (which have an optional
 /// body) rather than `FuncDecl`.  Only methods with a body should be lowered.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_interface_method(
     method: &InterfaceMethod,
     method_id: MethodId,
@@ -881,7 +881,7 @@ pub fn lower_interface_method(
 /// The resulting `VirFunction` is a **template** — it must NOT reach codegen
 /// directly.  A future VIR-to-VIR monomorphization pass substitutes type
 /// parameters with concrete types before compilation.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_generic_function(
     func: &FuncDecl,
     func_id: FunctionId,
