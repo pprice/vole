@@ -497,6 +497,34 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.box_interface_value(value, interface_type_id)
     }
 
+    // ========== Integer width coercion ==========
+
+    /// Narrow or widen an integer `CompiledValue` to match `expected_ty`.
+    /// If both source and target are integers of different widths, emits
+    /// `ireduce`, `uextend`, or `sextend` as appropriate. Otherwise returns
+    /// the value unchanged.
+    fn coerce_int_width(
+        &mut self,
+        compiled: CompiledValue,
+        expected_ty: Type,
+        param_type_id: TypeId,
+        param_vir_ty: VirTypeId,
+    ) -> CompiledValue {
+        if compiled.ty.is_int() && expected_ty.is_int() && expected_ty.bits() != compiled.ty.bits()
+        {
+            let new_value = if expected_ty.bits() < compiled.ty.bits() {
+                self.builder.ins().ireduce(expected_ty, compiled.value)
+            } else if self.vir_query_is_unsigned(param_type_id) {
+                uextend_const(self.builder, expected_ty, compiled.value)
+            } else {
+                sextend_const(self.builder, expected_ty, compiled.value)
+            };
+            CompiledValue::new(new_value, expected_ty, param_vir_ty)
+        } else {
+            compiled
+        }
+    }
+
     // ========== Default parameter compilation ==========
 
     /// Compile default expressions for omitted parameters using typed function ID.
@@ -538,21 +566,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let param_vir_ty = self.vir_lookup_or_compat(param_type_id);
             let compiled = self.coerce_to_type(compiled, param_vir_ty)?;
             let expected_ty = self.cranelift_type(param_type_id);
-            let compiled = if compiled.ty.is_int()
-                && expected_ty.is_int()
-                && expected_ty.bits() != compiled.ty.bits()
-            {
-                let new_value = if expected_ty.bits() < compiled.ty.bits() {
-                    self.builder.ins().ireduce(expected_ty, compiled.value)
-                } else if self.vir_query_is_unsigned(param_type_id) {
-                    uextend_const(self.builder, expected_ty, compiled.value)
-                } else {
-                    sextend_const(self.builder, expected_ty, compiled.value)
-                };
-                CompiledValue::new(new_value, expected_ty, param_vir_ty)
-            } else {
-                compiled
-            };
+            let compiled =
+                self.coerce_int_width(compiled, expected_ty, param_type_id, param_vir_ty);
 
             args.push(compiled.value);
         }
@@ -600,21 +615,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let param_vir_ty = self.vir_lookup_or_compat(param_type_id);
             let compiled = self.coerce_to_type(compiled, param_vir_ty)?;
             let expected_ty = self.cranelift_type(param_type_id);
-            let compiled = if compiled.ty.is_int()
-                && expected_ty.is_int()
-                && expected_ty.bits() != compiled.ty.bits()
-            {
-                let new_value = if expected_ty.bits() < compiled.ty.bits() {
-                    self.builder.ins().ireduce(expected_ty, compiled.value)
-                } else if self.vir_query_is_unsigned(param_type_id) {
-                    uextend_const(self.builder, expected_ty, compiled.value)
-                } else {
-                    sextend_const(self.builder, expected_ty, compiled.value)
-                };
-                CompiledValue::new(new_value, expected_ty, param_vir_ty)
-            } else {
-                compiled
-            };
+            let compiled =
+                self.coerce_int_width(compiled, expected_ty, param_type_id, param_vir_ty);
 
             let arg_value = if is_generic_class && compiled.ty != types::I64 {
                 self.emit_word(&compiled, None)?
@@ -659,21 +661,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             // Handle integer narrowing/widening if needed.
             let expected_ty = self.cranelift_type(param_type_id);
-            let compiled = if compiled.ty.is_int()
-                && expected_ty.is_int()
-                && expected_ty.bits() != compiled.ty.bits()
-            {
-                let new_value = if expected_ty.bits() < compiled.ty.bits() {
-                    self.builder.ins().ireduce(expected_ty, compiled.value)
-                } else if self.vir_query_is_unsigned(param_type_id) {
-                    uextend_const(self.builder, expected_ty, compiled.value)
-                } else {
-                    sextend_const(self.builder, expected_ty, compiled.value)
-                };
-                CompiledValue::new(new_value, expected_ty, param_vir_ty)
-            } else {
-                compiled
-            };
+            let compiled =
+                self.coerce_int_width(compiled, expected_ty, param_type_id, param_vir_ty);
             args.push(compiled.value);
         }
 
