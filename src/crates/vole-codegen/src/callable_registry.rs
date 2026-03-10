@@ -6,14 +6,14 @@ use crate::runtime_registry::AbiTy;
 use crate::{IntrinsicKey, RuntimeKey};
 
 /// Typed callable identity used by codegen call sites.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CallableKey {
     Runtime(RuntimeKey),
     Intrinsic(IntrinsicKey),
 }
 
 /// Resolved callable backend target.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResolvedCallable {
     Runtime(RuntimeKey),
     InlineIntrinsic(IntrinsicKey),
@@ -238,9 +238,8 @@ mod tests {
     #[test]
     fn panic_intrinsic_can_toggle_to_runtime_backend() {
         let key = CallableKey::Intrinsic(IntrinsicKey::Panic);
-        let inline =
-            resolve_callable_with_preference(key.clone(), CallableBackendPreference::PreferInline)
-                .expect("inline panic callable resolution");
+        let inline = resolve_callable_with_preference(key, CallableBackendPreference::PreferInline)
+            .expect("inline panic callable resolution");
         assert!(matches!(
             inline,
             ResolvedCallable::InlineIntrinsic(IntrinsicKey::Panic)
