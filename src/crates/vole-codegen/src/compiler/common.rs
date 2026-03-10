@@ -408,7 +408,7 @@ fn compile_trailing_vir_expr(
 ///
 /// Peeks into the last statement to detect a trailing expression for the
 /// Rust-like implicit return heuristic via `VirStmt::Expr` variants.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 fn compile_vir_block_body(
     cg: &mut Cg,
     stmts: &[VirStmt],

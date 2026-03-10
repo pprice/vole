@@ -856,7 +856,7 @@ impl Cg<'_, '_, '_> {
                 }
                 VirStringPart::Expr { value, conversion } => {
                     let compiled = self.compile_vir_expr(value)?;
-                    #[allow(clippy::wildcard_enum_match_arm)]
+                    #[expect(clippy::wildcard_enum_match_arm)]
                     match conversion {
                         StringConversion::Identity => (compiled.value, compiled.is_owned()),
                         _ => (self.apply_string_conversion(compiled, conversion)?, true),
@@ -1374,7 +1374,7 @@ impl Cg<'_, '_, '_> {
     /// from the object's concrete type in the current codegen scope.
     fn resolve_vir_static_meta_type_def(&self, object: Option<&VirExpr>) -> Option<TypeDefId> {
         let object = object?;
-        #[allow(clippy::wildcard_enum_match_arm)] // predicate query, not dispatch
+        #[expect(clippy::wildcard_enum_match_arm)] // predicate query, not dispatch
         let object_vir_ty = match object {
             VirExpr::LocalLoad { name, .. } => self.vars.get(name).map(|(_, ty)| *ty)?,
             _ => return None,

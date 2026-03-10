@@ -1428,7 +1428,7 @@ impl Cg<'_, '_, '_> {
 
         // Detect struct copy: init is a variable that is already tracked as a
         // composite RC local.
-        #[allow(clippy::wildcard_enum_match_arm)] // predicate query, not dispatch
+        #[expect(clippy::wildcard_enum_match_arm)] // predicate query, not dispatch
         let is_struct_copy = match value_expr {
             vole_vir::VirExpr::LocalLoad { name, .. } => self
                 .vars

@@ -1164,7 +1164,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Converts `VirTypeId` → `TypeId` via VirTypeTable reverse mapping,
     /// then looks up in VirProgram's module_exports.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     #[inline]
     pub fn vir_query_unwrap_module_v(
         &self,
