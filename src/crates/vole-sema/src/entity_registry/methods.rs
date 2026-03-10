@@ -210,7 +210,7 @@ impl EntityRegistry {
             return Some(method_id);
         }
         // Check parent types
-        for parent in &self.type_defs[type_id.index() as usize].extends.clone() {
+        for parent in &self.type_defs[type_id.index() as usize].extends {
             if let Some(method_id) = self.resolve_method(*parent, method_name) {
                 return Some(method_id);
             }
@@ -240,7 +240,7 @@ impl EntityRegistry {
             }
         }
         // Then check parents
-        for parent in self.type_defs[type_id.index() as usize].extends.clone() {
+        for &parent in &self.type_defs[type_id.index() as usize].extends {
             self.collect_all_methods(parent, result, seen_names);
         }
     }
