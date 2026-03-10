@@ -9,6 +9,7 @@
 // `VirPattern` variants.
 
 pub mod expr;
+mod pattern;
 pub mod stmt;
 pub mod type_translate;
 
