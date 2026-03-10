@@ -96,6 +96,14 @@ Do NOT touch:
   "max_rounds": 10,
   "round": 1,
   "epic_id": "vol-xxxx",
+  "exhausted_categories": [
+    { "name": "magic-numbers", "exhausted_at_commit": "abc123", "exhausted_at_round": 92 },
+    { "name": "unwrap-hardening", "exhausted_at_commit": "def456", "exhausted_at_round": 103 }
+  ],
+  "category_skip_streaks": {
+    "let-else": 1,
+    "module-org": 2
+  },
   "completed": [
     {
       "round": 1,
@@ -138,29 +146,108 @@ Persistent across sessions. Sections:
 
 ## Categories
 
-Roll a dice (`shuf -i 1-16 -n 1`) to select the category:
+### Adaptive Category Selection
 
-| Roll | Category | What to scan for |
-|------|----------|-----------------|
-| 1-3  | **Structural** | Duplicated logic, responsibility at wrong level, inconsistent patterns |
-| 4-5  | **Exhaustive matching** | `_ =>` catch-all arms that should list variants explicitly |
-| 6    | **Dead code** | `#[allow(dead_code)]` items, stale TODO references to closed tickets |
-| 7    | **Lint hygiene** | `#[allow(...)]` → `#[expect(...)]`, missing `// SAFETY:` on unsafe |
-| 8    | **Unwrap hardening** | Bare `.unwrap()` → `.expect("context")` or proper error handling |
-| 9    | **Magic numbers** | Bare numeric constants that should be named constants |
-| 10   | **Large function splitting** | Functions >150 lines that do multiple distinct things |
-| 11-12| **Visibility tightening** | `pub` items that should be `pub(crate)` or `pub(super)` |
-| 13   | **Let-else modernization** | `if let` with early return/continue/break → `let else` |
-| 14   | **Module organization** | Files >600 lines that should be split into submodules |
-| 15   | **Clone/allocation reduction** | Unnecessary `.clone()`, `String` params → `&str`, `Vec<T>` → `&[T]` |
-| 16   | **Iterator modernization** | Manual loops → iterator combinators, for+push → map+collect |
+Categories are selected randomly but **skip exhausted categories** — those where
+previous scans consistently found nothing actionable. This prevents wasting rounds
+on categories the codebase has already been cleaned of.
 
-Record the roll and category in the commit message (e.g.
+**Category pool** (with default weights):
+
+| ID | Weight | Category | What to scan for |
+|----|--------|----------|-----------------|
+| 1  | 3      | **Structural** | Duplicated logic, responsibility at wrong level, inconsistent patterns |
+| 2  | 2      | **Exhaustive matching** | `_ =>` catch-all arms that should list variants explicitly |
+| 3  | 1      | **Dead code** | `#[allow(dead_code)]` items, stale TODO references to closed tickets |
+| 4  | 1      | **Lint hygiene** | `#[allow(...)]` → `#[expect(...)]`, missing `// SAFETY:` on unsafe |
+| 5  | 1      | **Unwrap hardening** | Bare `.unwrap()` → `.expect("context")` or proper error handling |
+| 6  | 1      | **Magic numbers** | Bare numeric constants that should be named constants |
+| 7  | 1      | **Large function splitting** | Functions >150 lines that do multiple distinct things |
+| 8  | 2      | **Visibility tightening** | `pub` items that should be `pub(crate)` or `pub(super)` |
+| 9  | 1      | **Let-else modernization** | `if let` with early return/continue/break → `let else` |
+| 10 | 1      | **Module organization** | Files >600 lines that should be split into submodules |
+| 11 | 1      | **Clone/allocation reduction** | Unnecessary `.clone()`, `String` params → `&str`, `Vec<T>` → `&[T]` |
+| 12 | 1      | **Iterator modernization** | Manual loops → iterator combinators, for+push → map+collect |
+| 13 | 1      | **Debug assertion hardening** | Missing `debug_assert!` for invariants at function boundaries |
+| 14 | 1      | **Error message quality** | Vague error strings → specific context about what failed and why |
+| 15 | 1      | **Type alias introduction** | Complex repeated types → named type aliases |
+| 16 | 1      | **Tracing coverage** | Key functions missing `tracing::debug!` or `#[instrument]` spans |
+| 17 | 1      | **Derive completeness** | Types missing useful derives (`Copy`, `PartialEq`, `Eq`, `Hash`) |
+
+**Selection algorithm:**
+
+1. Build the active pool: all categories NOT in `exhausted_categories`
+2. If the active pool is empty → STOP the hunt (codebase is clean)
+3. Build a weighted list from active categories (repeat each category name by its weight)
+4. Pick randomly: `shuf -e <weighted_list> -n 1`
+5. If the scan finds nothing actionable → increment that category's `skip_streak`
+   in the state file
+6. If `skip_streak >= 3` for a category → move it to `exhausted_categories` with
+   the current commit hash as `exhausted_at_commit`
+7. When a category IS productive (fix applied) → reset its `skip_streak` to 0
+
+### Exhaustion Re-emergence
+
+Exhausted categories automatically re-enter the pool when the codebase has changed
+enough that they might have fresh findings.
+
+**Commit-based re-emergence (checked at session start, Step 1):**
+
+For each exhausted category, check how many in-scope commits have landed since
+it was exhausted:
+
+```bash
+git rev-list --count <exhausted_at_commit>..HEAD -- src/crates/
+```
+
+If the count is **≥30**, un-exhaust the category: remove it from
+`exhausted_categories` and set its `skip_streak` to 0. The rationale: 30+
+commits means significant new code that may have introduced new instances of
+the pattern this category targets.
+
+**Periodic probe (every 10th round):**
+
+On rounds where `round % 10 == 0`, instead of the normal selection:
+1. Pick one random exhausted category (if any exist)
+2. Run its scan commands as a quick probe
+3. If the scan finds ≥1 actionable instance → un-exhaust the category and
+   fix the instance as the round's work
+4. If nothing found → leave it exhausted, record as a skipped probe
+
+This ensures categories don't stay permanently exhausted even if the commit
+threshold hasn't been reached (e.g., many small changes within existing files).
+
+**State file additions:**
+```json
+{
+  "exhausted_categories": [
+    { "name": "exhaustive-match", "exhausted_at_commit": "abc123", "exhausted_at_round": 45 },
+    { "name": "magic-numbers", "exhausted_at_commit": "def456", "exhausted_at_round": 92 }
+  ],
+  "category_skip_streaks": {
+    "let-else": 2,
+    "module-org": 1
+  }
+}
+```
+
+**Seeding from journal:** At session start (Step 1), read the journal for lines
+containing `*Exhausted*` or `*exhausted*` and pre-populate `exhausted_categories`.
+Use `HEAD` as the `exhausted_at_commit` for journal-seeded entries (they'll
+immediately be eligible for commit-based re-emergence if enough code has changed
+since the journal entry was written).
+
+**Re-roll behavior:** When a scan finds nothing, do NOT re-roll within the same
+round. Instead, increment the skip streak, record the skip, and move to the next
+round. This replaces the old "max 3 re-rolls" behavior — the adaptive system
+handles it across rounds instead of within a single round.
+
+Record the category in the commit message (e.g.
 `tidy(exhaustive-match): replace _ catch-all in type_id_to_cranelift_type`).
 
 ### Category Details
 
-#### Structural (rolls 1-3) — the highest-value category
+#### Structural (category 1) — the highest-value category
 
 These are factoring problems, typically caused by incremental bug fixes adding
 localized edge-case handling instead of fixing the root abstraction.
@@ -295,7 +382,7 @@ When deferring, the ticket description MUST include:
 - Your suggested approach (which pattern to keep, what to extract)
 - Why you deferred (>3 files, signature change needed, not obviously correct, etc.)
 
-#### Exhaustive matching (rolls 4-5)
+#### Exhaustive matching (category 2)
 
 **Scan:**
 ```bash
@@ -329,7 +416,7 @@ rg 'fn \w+\(.*\bbool\b' src/crates/ --type rust -n | head -30
   safely)
 - Bool is a fundamental property (`is_empty`, `contains`) → SKIP
 
-#### Dead code (roll 6)
+#### Dead code (category 3)
 
 **Scan:**
 ```bash
@@ -352,7 +439,7 @@ Pick ONE finding.
 **Max 1 file changed per round for dead code.** Don't cascade into cleaning up
 everything that becomes unused after a deletion.
 
-#### Lint hygiene (roll 7)
+#### Lint hygiene (category 4)
 
 **Scan:**
 ```bash
@@ -387,7 +474,7 @@ do them one at a time with grep.
 
 **Max 5 allow→expect conversions per round** (batch small changes in one commit).
 
-#### Unwrap hardening (roll 8)
+#### Unwrap hardening (category 5)
 
 **Scan:**
 ```bash
@@ -432,7 +519,7 @@ rg 'if let Some\(' src/crates/ --type rust -n -A3 | head -50
 
 **Max 1 file per round.**
 
-#### Magic numbers (roll 9)
+#### Magic numbers (category 6)
 
 **Scan:**
 ```bash
@@ -463,7 +550,7 @@ all sites across the codebase. This is a mechanical replacement — the file lim
 exception in Hard Rule 1 applies. Verify each replacement site actually means
 the same thing (e.g., `8` as "word size" vs `8` as "array capacity").
 
-#### Large function splitting (roll 10)
+#### Large function splitting (category 7)
 
 **Scan:** Find the longest functions in codegen and sema.
 
@@ -492,7 +579,7 @@ file in the same module is allowed if the extracted code is >80 lines and
 forms a coherent unit (e.g., a phase of compilation). Register the new file
 in the parent `mod.rs`.
 
-#### Visibility tightening (rolls 11-12)
+#### Visibility tightening (category 8)
 
 **Scan:**
 ```bash
@@ -523,7 +610,7 @@ immediately after each change — if anything breaks, the item IS used externall
 **Max 5 files changed** (the definition + up to 4 files with `use` statements
 that need updating).
 
-#### Let-else modernization (roll 13)
+#### Let-else modernization (category 9)
 
 **Scan:**
 ```bash
@@ -548,7 +635,7 @@ Pick ONE file with the most `if let` + early-exit patterns.
 
 **Max 1 file per round. Max 5 conversions per file.**
 
-#### Module organization (roll 14)
+#### Module organization (category 10)
 
 **Scan:**
 ```bash
@@ -576,7 +663,7 @@ after creating the file and updating `mod.rs`.
 
 **Max 2 files created per round.** The source file + 1 new file (+ mod.rs update).
 
-#### Clone/allocation reduction (roll 15)
+#### Clone/allocation reduction (category 11)
 
 **Scan:**
 ```bash
@@ -613,7 +700,7 @@ Pick ONE instance.
 
 **Max 1 file per round for clone removal. Max 3 files for param changes.**
 
-#### Iterator modernization (roll 16)
+#### Iterator modernization (category 12)
 
 **Scan:**
 ```bash
@@ -641,6 +728,161 @@ Pick ONE instance.
 
 **Max 1 file per round. Max 3 conversions per file.**
 
+#### Debug assertion hardening (category 13)
+
+**Scan:**
+```bash
+# Find functions that index into vectors/slices without bounds checks
+rg '\[\w+\s*(as usize)?\]' src/crates/vole-codegen/src/ --type rust -n | grep -v 'test' | head -30
+# Find unsafe blocks without debug_assert! nearby
+rg -U 'unsafe \{' src/crates/ --type rust -n -B3 -A5 | grep -v 'debug_assert' | head -50
+# Find functions with precondition comments but no assertions
+rg '// (Precondition|Invariant|Assumes|Must be)' src/crates/ --type rust -n | head -20
+# Find transmute/pointer casts without assertions
+rg 'transmute|as \*const|as \*mut' src/crates/ --type rust -n | grep -v 'test' | head -20
+```
+
+Pick ONE function with an implicit invariant that should be asserted.
+
+**Decision rule:**
+- Function has a comment like "x must be non-null" or "index must be in range"
+  but no `debug_assert!` → FIX: add `debug_assert!` with a descriptive message
+- Unsafe block assumes alignment/size/non-null but doesn't assert it → FIX: add
+  `debug_assert!` before the unsafe block
+- Index access on a slice/vec where the index comes from an external parameter
+  → FIX: add `debug_assert!(idx < slice.len(), "context")`
+- The invariant is already enforced by the type system (e.g., `NonZero`) → SKIP
+- The assertion would be in a hot loop (per-instruction, per-iteration) → SKIP
+  (debug assertions are free in release but slow in debug builds)
+- The invariant is trivially obvious from the surrounding code → SKIP
+
+**Max 3 assertions per file per round.**
+
+#### Error message quality (category 14)
+
+**Scan:**
+```bash
+# Find vague error messages
+rg '"internal error"|"failed"|"unexpected"|"invalid"' src/crates/ --type rust -n | grep -v 'test' | head -30
+# Find bare format! errors without context
+rg 'format!\("[^"]{1,20}"\)' src/crates/ --type rust -n | head -20
+# Find .expect() with generic messages
+rg '\.expect\("[^"]{1,15}"\)' src/crates/ --type rust -n | grep -v 'test' | head -30
+# Find error messages that don't mention what was expected vs found
+rg 'CodegenError::internal\(' src/crates/vole-codegen/ --type rust -n | head -20
+```
+
+Pick ONE error message that lacks context.
+
+**Decision rule:**
+- Error says `"internal error"` or `"unexpected X"` without what X was or where
+  → FIX: add the specific value/type/name that was unexpected. Use `format!`
+  with the relevant variable.
+- `.expect("should exist")` where the key/name being looked up is available
+  → FIX: change to `.expect("context: {key} should exist")` or use
+  `unwrap_or_else` with a formatted message
+- Error message is correct but could include the source location (file:line of
+  the Vole source being compiled) → FIX: if a `Span` or file path is available
+  in scope, include it
+- Error is in a code path that genuinely should never be reached (compiler bug)
+  → SKIP (vague is fine for ICEs, the backtrace matters more)
+- Error is user-facing (sema diagnostics) → SKIP (those have their own error
+  code system and are handled separately)
+
+**Max 1 file per round. Max 5 messages improved per file.**
+
+#### Type alias introduction (category 15)
+
+**Scan:**
+```bash
+# Find complex generic types repeated in function signatures
+rg 'FxHashMap<\w+,\s*(Vec|FxHashMap|Option)<' src/crates/ --type rust -n | head -20
+# Find long tuple types
+rg '\((\w+,\s*){3,}' src/crates/ --type rust -n | head -20
+# Find repeated complex return types
+rg '-> (Result|Option)<.*<.*>>' src/crates/ --type rust -n | head -20
+# Find identical type annotations appearing 3+ times
+rg 'Vec<\(\w+, \w+\)>' src/crates/ --type rust -n | head -20
+```
+
+Pick ONE complex type that appears 3+ times.
+
+**Decision rule:**
+- Same complex type (`FxHashMap<NameId, Vec<TypeDefId>>`) appears in 3+ function
+  signatures in the same file → FIX: add a `type` alias at the top of the file
+  (or in the module's types section), replace all occurrences
+- Same complex type appears across 2-3 files in the same crate → FIX: add the
+  alias in the crate's `lib.rs` or a shared `types.rs`, replace all occurrences
+- Type appears only 1-2 times → SKIP (alias adds indirection without benefit)
+- Type is already short enough to read (`Vec<TypeId>`, `Option<NameId>`) → SKIP
+- Type is part of a public API → DEFER (alias changes the documented type)
+
+**Max 1 alias per round. Max 5 files changed (definition + replacements).**
+
+#### Tracing coverage (category 16)
+
+**Scan:**
+```bash
+# Find pub functions in codegen/sema without tracing
+rg '^\s*pub(\(crate\))?\s+fn \w+' src/crates/vole-codegen/src/compiler/ --type rust -n | head -20
+rg '^\s*pub(\(crate\))?\s+fn \w+' src/crates/vole-sema/src/lowering/ --type rust -n | head -20
+# Check which already have tracing
+rg 'tracing::(debug|info|trace|instrument)' src/crates/vole-codegen/src/compiler/ --type rust -c | sort -t: -k2 -rn
+rg 'tracing::(debug|info|trace|instrument)' src/crates/vole-sema/src/lowering/ --type rust -c | sort -t: -k2 -rn
+# Find files with zero tracing
+rg -L 'tracing::' src/crates/vole-codegen/src/ --type rust | head -10
+rg -L 'tracing::' src/crates/vole-sema/src/ --type rust | head -10
+```
+
+Pick ONE file or function that would benefit from tracing.
+
+**Decision rule:**
+- Public entry point function (e.g., `compile_program`, `analyze`, `lower_to_vir`)
+  with no tracing → FIX: add `tracing::debug!` at entry with key parameters
+- Function that dispatches to multiple sub-functions (e.g., `compile_expr`,
+  `compile_stmt`) → FIX: add `tracing::debug!` with the variant being dispatched
+- Function called once during compilation with no tracing → FIX: add entry-level
+  `tracing::debug!` showing what's being processed
+- Hot inner loop (called per-expression, per-instruction) → SKIP (too noisy,
+  use `tracing::trace!` only if there's a known debugging need)
+- Function already has adequate tracing → SKIP
+- Test-only or trivial accessor function → SKIP
+
+**Max 1 file per round. Max 5 tracing additions per file.** Always use
+`tracing::debug!` unless the function is extremely high-frequency (use `trace!`).
+
+#### Derive completeness (category 17)
+
+**Scan:**
+```bash
+# Find types with Clone but not Copy where all fields are Copy
+rg '#\[derive\(.*Clone(?!.*Copy)' src/crates/ --type rust -n | head -20
+# Find types used in HashMaps/HashSets but missing Hash
+rg 'HashMap<\w+' src/crates/ --type rust -n | head -20
+# Find enum/struct without Debug
+rg '^pub (enum|struct) \w+' src/crates/ --type rust -n -B2 | grep -v 'Debug' | head -20
+# Find types with PartialEq but not Eq (usually should have both)
+rg '#\[derive\(.*PartialEq(?!.*\bEq\b)' src/crates/ --type rust -n | head -20
+```
+
+Pick ONE type with a missing derive.
+
+**Decision rule:**
+- Type has `Clone` but not `Copy`, and ALL fields are `Copy` types → FIX: add
+  `Copy` to the derive list (like we did for `CallableKey`)
+- Type has `PartialEq` but not `Eq`, and the type has no floating-point fields
+  → FIX: add `Eq`
+- Type is used as a `HashMap`/`HashSet` key but doesn't derive `Hash` → FIX:
+  add `Hash` (only if all fields implement `Hash`)
+- Type is missing `Debug` → FIX: add `Debug` (almost all types should have it)
+- Type has `Clone` but one or more fields are not `Copy` → SKIP (can't add Copy)
+- Type intentionally omits a derive (e.g., `Eq` omitted because of `f64` field)
+  → SKIP
+- Adding the derive would require adding it to a dependency type first → DEFER
+
+**Max 1 type per round.** Always run `just check` after adding a derive — if it
+fails, the type's fields don't support it. Revert and pick another.
+
 ## Workflow Per Iteration
 
 Read `.claude/tidy-hunt-state.json`. Based on state, perform the **first applicable
@@ -651,25 +893,59 @@ step**, then update state and finish.
 - **Read `.claude/tidy-hunt-journal.md`** to load lessons from previous runs
 - If stale state exists from a previous session, delete it and start fresh
 - **Preflight check**: run `just check` to verify the repo compiles
-- Create a single epic for all tidy-hunt tickets:
+- **Seed exhausted categories** from the journal: scan for lines containing
+  `*Exhausted*` or `*exhausted*` and extract the category names. Initialize
+  `exhausted_categories` with these, using `HEAD` as `exhausted_at_commit`.
+- **Run re-emergence checks** on all seeded exhausted categories:
+  ```bash
+  git rev-list --count <exhausted_at_commit>..HEAD -- src/crates/
+  ```
+  If ≥30 commits since exhaustion → remove from `exhausted_categories` (the
+  codebase has changed enough that the category may have fresh findings).
+- Create a single epic for all tidy-hunt tickets (if no epic exists):
   ```bash
   tk create "EPIC: tidy-hunt code quality improvements" \
     -d "Refactorings identified by the tidy-hunt automated loop that require human judgment or are too large for autonomous application." \
     -t epic -p 3 --tags cleanup,refactoring
   ```
-- Write initial state with `round: 1`, the epic ID, empty arrays
+- Write initial state with `round: 1`, the epic ID, surviving `exhausted_categories`,
+  empty `category_skip_streaks`, and empty arrays for completed/deferred/history
 
 ### Step 2 — Pick and Scan
 
-1. Roll for category: `shuf -i 1-16 -n 1`
-2. Run the scan commands for that category
-3. Rank findings by impact:
+1. **Check for periodic probe** (every 10th round):
+   - If `round % 10 == 0` AND `exhausted_categories` is non-empty:
+     - Pick one random exhausted category: `shuf -e <exhausted_names> -n 1`
+     - Run its scan commands as a probe
+     - If ≥1 actionable instance found → un-exhaust the category (remove from
+       `exhausted_categories`, reset its `skip_streak` to 0) and proceed to
+       Step 3 with this finding
+     - If nothing found → record as a skipped probe in `skipped_scans`, increment
+       `round`, and proceed to next iteration (this round is consumed by the probe)
+
+2. **Select category adaptively** (normal rounds):
+   - Build the active category list by removing `exhausted_categories` from the pool
+   - If no active categories remain → STOP the hunt
+   - Build a weighted pick list: repeat each active category name by its weight
+     (structural×3, exhaustive-match×2, visibility-tightening×2, all others×1)
+   - Use `shuf` to pick one randomly from the weighted list
+   - Example: if structural, lint-hygiene, and clone-reduction are active:
+     `shuf -e structural structural structural lint-hygiene clone-reduction -n 1`
+
+3. Run the scan commands for the selected category
+
+4. Rank findings by impact:
    - Files with most recent git churn (most likely to have accumulated debt)
    - Larger instances over smaller ones
    - Codegen and sema over frontend and identity (higher bug risk)
-4. Pick ONE opportunity — the highest-impact, cleanest fix
-5. If the scan finds nothing actionable for this category, record in
-   `skipped_scans` and re-roll (max 3 re-rolls, then stop iteration)
+
+5. Pick ONE opportunity — the highest-impact, cleanest fix
+
+6. If the scan finds nothing actionable:
+   - Increment `category_skip_streaks[category]` (default 0 → 1)
+   - If streak reaches 3 → move category to `exhausted_categories` with
+     current `HEAD` as `exhausted_at_commit`, remove from streaks
+   - Record in `skipped_scans` and move to the next round (NO re-rolls within a round)
 
 ### Step 3 — Fix
 
@@ -746,17 +1022,22 @@ it will not finish. The fix was too complex — revert and defer to a ticket.
 
 1. Record the outcome in `completed` or `deferred`
 2. Add to `history`
-3. Update journal with any learnings
-4. Increment `round`
-5. If `round > max_rounds`: output `<promise>TIDY_HUNT_DONE</promise>`
-6. Otherwise: done for this iteration (ralph-loop will invoke next)
+3. **Update skip streaks:**
+   - If the round produced a fix → reset `category_skip_streaks[category]` to 0
+   - If the round was skipped → streak was already incremented in Step 2
+   - If a category's streak reached 3 → it was already moved to `exhausted_categories`
+4. Update journal with any learnings
+5. Increment `round`
+6. If `round > max_rounds`: output `<promise>TIDY_HUNT_DONE</promise>`
+7. Otherwise: done for this iteration (ralph-loop will invoke next)
 
 ## Stopping Conditions
 
 The loop stops when ANY of these are true:
 - `round > max_rounds` (hard limit)
-- 3 consecutive re-rolls find nothing (codebase is clean for scanned categories)
+- All categories are exhausted (no active categories remain)
 - Sub-agent reverts twice in a row (changes are getting risky)
+- 3 consecutive rounds produce only skips (even with adaptive selection)
 
 On stop, output `<promise>TIDY_HUNT_DONE</promise>`.
 
