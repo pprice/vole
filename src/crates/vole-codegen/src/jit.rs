@@ -52,6 +52,11 @@ impl CompiledModules {
         module_paths: Vec<String>,
         dispatch_table: Option<Arc<lazy::LazyDispatchTable>>,
     ) -> CodegenResult<Self> {
+        tracing::debug!(
+            num_modules = module_paths.len(),
+            has_dispatch_table = dispatch_table.is_some(),
+            "creating compiled module cache"
+        );
         // Finalize to get function pointers
         jit.finalize()?;
 
@@ -87,6 +92,10 @@ impl CompiledModules {
         module_paths: Vec<String>,
         dispatch_table: Option<Arc<lazy::LazyDispatchTable>>,
     ) -> CodegenResult<()> {
+        tracing::debug!(
+            num_new_modules = module_paths.len(),
+            "extending compiled module cache"
+        );
         // Finalize to get function pointers
         jit.finalize()?;
 
@@ -260,6 +269,12 @@ impl JitContext {
         precompiled: Option<&FxHashMap<String, *const u8>>,
         options: JitOptions,
     ) -> Self {
+        tracing::debug!(
+            release = options.release,
+            lazy = options.lazy_modules,
+            has_precompiled = precompiled.is_some(),
+            "creating JIT context"
+        );
         // Build JIT module with native ISA
         let mut flag_builder = settings::builder();
         flag_builder
@@ -455,6 +470,7 @@ impl JitContext {
 
     /// Define a function (after building IR)
     pub fn define_function(&mut self, func_id: FuncId) -> CodegenResult<()> {
+        tracing::debug!(?func_id, "defining function");
         // Run CFG cleanup to eliminate trampoline blocks before Cranelift compilation
         crate::control_flow::cleanup_cfg(&mut self.ctx.func);
 
@@ -529,6 +545,11 @@ impl JitContext {
     /// Finalize all functions and get code pointers
     /// Returns Ok(()) on success, Err on finalization failure (safe to ignore)
     pub fn finalize(&mut self) -> CodegenResult<()> {
+        tracing::debug!(
+            num_functions = self.func_ids.len(),
+            num_defined = self.defined_func_ids.len(),
+            "finalizing JIT context"
+        );
         self.module.finalize_definitions().map_err(|e| {
             CodegenError::internal_with_context("finalization error", format!("{:?}", e))
         })?;
