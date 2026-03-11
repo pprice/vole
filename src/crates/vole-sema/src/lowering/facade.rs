@@ -538,7 +538,7 @@ where
         type_arena,
     );
 
-    let generic_func_asts = build_generic_func_map(
+    let _generic_func_asts = build_generic_func_map(
         program,
         interner,
         names,
@@ -547,19 +547,9 @@ where
         module_id,
     );
     lower_monomorphized_instances(LowerMonomorphizedInstancesArgs {
-        generic_func_asts: &generic_func_asts,
-        module_programs: &mut module_programs,
         names,
         entities,
-        type_arena,
-        node_map,
-        modules_with_errors,
-        interner,
-        vir_functions: &mut vir_functions,
-        type_table,
         vir_handled_function_ids: &vir_handled_function_ids,
-        cross_module: &cross_module_ctx,
-        implements,
     });
 
     // -----------------------------------------------------------------------

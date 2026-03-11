@@ -1,92 +1,30 @@
 use std::collections::HashSet;
-use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
 use crate::LoweringEntityLookup;
-use crate::generic::MonomorphInstance;
-use crate::implement_registry::ImplementRegistry;
-use crate::vir_lower::{CrossModuleCtx, lower_monomorphized_function};
-use crate::{NodeMap, TypeArena};
+use crate::NodeMap;
 use vole_frontend::ast::{FuncBody, Stmt};
 use vole_frontend::{Decl, FuncDecl, Interner, Program};
 use vole_identity::{FunctionId, ModuleId, NameId, NameTable, NamerLookup, NodeId, Span};
-use vole_vir::VirFunction;
-use vole_vir::type_table::VirTypeTable;
 
-pub struct LowerMonomorphizedInstancesArgs<'a, 'decl> {
-    pub generic_func_asts: &'a FxHashMap<NameId, &'decl FuncDecl>,
-    pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
+pub struct LowerMonomorphizedInstancesArgs<'a> {
     pub names: &'a NameTable,
     pub entities: &'a dyn LoweringEntityLookup,
-    pub type_arena: &'a TypeArena,
-    pub node_map: &'a NodeMap,
-    pub modules_with_errors: &'a HashSet<String>,
-    pub interner: &'a mut Interner,
-    pub vir_functions: &'a mut Vec<VirFunction>,
-    pub type_table: &'a mut VirTypeTable,
     pub vir_handled_function_ids: &'a HashSet<FunctionId>,
-    pub cross_module: &'a CrossModuleCtx,
-    pub implements: &'a ImplementRegistry,
 }
 
-struct LowerSingleMonomorphArgs<'a> {
-    func: &'a FuncDecl,
-    instance: &'a MonomorphInstance,
-    names: &'a NameTable,
-    entities: &'a dyn LoweringEntityLookup,
-    type_arena: &'a TypeArena,
-    node_map: &'a NodeMap,
-    interner: &'a mut Interner,
-    vir_functions: &'a mut Vec<VirFunction>,
-    type_table: &'a mut VirTypeTable,
-    cross_module: &'a CrossModuleCtx,
-    implements: &'a ImplementRegistry,
-}
-
-struct LowerModuleMonomorphArgs<'a> {
-    instance: &'a MonomorphInstance,
-    module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
-    names: &'a NameTable,
-    entities: &'a dyn LoweringEntityLookup,
-    type_arena: &'a TypeArena,
-    node_map: &'a NodeMap,
-    modules_with_errors: &'a HashSet<String>,
-    vir_functions: &'a mut Vec<VirFunction>,
-    type_table: &'a mut VirTypeTable,
-    cross_module: &'a CrossModuleCtx,
-    implements: &'a ImplementRegistry,
-}
-
-/// AST-based fallback for monomorphized instances not handled by VIR monomorph.
+/// Asserts that all monomorphized instances were handled by VIR monomorph.
 ///
-/// For each concrete instance in the monomorph cache, finds the generic
-/// function's AST in the main program (`generic_func_asts`) or in module
-/// programs and lowers it with the substituted (concrete) param and return
-/// types from the instance's `func_type`.
-///
-/// Instances whose `original_name` resolves to a `FunctionId` in
-/// `vir_handled_function_ids` are skipped -- those were already produced
-/// by the VIR monomorphization pass. The remaining instances (e.g.,
-/// module-originating generics without VIR templates) are lowered here.
-///
-/// Debug-asserts that no `TypeId` in the output contains a type parameter.
-pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '_>) {
-    #[allow(unused_variables)] // Fields used only in dead fallback code below panic
+/// For each concrete instance in the monomorph cache, checks that it was either
+/// handled by VIR monomorphization or is an external function (intrinsic).
+/// Panics if any instance was missed — this proves the AST fallback path is
+/// dead.
+pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_>) {
     let LowerMonomorphizedInstancesArgs {
-        generic_func_asts,
-        module_programs,
         names,
         entities,
-        type_arena,
-        node_map,
-        modules_with_errors,
-        interner,
-        vir_functions,
-        type_table,
         vir_handled_function_ids,
-        cross_module,
-        implements,
     } = args;
 
     // Iterate all monomorphized instances in the cache
@@ -120,199 +58,7 @@ pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '
              func={func_name}, module={module_path}. \
              All generic functions should have VIR templates."
         );
-
-        // Dead code below — kept temporarily until vol-y5kp deletes
-        // the entire fallback path. The panic above proves this is
-        // unreachable; these allow-attributes suppress warnings until
-        // deletion.
-        #[allow(unreachable_code, unused_variables)]
-        if let Some(func) = generic_func_asts.get(&instance.original_name) {
-            // Found in the main program — lower with the main interner
-            let func_name = names.display(instance.original_name);
-            let module_id = names.module_of(instance.original_name);
-            let module_path = names.module_path(module_id);
-            tracing::warn!(
-                func_name,
-                module_path,
-                origin = "main",
-                "AST fallback monomorph (no VIR template)"
-            );
-            lower_single_monomorph(LowerSingleMonomorphArgs {
-                func,
-                instance: &instance,
-                names,
-                entities,
-                type_arena,
-                node_map,
-                interner,
-                vir_functions,
-                type_table,
-                cross_module,
-                implements,
-            });
-            continue;
-        }
-
-        // Not in the main program — search module programs
-        let func_name = names.display(instance.original_name);
-        let module_id = names.module_of(instance.original_name);
-        let module_path = names.module_path(module_id);
-        tracing::warn!(
-            func_name,
-            module_path,
-            origin = "module",
-            "AST fallback monomorph (no VIR template)"
-        );
-        lower_module_monomorph(LowerModuleMonomorphArgs {
-            instance: &instance,
-            module_programs,
-            names,
-            entities,
-            type_arena,
-            node_map,
-            modules_with_errors,
-            vir_functions,
-            type_table,
-            cross_module,
-            implements,
-        });
     }
-}
-
-/// Lower a single monomorphized instance whose AST is in the main program.
-fn lower_single_monomorph(args: LowerSingleMonomorphArgs<'_>) {
-    let LowerSingleMonomorphArgs {
-        func,
-        instance,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        interner,
-        vir_functions,
-        type_table,
-        cross_module,
-        implements,
-    } = args;
-
-    let Some(func_id) = entities.function_by_name(instance.original_name) else {
-        return;
-    };
-    let param_types: Vec<_> = func
-        .params
-        .iter()
-        .zip(instance.func_type.params_id.iter())
-        .map(|(p, &ty)| (p.name, ty))
-        .collect();
-    let mangled_name = names.display(instance.mangled_name);
-    let module_id = names.module_of(instance.original_name);
-    let vir = lower_monomorphized_function(
-        func,
-        func_id,
-        mangled_name,
-        &param_types,
-        instance.func_type.return_type_id,
-        node_map,
-        type_arena,
-        instance.mangled_name,
-        interner,
-        entities.as_entity_registry(),
-        names,
-        type_table,
-        module_id,
-        cross_module,
-        implements,
-    );
-    vir_functions.push(vir);
-}
-
-/// Lower a single monomorphized instance whose AST originates from a module.
-///
-/// Resolves the module from `instance.original_name`, finds the generic
-/// function AST in that module's program, and lowers it with the module's
-/// interner. Skips lowering if sema never analyzed the function body (i.e.,
-/// the NodeMap has no entries for body nodes) — codegen falls back to the
-/// AST path for those instances.
-fn lower_module_monomorph(args: LowerModuleMonomorphArgs<'_>) {
-    let LowerModuleMonomorphArgs {
-        instance,
-        module_programs,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        modules_with_errors,
-        vir_functions,
-        type_table,
-        cross_module,
-        implements,
-    } = args;
-
-    let Some(func_id) = entities.function_by_name(instance.original_name) else {
-        return;
-    };
-    let module_id = names.module_of(instance.original_name);
-    let module_path = names.module_path(module_id).to_string();
-    if modules_with_errors.contains(&module_path) {
-        return;
-    }
-    let Some((module_program, module_interner)) = module_programs.get_mut(&module_path) else {
-        return;
-    };
-    let interner = Rc::make_mut(module_interner);
-
-    // Find the generic function in the module by checking all function decls
-    let func = module_program.declarations.iter().find_map(|decl| {
-        let Decl::Function(func) = decl else {
-            return None;
-        };
-        if func.type_params.is_empty() {
-            return None;
-        }
-        let namer = NamerLookup::new(names, interner);
-        let name_id = namer.function(module_id, func.name)?;
-        if name_id == instance.original_name {
-            Some(func)
-        } else {
-            None
-        }
-    });
-
-    let Some(func) = func else { return };
-
-    // Check if sema analyzed this function's body. Generic function bodies
-    // are skipped during initial module analysis and only analyzed later
-    // during `analyze_monomorph_bodies`. If the body was never analyzed,
-    // the NodeMap won't have entries and VIR lowering would panic.
-    if !body_has_sema_data(&func.body, node_map) {
-        return;
-    }
-
-    let param_types: Vec<_> = func
-        .params
-        .iter()
-        .zip(instance.func_type.params_id.iter())
-        .map(|(p, &ty)| (p.name, ty))
-        .collect();
-    let mangled_name = names.display(instance.mangled_name);
-    let vir = lower_monomorphized_function(
-        func,
-        func_id,
-        mangled_name,
-        &param_types,
-        instance.func_type.return_type_id,
-        node_map,
-        type_arena,
-        instance.mangled_name,
-        interner,
-        entities.as_entity_registry(),
-        names,
-        type_table,
-        module_id,
-        cross_module,
-        implements,
-    );
-    vir_functions.push(vir);
 }
 
 /// Check whether sema has analyzed a function body by probing for NodeMap
