@@ -958,7 +958,11 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         module_module_bindings: vir_module_module_bindings,
         module_constants,
         module_exports,
-        vir_monomorph_base: usize::MAX,
+        vir_monomorph_base: early_instance_index
+            .values()
+            .copied()
+            .min()
+            .unwrap_or(usize::MAX),
         vir_instance_index: early_instance_index,
         entity_metadata,
         implement_dispatch: module_implement_dispatch,

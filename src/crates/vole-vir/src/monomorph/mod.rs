@@ -14,7 +14,7 @@ pub use fixpoint::{MonomorphInstance, MonomorphResult, monomorphize, monomorphiz
 pub use instance::{VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo};
 pub use rederive::{
     RederiveCallCtx, classify_capture_rc_kind, classify_rc_cleanup, rederive_decisions,
-    rederive_decisions_with_calls,
+    rederive_decisions_with_calls, rederive_monomorphized_calls,
 };
 pub use resolve::{InstanceIndex, resolve_all_calls, resolve_generic_calls};
 pub use rewrite::{RewriteCtx, rewrite_function};

@@ -1,0 +1,91 @@
+// Test: rederive call resolution for closure-related call targets in generic functions.
+// Exercises local closures (vol-fcjs), captured closures (vol-dl7p),
+// global closures (vol-xttf), and functional interfaces (vol-tdf7).
+
+// --- Global closure (vol-xttf) ---
+let global_double = (x: i64) -> i64 => x * 2
+
+func use_global_closure<T>(t: T) -> i64 {
+    // global_double is a module-level let-bound lambda.
+    // rederive should resolve this to global_closure().
+    return global_double(21)
+}
+
+// --- Functional interface (vol-tdf7) ---
+interface Mapper {
+    func apply(x: i64) -> i64
+}
+
+let global_mapper: Mapper = (x: i64) -> i64 => x + 10
+
+func use_global_functional_interface<T>(t: T) -> i64 {
+    // global_mapper is a module-level functional interface variable.
+    // rederive should resolve this to global_closure() (or functional_interface()).
+    return global_mapper(32)
+}
+
+func use_local_functional_interface<T>(t: T) -> i64 {
+    // Local let-bound functional interface variable.
+    // rederive should resolve to functional_interface().
+    let m: Mapper = (x: i64) -> i64 => x * 3
+    return m(14)
+}
+
+// --- Local closure (vol-fcjs) ---
+func use_local_closure<T>(t: T) -> i64 {
+    // Let-bound lambda — rederive should resolve to closure_var().
+    let add_five = (x: i64) -> i64 => x + 5
+    return add_five(37)
+}
+
+// --- Captured closure (vol-dl7p) ---
+func use_captured_closure<T>(t: T) -> i64 {
+    let multiplier = (x: i64) -> i64 => x * 2
+    // wrapper captures multiplier from outer scope.
+    let wrapper = (n: i64) -> i64 => {
+        return multiplier(n)
+    }
+    return wrapper(21)
+}
+
+// --- Param closure (already works) ---
+func use_param_closure<T>(x: T, f: (T) -> T) -> T {
+    return f(f(x))
+}
+
+// --- Functional interface as param (vol-tdf7) ---
+func use_param_functional_interface<T>(t: T, m: Mapper) -> i64 {
+    // m is a functional interface parameter.
+    // rederive should resolve to functional_interface() instead of closure_var().
+    return m(7)
+}
+
+tests "rederive closure call resolution" {
+    test "global closure in generic" {
+        assert(use_global_closure(0) == 42)
+        assert(use_global_closure("hi") == 42)
+    }
+
+    test "global functional interface in generic" {
+        assert(use_global_functional_interface(0) == 42)
+    }
+
+    test "local functional interface in generic" {
+        assert(use_local_functional_interface(0) == 42)
+    }
+
+    test "local closure in generic" {
+        assert(use_local_closure(0) == 42)
+        assert(use_local_closure(true) == 42)
+    }
+
+    test "param closure in generic" {
+        let double = (x: i64) => x * 2
+        assert(use_param_closure(5, double) == 20)
+    }
+
+    test "param functional interface in generic" {
+        let tripler: Mapper = (x: i64) -> i64 => x * 3
+        assert(use_param_functional_interface(0, tripler) == 21)
+    }
+}

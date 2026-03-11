@@ -6,6 +6,8 @@
 // Each generic call creates a new monomorphization instance (function_id +
 // concrete type_args).  The loop runs until no new instances are discovered.
 
+use std::cell::RefCell;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{FunctionId, VirTypeId};
 
@@ -157,6 +159,7 @@ fn monomorphize_one(instance: &MonomorphInstance, program: &mut VirProgram) -> O
             .iter()
             .map(|&(sym, _, vir_ty)| (sym, vir_ty))
             .collect(),
+        local_vars: RefCell::new(FxHashMap::default()),
     };
     rederive_decisions_with_calls(
         &mut concrete,

@@ -8,7 +8,9 @@
 // This pass walks the VIR tree and re-derives those decisions from the
 // now-concrete types.
 
-use rustc_hash::FxHashSet;
+use std::cell::RefCell;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{
     Interner, ModuleId, NameTable, StringConversion, Symbol, UnionStorageKind, VirTypeId,
 };
@@ -47,6 +49,10 @@ pub struct RederiveCallCtx<'a> {
     /// Function parameter names and VIR types from the monomorphized function.
     /// Used to detect closure variable calls (callee matches a function-typed param).
     pub params: Vec<(Symbol, VirTypeId)>,
+    /// Local variables with function types, accumulated during rederive walk.
+    /// Used to detect closure variable calls for let-bound lambdas.
+    /// Interior mutability allows population during the immutable walk.
+    pub local_vars: RefCell<FxHashMap<Symbol, VirTypeId>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +92,51 @@ pub fn rederive_decisions_with_calls(
     call_ctx: &RederiveCallCtx<'_>,
 ) {
     rederive_decisions_inner(func, table, entities, Some(call_ctx));
+}
+
+/// Re-rederive call targets on VIR-monomorphized functions in a program.
+///
+/// The early VIR monomorph pass runs with a temporary empty interner, which
+/// prevents `rederive_call_target` from resolving Unresolved calls.  This
+/// function re-runs call reclassification on monomorphized functions
+/// (those at indices `>= vir_monomorph_base`) using the program's real
+/// interner and name_table.
+///
+/// Should be called after the program's interner and name_table have been
+/// populated (i.e., after `lower_vir_program` returns and the CLI sets them).
+pub fn rederive_monomorphized_calls(program: &mut crate::program::VirProgram) {
+    let base = program.vir_monomorph_base;
+    if base == usize::MAX || base >= program.functions.len() {
+        return;
+    }
+
+    // Temporarily take the functions vec to avoid borrow-checker conflicts
+    // between &mut func and shared refs to other program fields.
+    let mut functions = std::mem::take(&mut program.functions);
+
+    for func in &mut functions[base..] {
+        let module_id = program
+            .entity_metadata
+            .get_function_def(func.id)
+            .map(|def| def.module)
+            .unwrap_or(program.module_id);
+        let call_ctx = RederiveCallCtx {
+            interner: &program.interner,
+            name_table: &program.name_table,
+            module_id,
+            implement_dispatch: &program.implement_dispatch,
+            params: func.params.iter().map(|&(s, _, v)| (s, v)).collect(),
+            local_vars: RefCell::new(FxHashMap::default()),
+        };
+        rederive_decisions_with_calls(
+            func,
+            &program.type_table,
+            &program.entity_metadata,
+            &call_ctx,
+        );
+    }
+
+    program.functions = functions;
 }
 
 fn rederive_decisions_inner(
@@ -367,6 +418,7 @@ fn rederive_expr(
 
         // Lambda — use the lambda's own return type, not the enclosing function's.
         // Also rederive RC kind for each capture.
+        // Save/restore local_vars so lambda-internal lets don't leak to outer scope.
         VirExpr::Lambda {
             body,
             captures,
@@ -377,7 +429,15 @@ fn rederive_expr(
                 .unwrap_function(*vir_ty)
                 .map(|(_, ret)| ret)
                 .unwrap_or(ret_ty);
+            // Snapshot outer locals; lambda body gets its own scope (inheriting
+            // outer bindings for captured closure calls, but any let-bindings
+            // inside the lambda body won't leak out).
+            let saved = call_ctx.map(|ctx| ctx.local_vars.borrow().clone());
             rederive_body(body, table, lambda_ret_ty, entities, call_ctx);
+            if let Some(ctx) = call_ctx
+                && let Some(saved) = saved {
+                    *ctx.local_vars.borrow_mut() = saved;
+                }
             for cap in captures.iter_mut() {
                 cap.rc_kind = classify_capture_rc_kind(cap.vir_ty, table);
             }
@@ -420,14 +480,17 @@ fn rederive_stmt(
 ) {
     match stmt {
         VirStmt::Let {
+            name,
             value,
             vir_ty,
             storage,
             needs_struct_copy,
             ..
         } => {
+            let name = *name;
+            let binding_vir_ty = *vir_ty;
             let init_vir_ty = extract_vir_ty(value);
-            *storage = rederive_let_storage(*vir_ty, init_vir_ty, storage, table);
+            *storage = rederive_let_storage(binding_vir_ty, init_vir_ty, storage, table);
             // Re-derive struct copy flag: after monomorphization a type param
             // may have been substituted with a concrete struct type.
             // Sentinels (Nil, Done, user-defined empties) are stored as
@@ -438,6 +501,12 @@ fn rederive_stmt(
                     !table.is_sentinel(init_vir_ty) && table.is_struct(init_vir_ty);
             }
             rederive_ref(value, table, ret_ty, entities, call_ctx);
+            // Track function-typed let bindings for closure variable resolution.
+            if let Some(ctx) = call_ctx
+                && table.is_function(binding_vir_ty)
+            {
+                ctx.local_vars.borrow_mut().insert(name, binding_vir_ty);
+            }
         }
         VirStmt::LetTuple { pattern, value, .. } => {
             rederive_destructure_pattern(pattern, table, entities);
@@ -572,7 +641,8 @@ fn rederive_pattern(
 /// 1. **Hardcoded intrinsics** (`assert`, `print_char`) by resolving `callee_sym`.
 /// 2. **Direct function calls** via `NameTable` + `VirEntityMetadata` lookup.
 /// 3. **Compiler intrinsics** (`panic`, etc.) via `VirImplementDispatch`.
-/// 4. **Closure variable calls** when the callee matches a function-typed parameter.
+/// 4. **Closure variable calls** when the callee matches a function-typed
+///    parameter or a let-bound local with function type.
 ///
 /// **Not reclassified** (left for codegen's `call_dispatch`):
 /// - Captured closure calls (no capture context available on `VirFunction`)
@@ -638,6 +708,17 @@ fn rederive_call_target(
             };
             return;
         }
+    }
+
+    // 2b. Closure variable call: callee matches a let-bound function-typed local.
+    if let Some(&local_vir_ty) = ctx.local_vars.borrow().get(&callee_sym) {
+        *target = CallTarget::ClosureVariable {
+            var_name: callee_sym,
+            vir_type: local_vir_ty,
+            resolved_call_args: rca,
+            lambda_defaults: ld,
+        };
+        return;
     }
 
     // 3. Direct function call: look up in the name table.
@@ -2352,6 +2433,7 @@ mod tests {
             module_id: vole_identity::ModuleId::new(0),
             implement_dispatch: impl_dispatch,
             params,
+            local_vars: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -2444,6 +2526,41 @@ mod tests {
     }
 
     #[test]
+    fn rederive_unresolved_local_closure_to_closure_variable() {
+        let mut interner = Interner::new();
+        let add_five_sym = interner.intern("add_five");
+        let name_table = vole_identity::NameTable::new();
+
+        let mut table = VirTypeTable::new();
+        let func_ty = table.intern(
+            VirType::Function {
+                params: vec![VirTypeId::I64],
+                ret: VirTypeId::I64,
+            },
+            None,
+        );
+
+        let mut target = unresolved_target(add_five_sym, 38);
+        let entities = empty_entities();
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![]);
+
+        // Simulate a let-bound function-typed local by inserting into local_vars.
+        ctx.local_vars.borrow_mut().insert(add_five_sym, func_ty);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        match &target {
+            CallTarget::ClosureVariable {
+                var_name, vir_type, ..
+            } => {
+                assert_eq!(*var_name, add_five_sym);
+                assert_eq!(*vir_type, func_ty);
+            }
+            other => panic!("expected ClosureVariable, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn rederive_unresolved_non_function_param_stays_unresolved() {
         let mut interner = Interner::new();
         let x_sym = interner.intern("x");
@@ -2515,6 +2632,7 @@ mod tests {
             module_id,
             implement_dispatch: &impl_dispatch,
             params: vec![],
+            local_vars: RefCell::new(FxHashMap::default()),
         };
 
         rederive_call_target(&mut target, &table, &entities, &ctx);

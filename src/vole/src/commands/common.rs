@@ -392,6 +392,11 @@ pub fn build_analyzed_program(
     vir_program.interner = Rc::new(interner);
     vir_program.name_table = Rc::clone(&db.names);
 
+    // Now that the real interner/name_table are set, re-rederive call targets
+    // on VIR-monomorphized functions (the early monomorph pass ran with an
+    // empty interner, so call reclassification was a no-op).
+    vole_vir::rederive_monomorphized_calls(&mut vir_program);
+
     // Inject TypeArena substitution fallback for compound types not yet in VirTypeTable.
     let type_arena = Rc::clone(&db.types);
     let substitute_fallback: Box<vole_vir::SubstituteFallbackFn> =
