@@ -735,6 +735,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR binary operation by delegating to `binary_op()`.
     ///
     /// Delegates to `binary_op()` which handles type promotion and Cranelift emission.
+    #[expect(clippy::too_many_arguments)]
     fn compile_vir_binary_op(
         &mut self,
         op: VirBinOp,

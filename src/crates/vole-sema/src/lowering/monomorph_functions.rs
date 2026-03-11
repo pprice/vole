@@ -72,6 +72,7 @@ struct LowerModuleMonomorphArgs<'a> {
 ///
 /// Debug-asserts that no `TypeId` in the output contains a type parameter.
 pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '_>) {
+    #[allow(unused_variables)] // Fields used only in dead fallback code below panic
     let LowerMonomorphizedInstancesArgs {
         generic_func_asts,
         module_programs,
@@ -108,6 +109,23 @@ pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '
             continue;
         }
 
+        // All monomorphized instances should be handled by VIR monomorph or
+        // skipped as externals above. If we reach here, a generic function
+        // was not lowered to a VIR template — this is a bug.
+        let func_name = names.display(instance.original_name);
+        let module_id = names.module_of(instance.original_name);
+        let module_path = names.module_path(module_id);
+        panic!(
+            "AST fallback reached for monomorphized instance: \
+             func={func_name}, module={module_path}. \
+             All generic functions should have VIR templates."
+        );
+
+        // Dead code below — kept temporarily until vol-y5kp deletes
+        // the entire fallback path. The panic above proves this is
+        // unreachable; these allow-attributes suppress warnings until
+        // deletion.
+        #[allow(unreachable_code, unused_variables)]
         if let Some(func) = generic_func_asts.get(&instance.original_name) {
             // Found in the main program — lower with the main interner
             let func_name = names.display(instance.original_name);

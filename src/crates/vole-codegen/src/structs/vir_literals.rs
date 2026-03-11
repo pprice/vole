@@ -336,6 +336,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// When `coercion_hint` is provided, it is used for the interface boxing
     /// decision instead of querying `vir_query_is_interface_v()`.
+    #[expect(clippy::too_many_arguments)]
     fn compile_class_field_vir(
         &mut self,
         name: Symbol,

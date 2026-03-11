@@ -365,6 +365,7 @@ impl Analyzer {
     }
 
     /// Find a method in a constraint interface for type parameter resolution
+    #[expect(clippy::too_many_arguments)]
     fn find_method_in_constraint_interface(
         &mut self,
         interface_type_id: TypeDefId,
@@ -426,6 +427,7 @@ impl Analyzer {
     }
 
     /// Build the ResolvedMethod::InterfaceMethod for a type parameter constraint
+    #[expect(clippy::too_many_arguments)]
     fn build_interface_method_resolution(
         &mut self,
         interface_type_id: TypeDefId,

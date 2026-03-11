@@ -65,6 +65,7 @@ pub fn lower_global_inits(
 /// Iterates each module's `Decl::Let` declarations and lowers their
 /// initializer expressions. Returns a nested map keyed first by module path,
 /// then by the binding's `Symbol`.
+#[expect(clippy::too_many_arguments)]
 pub fn lower_module_global_inits(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,

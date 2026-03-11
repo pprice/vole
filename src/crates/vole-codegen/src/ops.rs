@@ -199,6 +199,7 @@ impl Cg<'_, '_, '_> {
     /// `lhs_is_unsigned` is a VIR-lowering hint that short-circuits the
     /// `VirTypeId::is_unsigned_int()` check for selecting unsigned
     /// Cranelift instructions (udiv, ushr, unsigned icmp).
+    #[expect(clippy::too_many_arguments)]
     pub fn binary_op(
         &mut self,
         mut left: CompiledValue,
