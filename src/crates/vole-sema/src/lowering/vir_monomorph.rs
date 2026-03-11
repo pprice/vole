@@ -72,6 +72,10 @@ pub fn run_early_vir_monomorphize(
         let template = generic_vir_functions.iter().find(|f| f.id == func_id);
         let Some(template) = template else {
             // No generic VIR template -- can't VIR-monomorphize this one.
+            tracing::warn!(
+                func_id = ?func_id,
+                "VIR template not found for generic instance"
+            );
             continue;
         };
 

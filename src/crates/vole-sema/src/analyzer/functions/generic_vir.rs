@@ -107,6 +107,11 @@ impl Analyzer {
             .iter()
             .any(|tp| tp.constraint.is_some());
         if generic_errors > 0 && !has_constraints {
+            tracing::warn!(
+                func = interner.resolve(func.name),
+                generic_errors,
+                "VIR template skipped: errors in unconstrained generic"
+            );
             return None;
         }
 

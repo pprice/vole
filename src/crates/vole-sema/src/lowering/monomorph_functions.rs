@@ -101,6 +101,15 @@ pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '
 
         if let Some(func) = generic_func_asts.get(&instance.original_name) {
             // Found in the main program — lower with the main interner
+            let func_name = names.display(instance.original_name);
+            let module_id = names.module_of(instance.original_name);
+            let module_path = names.module_path(module_id);
+            tracing::warn!(
+                func_name,
+                module_path,
+                origin = "main",
+                "AST fallback monomorph (no VIR template)"
+            );
             lower_single_monomorph(LowerSingleMonomorphArgs {
                 func,
                 instance: &instance,
@@ -118,6 +127,15 @@ pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '
         }
 
         // Not in the main program — search module programs
+        let func_name = names.display(instance.original_name);
+        let module_id = names.module_of(instance.original_name);
+        let module_path = names.module_path(module_id);
+        tracing::warn!(
+            func_name,
+            module_path,
+            origin = "module",
+            "AST fallback monomorph (no VIR template)"
+        );
         lower_module_monomorph(LowerModuleMonomorphArgs {
             instance: &instance,
             module_programs,
