@@ -160,6 +160,7 @@ fn monomorphize_one(instance: &MonomorphInstance, program: &mut VirProgram) -> O
             .map(|&(sym, _, vir_ty)| (sym, vir_ty))
             .collect(),
         local_vars: RefCell::new(FxHashMap::default()),
+        captures: RefCell::new(FxHashMap::default()),
     };
     rederive_decisions_with_calls(
         &mut concrete,

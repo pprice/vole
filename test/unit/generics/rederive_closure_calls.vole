@@ -79,6 +79,11 @@ tests "rederive closure call resolution" {
         assert(use_local_closure(true) == 42)
     }
 
+    test "captured closure in generic" {
+        assert(use_captured_closure(0) == 42)
+        assert(use_captured_closure("hi") == 42)
+    }
+
     test "param closure in generic" {
         let double = (x: i64) => x * 2
         assert(use_param_closure(5, double) == 20)

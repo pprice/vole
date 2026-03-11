@@ -53,6 +53,10 @@ pub struct RederiveCallCtx<'a> {
     /// Used to detect closure variable calls for let-bound lambdas.
     /// Interior mutability allows population during the immutable walk.
     pub local_vars: RefCell<FxHashMap<Symbol, VirTypeId>>,
+    /// Captured variables with function types, populated when entering a Lambda body.
+    /// Used to detect captured closure variable calls.
+    /// Save/restore pattern mirrors VIR lowering's capture scope management.
+    pub captures: RefCell<FxHashMap<Symbol, VirTypeId>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +131,7 @@ pub fn rederive_monomorphized_calls(program: &mut crate::program::VirProgram) {
             implement_dispatch: &program.implement_dispatch,
             params: func.params.iter().map(|&(s, _, v)| (s, v)).collect(),
             local_vars: RefCell::new(FxHashMap::default()),
+            captures: RefCell::new(FxHashMap::default()),
         };
         rederive_decisions_with_calls(
             func,
@@ -418,7 +423,8 @@ fn rederive_expr(
 
         // Lambda — use the lambda's own return type, not the enclosing function's.
         // Also rederive RC kind for each capture.
-        // Save/restore local_vars so lambda-internal lets don't leak to outer scope.
+        // Save/restore local_vars and captures so lambda-internal state
+        // doesn't leak to the outer scope.
         VirExpr::Lambda {
             body,
             captures,
@@ -429,15 +435,47 @@ fn rederive_expr(
                 .unwrap_function(*vir_ty)
                 .map(|(_, ret)| ret)
                 .unwrap_or(ret_ty);
-            // Snapshot outer locals; lambda body gets its own scope (inheriting
-            // outer bindings for captured closure calls, but any let-bindings
-            // inside the lambda body won't leak out).
-            let saved = call_ctx.map(|ctx| ctx.local_vars.borrow().clone());
+            // Snapshot outer locals and captures; lambda body gets its own
+            // scope.  Any let-bindings inside the lambda body won't leak out,
+            // and the lambda's captures replace the outer captures.
+            let saved_locals = call_ctx.map(|ctx| ctx.local_vars.borrow().clone());
+            let saved_captures = call_ctx.map(|ctx| ctx.captures.borrow().clone());
+            // Push this lambda's captures into the captures map so that calls
+            // inside the lambda body can be resolved as CapturedClosure.
+            // Also remove captured names from local_vars — inside the lambda
+            // these are captures, not locals.
+            if let Some(ctx) = call_ctx {
+                let mut cap_map = ctx.captures.borrow_mut();
+                cap_map.clear();
+                let mut locals = ctx.local_vars.borrow_mut();
+                for cap in captures.iter() {
+                    // Use the capture's vir_ty if it's a known function type.
+                    // Fall back to the local_vars type if the capture's vir_ty
+                    // is Unknown (can happen when the type table entry wasn't
+                    // populated during rewrite).
+                    let fn_vir_ty = if table.is_function(cap.vir_ty) {
+                        Some(cap.vir_ty)
+                    } else {
+                        locals
+                            .get(&cap.name)
+                            .copied()
+                            .filter(|&ty| table.is_function(ty))
+                    };
+                    locals.remove(&cap.name);
+                    if let Some(vir_ty) = fn_vir_ty {
+                        cap_map.insert(cap.name, vir_ty);
+                    }
+                }
+            }
             rederive_body(body, table, lambda_ret_ty, entities, call_ctx);
-            if let Some(ctx) = call_ctx
-                && let Some(saved) = saved {
+            if let Some(ctx) = call_ctx {
+                if let Some(saved) = saved_locals {
                     *ctx.local_vars.borrow_mut() = saved;
                 }
+                if let Some(saved) = saved_captures {
+                    *ctx.captures.borrow_mut() = saved;
+                }
+            }
             for cap in captures.iter_mut() {
                 cap.rc_kind = classify_capture_rc_kind(cap.vir_ty, table);
             }
@@ -643,9 +681,10 @@ fn rederive_pattern(
 /// 3. **Compiler intrinsics** (`panic`, etc.) via `VirImplementDispatch`.
 /// 4. **Closure variable calls** when the callee matches a function-typed
 ///    parameter or a let-bound local with function type.
+/// 5. **Captured closure calls** when the callee matches a function-typed
+///    capture from an enclosing lambda scope.
 ///
 /// **Not reclassified** (left for codegen's `call_dispatch`):
-/// - Captured closure calls (no capture context available on `VirFunction`)
 /// - Regular FFI external calls (would need `&mut Interner` to create `Symbol`s)
 /// - Global closure calls (need module-level scope tracking)
 /// - Functional interface variable calls (need sema's `callee_var_type`)
@@ -715,6 +754,18 @@ fn rederive_call_target(
         *target = CallTarget::ClosureVariable {
             var_name: callee_sym,
             vir_type: local_vir_ty,
+            resolved_call_args: rca,
+            lambda_defaults: ld,
+        };
+        return;
+    }
+
+    // 2c. Captured closure call: callee matches a function-typed capture
+    // from an enclosing scope (populated when entering a Lambda body).
+    if let Some(&capture_vir_ty) = ctx.captures.borrow().get(&callee_sym) {
+        *target = CallTarget::CapturedClosure {
+            var_name: callee_sym,
+            vir_type: capture_vir_ty,
             resolved_call_args: rca,
             lambda_defaults: ld,
         };
@@ -2434,6 +2485,7 @@ mod tests {
             implement_dispatch: impl_dispatch,
             params,
             local_vars: RefCell::new(FxHashMap::default()),
+            captures: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -2633,6 +2685,7 @@ mod tests {
             implement_dispatch: &impl_dispatch,
             params: vec![],
             local_vars: RefCell::new(FxHashMap::default()),
+            captures: RefCell::new(FxHashMap::default()),
         };
 
         rederive_call_target(&mut target, &table, &entities, &ctx);
