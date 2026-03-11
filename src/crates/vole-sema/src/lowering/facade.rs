@@ -44,9 +44,6 @@ use super::method_default_inits::{
 use super::module_bindings::{
     extract_cross_module_bindings, lower_module_bindings, lower_module_module_bindings,
 };
-use super::monomorph_functions::{
-    LowerMonomorphizedInstancesArgs, build_generic_func_map, lower_monomorphized_instances,
-};
 use super::monomorph_info::populate_monomorph_info;
 use super::test_bodies::lower_test_bodies;
 use super::test_scoped_type_methods::lower_test_scoped_type_methods;
@@ -529,7 +526,7 @@ where
     // -----------------------------------------------------------------------
 
     let (generic_vir_functions, generic_vir_map) = build_generic_vir_storage(generic_vir_functions);
-    let (vir_handled_function_ids, early_instance_index) = run_early_vir_monomorphize(
+    let early_instance_index = run_early_vir_monomorphize(
         &mut vir_functions,
         &generic_vir_functions,
         &generic_vir_map,
@@ -537,20 +534,6 @@ where
         entities,
         type_arena,
     );
-
-    let _generic_func_asts = build_generic_func_map(
-        program,
-        interner,
-        names,
-        entities,
-        tests_virtual_modules,
-        module_id,
-    );
-    lower_monomorphized_instances(LowerMonomorphizedInstancesArgs {
-        names,
-        entities,
-        vir_handled_function_ids: &vir_handled_function_ids,
-    });
 
     // -----------------------------------------------------------------------
     // Type methods and implement-block methods (file-level only)

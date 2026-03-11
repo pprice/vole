@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use crate::LoweringEntityLookup;
 use crate::TypeArena;
 use vole_frontend::Interner;
-use vole_identity::{FunctionId, NameId, NameTable};
+use vole_identity::{NameId, NameTable};
 use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::implement_dispatch::VirImplementDispatch;
 use vole_vir::type_table::VirTypeTable;
@@ -40,13 +40,9 @@ pub fn build_generic_vir_storage(
 /// seeds, and merges the produced concrete functions back into the working
 /// `vir_functions` vec and `type_table`.
 ///
-/// Returns a tuple of:
-/// - The set of `FunctionId`s for generic functions that were successfully
-///   monomorphized -- `lower_monomorphized_instances` should skip all sema
-///   cache entries whose `original_name` resolves to one of these.
-/// - The instance index mapping `MonomorphInstance` to absolute function
-///   index -- used later by `resolve_all_calls` to resolve `Unresolved`
-///   calls to `VirDirect`.
+/// Returns the instance index mapping `MonomorphInstance` to absolute function
+/// index -- used later by `resolve_all_calls` to resolve `Unresolved`
+/// calls to `VirDirect`.
 #[allow(clippy::too_many_arguments)]
 pub fn run_early_vir_monomorphize(
     vir_functions: &mut Vec<VirFunction>,
@@ -55,10 +51,8 @@ pub fn run_early_vir_monomorphize(
     type_table: &mut VirTypeTable,
     entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
-) -> (HashSet<FunctionId>, vole_vir::InstanceIndex) {
+) -> vole_vir::InstanceIndex {
     use crate::vir_lower::type_translate::translate_type_id;
-
-    let mut handled = HashSet::new();
 
     // Build seeds from the sema monomorph cache.
     let mut seeds: Vec<vole_vir::MonomorphInstance> = Vec::new();
@@ -105,7 +99,7 @@ pub fn run_early_vir_monomorphize(
     }
 
     if seeds.is_empty() {
-        return (handled, FxHashMap::default());
+        return FxHashMap::default();
     }
 
     // Build a temporary VirProgram for VIR monomorphization.
@@ -129,11 +123,6 @@ pub fn run_early_vir_monomorphize(
     let mut early_instance_index = vole_vir::InstanceIndex::default();
 
     if !result.functions.is_empty() {
-        // Record which generic FunctionIds were handled.
-        for instance in result.instance_map.keys() {
-            handled.insert(instance.function_id);
-        }
-
         // Compute the base index where new functions will be appended.
         let base_index = temp_program.functions.len();
         temp_program.vir_monomorph_base = base_index;
@@ -159,7 +148,7 @@ pub fn run_early_vir_monomorphize(
     *type_table = temp_program.type_table;
     *vir_functions = temp_program.functions;
 
-    (handled, early_instance_index)
+    early_instance_index
 }
 
 /// Run the VIR monomorphization pass: discover generic calls in concrete
