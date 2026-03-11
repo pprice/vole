@@ -449,17 +449,16 @@ fn rederive_expr(
                 cap_map.clear();
                 let mut locals = ctx.local_vars.borrow_mut();
                 for cap in captures.iter() {
-                    // Use the capture's vir_ty if it's a known function type.
-                    // Fall back to the local_vars type if the capture's vir_ty
-                    // is Unknown (can happen when the type table entry wasn't
-                    // populated during rewrite).
-                    let fn_vir_ty = if table.is_function(cap.vir_ty) {
+                    // Use the capture's vir_ty if it's a known callable type
+                    // (function or interface).  Fall back to the local_vars type
+                    // if the capture's vir_ty is Unknown (can happen when the
+                    // type table entry wasn't populated during rewrite).
+                    let is_callable =
+                        |ty: VirTypeId| table.is_function(ty) || table.is_interface(ty);
+                    let fn_vir_ty = if is_callable(cap.vir_ty) {
                         Some(cap.vir_ty)
                     } else {
-                        locals
-                            .get(&cap.name)
-                            .copied()
-                            .filter(|&ty| table.is_function(ty))
+                        locals.get(&cap.name).copied().filter(|&ty| is_callable(ty))
                     };
                     locals.remove(&cap.name);
                     if let Some(vir_ty) = fn_vir_ty {
@@ -539,9 +538,10 @@ fn rederive_stmt(
                     !table.is_sentinel(init_vir_ty) && table.is_struct(init_vir_ty);
             }
             rederive_ref(value, table, ret_ty, entities, call_ctx);
-            // Track function-typed let bindings for closure variable resolution.
+            // Track function-typed and interface-typed let bindings for
+            // closure variable and functional interface resolution.
             if let Some(ctx) = call_ctx
-                && table.is_function(binding_vir_ty)
+                && (table.is_function(binding_vir_ty) || table.is_interface(binding_vir_ty))
             {
                 ctx.local_vars.borrow_mut().insert(name, binding_vir_ty);
             }
@@ -670,6 +670,29 @@ fn rederive_pattern(
 // Call target reclassification
 // ---------------------------------------------------------------------------
 
+/// Check if a variable's type is a functional interface (single abstract method).
+///
+/// Returns `Some(CallTarget::FunctionalInterface { .. })` if the VIR type is
+/// an interface with exactly one non-default method, otherwise `None`.
+fn try_as_functional_interface(
+    var_name: Symbol,
+    vir_type: VirTypeId,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) -> Option<CallTarget> {
+    if !table.is_interface(vir_type) {
+        return None;
+    }
+    let type_def_id = table.type_def_id(vir_type)?;
+    let method_id = entities.is_functional(type_def_id)?;
+    Some(CallTarget::FunctionalInterface {
+        var_name,
+        vir_type,
+        interface_type_def_id: type_def_id,
+        method_id,
+    })
+}
+
 /// Attempt to reclassify a `CallTarget::Unresolved` using concrete post-monomorphization info.
 ///
 /// After monomorphization, types are concrete but calls inside generic templates
@@ -679,16 +702,17 @@ fn rederive_pattern(
 /// 1. **Hardcoded intrinsics** (`assert`, `print_char`) by resolving `callee_sym`.
 /// 2. **Direct function calls** via `NameTable` + `VirEntityMetadata` lookup.
 /// 3. **Compiler intrinsics** (`panic`, etc.) via `VirImplementDispatch`.
-/// 4. **Closure variable calls** when the callee matches a function-typed
+/// 4. **Functional interface calls** when the callee is a variable (param,
+///    local, or capture) whose type is a single-method interface.
+/// 5. **Closure variable calls** when the callee matches a function-typed
 ///    parameter or a let-bound local with function type.
-/// 5. **Captured closure calls** when the callee matches a function-typed
+/// 6. **Captured closure calls** when the callee matches a function-typed
 ///    capture from an enclosing lambda scope.
-/// 6. **Global closure calls** via `NameTable` + `VirEntityMetadata` global
+/// 7. **Global closure calls** via `NameTable` + `VirEntityMetadata` global
 ///    variable lookup.
 ///
 /// **Not reclassified** (left for codegen's `call_dispatch`):
 /// - Regular FFI external calls (would need `&mut Interner` to create `Symbol`s)
-/// - Functional interface variable calls (need sema's `callee_var_type`)
 fn rederive_call_target(
     target: &mut CallTarget,
     table: &VirTypeTable,
@@ -739,16 +763,24 @@ fn rederive_call_target(
         _ => {}
     }
 
-    // 2. Closure variable call: callee matches a function-typed parameter.
+    // 2. Callable variable: callee matches a parameter with function or
+    //    functional-interface type.
     for &(param_sym, param_vir_ty) in &ctx.params {
-        if param_sym == callee_sym && table.is_function(param_vir_ty) {
-            *target = CallTarget::ClosureVariable {
-                var_name: callee_sym,
-                vir_type: param_vir_ty,
-                resolved_call_args: rca,
-                lambda_defaults: ld,
-            };
-            return;
+        if param_sym == callee_sym {
+            if let Some(fi) = try_as_functional_interface(callee_sym, param_vir_ty, table, entities)
+            {
+                *target = fi;
+                return;
+            }
+            if table.is_function(param_vir_ty) {
+                *target = CallTarget::ClosureVariable {
+                    var_name: callee_sym,
+                    vir_type: param_vir_ty,
+                    resolved_call_args: rca,
+                    lambda_defaults: ld,
+                };
+                return;
+            }
         }
     }
 
@@ -760,20 +792,27 @@ fn rederive_call_target(
         .name_id_raw(ctx.module_id, &[callee_name])
         .and_then(|nid| entities.global_by_name(nid))
         .is_some();
-    if !is_global
-        && let Some(&local_vir_ty) = ctx.local_vars.borrow().get(&callee_sym) {
-            *target = CallTarget::ClosureVariable {
-                var_name: callee_sym,
-                vir_type: local_vir_ty,
-                resolved_call_args: rca,
-                lambda_defaults: ld,
-            };
+    if !is_global && let Some(&local_vir_ty) = ctx.local_vars.borrow().get(&callee_sym) {
+        if let Some(fi) = try_as_functional_interface(callee_sym, local_vir_ty, table, entities) {
+            *target = fi;
             return;
         }
+        *target = CallTarget::ClosureVariable {
+            var_name: callee_sym,
+            vir_type: local_vir_ty,
+            resolved_call_args: rca,
+            lambda_defaults: ld,
+        };
+        return;
+    }
 
     // 2c. Captured closure call: callee matches a function-typed capture
     // from an enclosing scope (populated when entering a Lambda body).
     if let Some(&capture_vir_ty) = ctx.captures.borrow().get(&callee_sym) {
+        if let Some(fi) = try_as_functional_interface(callee_sym, capture_vir_ty, table, entities) {
+            *target = fi;
+            return;
+        }
         *target = CallTarget::CapturedClosure {
             var_name: callee_sym,
             vir_type: capture_vir_ty,
@@ -1585,7 +1624,7 @@ mod tests {
     use super::*;
     use crate::func::VirBody;
     use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
-    use vole_identity::{FunctionId, NameId, Symbol, TypeDefId, TypeId};
+    use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeDefId, TypeId};
 
     /// Helper: create a NameId for testing.
     fn name(n: u32) -> NameId {
@@ -2717,6 +2756,175 @@ mod tests {
                 assert_eq!(*function_id, func_id);
             }
             other => panic!("expected Direct, got {other:?}"),
+        }
+    }
+
+    /// Helper: build a VirEntityMetadata with a single-method interface (functional interface).
+    fn entities_with_functional_interface(
+        type_def_id: TypeDefId,
+        method_id: MethodId,
+    ) -> VirEntityMetadata {
+        let mut entities = VirEntityMetadata::new();
+        entities.insert_type_def(crate::entity_metadata::VirTypeDef {
+            id: type_def_id,
+            name_id: name(200),
+            kind: crate::entity_metadata::VirTypeDefKind::Interface,
+            fields: vec![],
+            field_types: vec![],
+            methods: vec![method_id],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: vole_identity::ModuleId::new(0),
+            is_generic: false,
+            generic_field_types: None,
+            generic_field_names: None,
+        });
+        entities.insert_method_def(crate::entity_metadata::VirMethodDef {
+            id: method_id,
+            name_id: name(201),
+            full_name_id: name(202),
+            defining_type: type_def_id,
+            signature_id: sema_type_id(0),
+            has_default: false,
+            is_static: false,
+            external_binding: None,
+            has_param_defaults: vec![false],
+            method_type_params: vec![],
+            required_params: 1,
+            param_names: vec!["x".to_string()],
+            param_types: vec![VirTypeId::I64],
+            return_type: VirTypeId::I64,
+        });
+        entities
+    }
+
+    #[test]
+    fn rederive_param_functional_interface() {
+        let mut interner = Interner::new();
+        let m_sym = interner.intern("m");
+        let name_table = vole_identity::NameTable::new();
+
+        let type_def_id = TypeDefId::new(112);
+        let method_id = MethodId::new(50);
+
+        let mut table = VirTypeTable::new();
+        let iface_ty = table.intern(
+            VirType::Interface {
+                def: type_def_id,
+                type_args: vec![],
+            },
+            None,
+        );
+
+        let mut target = unresolved_target(m_sym, 60);
+        let entities = entities_with_functional_interface(type_def_id, method_id);
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![(m_sym, iface_ty)]);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        match &target {
+            CallTarget::FunctionalInterface {
+                var_name,
+                vir_type,
+                interface_type_def_id,
+                method_id: mid,
+            } => {
+                assert_eq!(*var_name, m_sym);
+                assert_eq!(*vir_type, iface_ty);
+                assert_eq!(*interface_type_def_id, type_def_id);
+                assert_eq!(*mid, method_id);
+            }
+            other => panic!("expected FunctionalInterface, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rederive_local_functional_interface() {
+        let mut interner = Interner::new();
+        let m_sym = interner.intern("m");
+        let name_table = vole_identity::NameTable::new();
+
+        let type_def_id = TypeDefId::new(112);
+        let method_id = MethodId::new(50);
+
+        let mut table = VirTypeTable::new();
+        let iface_ty = table.intern(
+            VirType::Interface {
+                def: type_def_id,
+                type_args: vec![],
+            },
+            None,
+        );
+
+        let mut target = unresolved_target(m_sym, 31);
+        let entities = entities_with_functional_interface(type_def_id, method_id);
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![]);
+
+        // Simulate a let-bound interface-typed local.
+        ctx.local_vars.borrow_mut().insert(m_sym, iface_ty);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        match &target {
+            CallTarget::FunctionalInterface {
+                var_name,
+                vir_type,
+                interface_type_def_id,
+                method_id: mid,
+            } => {
+                assert_eq!(*var_name, m_sym);
+                assert_eq!(*vir_type, iface_ty);
+                assert_eq!(*interface_type_def_id, type_def_id);
+                assert_eq!(*mid, method_id);
+            }
+            other => panic!("expected FunctionalInterface, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rederive_captured_functional_interface() {
+        let mut interner = Interner::new();
+        let m_sym = interner.intern("m");
+        let name_table = vole_identity::NameTable::new();
+
+        let type_def_id = TypeDefId::new(112);
+        let method_id = MethodId::new(50);
+
+        let mut table = VirTypeTable::new();
+        let iface_ty = table.intern(
+            VirType::Interface {
+                def: type_def_id,
+                type_args: vec![],
+            },
+            None,
+        );
+
+        let mut target = unresolved_target(m_sym, 45);
+        let entities = entities_with_functional_interface(type_def_id, method_id);
+        let ctx = call_ctx_with_interner(&interner, &name_table, vec![]);
+
+        // Simulate a captured interface-typed variable.
+        ctx.captures.borrow_mut().insert(m_sym, iface_ty);
+
+        rederive_call_target(&mut target, &table, &entities, &ctx);
+
+        match &target {
+            CallTarget::FunctionalInterface {
+                var_name,
+                vir_type,
+                interface_type_def_id,
+                method_id: mid,
+            } => {
+                assert_eq!(*var_name, m_sym);
+                assert_eq!(*vir_type, iface_ty);
+                assert_eq!(*interface_type_def_id, type_def_id);
+                assert_eq!(*mid, method_id);
+            }
+            other => panic!("expected FunctionalInterface, got {other:?}"),
         }
     }
 }
