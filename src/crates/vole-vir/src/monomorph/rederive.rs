@@ -683,10 +683,11 @@ fn rederive_pattern(
 ///    parameter or a let-bound local with function type.
 /// 5. **Captured closure calls** when the callee matches a function-typed
 ///    capture from an enclosing lambda scope.
+/// 6. **Global closure calls** via `NameTable` + `VirEntityMetadata` global
+///    variable lookup.
 ///
 /// **Not reclassified** (left for codegen's `call_dispatch`):
 /// - Regular FFI external calls (would need `&mut Interner` to create `Symbol`s)
-/// - Global closure calls (need module-level scope tracking)
 /// - Functional interface variable calls (need sema's `callee_var_type`)
 fn rederive_call_target(
     target: &mut CallTarget,
@@ -699,6 +700,7 @@ fn rederive_call_target(
         line,
         resolved_call_args,
         lambda_defaults,
+        monomorph_key,
         ..
     } = target
     else {
@@ -709,6 +711,7 @@ fn rederive_call_target(
     let line = *line;
     let rca = resolved_call_args.clone();
     let ld = *lambda_defaults;
+    let mk = monomorph_key.clone();
 
     // Resolve the callee symbol to a string first. If the interner can't
     // resolve it (e.g. during early monomorphization with a temporary empty
@@ -750,15 +753,23 @@ fn rederive_call_target(
     }
 
     // 2b. Closure variable call: callee matches a let-bound function-typed local.
-    if let Some(&local_vir_ty) = ctx.local_vars.borrow().get(&callee_sym) {
-        *target = CallTarget::ClosureVariable {
-            var_name: callee_sym,
-            vir_type: local_vir_ty,
-            resolved_call_args: rca,
-            lambda_defaults: ld,
-        };
-        return;
-    }
+    // Guard: skip if the callee is a module-level global — globals are handled
+    // in step 3b below, not as local closure variables.
+    let is_global = ctx
+        .name_table
+        .name_id_raw(ctx.module_id, &[callee_name])
+        .and_then(|nid| entities.global_by_name(nid))
+        .is_some();
+    if !is_global
+        && let Some(&local_vir_ty) = ctx.local_vars.borrow().get(&callee_sym) {
+            *target = CallTarget::ClosureVariable {
+                var_name: callee_sym,
+                vir_type: local_vir_ty,
+                resolved_call_args: rca,
+                lambda_defaults: ld,
+            };
+            return;
+        }
 
     // 2c. Captured closure call: callee matches a function-typed capture
     // from an enclosing scope (populated when entering a Lambda body).
@@ -783,6 +794,17 @@ fn rederive_call_target(
     {
         *target = CallTarget::Direct {
             function_id: func_id,
+        };
+        return;
+    }
+
+    // 3b. Global closure call: callee is a module-level global variable.
+    if is_global {
+        *target = CallTarget::GlobalClosure {
+            var_name: callee_sym,
+            resolved_call_args: rca,
+            lambda_defaults: ld,
+            monomorph_key: mk,
         };
         return;
     }
