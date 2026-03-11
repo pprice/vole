@@ -32,23 +32,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// paths (builtins, closures, modules, monomorphization, FFI, prelude, etc.).
     ///
     /// Only called from `compile_vir_unresolved_call()` for `CallTarget::Unresolved`
-    /// calls that VIR lowering could not fully classify.
+    /// calls that VIR lowering and rederive could not fully classify.
     ///
     /// # Remaining Unresolved cases (March 2026)
     ///
-    /// VIR lowering now classifies many call patterns into concrete `CallTarget`
+    /// VIR lowering classifies most call patterns into concrete `CallTarget`
     /// variants (Direct, Intrinsic, ClosureVariable, CapturedClosure,
-    /// FunctionalInterface, GlobalClosure, GenericCall, VirDirect).  The
-    /// following cases still fall through to Unresolved:
+    /// FunctionalInterface, GlobalClosure, GenericCall, VirDirect).
+    /// The rederive pass resolves generic template calls to GenericCall, and
+    /// the resolve pass converts those to VirDirect.
     ///
-    /// - **Functions returning struct types** — Direct doesn't handle sret
-    /// - **Functions with interface/union params** — Direct doesn't box/coerce
-    /// - **External/FFI functions** — not in func_registry by NameId
-    /// - **Test-scoped local functions** — not in the main name table
-    /// - **Sema-fallback monomorphized calls** — not in VIR instance index
-    /// - **Module bindings** (destructured imports targeting FFI/generic externals)
-    /// - **Prelude external functions** (panic, etc.)
-    /// - **Generic template calls** (Unresolved in templates, may resolve during monomorph)
+    /// The following cases still fall through to Unresolved:
+    ///
+    /// - **External/FFI functions** — producing `CallTarget::Native` requires
+    ///   interning new `Symbol` values (`&mut Interner`), which rederive
+    ///   doesn't have
+    /// - **Cross-module aliased generics** — destructured imports with
+    ///   renamed generic externals (e.g. `let { sqrt as squareRoot } = import "std:math"`)
     pub fn call_dispatch(
         &mut self,
         callee_sym: Symbol,

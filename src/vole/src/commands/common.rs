@@ -393,9 +393,20 @@ pub fn build_analyzed_program(
     vir_program.name_table = Rc::clone(&db.names);
 
     // Now that the real interner/name_table are set, re-rederive call targets
-    // on VIR-monomorphized functions (the early monomorph pass ran with an
-    // empty interner, so call reclassification was a no-op).
+    // on VIR-monomorphized functions and test bodies (the early monomorph pass
+    // ran with an empty interner, so call reclassification was a no-op).
+    // Test body rederive converts Unresolved calls (with monomorph keys) to
+    // GenericCall, which the subsequent resolve pass converts to VirDirect.
     vole_vir::rederive_monomorphized_calls(&mut vir_program);
+
+    // Resolve GenericCall → VirDirect in test bodies using the instance index.
+    // rederive_monomorphized_calls above may have converted Unresolved calls
+    // (with monomorph keys) to GenericCall; this resolves them to VirDirect.
+    vole_vir::resolve_test_calls(
+        &mut vir_program.tests,
+        &vir_program.vir_instance_index,
+        &vir_program.entity_metadata,
+    );
 
     // Inject TypeArena substitution fallback for compound types not yet in VirTypeTable.
     let type_arena = Rc::clone(&db.types);

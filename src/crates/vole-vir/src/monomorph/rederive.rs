@@ -98,13 +98,17 @@ pub fn rederive_decisions_with_calls(
     rederive_decisions_inner(func, table, entities, Some(call_ctx));
 }
 
-/// Re-rederive call targets on VIR-monomorphized functions in a program.
+/// Re-rederive call targets on VIR-monomorphized functions and test bodies.
 ///
 /// The early VIR monomorph pass runs with a temporary empty interner, which
 /// prevents `rederive_call_target` from resolving Unresolved calls.  This
 /// function re-runs call reclassification on monomorphized functions
-/// (those at indices `>= vir_monomorph_base`) using the program's real
-/// interner and name_table.
+/// (those at indices `>= vir_monomorph_base`) and all test bodies using the
+/// program's real interner and name_table.
+///
+/// For generic calls with monomorph keys, rederive converts them to
+/// `GenericCall` so the subsequent `resolve_test_calls` pass can convert
+/// them to `VirDirect`.
 ///
 /// Should be called after the program's interner and name_table have been
 /// populated (i.e., after `lower_vir_program` returns and the CLI sets them).
@@ -142,6 +146,46 @@ pub fn rederive_monomorphized_calls(program: &mut crate::program::VirProgram) {
     }
 
     program.functions = functions;
+
+    // Also rederive call targets in test bodies.  Test VIR bodies can contain
+    // Unresolved calls (e.g. test-scoped calls to generic functions) that
+    // were not processed by the monomorph rederive above.
+    rederive_test_calls(program);
+}
+
+/// Re-derive call targets in VIR test bodies.
+///
+/// Test bodies are stored separately from `program.functions` and were not
+/// previously covered by `rederive_monomorphized_calls`.  This function
+/// walks each test body with a call-reclassification context so that
+/// `CallTarget::Unresolved` is resolved before codegen.
+fn rederive_test_calls(program: &mut crate::program::VirProgram) {
+    if program.tests.is_empty() {
+        return;
+    }
+
+    let mut tests = std::mem::take(&mut program.tests);
+
+    for test in &mut tests {
+        let call_ctx = RederiveCallCtx {
+            interner: &program.interner,
+            name_table: &program.name_table,
+            module_id: program.module_id,
+            implement_dispatch: &program.implement_dispatch,
+            params: Vec::new(),
+            local_vars: RefCell::new(FxHashMap::default()),
+            captures: RefCell::new(FxHashMap::default()),
+        };
+        rederive_body(
+            &mut test.body,
+            &program.type_table,
+            VirTypeId::VOID,
+            &program.entity_metadata,
+            Some(&call_ctx),
+        );
+    }
+
+    program.tests = tests;
 }
 
 fn rederive_decisions_inner(
@@ -822,19 +866,31 @@ fn rederive_call_target(
         return;
     }
 
-    // 3. Direct function call: look up in the name table.
+    // 3. Direct or generic function call: look up in the name table.
     // Use name_id_raw (string-based) instead of name_id (Symbol-based)
     // to avoid panicking when the interner doesn't contain the symbol.
     if let Some(name_id) = ctx.name_table.name_id_raw(ctx.module_id, &[callee_name])
         && let Some(func_id) = entities.function_by_name(name_id)
         && let Some(func_def) = entities.get_function_def(func_id)
-        && !func_def.is_generic
-        && !func_def.is_external
     {
-        *target = CallTarget::Direct {
-            function_id: func_id,
-        };
-        return;
+        if func_def.is_generic {
+            // Generic function with monomorph key: convert to GenericCall so
+            // the resolve pass can look it up in the instance index and
+            // convert to VirDirect.  This handles test-scoped calls to
+            // generic functions that were Unresolved at VIR lowering time.
+            if let Some(key) = &mk {
+                *target = CallTarget::GenericCall {
+                    function_id: func_id,
+                    type_args: key.type_keys.clone(),
+                };
+                return;
+            }
+        } else if !func_def.is_external {
+            *target = CallTarget::Direct {
+                function_id: func_id,
+            };
+            return;
+        }
     }
 
     // 3b. Global closure call: callee is a module-level global variable.

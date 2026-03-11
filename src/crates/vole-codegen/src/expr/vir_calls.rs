@@ -600,11 +600,12 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an unresolved call by delegating to `call_dispatch()`.
     ///
-    /// VIR lowering emits `CallTarget::Unresolved` for call expressions it
-    /// could not fully classify (functions with defaults/sret/interface params,
-    /// FFI, test-scoped functions, sema-fallback monomorphs, module bindings,
-    /// prelude externals, and generic template calls).  See `CallTarget::Unresolved`
-    /// for the full list.
+    /// After VIR lowering, rederive, and resolve, most `CallTarget::Unresolved`
+    /// calls have been converted to concrete targets.  The remaining cases are:
+    /// - **External/FFI functions** — rederive can't produce `CallTarget::Native`
+    ///   without `&mut Interner`
+    /// - **Cross-module aliased generics** — destructured imports with renamed
+    ///   generic externals
     ///
     /// This method stashes the VIR-resolved named-arg mapping, lambda
     /// defaults, and return type, then passes the VIR-lowered `args` through

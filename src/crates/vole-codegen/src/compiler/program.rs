@@ -1470,7 +1470,7 @@ impl Compiler<'_> {
     /// From those roots, walk `VirDirect` edges transitively and collect
     /// target indices that must be declared/compiled.
     fn vir_monomorph_indices(&self) -> Vec<usize> {
-        collect_reachable_vir_direct_targets(&self.analyzed.functions)
+        collect_reachable_vir_direct_targets(&self.analyzed.functions, &self.analyzed.tests)
     }
 
     /// Declare VIR-monomorphized functions in the JIT module.
@@ -1579,8 +1579,15 @@ impl Compiler<'_> {
     }
 }
 
-fn collect_reachable_vir_direct_targets(functions: &[vole_vir::func::VirFunction]) -> Vec<usize> {
+fn collect_reachable_vir_direct_targets(
+    functions: &[vole_vir::func::VirFunction],
+    tests: &[vole_vir::func::VirTest],
+) -> Vec<usize> {
     let mut worklist: Vec<usize> = Vec::new();
+    let mut visited = BTreeSet::new();
+    let mut targets = BTreeSet::new();
+
+    // Seed worklist with non-monomorph functions (entry points).
     for (idx, func) in functions.iter().enumerate() {
         let is_early_vir_monomorph = func.name.contains("<VirTypeId(");
         if func.mangled_name_id.is_some() || !is_early_vir_monomorph {
@@ -1588,8 +1595,17 @@ fn collect_reachable_vir_direct_targets(functions: &[vole_vir::func::VirFunction
         }
     }
 
-    let mut visited = BTreeSet::new();
-    let mut targets = BTreeSet::new();
+    // Seed with VirDirect targets from test bodies (test bodies may reference
+    // VIR-monomorphized functions via resolved GenericCall → VirDirect).
+    for test in tests {
+        let mut test_targets = BTreeSet::new();
+        collect_vir_direct_in_body(&test.body, &mut test_targets);
+        for target_idx in test_targets {
+            if targets.insert(target_idx) {
+                worklist.push(target_idx);
+            }
+        }
+    }
 
     while let Some(func_idx) = worklist.pop() {
         if func_idx >= functions.len() || !visited.insert(func_idx) {

@@ -74,6 +74,25 @@ pub fn resolve_all_calls(
     }
 }
 
+/// Resolve `Unresolved` (with monomorph key) call targets in VIR test bodies
+/// to `VirDirect`, using the same instance index as `resolve_all_calls`.
+///
+/// Test bodies are stored separately from `VirProgram.functions` and were not
+/// previously processed by `resolve_all_calls`.
+pub fn resolve_test_calls(
+    tests: &mut [crate::func::VirTest],
+    index: &InstanceIndex,
+    entity_metadata: &VirEntityMetadata,
+) {
+    let ctx = ResolveCtx {
+        index,
+        entity_metadata: Some(entity_metadata),
+    };
+    for test in tests.iter_mut() {
+        resolve_in_body(&mut test.body, &ctx);
+    }
+}
+
 fn resolve_in_body(body: &mut VirBody, ctx: &ResolveCtx<'_>) {
     for stmt in &mut body.stmts {
         resolve_in_stmt(stmt, ctx);

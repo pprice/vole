@@ -194,13 +194,15 @@ pub fn run_vir_monomorphize(program: &mut VirProgram) {
     // Resolve GenericCall -> VirDirect and Unresolved (with monomorph key)
     // -> VirDirect in all concrete functions.  Only resolves Unresolved calls
     // whose targets are VIR-monomorphized (present in the instance index).
-    // Functions monomorphized by the sema fallback path remain Unresolved
-    // for codegen to handle via call_dispatch().
     vole_vir::resolve_all_calls(
         &mut program.functions,
         &merged_index,
         &program.entity_metadata,
     );
+
+    // Store the merged index so test bodies can be resolved later (after the
+    // program's real interner/name_table are set in the CLI pipeline).
+    program.vir_instance_index = merged_index;
 }
 
 /// Build an empty VirProgram shell for temporary use during monomorphization.
