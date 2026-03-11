@@ -200,8 +200,13 @@ fn generic_structural_field_access_produces_generic_vir_template() {
     "#;
 
     let output = analyze_output(source);
-    assert_eq!(output.generic_vir_functions.len(), 1);
-    assert_eq!(output.generic_vir_functions[0].1.name, "get_name");
+    assert!(
+        output
+            .generic_vir_functions
+            .iter()
+            .any(|(_, vir)| vir.name == "get_name"),
+        "expected user-defined generic function to produce a VIR template"
+    );
 }
 
 #[test]

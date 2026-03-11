@@ -59,6 +59,10 @@ pub struct CachedModule {
     pub declared_var_types: FxHashMap<NodeId, TypeId>,
     /// Struct/class literal type resolution (NodeId → StructLiteralInfo)
     pub struct_literal_infos: FxHashMap<NodeId, StructLiteralInfo>,
+    /// Generic VIR function templates lowered during analysis.
+    /// Stored so that cached prelude modules can propagate VIR templates
+    /// to subsequent analyzers without re-analysis.
+    pub generic_vir_functions: Vec<(vole_identity::NameId, vole_vir::func::VirFunction)>,
     /// Number of semantic errors seen while analyzing this module before it was cached.
     /// Non-zero means cached data is partial but still usable for best-effort compilation.
     pub partial_error_count: usize,

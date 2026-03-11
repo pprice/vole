@@ -151,6 +151,11 @@ impl Analyzer {
                 );
                 self.ctx.merged_node_map.borrow_mut().merge_cached(&cached);
             }
+            // Merge cached generic VIR templates so VIR monomorphization can
+            // find templates for prelude generic functions (e.g. print<T>).
+            self.results
+                .generic_vir_functions
+                .extend(cached.generic_vir_functions.iter().cloned());
             return;
         }
 
@@ -248,6 +253,7 @@ impl Analyzer {
                     is_check_results,
                     declared_var_types,
                     struct_literal_infos,
+                    generic_vir_functions: sub_analyzer.results.generic_vir_functions.clone(),
                     partial_error_count,
                 },
             );
@@ -312,6 +318,14 @@ impl Analyzer {
             .merged_node_map
             .borrow_mut()
             .merge(prelude_node_map);
+
+        // Merge generic VIR templates from the prelude sub-analyzer so that
+        // VIR monomorphization can find templates for prelude generic functions
+        // (e.g. print<T>). Without this, prelude generics fall back to the AST
+        // lowering path. (Mirrors store_sub_analyzer_results in module.rs.)
+        self.results
+            .generic_vir_functions
+            .extend(sub_analyzer.results.generic_vir_functions);
     }
 
     /// Check if a function name refers to a generic function in a prelude module.

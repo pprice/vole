@@ -99,6 +99,15 @@ pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '
             continue;
         }
 
+        // Skip generic external functions (e.g. compiler intrinsics).
+        // These have no body to lower — codegen handles them via
+        // call_dispatch() and intrinsic key resolution.
+        if let Some(func_id) = entities.function_by_name(instance.original_name)
+            && entities.get_function(func_id).is_external
+        {
+            continue;
+        }
+
         if let Some(func) = generic_func_asts.get(&instance.original_name) {
             // Found in the main program — lower with the main interner
             let func_name = names.display(instance.original_name);
