@@ -41,9 +41,7 @@ impl Cg<'_, '_, '_> {
             CallTarget::IntrinsicRuntime { key } => {
                 self.compile_vir_intrinsic_runtime_call(*key, args, ty)
             }
-            CallTarget::VtableMethod { slot } => {
-                self.compile_vir_vtable_call(*slot, args, ty, vir_ty)
-            }
+            CallTarget::VtableMethod { slot } => self.compile_vir_vtable_call(*slot, args, ty),
             CallTarget::BuiltinMethod { method } => {
                 self.compile_vir_builtin_method_call(*method, args, ty)
             }
@@ -445,7 +443,6 @@ impl Cg<'_, '_, '_> {
         slot: usize,
         args: &[VirRef],
         return_ty: TypeId,
-        return_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         assert!(
             !args.is_empty(),
@@ -502,9 +499,10 @@ impl Cg<'_, '_, '_> {
             .copied()
             .ok_or_else(|| CodegenError::internal("vtable call missing return value"))?;
         let value = self.convert_from_i64_storage(word, return_ty);
-        // Use VirTypeId-native conversion to avoid sema TypeId round-trip
-        // failures when VirTypeTable reverse mappings are incomplete.
-        let return_ty = self.maybe_convert_iterator_return_type_v(return_vir_ty);
+        // Vtable dispatch returns boxed interface values, not raw pointers.
+        // Do NOT convert Iterator<T> to RuntimeIterator<T> here — the boxed
+        // interface must be dispatched through the vtable, not treated as a
+        // raw RuntimeIterator pointer.
         Ok(self.compiled(value, return_ty))
     }
 
@@ -545,6 +543,9 @@ impl Cg<'_, '_, '_> {
         args: &[VirRef],
         return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
+        // Convert Iterator<T> return types to RuntimeIterator<T> so that
+        // downstream code sees the concrete iterator type.
+        let return_ty = self.convert_interface_iterator_return_by_type(return_ty);
         let module_str = self.interner().resolve(module_path).to_string();
         let name_str = self.interner().resolve(native_name).to_string();
         let native_func = self
@@ -554,11 +555,6 @@ impl Cg<'_, '_, '_> {
                 CodegenError::not_found("native function", format!("{module_str}::{name_str}"))
             })?
             .clone();
-
-        // Convert Iterator<T> return types to RuntimeIterator<T> so that
-        // downstream code (method calls on the result, RC tracking, etc.)
-        // sees the concrete iterator type rather than the interface.
-        let return_ty = self.maybe_convert_iterator_return_type(return_ty);
 
         // Compile VIR args and coerce to the expected native parameter types.
         // RC temps are intentionally NOT consumed: the native function takes

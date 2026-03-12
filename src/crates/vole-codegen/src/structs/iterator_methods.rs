@@ -14,14 +14,14 @@ use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
-use vole_identity::{NodeId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{NodeId, TypeDefId, TypeId};
 use vole_vir::BuiltinMethod;
 
 use super::methods::ArgSource;
 
 impl Cg<'_, '_, '_> {
     /// Resolve an Iterator interface method: find the external binding and
-    /// compute the substituted return type (converting Iterator<T> to RuntimeIterator(T)).
+    /// compute the return type from sema's `concrete_return_hint`.
     ///
     /// `fallback_elem_type` is used when compiling Iterable default method bodies
     /// (e.g. `map` in traits.vole) whose inner expressions are not analyzed by sema.
@@ -62,10 +62,10 @@ impl Cg<'_, '_, '_> {
 
         // In monomorphized module contexts, substituted_return_type can be absent.
         // Fall back to expression type before failing.
-        // The return_type_hint comes from sema's concrete_return_hint (populated for
-        // all 29 iterator/builtin method variants). The derive fallback is only
-        // needed for Iterable default method bodies whose inner expressions are not
-        // analyzed by sema.
+        // The return_type_hint may come from sema's concrete_return_hint (already
+        // RuntimeIterator<T>) or from substituted_return_type (still Iterator<T>).
+        // Convert any remaining Iterator<T> types to RuntimeIterator<T> via the
+        // inline fallback, since runtime functions return raw iterator pointers.
         let return_type_id = return_type_hint
             .or_else(|| expr_id.and_then(|id| self.get_substituted_return_type(&id)))
             .or_else(|| expr_id.and_then(|id| self.get_expr_type(&id)))
@@ -81,9 +81,7 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
-        // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
-        // functions return raw iterator pointers, not boxed interface values
-        let return_type_id = self.convert_iterator_return_type(return_type_id, iter_type_id);
+        let return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
 
         Ok((external_info, return_type_id))
     }
@@ -380,68 +378,5 @@ impl Cg<'_, '_, '_> {
         }
 
         Ok(result)
-    }
-
-    /// Convert Iterator<T> return types to RuntimeIterator(T)
-    ///
-    /// When calling external iterator methods, the runtime returns raw iterator pointers,
-    /// not boxed interface values. This function converts Interface/GenericInstance types
-    /// for Iterator to RuntimeIterator so that subsequent method calls use direct dispatch.
-    fn convert_iterator_return_type(&self, ty: TypeId, iterator_type_id: TypeDefId) -> TypeId {
-        self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
-    }
-
-    /// Convert Iterator<T> return types to RuntimeIterator(T), using well-known type metadata.
-    /// Takes and returns TypeId for O(1) equality; converts internally for matching.
-    pub(crate) fn maybe_convert_iterator_return_type(&self, ty: TypeId) -> TypeId {
-        // Look up the Iterator interface via well-known type metadata
-        if let Some(iterator_type_id) = self.name_table().well_known.iterator_type_def {
-            self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
-        } else {
-            ty
-        }
-    }
-
-    /// VirTypeId-native version of iterator return type conversion.
-    /// Avoids sema TypeId round-tripping which can fail when VirTypeTable
-    /// mappings are incomplete.
-    pub(crate) fn maybe_convert_iterator_return_type_v(&self, vir_ty: VirTypeId) -> TypeId {
-        if let Some(iterator_type_id) = self.name_table().well_known.iterator_type_def
-            && let Some((type_def_id, vir_type_args)) = self.vir_query_unwrap_interface_v(vir_ty)
-            && type_def_id == iterator_type_id
-            && let Some(&elem_vir) = vir_type_args.first()
-            && let Some(runtime_iter_id) = self.vir_query_lookup_runtime_iterator_v(elem_vir)
-        {
-            let table = self.vir_type_table();
-            if let Some(sema_id) = table.lookup_vir_type_id(runtime_iter_id) {
-                return sema_id;
-            }
-        }
-        self.vir_type_table().vir_to_type_id(vir_ty)
-    }
-
-    /// Core implementation of iterator return type conversion
-    /// Uses VirTypeTable to check for Iterator interface and convert to RuntimeIterator
-    fn convert_iterator_return_type_by_type_def_id(
-        &self,
-        ty: TypeId,
-        iterator_type_id: TypeDefId,
-    ) -> TypeId {
-        // Check if this is an Interface type matching Iterator
-        if let Some((type_def_id, vir_type_args)) = self.vir_query_unwrap_interface(ty)
-            && type_def_id == iterator_type_id
-            && let Some(&elem_vir) = vir_type_args.first()
-        {
-            let table = self.vir_type_table();
-            let elem_type_id = table.vir_to_type_id(elem_vir);
-            // Look up existing RuntimeIterator type if sema created one.
-            // If not found, this is a user-defined Iterator (e.g., pure Vole
-            // MapKeyIterator/SetIterator) — keep the original Interface type
-            // for vtable dispatch.
-            if let Some(runtime_iter_id) = self.vir_query_lookup_runtime_iterator(elem_type_id) {
-                return runtime_iter_id;
-            }
-        }
-        ty
     }
 }

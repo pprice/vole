@@ -554,17 +554,28 @@ impl Cg<'_, '_, '_> {
         if let Some(resolved) = resolution {
             // Interface dispatch with pre-computed slot (optimized path)
             if let Some(method_index) = resolved.method_index() {
-                // Use the substituted (concrete) return type for iterator
-                // conversion, since the method signature may be generic.
-                let concrete_return_vir = dispatch
-                    .substituted_return_type
-                    .map(|ty| self.try_substitute_type_v(ty));
+                // Compute the concrete return type for this vtable dispatch.
+                // 1. Use concrete_return_hint if available (already RuntimeIterator
+                //    for iterator methods from sema's VirResolvedMethod).
+                // 2. Otherwise derive from substituted_return_type (which has
+                //    concrete type args), applying Iterator→RuntimeIterator
+                //    conversion since vtable calls to Iterator methods return
+                //    raw pointers.
+                let return_type_override =
+                    self.resolved_concrete_return_hint(resolved).or_else(|| {
+                        dispatch.substituted_return_type.map(|ty| {
+                            let v = self.try_substitute_type_v(ty);
+                            let table = self.vir_type_table();
+                            let as_type_id = table.vir_to_type_id(v);
+                            self.convert_interface_iterator_return_by_type(as_type_id)
+                        })
+                    });
                 let result = self.interface_dispatch_call_args_by_slot(
                     &obj,
                     &mc.arg_source(),
                     method_index,
                     self.resolved_dispatch_func_type_id(resolved),
-                    concrete_return_vir,
+                    return_type_override,
                 )?;
                 // Consume the owned RC receiver after the call. For temporaries
                 // (e.g. make_nums().collect()), this rc_dec's the interface's
@@ -679,14 +690,14 @@ impl Cg<'_, '_, '_> {
                         args.push(compiled.value);
                     }
                 }
-                // Use concrete_return_hint if available (for iter() methods),
-                // otherwise fall back to maybe_convert_iterator_return_type for other methods
+                // Use concrete_return_hint if available (carries the correct
+                // RuntimeIterator type for iterator methods); otherwise convert
+                // any Iterator<T> return types to RuntimeIterator<T> inline.
                 let return_type_id =
                     self.resolved_concrete_return_hint(resolved)
                         .unwrap_or_else(|| {
-                            self.maybe_convert_iterator_return_type(
-                                self.resolved_return_type_id(resolved),
-                            )
+                            let ty = self.resolved_return_type_id(resolved);
+                            self.convert_interface_iterator_return_by_type(ty)
                         });
 
                 // Generic external methods with where-mappings are dispatched through
@@ -893,8 +904,17 @@ impl Cg<'_, '_, '_> {
                     let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
                     args.push(compiled.value);
                 }
-                let return_type_id =
-                    self.maybe_convert_iterator_return_type(binding.sema_func_type.return_type_id);
+                // Use concrete_return_hint (already RuntimeIterator) when
+                // available; otherwise convert Iterator<T> inline.
+                let return_type_id = dispatch
+                    .resolved_method
+                    .as_ref()
+                    .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
+                    .unwrap_or_else(|| {
+                        self.convert_interface_iterator_return_by_type(
+                            binding.sema_func_type.return_type_id,
+                        )
+                    });
                 let ext = ExternalMethodRef::from(*external_info);
                 let result = self.call_external_id(&ext, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call
@@ -986,46 +1006,23 @@ impl Cg<'_, '_, '_> {
             })
             .unwrap_or(return_type_id);
 
-        // NOTE: RuntimeIterator conversion for Iterator<T> return types is handled
-        // in the external method call paths above (which return early). Non-external
-        // methods (pure Vole classes) return interface-boxed iterators and use vtable
-        // dispatch — no RuntimeIterator conversion needed there.
+        // For Iterable default methods on arrays/primitives (range, string), the
+        // func_key comes from array_iterable_func_keys and the compiled function
+        // returns a raw RuntimeIterator pointer. Convert the return type from
+        // Iterator<T> to RuntimeIterator<T> so downstream dispatch is correct.
         //
-        // However, compiled Iterable default methods (for arrays, strings, ranges) return
-        // raw *mut RcIterator, not boxed interfaces. Apply the RuntimeIterator conversion
-        // here so subsequent method calls use direct dispatch.
-        //
-        // In monomorphized contexts, the return type from the entity registry may contain
-        // an unsubstituted type parameter from the Iterable interface (e.g. Iterator<T>
-        // instead of Iterator<i64>). The function's own substitution map only covers its
-        // own type params, not the interface's. When conversion fails, derive the return
-        // type from the receiver's concrete element type.
+        // NOTE: Do NOT apply this in all monomorphized contexts — user-defined
+        // .iter() methods return boxed Iterator<T> interfaces, not raw pointers.
+        // Converting those to RuntimeIterator causes segfaults.
         if used_array_iterable_path {
-            return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
-        }
-        if used_array_iterable_path || self.substitutions.is_some() {
-            // Check if the return type still looks like an unresolved Iterator<T>
-            // (maybe_convert failed because the elem TypeId was unknown/unsubstituted),
-            // OR if the return type is still a type parameter (e.g. sum() -> T where T
-            // is the Iterable interface's element type, not the function's own type param).
-            // In both cases, use concrete_return_hint from sema's VirResolvedMethod.
-            let needs_derivation = {
-                let vir_ret = self.vir_lookup(return_type_id);
-                if let Some((type_def_id, _)) = self.vir_query_unwrap_interface_v(vir_ret) {
-                    self.name_table()
-                        .well_known
-                        .is_iterator_type_def(type_def_id)
-                } else {
-                    self.vir_query_unwrap_type_param_v(vir_ret).is_some()
-                }
-            };
-            if needs_derivation
-                && let Some(hint) = dispatch
-                    .resolved_method
-                    .as_ref()
-                    .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
+            if let Some(hint) = dispatch
+                .resolved_method
+                .as_ref()
+                .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
             {
                 return_type_id = hint;
+            } else {
+                return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
             }
         }
 

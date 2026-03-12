@@ -866,15 +866,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(def, args)| (def, args.to_vec()))
     }
 
-    /// Unwrap an interface sema `TypeId` to `(TypeDefId, type_args)` via VirTypeTable.
-    #[inline]
-    pub fn vir_query_unwrap_interface(
-        &self,
-        type_id: TypeId,
-    ) -> Option<(vole_identity::TypeDefId, Vec<VirTypeId>)> {
-        self.vir_query_unwrap_interface_v(self.vir_lookup(type_id))
-    }
-
     /// Unwrap an error `VirTypeId` to its `TypeDefId` via VirTypeTable.
     #[inline]
     pub fn vir_query_unwrap_error_v(&self, vir_ty: VirTypeId) -> Option<vole_identity::TypeDefId> {

@@ -44,7 +44,7 @@ impl Cg<'_, '_, '_> {
         let type_id = self
             .get_expr_type_substituted(call_expr_id)
             .expect("INTERNAL: native call: missing sema return type");
-        let type_id = self.maybe_convert_iterator_return_type(type_id);
+        let type_id = self.convert_interface_iterator_return_by_type(type_id);
         self.native_call_result(call_inst, native_func, type_id)
     }
 
