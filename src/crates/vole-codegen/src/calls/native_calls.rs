@@ -1,7 +1,7 @@
 // calls/native_calls.rs
 //
 // Native (FFI) call compilation: calling native functions, struct returns,
-// generic external intrinsics, monomorphization dispatch, and functional interface calls.
+// generic external intrinsics, and functional interface calls.
 
 use cranelift::prelude::*;
 use cranelift_module::Module;
@@ -255,24 +255,6 @@ impl Cg<'_, '_, '_> {
         Ok(self.compiled_with_ty(value, expected_ty, type_id))
     }
 
-    /// Compile a native function call with known Vole types (for generic external functions).
-    ///
-    /// Accepts `ArgSource` for VIR-based argument compilation.
-    /// This uses the concrete types from the monomorphized FunctionType rather than
-    /// inferring types from the native signature.
-    fn compile_native_call_with_types_from_source(
-        &mut self,
-        native_func: &NativeFunction,
-        arg_source: &ArgSource<'_>,
-        return_type_id: TypeId,
-    ) -> CodegenResult<CompiledValue> {
-        let (args, _rc_temps) = self.compile_args_tracking_rc(arg_source)?;
-        let call_inst = self.call_native_indirect(native_func, &args);
-        let type_id = self.substitute_type(return_type_id);
-        let type_id = self.maybe_convert_iterator_return_type(type_id);
-        self.native_call_result(call_inst, native_func, type_id)
-    }
-
     /// Resolve the intrinsic key for a generic external function call.
     ///
     /// Resolution order:
@@ -345,27 +327,6 @@ impl Cg<'_, '_, '_> {
 
     /// Call a generic external function as a compiler intrinsic.
     ///
-    /// Accepts `ArgSource` for VIR-based argument compilation.
-    /// Uses the intrinsic key from type mappings to dispatch to the correct handler.
-    fn call_generic_external_intrinsic_with_source(
-        &mut self,
-        module_path: &str,
-        intrinsic_key: &str,
-        arg_source: &ArgSource<'_>,
-        return_type_id: TypeId,
-        expected_param_type_ids: Option<&[TypeId]>,
-    ) -> CodegenResult<CompiledValue> {
-        self.call_generic_external_intrinsic_method_args(
-            module_path,
-            intrinsic_key,
-            arg_source,
-            return_type_id,
-            expected_param_type_ids,
-        )
-    }
-
-    /// Call a generic external function as a compiler intrinsic.
-    ///
     /// Accepts `ArgSource` for VIR-based argument compilation; also used by
     /// method call paths.
     pub(crate) fn call_generic_external_intrinsic_method_args(
@@ -414,74 +375,6 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
-    /// Try to call a generic external function via monomorphization intrinsic resolution.
-    /// Returns Some(result) if the call was handled, None if it should fall through.
-    ///
-    /// Accepts `ArgSource` for VIR-based argument compilation.
-    pub(super) fn try_call_generic_external_intrinsic_from_monomorph(
-        &mut self,
-        _call_expr_id: NodeId,
-        arg_source: &ArgSource<'_>,
-    ) -> CodegenResult<Option<CompiledValue>> {
-        let Some(monomorph_key) = self.vir_monomorph_key.as_ref() else {
-            return Ok(None);
-        };
-
-        let instance_data = self.free_monomorph(monomorph_key).map(|inst| {
-            (
-                inst.original_name,
-                inst.func_type.params_id.to_vec(),
-                inst.func_type.return_type_id,
-                inst.substitutions.clone(),
-            )
-        });
-
-        let Some((original_name, param_type_ids, return_type_id, substitutions)) = instance_data
-        else {
-            return Ok(None);
-        };
-
-        let Some(callee_name) = self.name_table().last_segment_str(original_name) else {
-            return Ok(None);
-        };
-
-        let Some(generic_ext_info) = self.analyzed().generic_external_by_name(&callee_name) else {
-            return Ok(None);
-        };
-
-        let key = self.resolve_intrinsic_key_for_monomorph(
-            &callee_name,
-            &generic_ext_info.type_mappings,
-            &substitutions,
-        )?;
-
-        let module_path = self
-            .name_table()
-            .last_segment_str(generic_ext_info.module_path)
-            .unwrap_or_default();
-
-        let return_type_id = self.substitute_type(return_type_id);
-        let concrete_param_type_ids: Vec<TypeId> = param_type_ids
-            .iter()
-            .map(|&ty| {
-                self.vir_query_expect_substitute(
-                    ty,
-                    &substitutions,
-                    "generic external intrinsic args",
-                )
-            })
-            .collect();
-
-        self.call_generic_external_intrinsic_with_source(
-            &module_path,
-            &key,
-            arg_source,
-            return_type_id,
-            Some(&concrete_param_type_ids),
-        )
-        .map(Some)
-    }
-
     /// Try to call a value as a functional interface.
     /// Returns Some(result) if the value is a functional interface, None otherwise.
     /// Accepts `ArgSource` for VIR-based argument compilation.
@@ -510,145 +403,5 @@ impl Cg<'_, '_, '_> {
             func_type_id,
         )
         .map(Some)
-    }
-
-    /// Try to call a monomorphized function.
-    /// Returns Some(result) if the call was handled, None if it should fall through.
-    ///
-    /// Accepts `ArgSource` for VIR-based argument compilation.
-    pub(super) fn try_call_monomorphized_function(
-        &mut self,
-        call_expr_id: NodeId,
-        arg_source: &ArgSource<'_>,
-        _callee_sym: Symbol,
-        callee_name: &str,
-    ) -> CodegenResult<Option<CompiledValue>> {
-        let Some(monomorph_key) = self.vir_monomorph_key.as_ref() else {
-            return Ok(None);
-        };
-
-        tracing::trace!(
-            call_expr_id = ?call_expr_id,
-            callee = callee_name,
-            has_monomorph = true,
-            "checking for generic function call"
-        );
-
-        let instance_data = self.free_monomorph(monomorph_key).map(|inst| {
-            (
-                inst.original_name,
-                inst.mangled_name,
-                inst.func_type.params_id.to_vec(),
-                inst.func_type.return_type_id,
-                inst.substitutions.clone(),
-            )
-        });
-
-        let Some((original_name, mangled_name, param_types_raw, return_type_id, substitutions)) =
-            instance_data
-        else {
-            return Ok(None);
-        };
-
-        let param_type_display: Vec<String> = param_types_raw
-            .iter()
-            .map(|&ty| self.vir_query_display_basic(ty))
-            .collect();
-        tracing::debug!(
-            call_expr_id = ?call_expr_id,
-            callee = callee_name,
-            mangled = ?mangled_name,
-            ?param_types_raw,
-            ?param_type_display,
-            ?substitutions,
-            "monomorph call instance"
-        );
-
-        tracing::trace!(
-            instance_name = ?original_name,
-            mangled_name = ?mangled_name,
-            "found monomorph instance"
-        );
-
-        let func_key = self.funcs().intern_name_id(mangled_name);
-        if let Some(func_id) = self.funcs().func_id(func_key) {
-            let param_type_ids: Vec<TypeId> = param_types_raw
-                .iter()
-                .map(|&ty| {
-                    self.vir_query_expect_substitute(ty, &substitutions, "monomorph call args")
-                })
-                .collect();
-            tracing::trace!("found func_id, using regular path");
-            return self
-                .call_func_id_impl(
-                    func_key,
-                    func_id,
-                    arg_source,
-                    Some(original_name),
-                    Some(param_type_ids),
-                    self.get_expr_type_substituted(&call_expr_id),
-                    call_expr_id,
-                )
-                .map(Some);
-        }
-
-        tracing::trace!("no func_id, checking for external function");
-
-        // For generic external functions with type mappings, look up intrinsic by concrete type
-        if let Some(generic_ext_info) = self.analyzed().generic_external_by_name(callee_name) {
-            let key = self.resolve_intrinsic_key_for_monomorph(
-                callee_name,
-                &generic_ext_info.type_mappings,
-                &substitutions,
-            )?;
-            let module_path = self
-                .name_table()
-                .last_segment_str(generic_ext_info.module_path)
-                .unwrap_or_default();
-
-            let return_type_id = self.substitute_type(return_type_id);
-            let concrete_param_type_ids: Vec<TypeId> = param_types_raw
-                .iter()
-                .map(|&ty| {
-                    self.vir_query_expect_substitute(
-                        ty,
-                        &substitutions,
-                        "generic external intrinsic args",
-                    )
-                })
-                .collect();
-
-            return self
-                .call_generic_external_intrinsic_with_source(
-                    &module_path,
-                    &key,
-                    arg_source,
-                    return_type_id,
-                    Some(&concrete_param_type_ids),
-                )
-                .map(Some);
-        }
-
-        // Fallback: For generic external functions without type mappings,
-        // call them directly with type erasure via native_registry
-        if let Some(ext_info) = self.analyzed().external_func_by_name(callee_name) {
-            let name_table = self.name_table();
-            let module_path = name_table.last_segment_str(ext_info.module_path);
-            let native_name = name_table.last_segment_str(ext_info.native_name);
-            if let (Some(module_path), Some(native_name)) = (module_path, native_name)
-                && let Some(native_func) = self.native_registry().lookup(&module_path, &native_name)
-            {
-                let return_type_id = self.substitute_type(return_type_id);
-                return self
-                    .compile_native_call_with_types_from_source(
-                        native_func,
-                        arg_source,
-                        return_type_id,
-                    )
-                    .map(Some);
-            }
-        }
-
-        Ok(None)
     }
 }

@@ -115,23 +115,10 @@ impl Cg<'_, '_, '_> {
                 "generic external mapping",
                 message.clone(),
             )),
-            CallTarget::Unresolved {
-                callee_sym,
-                call_node_id,
-                line,
-                resolved_call_args,
-                lambda_defaults,
-                monomorph_key,
-            } => {
-                self.vir_monomorph_key = monomorph_key.clone();
-                self.compile_vir_unresolved_call(
-                    *callee_sym,
-                    args,
-                    *call_node_id,
-                    *line,
-                    resolved_call_args.as_deref(),
-                    *lambda_defaults,
-                    ty,
+            CallTarget::Unresolved { callee_sym, .. } => {
+                unreachable!(
+                    "CallTarget::Unresolved reached codegen for `{}` — all calls should be resolved during VIR lowering",
+                    self.interner().resolve(*callee_sym)
                 )
             }
         }
@@ -600,45 +587,6 @@ impl Cg<'_, '_, '_> {
         }
         let result = self.native_call_result(call_inst, &native_func, return_ty)?;
         Ok(self.mark_rc_owned(result))
-    }
-
-    /// Compile an unresolved call by delegating to `call_dispatch()`.
-    ///
-    /// After VIR lowering, rederive, and resolve, most `CallTarget::Unresolved`
-    /// calls have been converted to concrete targets.  The remaining cases are:
-    /// - **External/FFI functions** — rederive can't produce `CallTarget::Native`
-    ///   without `&mut Interner`
-    /// - **Cross-module aliased generics** — destructured imports with renamed
-    ///   generic externals
-    ///
-    /// This method stashes the VIR-resolved named-arg mapping, lambda
-    /// defaults, and return type, then passes the VIR-lowered `args` through
-    /// `ArgSource::Vir` so all dispatch paths compile from VIR instead of
-    /// the original AST.
-    #[allow(clippy::too_many_arguments)]
-    fn compile_vir_unresolved_call(
-        &mut self,
-        callee_sym: vole_identity::Symbol,
-        args: &[VirRef],
-        call_node_id: vole_identity::NodeId,
-        line: u32,
-        resolved_call_args: Option<&[Option<usize>]>,
-        lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
-        return_ty: TypeId,
-    ) -> CodegenResult<CompiledValue> {
-        let arg_source = crate::structs::methods::ArgSource(args);
-        // Stash the VIR-resolved named-arg mapping, lambda defaults, and
-        // return type so call_dispatch() sub-functions can read them.
-        // The monomorph key is already stashed by the caller (`compile_vir_call`).
-        self.vir_resolved_call_args = resolved_call_args.map(|m| m.to_vec());
-        self.vir_lambda_defaults = lambda_defaults;
-        self.vir_call_return_type = Some(return_ty);
-        let result = self.call_dispatch(callee_sym, &arg_source, line, call_node_id);
-        self.vir_resolved_call_args = None;
-        self.vir_lambda_defaults = None;
-        self.vir_monomorph_key = None;
-        self.vir_call_return_type = None;
-        result.map(|r| self.mark_rc_owned(r))
     }
 
     /// Compile a call to a local closure variable (`CallTarget::ClosureVariable`).

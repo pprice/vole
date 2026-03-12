@@ -224,29 +224,24 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub self_vir_type: Option<VirTypeId>,
     /// Pre-resolved named-argument reordering mapping from VIR.
     ///
-    /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
-    /// `call_func_id_impl()` and `call_actual_closure()`.
-    /// Cleared after `call_dispatch()` returns.
+    /// Set by VIR call dispatch (ClosureVariable, CapturedClosure, GlobalClosure),
+    /// consumed by `call_func_id_impl()` and `call_actual_closure()`.
     pub(crate) vir_resolved_call_args: Option<Vec<Option<usize>>>,
     /// Pre-resolved lambda parameter defaults from VIR.
     ///
-    /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
-    /// `call_actual_closure()`.
-    /// Cleared after `call_dispatch()` returns.
+    /// Set by VIR call dispatch (ClosureVariable, CapturedClosure, GlobalClosure),
+    /// consumed by `call_actual_closure()`.
     pub(crate) vir_lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
     /// Pre-resolved monomorph key from VIR.
     ///
-    /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
-    /// `try_call_generic_external_intrinsic_from_monomorph()` and
-    /// `try_call_monomorphized_function()`.
-    /// Cleared after `call_dispatch()` returns.
+    /// Set by VIR call dispatch (GlobalClosure), consumed by
+    /// method dispatch for generic external intrinsics.
     pub(crate) vir_monomorph_key: Option<vole_identity::MonomorphKey>,
     /// Pre-resolved return type from VIR `Call` node.
     ///
-    /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
+    /// Set by VIR call dispatch (ClosureVariable, GlobalClosure), consumed by
     /// `get_expr_type()` / `get_expr_type_substituted()` /
     /// `get_substituted_return_type()`.
-    /// Cleared after `call_dispatch()` returns.
     pub(crate) vir_call_return_type: Option<TypeId>,
     /// Cached `iconst.i64 0` created in the entry block for void returns.
     /// Reused by every `void_value()` call to avoid emitting thousands of
