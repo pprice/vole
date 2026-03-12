@@ -268,8 +268,14 @@ impl LoweringCtx<'_> {
         }
         // External (FFI) functions: look up the native function info from
         // the implement registry and emit CallTarget::Native or Intrinsic.
+        // Use the original function name (full_name_id) for lookup, since
+        // the callee may be an import alias (e.g., `sqrt as squareRoot`).
         if func_def.is_external {
-            return self.resolve_external_call_target(callee_name);
+            let original_name = self
+                .name_table
+                .last_segment_str(func_def.full_name_id)
+                .unwrap_or_else(|| callee_name.to_string());
+            return self.resolve_external_call_target(&original_name);
         }
         // Interface/union parameters are handled by codegen's
         // compile_vir_args_coerced(), which coerces each argument
@@ -347,8 +353,13 @@ impl LoweringCtx<'_> {
             return None;
         }
 
-        // Look up the generic external info from the implement registry.
-        let generic_ext = self.implements.get_generic_external(&callee_name)?;
+        // Look up the generic external info using the original function name
+        // (not the alias), since the implement registry uses original names.
+        let original_name = self
+            .name_table
+            .last_segment_str(func_def.full_name_id)
+            .unwrap_or_else(|| callee_name.clone());
+        let generic_ext = self.implements.get_generic_external(&original_name)?;
         let module_path_str = self
             .name_table
             .last_segment_str(generic_ext.module_path)

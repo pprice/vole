@@ -405,10 +405,14 @@ impl Analyzer {
                 // (e.g., math.sqrt maps to "f64_sqrt"), record the concrete key
                 // so the optimizer can fold calls with constant arguments.
                 {
-                    let callee_name = interner.resolve(*sym);
+                    // Use the original function name (not alias) for intrinsic lookup.
+                    let original_name = self
+                        .name_table()
+                        .last_segment_str(original_name_id)
+                        .unwrap_or_else(|| interner.resolve(*sym).to_string());
                     let ext_info = self
                         .implement_registry()
-                        .get_generic_external(callee_name)
+                        .get_generic_external(&original_name)
                         .cloned();
                     if let Some(ext_info) = ext_info {
                         let sub_types: FxHashSet<ArenaTypeId> =
