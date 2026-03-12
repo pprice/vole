@@ -713,7 +713,7 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
         VirExpr::MethodCall { dispatch, .. } => {
             assert!(matches!(
                 dispatch.dispatch_kind,
-                Some(vole_vir::expr::VirMethodDispatchKind::Builtin)
+                Some(vole_vir::expr::VirMethodDispatchKind::Builtin(_))
             ));
             assert!(matches!(
                 dispatch.receiver_coercion,

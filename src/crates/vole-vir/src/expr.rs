@@ -658,8 +658,8 @@ pub enum CoerceKind {
 pub enum VirMethodDispatchKind {
     /// Module-scoped function call dispatch.
     Module { module_id: ModuleId },
-    /// Built-in method dispatch.
-    Builtin,
+    /// Built-in method dispatch with the specific method pre-resolved.
+    Builtin(crate::BuiltinMethod),
     /// Array push special-case dispatch.
     ArrayPush,
     /// Standard method dispatch path.

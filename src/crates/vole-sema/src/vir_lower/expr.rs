@@ -109,7 +109,7 @@ pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                 .iter()
                 .map(|a| lower_call_arg(a.expr(), ctx))
                 .collect();
-            let dispatch = lower_method_dispatch_meta(expr.id, mc.object.id, ctx);
+            let dispatch = lower_method_dispatch_meta(expr.id, mc.object.id, mc.method, ctx);
             let dispatch_ty = dispatch
                 .substituted_return_type
                 .or_else(|| {
@@ -971,7 +971,7 @@ fn lower_optional_method_call(
         .map(|a| lower_call_arg(a.expr(), ctx))
         .collect();
     let vir_inner_type = ctx.translate(info.inner_type);
-    let dispatch = lower_method_dispatch_meta(expr.id, omc.object.id, ctx);
+    let dispatch = lower_method_dispatch_meta(expr.id, omc.object.id, omc.method, ctx);
     // Optional method calls produce an optional result (`Inner?`), not the raw
     // method return type. Keep the expression type from sema (`ty`) and carry
     // method dispatch return info only inside `dispatch`.
@@ -990,6 +990,54 @@ fn lower_optional_method_call(
     })
 }
 
+/// Resolve which `BuiltinMethod` variant a builtin method call corresponds to.
+///
+/// Uses the receiver's sema type and the method name to select the specific
+/// enum variant.  Falls back to `ArrayLength` if the receiver type is
+/// unavailable (e.g. in generic templates) — the variant will be corrected
+/// after monomorphization when `infer_method_dispatch_kind` re-derives.
+fn resolve_builtin_method(
+    receiver_ty: Option<TypeId>,
+    method_name: vole_identity::Symbol,
+    ctx: &LoweringCtx<'_>,
+) -> vole_vir::BuiltinMethod {
+    use vole_identity::TypeId;
+    use vole_vir::BuiltinMethod;
+
+    let Some(name) = ctx.interner.try_resolve(method_name) else {
+        // Synthetic symbol (e.g. in tests) — codegen will re-derive.
+        return BuiltinMethod::ArrayLength;
+    };
+    let Some(ty) = receiver_ty else {
+        // Generic template — receiver type unknown; codegen will re-derive.
+        return BuiltinMethod::ArrayLength;
+    };
+
+    if ctx.type_arena.is_array(ty) {
+        return match name {
+            "length" => BuiltinMethod::ArrayLength,
+            "iter" => BuiltinMethod::ArrayIter,
+            "push" => BuiltinMethod::ArrayPush,
+            _ => BuiltinMethod::ArrayLength,
+        };
+    }
+    if ty == TypeId::STRING {
+        return match name {
+            "length" => BuiltinMethod::StringLength,
+            "iter" => BuiltinMethod::StringIter,
+            _ => BuiltinMethod::StringLength,
+        };
+    }
+    if ty == TypeId::RANGE {
+        return match name {
+            "iter" => BuiltinMethod::RangeIter,
+            _ => BuiltinMethod::RangeIter,
+        };
+    }
+    // Unexpected receiver type for Builtin dispatch — default to ArrayLength.
+    BuiltinMethod::ArrayLength
+}
+
 /// Lower sema method-dispatch annotations into VIR method metadata.
 ///
 /// The metadata is sema-independent and uses identity types only so downstream
@@ -997,6 +1045,7 @@ fn lower_optional_method_call(
 fn lower_method_dispatch_meta(
     expr_id: vole_identity::NodeId,
     receiver_node_id: vole_identity::NodeId,
+    method_name: vole_identity::Symbol,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirMethodDispatchMeta {
     let dispatch_kind = ctx
@@ -1006,7 +1055,11 @@ fn lower_method_dispatch_meta(
             crate::node_map::MethodDispatchKind::Module(module_id) => {
                 VirMethodDispatchKind::Module { module_id }
             }
-            crate::node_map::MethodDispatchKind::Builtin => VirMethodDispatchKind::Builtin,
+            crate::node_map::MethodDispatchKind::Builtin => {
+                let receiver_ty = ctx.node_map.get_type(receiver_node_id);
+                let builtin = resolve_builtin_method(receiver_ty, method_name, ctx);
+                VirMethodDispatchKind::Builtin(builtin)
+            }
             crate::node_map::MethodDispatchKind::ArrayPush => VirMethodDispatchKind::ArrayPush,
             crate::node_map::MethodDispatchKind::Standard => VirMethodDispatchKind::Standard,
         });

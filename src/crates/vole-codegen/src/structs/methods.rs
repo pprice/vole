@@ -16,6 +16,7 @@ use vole_identity::Symbol;
 use vole_identity::{
     ClassMethodMonomorphKey, MethodId, NameId, NamerLookup, NodeId, TypeId, VirTypeId,
 };
+use vole_vir::BuiltinMethod;
 use vole_vir::VirRef;
 use vole_vir::expr::{
     VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirResolvedMethod,
@@ -424,7 +425,7 @@ impl Cg<'_, '_, '_> {
                     dispatch.resolved_call_args.as_deref(),
                 );
             }
-            VirMethodDispatchKind::Builtin => {
+            VirMethodDispatchKind::Builtin(_) => {
                 if let Some(result) =
                     self.builtin_method(&obj, method_name_str, concrete_return_hint)?
                 {
@@ -1396,11 +1397,25 @@ impl Cg<'_, '_, '_> {
             if method_name == "push" {
                 return VirMethodDispatchKind::ArrayPush;
             }
-            return VirMethodDispatchKind::Builtin;
+            let builtin = match method_name {
+                "length" => BuiltinMethod::ArrayLength,
+                "iter" => BuiltinMethod::ArrayIter,
+                _ => BuiltinMethod::ArrayLength,
+            };
+            return VirMethodDispatchKind::Builtin(builtin);
         }
-        // String and range builtins
-        if obj.type_id == VirTypeId::STRING || obj.type_id == VirTypeId::RANGE {
-            return VirMethodDispatchKind::Builtin;
+        // String builtins
+        if obj.type_id == VirTypeId::STRING {
+            let builtin = match method_name {
+                "length" => BuiltinMethod::StringLength,
+                "iter" => BuiltinMethod::StringIter,
+                _ => BuiltinMethod::StringLength,
+            };
+            return VirMethodDispatchKind::Builtin(builtin);
+        }
+        // Range builtins
+        if obj.type_id == VirTypeId::RANGE {
+            return VirMethodDispatchKind::Builtin(BuiltinMethod::RangeIter);
         }
         VirMethodDispatchKind::Standard
     }
