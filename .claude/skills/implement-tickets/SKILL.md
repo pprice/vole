@@ -69,8 +69,7 @@ you must follow these rules.
 3. Before declaring success `just pre-commit` must pass. You do not need to run 
    `just ci` if `just pre-commit` passes
 4. NEVER ignore clippy warnings, this is a sign of bad code
-5. If successful, do a brief code review of your changes, make sure the rules and
-   limits and followed, and we didn't write crap to just get things working. It
-   is okay to clean-up your code after the fact.
-6. If cleaning up after code-review, verify again with with `just pre-commit`
+5. If successful, run `/simplify` on your changes to check for reuse, quality,
+   and efficiency issues. Fix anything it finds.
+6. If cleaning up after `/simplify`, verify again with `just pre-commit`
 7. If task and code-review successful, commit the work to `git`.
