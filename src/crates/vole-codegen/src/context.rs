@@ -24,6 +24,7 @@ use vole_identity::{
 
 use super::lambda::CaptureBinding;
 use super::rc_cleanup::RcScopeStack;
+use super::rc_state::RcState;
 use super::types::{
     CodegenCtx, CompileEnv, CompiledValue, MonomorphIndexEntry, PendingMonomorph, TypeMetadataMap,
 };
@@ -260,6 +261,12 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// every use. The cache is never cleared on block switches — every value
     /// created once and reused everywhere.
     iconst_cache: FxHashMap<(Type, i64), Value>,
+    /// Lazily-populated cache for `rc_state_v()` results.
+    ///
+    /// RcState is a pure function of `(VirTypeId, VirTypeTable, AnalyzedProgram)`,
+    /// all immutable during codegen. The cache eliminates repeated computation
+    /// across the ~53 call sites.  Uses `RefCell` so `&self` methods can populate it.
+    pub(crate) rc_state_cache: RefCell<FxHashMap<VirTypeId, RcState>>,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -324,6 +331,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             cached_void_val,
             entry_block,
             iconst_cache,
+            rc_state_cache: RefCell::new(FxHashMap::default()),
             codegen_ctx,
             env,
         }

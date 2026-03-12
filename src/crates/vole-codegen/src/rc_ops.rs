@@ -573,6 +573,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         vir_compute_rc_state(vir_ty, self.vir_type_table(), self.analyzed())
     }
 
+    /// Get the RC state for a VIR type, with caching.
+    ///
+    /// RcState is a pure function of `(VirTypeId, VirTypeTable, AnalyzedProgram)`,
+    /// all immutable during codegen. This caches the result per VirTypeId so
+    /// repeated queries (across ~53 call sites) avoid recomputation.
+    #[expect(
+        dead_code,
+        reason = "vol-v4o7 will migrate call sites to use cached_rc_state_v"
+    )]
+    pub fn cached_rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
+        if let Some(cached) = self.rc_state_cache.borrow().get(&vir_ty) {
+            return cached.clone();
+        }
+        let state = self.rc_state_v(vir_ty);
+        self.rc_state_cache
+            .borrow_mut()
+            .insert(vir_ty, state.clone());
+        state
+    }
+
     /// Mark a CompiledValue as owned if its type needs RC cleanup.
     /// Use this for fresh allocations (function returns, operator results) — NOT for
     /// borrowed values (variable reads, field access, index operations).
