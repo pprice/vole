@@ -375,10 +375,44 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 iterator_interface_type,
             }
         }
-        Some(IterableKind::CustomIterable { elem_type }) => VirIterKind::CustomIterable {
-            elem_type: ctx.translate(elem_type),
-            vir_elem_type: ctx.translate(elem_type),
-        },
+        Some(IterableKind::CustomIterable { elem_type }) => {
+            let vir_elem = ctx.translate(elem_type);
+            let iterator_interface_type = ctx
+                .name_table
+                .well_known
+                .iterator_type_def
+                .map(|def| {
+                    let iface = VirType::Interface {
+                        def,
+                        type_args: vec![vir_elem],
+                    };
+                    ctx.type_table.intern(iface, None)
+                })
+                .unwrap_or(VirTypeId::UNKNOWN);
+
+            // Resolve the iterable class's type name and the "iter" method name
+            // so codegen can look up the FunctionKey directly without string search.
+            let iterable_ty = ctx
+                .node_map
+                .get_type(for_stmt.iterable.id)
+                .unwrap_or(TypeId::UNKNOWN);
+            let (type_def_id, _, _) = ctx
+                .type_arena
+                .unwrap_nominal(iterable_ty)
+                .expect("CustomIterable: iterable must be a nominal type");
+            let iter_type_name_id = ctx.entities.get_type(type_def_id).name_id;
+            let iter_method_name_id =
+                vole_identity::method_name_id_by_str(ctx.name_table, ctx.interner, "iter")
+                    .expect("CustomIterable: 'iter' method must exist in name table");
+
+            VirIterKind::CustomIterable {
+                elem_type: vir_elem,
+                vir_elem_type: vir_elem,
+                iterator_interface_type,
+                iter_type_name_id,
+                iter_method_name_id,
+            }
+        }
         Some(IterableKind::Generic { elem_type }) => VirIterKind::Generic {
             elem_type: ctx.translate(elem_type),
             vir_elem_type: ctx.translate(elem_type),

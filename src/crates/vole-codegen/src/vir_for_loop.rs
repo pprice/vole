@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_identity::{TypeId, UnionStorageKind, VirTypeId};
+use vole_identity::{NameId, TypeId, UnionStorageKind, VirTypeId};
 use vole_vir::stmt::{VirFor, VirIterKind};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
@@ -388,9 +388,19 @@ impl Cg<'_, '_, '_> {
                 iterator_interface_type,
                 ..
             } => self.setup_custom_iterator_iter(vir_for, *elem_type, *iterator_interface_type),
-            VirIterKind::CustomIterable { elem_type, .. } => {
-                self.setup_custom_iterable_iter(vir_for, *elem_type)
-            }
+            VirIterKind::CustomIterable {
+                elem_type,
+                iterator_interface_type,
+                iter_type_name_id,
+                iter_method_name_id,
+                ..
+            } => self.setup_custom_iterable_iter(
+                vir_for,
+                *elem_type,
+                *iterator_interface_type,
+                *iter_type_name_id,
+                *iter_method_name_id,
+            ),
             VirIterKind::Range | VirIterKind::Array { .. } => {
                 unreachable!("Range/Array handled before setup_vir_runtime_iter")
             }
@@ -453,14 +463,36 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Set up a for-loop over a custom Iterable implementor.
+    ///
+    /// Uses pre-resolved method dispatch info from VIR to call `.iter()`
+    /// without string-based method lookup.
     fn setup_custom_iterable_iter(
         &mut self,
         vir_for: &VirFor,
         elem_type: VirTypeId,
+        iterator_interface_type: VirTypeId,
+        iter_type_name_id: NameId,
+        iter_method_name_id: NameId,
     ) -> CodegenResult<(Value, VirTypeId, bool)> {
         let elem_vir = self.try_substitute_type_v(elem_type);
         let iterable = self.compile_vir_expr(&vir_for.iterable)?;
-        let iter_value = self.call_iterable_iter_method(&iterable)?;
+        let interface_vir = self.try_substitute_type_v(iterator_interface_type);
+        let return_type_id = self.vir_type_table().vir_to_type_id(interface_vir);
+
+        let func_key = self
+            .method_func_keys()
+            .get(&(iter_type_name_id, iter_method_name_id))
+            .copied()
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "iter method func_key",
+                    format!("{iter_type_name_id:?}::iter"),
+                )
+            })?;
+        let func_ref = self.func_ref(func_key)?;
+        let call_inst = self.emit_call(func_ref, &[iterable.value]);
+        let iter_value = self.call_result(call_inst, return_type_id)?;
+
         let iter = self.wrap_interface_iter_v(iter_value, elem_vir)?;
         self.enter_iter_rc_scope(&iter, None);
         Ok((iter.value, elem_vir, false))
@@ -552,40 +584,6 @@ impl Cg<'_, '_, '_> {
         } else {
             Ok(raw_val)
         }
-    }
-
-    /// Call the `.iter()` method on an Iterable value, returning the Iterator<T> interface.
-    pub(crate) fn call_iterable_iter_method(
-        &mut self,
-        iterable: &super::types::CompiledValue,
-    ) -> CodegenResult<super::types::CompiledValue> {
-        let type_def_id = self
-            .vir_query_unwrap_nominal_v(iterable.type_id)
-            .ok_or_else(|| CodegenError::internal("for_iterable: expected class/struct type"))?;
-        let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
-
-        let iter_name_id = self
-            .analyzed()
-            .try_method_name_id_by_str("iter")
-            .ok_or_else(|| CodegenError::not_found("method name_id", "iter"))?;
-
-        let func_key = self
-            .method_func_keys()
-            .get(&(type_name_id, iter_name_id))
-            .copied()
-            .ok_or_else(|| {
-                CodegenError::not_found("iter method func_key", format!("{type_def_id:?}::iter"))
-            })?;
-
-        let return_type_id = self
-            .analyzed()
-            .method_binding_return_type(type_def_id, iter_name_id)
-            .unwrap_or(TypeId::VOID);
-
-        let func_ref = self.func_ref(func_key)?;
-        let call_inst = self.emit_call(func_ref, &[iterable.value]);
-
-        self.call_result(call_inst, return_type_id)
     }
 
     /// Decode a raw array element value to the correct Cranelift type (VirTypeId-native).

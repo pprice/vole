@@ -2,7 +2,7 @@
 //
 // VIR statement nodes.
 
-use vole_identity::{ModuleId, Symbol, UnionStorageKind, VirTypeId};
+use vole_identity::{ModuleId, NameId, Symbol, UnionStorageKind, VirTypeId};
 
 use crate::expr::FieldStorage;
 use crate::func::VirBody;
@@ -336,6 +336,18 @@ pub enum VirIterKind {
     CustomIterable {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
+        /// The `Iterator<T>` interface type, pre-resolved by sema.
+        ///
+        /// Used as the return type of the `.iter()` call and eliminates
+        /// codegen's need to reconstruct `Iterator<elem_type>`.
+        iterator_interface_type: VirTypeId,
+        /// The iterable class's type name, pre-resolved by sema.
+        ///
+        /// Together with `iter_method_name_id`, eliminates codegen's
+        /// string-based lookup of the `.iter()` method.
+        iter_type_name_id: NameId,
+        /// The `iter` method's NameId, pre-resolved by sema.
+        iter_method_name_id: NameId,
     },
 
     /// Placeholder for generic lowering mode.
