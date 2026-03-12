@@ -1014,9 +1014,9 @@ impl Compiler<'_> {
                 // but the sema TypeId may be absent when the element type arose from an
                 // iterator transformation like .map() rather than a direct Iterable<T>
                 // implementation. Without a sema TypeId, inner runtime iterator method
-                // calls (e.g. self.iter().find(pred)) would fail in
-                // derive_iterator_return_type. Skip this method for this element type;
-                // the method is only needed if user code actually calls it on this type.
+                // calls (e.g. self.iter().find(pred)) would fail to resolve the return
+                // type. Skip this method for this element type; the method is only
+                // needed if user code actually calls it on this type.
                 {
                     let table = self.vir_type_table();
                     if table.lookup_vir_type_id(return_vir_ty).is_none()

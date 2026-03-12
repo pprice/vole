@@ -467,6 +467,12 @@ impl Cg<'_, '_, '_> {
                     let v = self.try_substitute_type_v(ty);
                     table.vir_to_type_id(v)
                 })
+                .or_else(|| {
+                    dispatch
+                        .resolved_method
+                        .as_ref()
+                        .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
+                })
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &obj,
@@ -496,6 +502,12 @@ impl Cg<'_, '_, '_> {
                 .map(|ty| {
                     let v = self.try_substitute_type_v(ty);
                     table.vir_to_type_id(v)
+                })
+                .or_else(|| {
+                    dispatch
+                        .resolved_method
+                        .as_ref()
+                        .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
                 })
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
@@ -986,7 +998,7 @@ impl Cg<'_, '_, '_> {
             // (maybe_convert failed because the elem TypeId was unknown/unsubstituted),
             // OR if the return type is still a type parameter (e.g. sum() -> T where T
             // is the Iterable interface's element type, not the function's own type param).
-            // In both cases, derive the correct type from the receiver's concrete element type.
+            // In both cases, use concrete_return_hint from sema's VirResolvedMethod.
             let needs_derivation = {
                 let vir_ret = self.vir_lookup(return_type_id);
                 if let Some((type_def_id, _)) = self.vir_query_unwrap_interface_v(vir_ret) {
@@ -994,35 +1006,16 @@ impl Cg<'_, '_, '_> {
                         .well_known
                         .is_iterator_type_def(type_def_id)
                 } else {
-                    // Also derive when the return type is still a type parameter.
-                    // This handles non-Iterator-returning Iterable defaults like
-                    // sum() -> T, reduce() -> T, first() -> T?, etc. where the
-                    // Iterable interface's type parameter T was not resolved.
                     self.vir_query_unwrap_type_param_v(vir_ret).is_some()
                 }
             };
-            if needs_derivation {
-                let elem_type_id =
-                    if let Some(elem_vir) = self.vir_query_unwrap_array_v(obj.type_id) {
-                        let table = self.vir_type_table();
-                        Some(table.vir_to_type_id(elem_vir))
-                    } else if self.vir_query_is_string_v(obj.type_id) {
-                        Some(TypeId::STRING)
-                    } else if obj.type_id == VirTypeId::RANGE {
-                        Some(TypeId::I64)
-                    } else {
-                        None
-                    };
-                if let Some(elem_type_id) = elem_type_id
-                    && let Some(iter_type_def) = self.name_table().well_known.iterator_type_def
-                    && let Some(derived) = self.derive_iterator_return_type(
-                        method_name_str,
-                        elem_type_id,
-                        iter_type_def,
-                    )
-                {
-                    return_type_id = derived;
-                }
+            if needs_derivation
+                && let Some(hint) = dispatch
+                    .resolved_method
+                    .as_ref()
+                    .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
+            {
+                return_type_id = hint;
             }
         }
 

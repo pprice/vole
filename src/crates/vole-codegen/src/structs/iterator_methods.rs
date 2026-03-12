@@ -22,8 +22,8 @@ impl Cg<'_, '_, '_> {
     /// Resolve an Iterator interface method: find the external binding and
     /// compute the substituted return type (converting Iterator<T> to RuntimeIterator(T)).
     ///
-    /// `fallback_elem_type` is used when expression data is absent (e.g. when compiling
-    /// Iterable default method bodies like `map` whose expressions were not analyzed by sema).
+    /// `fallback_elem_type` is used when compiling Iterable default method bodies
+    /// (e.g. `map` in traits.vole) whose inner expressions are not analyzed by sema.
     fn resolve_iterator_method(
         &self,
         method_name: &str,
@@ -61,9 +61,10 @@ impl Cg<'_, '_, '_> {
 
         // In monomorphized module contexts, substituted_return_type can be absent.
         // Fall back to expression type before failing.
-        // When compiling Iterable default method bodies (e.g. `map` in traits.vole),
-        // sema never analyzes the expression so both lookups return None.
-        // In that case, derive the return type from the method name + fallback_elem_type.
+        // The return_type_hint comes from sema's concrete_return_hint (populated for
+        // all 29 iterator/builtin method variants). The derive fallback is only
+        // needed for Iterable default method bodies whose inner expressions are not
+        // analyzed by sema.
         let return_type_id = return_type_hint
             .or_else(|| expr_id.and_then(|id| self.get_substituted_return_type(&id)))
             .or_else(|| expr_id.and_then(|id| self.get_expr_type(&id)))
@@ -88,10 +89,10 @@ impl Cg<'_, '_, '_> {
 
     /// Derive the return type of an Iterator method from the method name and element type.
     ///
-    /// Used as a fallback when expression data is absent (interface default method bodies
-    /// are not analyzed by sema). Returns None if the type can't be determined without
-    /// expression data.
-    pub(crate) fn derive_iterator_return_type(
+    /// Only used as a fallback when compiling Iterable default method bodies whose inner
+    /// expressions are not analyzed by sema (e.g. `self.iter().map(f)` inside the
+    /// default `map` implementation in traits.vole).
+    fn derive_iterator_return_type(
         &self,
         method_name: &str,
         elem_type_id: TypeId,
@@ -99,50 +100,19 @@ impl Cg<'_, '_, '_> {
     ) -> Option<TypeId> {
         let table = self.vir_type_table();
         match method_name {
-            // Methods returning Iterator<T> — convert to RuntimeIterator<elem_type_id>
             "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
-            | "flatten" | "flat_map" | "filter_map" => {
-                table.lookup_runtime_iterator_sema(elem_type_id)
-            }
-
-            // Methods returning Iterator<[i64, T]> for enumerate.
-            // The actual enumerate element is [i64, T], but the RuntimeIterator
-            // is keyed on the base elem_type_id. Return that if it exists.
-            "enumerate" => table.lookup_runtime_iterator_sema(elem_type_id),
-
-            // Methods returning Iterator<[T, T]> for zip
-            "zip" => table.lookup_runtime_iterator_sema(elem_type_id),
-
-            // Methods returning Iterator<[T]> for chunks/windows
-            "chunks" | "windows" => table.lookup_runtime_iterator_sema(elem_type_id),
-
-            // Method returning [T] (collect)
+            | "flatten" | "flat_map" | "filter_map" | "enumerate" | "zip" | "chunks"
+            | "windows" => table.lookup_runtime_iterator_sema(elem_type_id),
             "collect" => table.lookup_array_sema(elem_type_id),
-
-            // Methods returning i64
             "count" => Some(TypeId::I64),
-
-            // Methods returning bool
             "any" | "all" => Some(TypeId::BOOL),
-
-            // Methods returning void
             "for_each" => Some(TypeId::VOID),
-
-            // Methods returning T (the element type)
             "sum" | "reduce" => Some(elem_type_id),
-
-            // Methods returning T? (optional element): first, last, nth, find
-            // Optional<T> is pre-created in the TypeArena during sema analysis
-            // (alongside RuntimeIterator<T>) whenever an Iterable<T> impl is registered.
             "first" | "last" | "nth" | "find" => table.lookup_optional_sema(elem_type_id),
-
-            // next() -> T | Done — return the T type directly
             "next" => {
                 let _ = iter_type_id;
                 Some(elem_type_id)
             }
-
-            // Unknown method: can't derive
             _ => None,
         }
     }
