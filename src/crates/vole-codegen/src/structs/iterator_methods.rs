@@ -188,7 +188,7 @@ impl Cg<'_, '_, '_> {
         // rc_dec, so we need an extra reference to avoid a double-free.
         // Non-consuming methods like `next` just borrow the iterator and don't
         // need an rc_inc.
-        let consumes_iterator = method_name != "next";
+        let consumes_iterator = builtin != BuiltinMethod::IterNext;
         if obj.is_borrowed() && consumes_iterator {
             self.emit_rc_inc(obj.value)?;
         }
@@ -215,8 +215,17 @@ impl Cg<'_, '_, '_> {
         //      We MUST emit rc_inc so both cleanup paths can dec independently.
         //    - Terminal methods: runtime borrows and does NOT free. The outer caller
         //      handles dec_ref (scope-exit or return cleanup). No extra action needed.
-        let stores_closure = matches!(method_name, "map" | "filter" | "flat_map" | "filter_map");
-        let codegen_frees_closure = matches!(method_name, "find" | "any" | "all");
+        let stores_closure = matches!(
+            builtin,
+            BuiltinMethod::IterMap
+                | BuiltinMethod::IterFilter
+                | BuiltinMethod::IterFlatMap
+                | BuiltinMethod::IterFilterMap
+        );
+        let codegen_frees_closure = matches!(
+            builtin,
+            BuiltinMethod::IterFind | BuiltinMethod::IterAny | BuiltinMethod::IterAll
+        );
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         // Borrowed RC args for codegen_frees_closure methods inside an Iterable default body.
