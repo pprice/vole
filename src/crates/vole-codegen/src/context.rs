@@ -273,6 +273,11 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Eliminates repeated `find_nil_variant_vir()` and `vir_query_unwrap_optional_v()`
     /// calls across optional comparison, coalescing, and chaining sites.
     pub(crate) optional_meta_cache: RefCell<FxHashMap<VirTypeId, super::type_ops::OptionalMeta>>,
+    /// Lazily-populated cache for struct flat-slot layout (byte offset + Cranelift type per leaf).
+    ///
+    /// Pure function of `(VirTypeId, VirTypeTable, AnalyzedProgram)`, all immutable during codegen.
+    /// Eliminates repeated recursive traversal of `vir_struct_flat_field_cranelift_types()`.
+    pub(crate) struct_flat_slots_cache: RefCell<FxHashMap<VirTypeId, Vec<(i32, Type)>>>,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -339,6 +344,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             iconst_cache,
             rc_state_cache: RefCell::new(FxHashMap::default()),
             optional_meta_cache: RefCell::new(FxHashMap::default()),
+            struct_flat_slots_cache: RefCell::new(FxHashMap::default()),
             codegen_ctx,
             env,
         }

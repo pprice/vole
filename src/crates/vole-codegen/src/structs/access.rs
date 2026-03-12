@@ -42,15 +42,28 @@ impl Cg<'_, '_, '_> {
     /// VirTypeId-native variant of [`struct_flat_field_cranelift_types`].
     ///
     /// Returns None if `vir_ty` is not a struct. Used for struct equality comparison.
-    pub(crate) fn struct_flat_field_cranelift_types_v(
-        &self,
-        vir_ty: VirTypeId,
-    ) -> Option<Vec<(i32, Type)>> {
+    fn struct_flat_field_cranelift_types_v(&self, vir_ty: VirTypeId) -> Option<Vec<(i32, Type)>> {
         crate::types::vir_struct_helpers::vir_struct_flat_field_cranelift_types(
             vir_ty,
             self.vir_type_table(),
             self.analyzed(),
         )
+    }
+
+    /// Cached lookup of struct flat-slot layout (byte offset + Cranelift type per leaf).
+    ///
+    /// The flat-slot layout is a pure function of `(VirTypeId, VirTypeTable, AnalyzedProgram)`,
+    /// all immutable during codegen. Caches the result per `VirTypeId` to avoid repeated
+    /// recursive traversal.
+    pub(crate) fn cached_struct_flat_slots(&self, vir_ty: VirTypeId) -> Option<Vec<(i32, Type)>> {
+        if let Some(cached) = self.struct_flat_slots_cache.borrow().get(&vir_ty) {
+            return Some(cached.clone());
+        }
+        let slots = self.struct_flat_field_cranelift_types_v(vir_ty)?;
+        self.struct_flat_slots_cache
+            .borrow_mut()
+            .insert(vir_ty, slots.clone());
+        Some(slots)
     }
 
     /// Extract a field from a container object, handling struct/instance dispatch
