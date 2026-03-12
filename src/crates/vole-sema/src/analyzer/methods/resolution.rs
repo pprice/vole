@@ -1336,27 +1336,35 @@ impl Analyzer {
         method_impl.external_info?;
 
         let method_name_str = interner.resolve(method_name);
-        if method_name_str != "iter" {
-            return None;
+        match method_name_str {
+            "iter" => self.compute_iter_source_hint(object_type_id),
+            "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
+            | "flatten" | "flat_map" | "filter_map" | "enumerate" | "zip" | "chunks"
+            | "windows" => self.compute_pipeline_hint(object_type_id),
+            _ => None,
         }
+    }
 
-        // Determine the iterator element type based on the object type
+    /// Hint for .iter() — object is array/string/range, returns RuntimeIterator<elem>
+    fn compute_iter_source_hint(&mut self, object_type_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let element_type = {
             let arena = self.type_arena();
             if let Some(elem) = arena.unwrap_array(object_type_id) {
-                // array.iter() -> RuntimeIterator(element)
                 Some(elem)
             } else if object_type_id == arena.string() {
-                // string.iter() -> RuntimeIterator(string) for char iteration
                 Some(arena.string())
             } else if object_type_id == arena.range() {
-                // range.iter() -> RuntimeIterator(i64)
                 Some(arena.i64())
             } else {
                 None
             }
         };
-
         element_type.map(|elem| self.type_arena_mut().runtime_iterator(elem))
+    }
+
+    /// Hint for pipeline methods — object is RuntimeIterator<T>, returns RuntimeIterator<T>
+    fn compute_pipeline_hint(&mut self, object_type_id: ArenaTypeId) -> Option<ArenaTypeId> {
+        let elem = self.type_arena().unwrap_runtime_iterator(object_type_id)?;
+        Some(self.type_arena_mut().runtime_iterator(elem))
     }
 }
