@@ -9,7 +9,8 @@ use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::TypeId;
+use vole_vir::BuiltinMethod;
 
 impl Cg<'_, '_, '_> {
     /// VIR path for range.iter() - compiles start/end from VIR expressions.
@@ -40,119 +41,116 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Handle built-in methods on arrays, strings, and ranges.
+    ///
+    /// Dispatches on the pre-resolved `BuiltinMethod` enum from VIR — no
+    /// receiver-type re-detection needed.
     /// `iter_type_hint` is the pre-computed RuntimeIterator type from sema's concrete_return_hint.
     pub(crate) fn builtin_method(
         &mut self,
+        builtin: BuiltinMethod,
         obj: &CompiledValue,
-        method_name: &str,
         iter_type_hint: Option<TypeId>,
-    ) -> CodegenResult<Option<CompiledValue>> {
-        // Array methods
-        if let Some(elem_vir_type_id) = self.vir_query_unwrap_array_v(obj.type_id) {
-            return match method_name {
-                "length" => {
-                    let result = self.call_compiler_intrinsic_key_with_line(
-                        crate::IntrinsicKey::ArrayLen,
-                        &[obj.value],
-                        TypeId::I64,
-                        0,
-                    )?;
-                    Ok(Some(result))
-                }
-                "iter" => {
-                    let result = self.call_runtime(RuntimeKey::ArrayIter, &[obj.value])?;
-                    let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                        let table = self.vir_type_table();
-                        let elem_sema = table.vir_to_type_id(elem_vir_type_id);
-                        self.vir_query_lookup_runtime_iterator(elem_sema).expect(
-                            "INTERNAL: array iterator: RuntimeIterator type not pre-created",
-                        )
-                    });
-                    let tag = self.vir_query_unknown_type_tag_v(elem_vir_type_id);
-                    if tag != 0 {
-                        let tag_val = self.iconst_cached(types::I64, tag as i64);
-                        self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
-                    }
-                    Ok(Some(self.compiled_owned_with_ty(
-                        result,
-                        self.ptr_type(),
-                        iter_type_id,
-                    )))
-                }
-                _ => Ok(None),
-            };
-        }
-
-        // String methods
-        if self.vir_query_is_string_v(obj.type_id) {
-            return match method_name {
-                "length" => {
-                    let result = self.call_compiler_intrinsic_key_with_line(
-                        crate::IntrinsicKey::StringLen,
-                        &[obj.value],
-                        TypeId::I64,
-                        0,
-                    )?;
-                    Ok(Some(result))
-                }
-                "iter" => {
-                    let result = self.call_runtime(RuntimeKey::StringCharsIter, &[obj.value])?;
-                    // Use sema's pre-computed RuntimeIterator type, or look it up
-                    // (needed for monomorphized generic functions where sema
-                    // resolution is skipped).
-                    let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                        self.vir_query_lookup_runtime_iterator(TypeId::STRING)
-                            .expect(
-                                "INTERNAL: string iterator: RuntimeIterator<string> type not pre-created",
-                            )
-                    });
-                    // Set elem_tag to RuntimeTypeId::String so terminal methods can properly
-                    // free owned char strings produced by the string chars iterator.
-                    let string_tag = self.vir_query_unknown_type_tag(TypeId::STRING);
-                    if string_tag != 0 {
-                        let tag_val = self.iconst_cached(types::I64, string_tag as i64);
-                        self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
-                    }
-                    Ok(Some(self.compiled_owned_with_ty(
-                        result,
-                        self.ptr_type(),
-                        iter_type_id,
-                    )))
-                }
-                _ => Ok(None),
-            };
-        }
-
-        // Range methods
-        if obj.type_id == VirTypeId::RANGE {
-            if method_name == "iter" {
-                // Load start and end from the range struct (pointer to [start, end])
-                let start = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), obj.value, 0);
-                let end = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), obj.value, 8);
-                let result = self.call_runtime(RuntimeKey::RangeIter, &[start, end])?;
-                // Use sema's pre-computed RuntimeIterator type, or look it up from
-                // the element type (needed for monomorphized generic functions where
-                // sema resolution is skipped).
-                let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                    self.vir_query_lookup_runtime_iterator(TypeId::I64)
-                        .expect("INTERNAL: range.iter(): RuntimeIterator<i64> type not pre-created")
-                });
-                return Ok(Some(self.compiled_owned_with_ty(
-                    result,
-                    self.ptr_type(),
-                    iter_type_id,
-                )));
+    ) -> CodegenResult<CompiledValue> {
+        match builtin {
+            BuiltinMethod::ArrayLength => self.array_length(obj),
+            BuiltinMethod::ArrayIter => self.array_iter(obj, iter_type_hint),
+            BuiltinMethod::ArrayPush => {
+                // ArrayPush is handled via VirMethodDispatchKind::ArrayPush, not here.
+                Err(CodegenError::internal(
+                    "ArrayPush should be dispatched via VirMethodDispatchKind::ArrayPush",
+                ))
             }
-            return Ok(None);
+            BuiltinMethod::StringLength => self.string_length(obj),
+            BuiltinMethod::StringIter => self.string_iter(obj, iter_type_hint),
+            BuiltinMethod::RangeIter => self.range_iter_from_obj(obj, iter_type_hint),
+            other => Err(CodegenError::internal_with_context(
+                "unexpected BuiltinMethod in builtin_method dispatch",
+                format!("{other:?}"),
+            )),
         }
+    }
 
-        Ok(None)
+    fn array_length(&mut self, obj: &CompiledValue) -> CodegenResult<CompiledValue> {
+        self.call_compiler_intrinsic_key_with_line(
+            crate::IntrinsicKey::ArrayLen,
+            &[obj.value],
+            TypeId::I64,
+            0,
+        )
+    }
+
+    fn array_iter(
+        &mut self,
+        obj: &CompiledValue,
+        iter_type_hint: Option<TypeId>,
+    ) -> CodegenResult<CompiledValue> {
+        let elem_vir_type_id = self
+            .vir_query_unwrap_array_v(obj.type_id)
+            .ok_or_else(|| CodegenError::internal("ArrayIter on non-array type"))?;
+        let result = self.call_runtime(RuntimeKey::ArrayIter, &[obj.value])?;
+        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+            let table = self.vir_type_table();
+            let elem_sema = table.vir_to_type_id(elem_vir_type_id);
+            self.vir_query_lookup_runtime_iterator(elem_sema)
+                .expect("INTERNAL: array iterator: RuntimeIterator type not pre-created")
+        });
+        let tag = self.vir_query_unknown_type_tag_v(elem_vir_type_id);
+        if tag != 0 {
+            let tag_val = self.iconst_cached(types::I64, tag as i64);
+            self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
+        }
+        Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
+    }
+
+    fn string_length(&mut self, obj: &CompiledValue) -> CodegenResult<CompiledValue> {
+        self.call_compiler_intrinsic_key_with_line(
+            crate::IntrinsicKey::StringLen,
+            &[obj.value],
+            TypeId::I64,
+            0,
+        )
+    }
+
+    fn string_iter(
+        &mut self,
+        obj: &CompiledValue,
+        iter_type_hint: Option<TypeId>,
+    ) -> CodegenResult<CompiledValue> {
+        let result = self.call_runtime(RuntimeKey::StringCharsIter, &[obj.value])?;
+        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+            self.vir_query_lookup_runtime_iterator(TypeId::STRING)
+                .expect("INTERNAL: string iterator: RuntimeIterator<string> type not pre-created")
+        });
+        // Set elem_tag to RuntimeTypeId::String so terminal methods can properly
+        // free owned char strings produced by the string chars iterator.
+        let string_tag = self.vir_query_unknown_type_tag(TypeId::STRING);
+        if string_tag != 0 {
+            let tag_val = self.iconst_cached(types::I64, string_tag as i64);
+            self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
+        }
+        Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
+    }
+
+    /// Load start/end from a compiled range object and create a range iterator.
+    fn range_iter_from_obj(
+        &mut self,
+        obj: &CompiledValue,
+        iter_type_hint: Option<TypeId>,
+    ) -> CodegenResult<CompiledValue> {
+        let start = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), obj.value, 0);
+        let end = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), obj.value, 8);
+        let result = self.call_runtime(RuntimeKey::RangeIter, &[start, end])?;
+        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+            self.vir_query_lookup_runtime_iterator(TypeId::I64)
+                .expect("INTERNAL: range.iter(): RuntimeIterator<i64> type not pre-created")
+        });
+        Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
     }
 
     /// Handle array.push(value) - appends value to end of array

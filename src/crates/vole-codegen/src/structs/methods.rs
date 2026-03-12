@@ -375,18 +375,23 @@ impl Cg<'_, '_, '_> {
         // Extract concrete_return_hint for builtin iterator methods (array.iter, string.iter, range.iter)
         let concrete_return_hint = resolution.and_then(|r| self.resolved_concrete_return_hint(r));
 
-        // Handle range.iter() specially since range expressions can't be compiled to values directly.
-        // Special handling needed because the normal dispatch route for range.iter() resolves as
-        // Implemented (not Builtin) and calls the external function with wrong arguments
-        // (pointer instead of start/end pair).
+        // Handle range.iter() specially when the receiver is a range literal expression.
+        // Range expressions can't be compiled to values directly, so we extract
+        // start/end from the VIR node and pass them to the runtime.
+        // Check dispatch_kind when available; fall back to method name for
+        // monomorphized contexts where sema doesn't annotate dispatch.
         if let vole_vir::VirExpr::Range {
             start,
             end,
             inclusive,
         } = mc.receiver
         {
-            let method_name = self.interner().resolve(mc_method);
-            if method_name == "iter" {
+            let is_range_iter = match dispatch.dispatch_kind {
+                Some(VirMethodDispatchKind::Builtin(BuiltinMethod::RangeIter)) => true,
+                None => self.interner().resolve(mc_method) == "iter",
+                _ => false,
+            };
+            if is_range_iter {
                 return self.vir_range_iter(start, end, *inclusive, concrete_return_hint);
             }
         }
@@ -425,18 +430,15 @@ impl Cg<'_, '_, '_> {
                     dispatch.resolved_call_args.as_deref(),
                 );
             }
-            VirMethodDispatchKind::Builtin(_) => {
-                if let Some(result) =
-                    self.builtin_method(&obj, method_name_str, concrete_return_hint)?
-                {
-                    let mut obj = obj;
-                    self.consume_method_receiver(
-                        &mut obj,
-                        receiver_is_global_init_rc_iface,
-                        dispatch.receiver_is_interface,
-                    )?;
-                    return Ok(result);
-                }
+            VirMethodDispatchKind::Builtin(builtin) => {
+                let result = self.builtin_method(builtin, &obj, concrete_return_hint)?;
+                let mut obj = obj;
+                self.consume_method_receiver(
+                    &mut obj,
+                    receiver_is_global_init_rc_iface,
+                    dispatch.receiver_is_interface,
+                )?;
+                return Ok(result);
             }
             VirMethodDispatchKind::ArrayPush => {
                 let result = self.array_push_call(&obj, &mc.arg_source())?;
@@ -1394,27 +1396,23 @@ impl Cg<'_, '_, '_> {
         // Check array-specific methods: push needs its own path, other array
         // builtins (length, iter) go through builtin_method.
         if self.vir_query_unwrap_array_v(obj.type_id).is_some() {
-            if method_name == "push" {
-                return VirMethodDispatchKind::ArrayPush;
-            }
-            let builtin = match method_name {
-                "length" => BuiltinMethod::ArrayLength,
-                "iter" => BuiltinMethod::ArrayIter,
-                _ => BuiltinMethod::ArrayLength,
+            return match method_name {
+                "push" => VirMethodDispatchKind::ArrayPush,
+                "length" => VirMethodDispatchKind::Builtin(BuiltinMethod::ArrayLength),
+                "iter" => VirMethodDispatchKind::Builtin(BuiltinMethod::ArrayIter),
+                _ => VirMethodDispatchKind::Standard,
             };
-            return VirMethodDispatchKind::Builtin(builtin);
         }
         // String builtins
         if obj.type_id == VirTypeId::STRING {
-            let builtin = match method_name {
-                "length" => BuiltinMethod::StringLength,
-                "iter" => BuiltinMethod::StringIter,
-                _ => BuiltinMethod::StringLength,
+            return match method_name {
+                "length" => VirMethodDispatchKind::Builtin(BuiltinMethod::StringLength),
+                "iter" => VirMethodDispatchKind::Builtin(BuiltinMethod::StringIter),
+                _ => VirMethodDispatchKind::Standard,
             };
-            return VirMethodDispatchKind::Builtin(builtin);
         }
         // Range builtins
-        if obj.type_id == VirTypeId::RANGE {
+        if obj.type_id == VirTypeId::RANGE && method_name == "iter" {
             return VirMethodDispatchKind::Builtin(BuiltinMethod::RangeIter);
         }
         VirMethodDispatchKind::Standard
