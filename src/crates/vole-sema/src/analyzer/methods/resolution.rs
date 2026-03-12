@@ -1341,6 +1341,10 @@ impl Analyzer {
             "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
             | "flatten" | "flat_map" | "filter_map" | "enumerate" | "zip" | "chunks"
             | "windows" => self.compute_pipeline_hint(object_type_id),
+            "collect" | "count" | "any" | "all" | "for_each" | "sum" | "reduce" | "first"
+            | "last" | "nth" | "find" | "next" => {
+                self.compute_terminal_hint(object_type_id, method_name_str)
+            }
             _ => None,
         }
     }
@@ -1366,5 +1370,30 @@ impl Analyzer {
     fn compute_pipeline_hint(&mut self, object_type_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let elem = self.type_arena().unwrap_runtime_iterator(object_type_id)?;
         Some(self.type_arena_mut().runtime_iterator(elem))
+    }
+
+    /// Hint for terminal methods — object is RuntimeIterator<T>, returns a concrete scalar type
+    fn compute_terminal_hint(
+        &mut self,
+        object_type_id: ArenaTypeId,
+        method_name: &str,
+    ) -> Option<ArenaTypeId> {
+        match method_name {
+            // Fixed-type terminals (no elem_type needed)
+            "count" => return Some(ArenaTypeId::I64),
+            "any" | "all" => return Some(ArenaTypeId::BOOL),
+            "for_each" => return Some(ArenaTypeId::VOID),
+            _ => {}
+        }
+
+        // Remaining terminals need the element type from RuntimeIterator<T>
+        let elem = self.type_arena().unwrap_runtime_iterator(object_type_id)?;
+
+        match method_name {
+            "sum" | "reduce" | "next" => Some(elem),
+            "collect" => Some(self.type_arena_mut().array(elem)),
+            "first" | "last" | "nth" | "find" => Some(self.type_arena_mut().optional(elem)),
+            _ => None,
+        }
     }
 }
