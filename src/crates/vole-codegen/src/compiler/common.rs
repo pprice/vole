@@ -392,9 +392,9 @@ fn compile_trailing_vir_expr(
     let skip_var = extract_vir_rc_skip_var(cg, vir_expr);
 
     if skip_var.is_none() && value.is_borrowed() {
-        if cg.rc_state_v(value.type_id).needs_cleanup() {
+        if cg.cached_rc_state_v(value.type_id).needs_cleanup() {
             cg.emit_rc_inc_for_type_v(value.value, value.type_id)?;
-        } else if let Some(rc_tags) = cg.rc_state_v(value.type_id).union_variants() {
+        } else if let Some(rc_tags) = cg.cached_rc_state_v(value.type_id).union_variants() {
             cg.emit_union_rc_inc(value.value, rc_tags)?;
         }
     }
@@ -444,9 +444,9 @@ fn compile_vir_block_body(
         };
         let mut value = value;
         if skip_var.is_none() && value.is_borrowed() {
-            if cg.rc_state_v(value.type_id).needs_cleanup() {
+            if cg.cached_rc_state_v(value.type_id).needs_cleanup() {
                 cg.emit_rc_inc_for_type_v(value.value, value.type_id)?;
-            } else if let Some(rc_tags) = cg.rc_state_v(value.type_id).union_variants() {
+            } else if let Some(rc_tags) = cg.cached_rc_state_v(value.type_id).union_variants() {
                 cg.emit_union_rc_inc(value.value, rc_tags)?;
             }
         }

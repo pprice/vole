@@ -21,7 +21,7 @@ impl Cg<'_, '_, '_> {
         extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
     ) -> CodegenResult<CompiledValue> {
         let result_cranelift_type = self.cranelift_type_v(nullable_vir);
-        let result_needs_rc = self.rc_state_v(nullable_vir).needs_cleanup();
+        let result_needs_rc = self.cached_rc_state_v(nullable_vir).needs_cleanup();
 
         let match_block = self.builder.create_block();
         let no_match_block = self.builder.create_block();

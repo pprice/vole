@@ -1159,7 +1159,10 @@ impl Cg<'_, '_, '_> {
         let mut cv = CompiledValue::new(val, cl_ty, resolved_vir_ty);
         self.mark_borrowed_if_rc(&mut cv);
         if cv.rc_lifecycle == RcLifecycle::Untracked
-            && self.rc_state_v(resolved_vir_ty).union_variants().is_some()
+            && self
+                .cached_rc_state_v(resolved_vir_ty)
+                .union_variants()
+                .is_some()
         {
             cv.mark_borrowed();
         }

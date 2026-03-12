@@ -488,7 +488,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // when unambiguous, heap-boxed union when needed).
             let prefers_inline = self
                 .union_array_prefers_inline_storage_v(self.try_substitute_type_v(payload.type_id));
-            if can_classify_rc && prefers_inline && self.rc_state_v(payload.type_id).needs_cleanup()
+            if can_classify_rc
+                && prefers_inline
+                && self.cached_rc_state_v(payload.type_id).needs_cleanup()
             {
                 self.emit_rc_inc_for_type_v(payload.value, payload.type_id)?;
             }
@@ -498,7 +500,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             let tag = self.vir_query_array_element_tag_id_v(payload.type_id);
             let tag_val = self.iconst_cached(types::I64, tag);
-            if can_classify_rc && self.rc_state_v(payload.type_id).needs_cleanup() {
+            if can_classify_rc && self.cached_rc_state_v(payload.type_id).needs_cleanup() {
                 self.emit_rc_inc_for_type_v(payload.value, payload.type_id)?;
             }
             let payload_bits = convert_to_i64_for_storage(self.builder, &payload);

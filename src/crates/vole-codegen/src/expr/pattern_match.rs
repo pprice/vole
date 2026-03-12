@@ -789,7 +789,7 @@ impl Cg<'_, '_, '_> {
         if body_result.type_id == VirTypeId::NEVER {
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         } else if !is_void {
-            let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
+            let result_needs_rc = self.cached_rc_state_v(result_vir_ty).needs_cleanup();
             self.jump_with_owned_result(
                 body_result,
                 result_vir_ty,

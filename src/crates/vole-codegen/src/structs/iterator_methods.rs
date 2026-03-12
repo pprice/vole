@@ -240,7 +240,7 @@ impl Cg<'_, '_, '_> {
             let compiled = self.compile_arg_from_source(arg_source, i)?;
             if stores_closure
                 && compiled.is_borrowed()
-                && self.rc_state_v(compiled.type_id).needs_cleanup()
+                && self.cached_rc_state_v(compiled.type_id).needs_cleanup()
             {
                 if self.in_iterable_default_body {
                     // Iterable default body: `f` is owned (caller transferred ownership).
@@ -257,7 +257,7 @@ impl Cg<'_, '_, '_> {
                 }
             } else if codegen_frees_closure
                 && compiled.is_borrowed()
-                && self.rc_state_v(compiled.type_id).needs_cleanup()
+                && self.cached_rc_state_v(compiled.type_id).needs_cleanup()
                 && self.in_iterable_default_body
                 && !arg_var_has_scope_exit_cleanup
             {

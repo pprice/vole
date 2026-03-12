@@ -297,7 +297,9 @@ impl Cg<'_, '_, '_> {
 
             // Check for union/optional captures with RC variants (e.g. Box?, string?)
             let union_rc = if !is_self_capture && !is_rc {
-                self.rc_state_v(vole_vir_ty).union_variants().map(Vec::from)
+                self.cached_rc_state_v(vole_vir_ty)
+                    .union_variants()
+                    .map(Vec::from)
             } else {
                 None
             };
@@ -389,7 +391,7 @@ impl Cg<'_, '_, '_> {
         match capture.rc_kind {
             VirCaptureRcKind::None => false,
             VirCaptureRcKind::Rc => true,
-            VirCaptureRcKind::Unresolved => self.rc_state_v(resolved_vir_ty).is_capture(),
+            VirCaptureRcKind::Unresolved => self.cached_rc_state_v(resolved_vir_ty).is_capture(),
         }
     }
 

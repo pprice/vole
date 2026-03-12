@@ -279,7 +279,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         #[cfg(debug_assertions)]
         compiled.debug_assert_not_consumed("rc_inc_borrowed_for_container");
         if self.rc_scopes.has_active_scope()
-            && self.rc_state_v(compiled.type_id).needs_cleanup()
+            && self.cached_rc_state_v(compiled.type_id).needs_cleanup()
             && compiled.is_borrowed()
         {
             self.emit_rc_inc_for_type_v(compiled.value, compiled.type_id)?;
@@ -462,9 +462,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// For interface types, extracts the data word before decrementing.
     pub fn consume_rc_value(&mut self, cv: &mut CompiledValue) -> CodegenResult<()> {
         if cv.is_owned() {
-            if self.rc_state_v(cv.type_id).needs_cleanup() {
+            if self.cached_rc_state_v(cv.type_id).needs_cleanup() {
                 self.emit_rc_dec_for_type_v(cv.value, cv.type_id)?;
-            } else if let Some(rc_tags) = self.rc_state_v(cv.type_id).union_variants() {
+            } else if let Some(rc_tags) = self.cached_rc_state_v(cv.type_id).union_variants() {
                 self.emit_union_rc_dec(cv.value, rc_tags)?;
             }
             cv.mark_consumed();
@@ -544,7 +544,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     pub fn rc_state(&self, type_id: TypeId) -> RcState {
         let vir_ty = self.vir_lookup(type_id);
-        self.rc_state_v(vir_ty)
+        self.cached_rc_state_v(vir_ty)
     }
 
     /// Get the RC state for a VIR type (VirTypeId-native).
@@ -555,7 +555,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// For Optional types, resolves the runtime variant ordering via
     /// `vir_query_unwrap_union_v` (which uses sema's canonical order) to
     /// ensure RC variant tags match the runtime layout.
-    pub fn rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
+    fn rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
         // Optional variant ordering may differ between VIR convention
         // (tag 0 = inner, tag 1 = nil) and sema's canonical sort order.
         // Resolve via vir_query_unwrap_union_v which uses the authoritative
@@ -578,10 +578,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// RcState is a pure function of `(VirTypeId, VirTypeTable, AnalyzedProgram)`,
     /// all immutable during codegen. This caches the result per VirTypeId so
     /// repeated queries (across ~53 call sites) avoid recomputation.
-    #[expect(
-        dead_code,
-        reason = "vol-v4o7 will migrate call sites to use cached_rc_state_v"
-    )]
     pub fn cached_rc_state_v(&self, vir_ty: VirTypeId) -> RcState {
         if let Some(cached) = self.rc_state_cache.borrow().get(&vir_ty) {
             return cached.clone();
@@ -597,7 +593,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Use this for fresh allocations (function returns, operator results) — NOT for
     /// borrowed values (variable reads, field access, index operations).
     pub fn mark_rc_owned(&self, mut cv: CompiledValue) -> CompiledValue {
-        if self.rc_state_v(cv.type_id).needs_cleanup() {
+        if self.cached_rc_state_v(cv.type_id).needs_cleanup() {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
         cv
@@ -608,7 +604,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// with RC fields.
     /// This sets lifecycle metadata without emitting any rc_inc/rc_dec.
     pub fn mark_borrowed_if_rc(&self, cv: &mut CompiledValue) {
-        let state = self.rc_state_v(cv.type_id);
+        let state = self.cached_rc_state_v(cv.type_id);
         if state.needs_cleanup()
             || state.union_variants().is_some()
             || state.shallow_offsets().is_some()

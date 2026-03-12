@@ -88,7 +88,7 @@ impl Cg<'_, '_, '_> {
         // the field. If the field itself is RC, we must rc_inc it first so the
         // field value survives the container's rc_dec (which may free the container
         // and cascade to its fields).
-        if obj.is_owned() && self.rc_state_v(obj.type_id).needs_cleanup() {
+        if obj.is_owned() && self.cached_rc_state_v(obj.type_id).needs_cleanup() {
             if self.rc_state(field_type_id).needs_cleanup() {
                 self.emit_rc_inc_for_type(cv.value, field_type_id)?;
                 // The field is now an owned reference (we inc'd it out of the container)
@@ -125,7 +125,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // RC cleanup for owned temporaries (e.g. `obj.method().field`).
-        if obj.is_owned() && self.rc_state_v(obj.type_id).needs_cleanup() {
+        if obj.is_owned() && self.cached_rc_state_v(obj.type_id).needs_cleanup() {
             if self.rc_state(field_type_id).needs_cleanup() {
                 self.emit_rc_inc_for_type(cv.value, field_type_id)?;
                 cv.rc_lifecycle = RcLifecycle::Owned;

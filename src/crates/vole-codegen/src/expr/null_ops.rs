@@ -216,8 +216,8 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, cranelift_type);
 
-        let result_needs_rc =
-            self.rc_scopes.has_active_scope() && self.rc_state_v(vir_inner_type_id).needs_cleanup();
+        let result_needs_rc = self.rc_scopes.has_active_scope()
+            && self.cached_rc_state_v(vir_inner_type_id).needs_cleanup();
 
         self.emit_brif(is_nil, nil_block, not_nil_block);
 
@@ -323,7 +323,7 @@ impl Cg<'_, '_, '_> {
 
         let result_vir_ty = self.try_substitute_type_v(vir_result_type_id);
         let result_cranelift_type = self.cranelift_type_v(result_vir_ty);
-        let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
+        let result_needs_rc = self.cached_rc_state_v(result_vir_ty).needs_cleanup();
 
         let nil_block = self.builder.create_block();
         let not_nil_block = self.builder.create_block();
@@ -395,7 +395,7 @@ impl Cg<'_, '_, '_> {
 
         let result_vir_ty = self.try_substitute_type_v(vir_result_type_id);
         let result_cranelift_type = self.cranelift_type_v(result_vir_ty);
-        let result_needs_rc = self.rc_state_v(result_vir_ty).needs_cleanup();
+        let result_needs_rc = self.cached_rc_state_v(result_vir_ty).needs_cleanup();
 
         let nil_block = self.builder.create_block();
         let not_nil_block = self.builder.create_block();

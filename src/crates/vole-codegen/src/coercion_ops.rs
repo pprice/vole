@@ -428,7 +428,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // is freed, so we need the extra reference to avoid use-after-free.
         if value.is_borrowed()
             && self.rc_scopes.has_active_scope()
-            && self.rc_state_v(value.type_id).needs_cleanup()
+            && self.cached_rc_state_v(value.type_id).needs_cleanup()
         {
             self.emit_rc_inc_for_type_v(value.value, value.type_id)?;
         }

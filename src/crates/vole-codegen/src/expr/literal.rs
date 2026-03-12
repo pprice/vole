@@ -149,7 +149,7 @@ impl Cg<'_, '_, '_> {
         let slot = self.alloc_stack(total_size);
 
         let needs_rc = self.rc_scopes.has_active_scope()
-            && self.rc_state_v(elem_value.type_id).needs_cleanup();
+            && self.cached_rc_state_v(elem_value.type_id).needs_cleanup();
         let is_borrowed = elem_value.is_borrowed();
         let wide_bits = crate::types::wide_ops::WideType::from_cranelift_type(elem_value.ty)
             .map(|wide| wide.to_i128_bits(self.builder, elem_value.value));

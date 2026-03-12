@@ -29,19 +29,19 @@ impl Cg<'_, '_, '_> {
             return (None, None, None);
         };
 
-        let rc_old = if self.rc_state_v(vir_ty).needs_cleanup() {
+        let rc_old = if self.cached_rc_state_v(vir_ty).needs_cleanup() {
             Some(self.builder.use_var(var))
         } else {
             None
         };
 
         let composite_rc_old = self
-            .rc_state_v(vir_ty)
+            .cached_rc_state_v(vir_ty)
             .deep_offsets()
             .map(|offsets| (self.builder.use_var(var), offsets.to_vec()));
 
         let union_rc_old = self
-            .rc_state_v(vir_ty)
+            .cached_rc_state_v(vir_ty)
             .union_variants()
             .map(|rc_tags| (self.builder.use_var(var), rc_tags.to_vec()));
 

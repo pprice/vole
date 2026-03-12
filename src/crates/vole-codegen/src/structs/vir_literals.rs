@@ -211,7 +211,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CodegenResult<()> {
         // RC: inc borrowed field values so the struct gets its own reference.
         if self.rc_scopes.has_active_scope()
-            && self.rc_state_v(value.type_id).needs_cleanup()
+            && self.cached_rc_state_v(value.type_id).needs_cleanup()
             && value.is_borrowed()
         {
             self.emit_rc_inc_for_type_v(value.value, value.type_id)?;
@@ -360,7 +360,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // RC: inc borrowed field values (skip unions -- handled by coercion).
         if self.rc_scopes.has_active_scope()
-            && self.rc_state_v(value.type_id).needs_cleanup()
+            && self.cached_rc_state_v(value.type_id).needs_cleanup()
             && value.is_borrowed()
             && !self.vir_query_is_union_v(value.type_id)
         {

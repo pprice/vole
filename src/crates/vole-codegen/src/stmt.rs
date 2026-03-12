@@ -357,7 +357,7 @@ impl Cg<'_, '_, '_> {
         let tag_val = self.iconst_cached(types::I8, tag as i64);
         self.builder.ins().stack_store(tag_val, slot, 0);
 
-        let is_rc = self.rc_state_v(actual_vir).needs_cleanup();
+        let is_rc = self.cached_rc_state_v(actual_vir).needs_cleanup();
         let is_rc_val = self.iconst_cached(types::I8, is_rc as i64);
         self.builder
             .ins()
@@ -608,9 +608,11 @@ impl Cg<'_, '_, '_> {
             // RC bookkeeping: detect RC skip-var from VIR LocalLoad.
             let skip_var = self.extract_vir_return_skip_var(value_expr);
             if skip_var.is_none() && compiled.is_borrowed() {
-                if self.rc_state_v(compiled.type_id).needs_cleanup() {
+                if self.cached_rc_state_v(compiled.type_id).needs_cleanup() {
                     self.emit_rc_inc_for_type_v(compiled.value, compiled.type_id)?;
-                } else if let Some(rc_tags) = self.rc_state_v(compiled.type_id).union_variants() {
+                } else if let Some(rc_tags) =
+                    self.cached_rc_state_v(compiled.type_id).union_variants()
+                {
                     self.emit_union_rc_inc(compiled.value, rc_tags)?;
                 }
             }
@@ -944,7 +946,9 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
 
             let mut field_value = self.compile_vir_expr(&field_init.1)?;
-            if self.rc_state_v(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
+            if self.cached_rc_state_v(field_value.type_id).needs_cleanup()
+                && field_value.is_borrowed()
+            {
                 self.emit_rc_inc_for_type_v(field_value.value, field_value.type_id)?;
             }
             field_value.mark_consumed();
@@ -971,7 +975,9 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
 
             let mut field_value = self.compile_vir_expr(&field_init.1)?;
-            if self.rc_state_v(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
+            if self.cached_rc_state_v(field_value.type_id).needs_cleanup()
+                && field_value.is_borrowed()
+            {
                 self.emit_rc_inc_for_type_v(field_value.value, field_value.type_id)?;
             }
             field_value.mark_consumed();
@@ -1090,13 +1096,13 @@ impl Cg<'_, '_, '_> {
         // Register composite RC cleanup for owned temporaries.
         if self.rc_scopes.has_active_scope()
             && !is_borrow
-            && let Some(offsets) = self.rc_state_v(init.type_id).shallow_offsets()
+            && let Some(offsets) = self.cached_rc_state_v(init.type_id).shallow_offsets()
         {
             let cr_type = self.cranelift_type_v(init.type_id);
             let temp_var = self.builder.declare_var(cr_type);
             self.builder.def_var(temp_var, init.value);
             let union_fields = self
-                .rc_state_v(init.type_id)
+                .cached_rc_state_v(init.type_id)
                 .composite_union_fields()
                 .to_vec();
             let drop_flag =
@@ -1166,7 +1172,7 @@ impl Cg<'_, '_, '_> {
 
         // Extracted elements borrow from the parent composite.
         // RC_inc + register so scope-exit dec balances the borrow.
-        if self.rc_scopes.has_active_scope() && self.rc_state_v(vir_ty).needs_cleanup() {
+        if self.rc_scopes.has_active_scope() && self.cached_rc_state_v(vir_ty).needs_cleanup() {
             self.emit_rc_inc_for_type_v(value, vir_ty)?;
             let drop_flag = self.register_rc_local(var, vir_ty);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
@@ -1393,7 +1399,8 @@ impl Cg<'_, '_, '_> {
             // scope-exit emits rc_dec and array element closures are released.
             let drop_flag = self.register_rc_local(var, VirTypeId::HANDLE);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
-        } else if self.rc_scopes.has_active_scope() && self.rc_state_v(final_vir_ty).needs_cleanup()
+        } else if self.rc_scopes.has_active_scope()
+            && self.cached_rc_state_v(final_vir_ty).needs_cleanup()
         {
             let is_borrow = init.is_borrowed();
             if self.cf.in_loop() && is_borrow {
@@ -1431,7 +1438,7 @@ impl Cg<'_, '_, '_> {
         final_value: Value,
         final_vir_ty: VirTypeId,
     ) -> CodegenResult<()> {
-        let rc_state = self.rc_state_v(final_vir_ty);
+        let rc_state = self.cached_rc_state_v(final_vir_ty);
         let Some(offsets) = rc_state.shallow_offsets() else {
             return Ok(());
         };
@@ -1484,10 +1491,14 @@ impl Cg<'_, '_, '_> {
             return Ok(());
         }
         // Already handled by composite RC path.
-        if self.rc_state_v(final_vir_ty).shallow_offsets().is_some() {
+        if self
+            .cached_rc_state_v(final_vir_ty)
+            .shallow_offsets()
+            .is_some()
+        {
             return Ok(());
         }
-        let rc_state = self.rc_state_v(final_vir_ty);
+        let rc_state = self.cached_rc_state_v(final_vir_ty);
         let Some(rc_tags) = rc_state.union_variants() else {
             return Ok(());
         };

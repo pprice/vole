@@ -104,7 +104,7 @@ impl Cg<'_, '_, '_> {
         }
         let result = self.builder.block_params(merge_block)[0];
         let mut cv = CompiledValue::new(result, cranelift_type, vir_ty);
-        if self.rc_state_v(vir_ty).needs_cleanup() {
+        if self.cached_rc_state_v(vir_ty).needs_cleanup() {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
         Ok(cv)
@@ -142,7 +142,7 @@ impl Cg<'_, '_, '_> {
 
         self.emit_brif(condition.value, then_block, else_block);
 
-        let result_needs_rc = !is_void && self.rc_state_v(result_type_id).needs_cleanup();
+        let result_needs_rc = !is_void && self.cached_rc_state_v(result_type_id).needs_cleanup();
 
         // Compile then branch
         //

@@ -243,7 +243,7 @@ impl Cg<'_, '_, '_> {
 
         // Track owned iterable in a dedicated RC scope.
         self.push_rc_scope();
-        if arr.is_owned() && self.rc_state_v(arr.type_id).needs_cleanup() {
+        if arr.is_owned() && self.cached_rc_state_v(arr.type_id).needs_cleanup() {
             let tracked_var = self.builder.declare_var(self.cranelift_type_v(arr.type_id));
             self.builder.def_var(tracked_var, arr.value);
             let drop_flag = self.register_rc_local(tracked_var, arr.type_id);
@@ -522,7 +522,7 @@ impl Cg<'_, '_, '_> {
 
     /// Track an owned iterator in the current RC scope for cleanup.
     pub(crate) fn track_iter_in_rc_scope(&mut self, iter: &super::types::CompiledValue) {
-        if iter.is_owned() && self.rc_state_v(iter.type_id).needs_cleanup() {
+        if iter.is_owned() && self.cached_rc_state_v(iter.type_id).needs_cleanup() {
             let tracked_var = self
                 .builder
                 .declare_var(self.cranelift_type_v(iter.type_id));

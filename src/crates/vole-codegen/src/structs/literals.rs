@@ -150,7 +150,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .store(MemFlags::new(), tag_val, heap_ptr, 0);
 
-        let is_rc = self.rc_state_v(actual_vir).needs_cleanup();
+        let is_rc = self.cached_rc_state_v(actual_vir).needs_cleanup();
         let is_rc_val = self.iconst_cached(types::I8, is_rc as i64);
         self.builder.ins().store(
             MemFlags::new(),

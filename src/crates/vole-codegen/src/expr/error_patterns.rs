@@ -50,12 +50,12 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or(VirTypeId::UNKNOWN)
         };
 
-        let success_rc = self.rc_state_v(success_vir).needs_cleanup();
+        let success_rc = self.cached_rc_state_v(success_vir).needs_cleanup();
         // Error types may have RC payloads even though the error struct itself
         // isn't RC-tracked.  Single-field error structs store their field value
         // directly as the payload (no wrapping pointer), so if that field is RC
         // we must rc_dec the payload.
-        let error_rc = self.rc_state_v(error_vir).needs_cleanup()
+        let error_rc = self.cached_rc_state_v(error_vir).needs_cleanup()
             || self.fallible_error_payload_needs_rc_v(error_vir);
 
         if !success_rc && !error_rc {
@@ -142,7 +142,7 @@ impl Cg<'_, '_, '_> {
             0 => true, // null payload, rc_dec is no-op
             1 => {
                 let field = self.analyzed().field_def(fields[0]);
-                self.rc_state_v(field.vir_ty).needs_cleanup()
+                self.cached_rc_state_v(field.vir_ty).needs_cleanup()
             }
             _ => false, // 2+ fields = stack pointer, NOT safe for rc_dec
         }
@@ -159,7 +159,7 @@ impl Cg<'_, '_, '_> {
             return false;
         }
         let field = self.analyzed().field_def(fields[0]);
-        self.rc_state_v(field.vir_ty).needs_cleanup()
+        self.cached_rc_state_v(field.vir_ty).needs_cleanup()
     }
 
     // =========================================================================

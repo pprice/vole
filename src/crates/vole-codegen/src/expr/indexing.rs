@@ -293,16 +293,17 @@ impl Cg<'_, '_, '_> {
         let elem_ptr = self.builder.ins().iadd(arr_value, offset);
 
         // RC bookkeeping for fixed array element overwrite
-        let rc_old =
-            if self.rc_scopes.has_active_scope() && self.rc_state_v(elem_vir_ty).needs_cleanup() {
-                Some(
-                    self.builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), elem_ptr, 0),
-                )
-            } else {
-                None
-            };
+        let rc_old = if self.rc_scopes.has_active_scope()
+            && self.cached_rc_state_v(elem_vir_ty).needs_cleanup()
+        {
+            Some(
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), elem_ptr, 0),
+            )
+        } else {
+            None
+        };
         if rc_old.is_some() && val.is_borrowed() {
             self.emit_rc_inc_for_type_v(val.value, elem_vir_ty)?;
         }
