@@ -637,7 +637,22 @@ impl Analyzer {
         if iface_subs.is_empty() {
             return Some(resolved);
         }
-        Some(self.substitute_generic_iface_params_in_resolved(resolved, &iface_subs))
+        let mut resolved = self.substitute_generic_iface_params_in_resolved(resolved, &iface_subs);
+
+        // Compute concrete_return_hint for Iterable default methods on primitives.
+        // The elem type comes from the interface substitution (e.g., T → i64 for range).
+        if let ResolvedMethod::DefaultMethod {
+            ref mut concrete_return_hint,
+            ..
+        } = resolved
+            && concrete_return_hint.is_none()
+            && let Some(&elem_type) = iface_subs.values().next()
+        {
+            let method_name_str = interner.resolve(method_name);
+            *concrete_return_hint = self.compute_iterable_default_hint(elem_type, method_name_str);
+        }
+
+        Some(resolved)
     }
 
     /// Apply a type-parameter substitution map to a `ResolvedMethod`'s func_type and return_type.
@@ -660,9 +675,12 @@ impl Analyzer {
                 func_type_id,
                 return_type_id,
                 external_info,
+                concrete_return_hint,
             } => {
                 let new_func_type_id = self.type_arena_mut().substitute(func_type_id, subs);
                 let new_return_type_id = self.type_arena_mut().substitute(return_type_id, subs);
+                let new_hint =
+                    concrete_return_hint.map(|h| self.type_arena_mut().substitute(h, subs));
                 ResolvedMethod::DefaultMethod {
                     type_def_id,
                     method_name_id: mni,
@@ -673,6 +691,7 @@ impl Analyzer {
                     func_type_id: new_func_type_id,
                     return_type_id: new_return_type_id,
                     external_info,
+                    concrete_return_hint: new_hint,
                 }
             }
             // Direct methods copied from interfaces (via
@@ -782,6 +801,7 @@ impl Analyzer {
                 func_type_id,
                 return_type_id,
                 external_info,
+                ..
             } => {
                 let new_func_type_id = {
                     let mut arena = self.type_arena_mut();
@@ -791,6 +811,8 @@ impl Analyzer {
                     let mut arena = self.type_arena_mut();
                     arena.substitute(return_type_id, &subs)
                 };
+                let method_name_str = interner.resolve(method_name);
+                let hint = self.compute_iterable_default_hint(elem_type, method_name_str);
                 Some(ResolvedMethod::DefaultMethod {
                     type_def_id,
                     method_name_id: mni,
@@ -801,6 +823,7 @@ impl Analyzer {
                     func_type_id: new_func_type_id,
                     return_type_id: new_return_type_id,
                     external_info,
+                    concrete_return_hint: hint,
                 })
             }
             other => Some(other),
@@ -1107,6 +1130,8 @@ impl Analyzer {
             } else {
                 None
             },
+            // Hint is populated later after type substitution (T → concrete elem type)
+            concrete_return_hint: None,
         })
     }
 
@@ -1261,6 +1286,8 @@ impl Analyzer {
                 func_type_id,
                 return_type_id,
                 external_info: method_external_binding,
+                // Hint populated after T → elem_type substitution in callers
+                concrete_return_hint: None,
             });
         }
 
@@ -1345,6 +1372,46 @@ impl Analyzer {
             | "last" | "nth" | "find" | "next" => {
                 self.compute_terminal_hint(object_type_id, method_name_str)
             }
+            _ => None,
+        }
+    }
+
+    /// Hint for Iterable default methods called directly on arrays/primitives.
+    ///
+    /// The compiled function internally calls `.iter()`, so pipeline methods
+    /// return `RuntimeIterator<elem>` and terminals return concrete types.
+    fn compute_iterable_default_hint(
+        &mut self,
+        elem_type: ArenaTypeId,
+        method_name: &str,
+    ) -> Option<ArenaTypeId> {
+        match method_name {
+            // Pipeline methods → RuntimeIterator<elem>
+            "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
+            | "flatten" | "flat_map" | "filter_map" | "enumerate" | "zip" | "chunks"
+            | "windows" => Some(self.type_arena_mut().runtime_iterator(elem_type)),
+            // Terminal methods → concrete result
+            "collect" | "count" | "any" | "all" | "for_each" | "sum" | "reduce" | "first"
+            | "last" | "nth" | "find" | "next" => {
+                self.compute_terminal_hint_from_elem(elem_type, method_name)
+            }
+            _ => None,
+        }
+    }
+
+    /// Terminal hint computed from elem_type directly (no RuntimeIterator unwrap).
+    fn compute_terminal_hint_from_elem(
+        &mut self,
+        elem_type: ArenaTypeId,
+        method_name: &str,
+    ) -> Option<ArenaTypeId> {
+        match method_name {
+            "count" => Some(ArenaTypeId::I64),
+            "any" | "all" => Some(ArenaTypeId::BOOL),
+            "for_each" => Some(ArenaTypeId::VOID),
+            "sum" | "reduce" | "next" => Some(elem_type),
+            "collect" => Some(self.type_arena_mut().array(elem_type)),
+            "first" | "last" | "nth" | "find" => Some(self.type_arena_mut().optional(elem_type)),
             _ => None,
         }
     }

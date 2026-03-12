@@ -57,6 +57,10 @@ pub enum ResolvedMethod {
         func_type_id: TypeId,
         return_type_id: TypeId,
         external_info: Option<ExternalMethodInfo>,
+        /// Concrete runtime return type for Iterable default methods.
+        /// For pipeline methods (map, filter, etc.) this is RuntimeIterator<T>,
+        /// for terminals (collect, count, etc.) the concrete result type.
+        concrete_return_hint: Option<TypeId>,
     },
 
     /// Method called through a non-functional interface value (vtable dispatch)

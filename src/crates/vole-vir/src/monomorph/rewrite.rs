@@ -990,6 +990,7 @@ fn rewrite_resolved_method(
             return_type_id,
             vir_return_type_id,
             external_info,
+            concrete_return_hint,
         } => VirResolvedMethod::DefaultMethod {
             type_def_id: *type_def_id,
             interface_type_def_id: *interface_type_def_id,
@@ -998,6 +999,7 @@ fn rewrite_resolved_method(
             return_type_id: ctx.remap(*return_type_id),
             vir_return_type_id: ctx.remap(*vir_return_type_id),
             external_info: *external_info,
+            concrete_return_hint: concrete_return_hint.map(|v| ctx.remap(v)),
         },
         VirResolvedMethod::InterfaceMethod {
             interface_type_def_id,

@@ -1014,22 +1014,19 @@ impl Cg<'_, '_, '_> {
 
         // For Iterable default methods on arrays/primitives (range, string), the
         // func_key comes from array_iterable_func_keys and the compiled function
-        // returns a raw RuntimeIterator pointer. Convert the return type from
-        // Iterator<T> to RuntimeIterator<T> so downstream dispatch is correct.
+        // returns a raw RuntimeIterator pointer. The concrete_return_hint carries
+        // the correct RuntimeIterator<T> type from sema's VIR lowering.
         //
         // NOTE: Do NOT apply this in all monomorphized contexts — user-defined
         // .iter() methods return boxed Iterator<T> interfaces, not raw pointers.
         // Converting those to RuntimeIterator causes segfaults.
-        if used_array_iterable_path {
-            if let Some(hint) = dispatch
+        if used_array_iterable_path
+            && let Some(hint) = dispatch
                 .resolved_method
                 .as_ref()
                 .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
-            {
-                return_type_id = hint;
-            } else {
-                return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
-            }
+        {
+            return_type_id = hint;
         }
 
         let class_method_monomorph_key = dispatch.class_method_generic.as_ref().map(|key| {

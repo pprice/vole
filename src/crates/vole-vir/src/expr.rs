@@ -720,6 +720,7 @@ pub enum VirResolvedMethod {
         return_type_id: VirTypeId,
         vir_return_type_id: VirTypeId,
         external_info: Option<VirExternalMethodInfo>,
+        concrete_return_hint: Option<VirTypeId>,
     },
     InterfaceMethod {
         interface_type_def_id: TypeDefId,
@@ -803,10 +804,13 @@ impl VirResolvedMethod {
             VirResolvedMethod::Implemented {
                 concrete_return_hint,
                 ..
+            }
+            | VirResolvedMethod::DefaultMethod {
+                concrete_return_hint,
+                ..
             } => *concrete_return_hint,
             VirResolvedMethod::Direct { .. }
             | VirResolvedMethod::FunctionalInterface { .. }
-            | VirResolvedMethod::DefaultMethod { .. }
             | VirResolvedMethod::InterfaceMethod { .. }
             | VirResolvedMethod::Static { .. } => None,
         }

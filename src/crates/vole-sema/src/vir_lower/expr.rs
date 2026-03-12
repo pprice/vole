@@ -1238,6 +1238,7 @@ fn lower_resolved_method(
             func_type_id,
             return_type_id,
             external_info,
+            concrete_return_hint,
             ..
         } => VirResolvedMethod::DefaultMethod {
             type_def_id: *type_def_id,
@@ -1250,6 +1251,7 @@ fn lower_resolved_method(
                 module_path: info.module_path,
                 native_name: info.native_name,
             }),
+            concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
         },
         crate::resolution::ResolvedMethod::InterfaceMethod {
             interface_type_def_id,
