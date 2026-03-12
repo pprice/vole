@@ -333,4 +333,33 @@ impl BuiltinMethod {
             _ => return None,
         })
     }
+
+    /// Whether this method consumes the source iterator (transfers ownership).
+    ///
+    /// All iterator methods except `next` consume the iterator — pipeline methods
+    /// store its pointer, terminal methods dec_ref it. `next` just borrows.
+    pub fn consumes_iterator(&self) -> bool {
+        *self != Self::IterNext
+    }
+
+    /// Whether the runtime stores the closure argument in the returned iterator.
+    ///
+    /// Pipeline methods that store closures need RC adjustments: in regular code
+    /// the closure must be rc_inc'd (since both scope-exit and iterator drop will
+    /// dec it), while in Iterable default bodies the single owned reference is
+    /// transferred directly.
+    pub fn stores_closure(&self) -> bool {
+        matches!(
+            self,
+            Self::IterMap | Self::IterFilter | Self::IterFlatMap | Self::IterFilterMap
+        )
+    }
+
+    /// Whether codegen must free the closure after calling this method.
+    ///
+    /// Terminal predicate methods (`find`, `any`, `all`) borrow the closure but
+    /// don't free it — codegen is responsible for emitting the rc_dec.
+    pub fn codegen_frees_closure(&self) -> bool {
+        matches!(self, Self::IterFind | Self::IterAny | Self::IterAll)
+    }
 }
