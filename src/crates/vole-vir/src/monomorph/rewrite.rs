@@ -1127,9 +1127,11 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
         VirIterKind::CustomIterator {
             elem_type,
             vir_elem_type,
+            iterator_interface_type,
         } => VirIterKind::CustomIterator {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
+            iterator_interface_type: ctx.remap(*iterator_interface_type),
         },
         VirIterKind::CustomIterable {
             elem_type,

@@ -322,6 +322,11 @@ pub enum VirIterKind {
     CustomIterator {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
+        /// The `Iterator<T>` interface type, pre-resolved by sema.
+        ///
+        /// Eliminates codegen's need to reconstruct `Iterator<elem_type>`
+        /// via `vir_query_lookup_interface_v()`.
+        iterator_interface_type: VirTypeId,
     },
 
     /// Iterate via a concrete class implementing `Iterable<T>`.

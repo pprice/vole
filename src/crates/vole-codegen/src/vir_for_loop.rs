@@ -383,9 +383,11 @@ impl Cg<'_, '_, '_> {
             VirIterKind::IteratorInterface { elem_type, .. } => {
                 self.setup_iterator_interface_iter(vir_for, *elem_type)
             }
-            VirIterKind::CustomIterator { elem_type, .. } => {
-                self.setup_custom_iterator_iter(vir_for, *elem_type)
-            }
+            VirIterKind::CustomIterator {
+                elem_type,
+                iterator_interface_type,
+                ..
+            } => self.setup_custom_iterator_iter(vir_for, *elem_type, *iterator_interface_type),
             VirIterKind::CustomIterable { elem_type, .. } => {
                 self.setup_custom_iterable_iter(vir_for, *elem_type)
             }
@@ -439,22 +441,11 @@ impl Cg<'_, '_, '_> {
         &mut self,
         vir_for: &VirFor,
         elem_type: VirTypeId,
+        iterator_interface_type: VirTypeId,
     ) -> CodegenResult<(Value, VirTypeId, bool)> {
         let elem_vir = self.try_substitute_type_v(elem_type);
         let iterable = self.compile_vir_expr(&vir_for.iterable)?;
-        let iterator_type_def = self
-            .name_table()
-            .well_known
-            .iterator_type_def
-            .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
-        let interface_vir = self
-            .vir_query_lookup_interface_v(iterator_type_def, vec![elem_vir])
-            .ok_or_else(|| {
-                CodegenError::internal_with_context(
-                    "Iterator<T> interface type not pre-interned by sema",
-                    format!("elem_vir={elem_vir:?}"),
-                )
-            })?;
+        let interface_vir = self.try_substitute_type_v(iterator_interface_type);
         let boxed = self.box_interface_value_v(iterable, interface_vir)?;
         let iter = self.wrap_interface_iter_v(boxed, elem_vir)?;
         self.enter_iter_rc_scope(&iter, None);

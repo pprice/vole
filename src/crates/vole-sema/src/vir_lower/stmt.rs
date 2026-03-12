@@ -5,13 +5,14 @@
 use crate::IterableKind;
 use vole_frontend::PatternKind;
 use vole_frontend::ast::{ExprKind, LetInit, LetStmt, Stmt};
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 
 use vole_vir::expr::VirExpr;
 use vole_vir::stmt::{
     DestructureTupleKind, LetStorageHint, ReturnConvention, UnionTagHint, VirDestructureElement,
     VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
+use vole_vir::types::VirType;
 
 use super::LoweringCtx;
 use super::expr::lower_expr;
@@ -354,10 +355,26 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 }
             }
         }
-        Some(IterableKind::CustomIterator { elem_type }) => VirIterKind::CustomIterator {
-            elem_type: ctx.translate(elem_type),
-            vir_elem_type: ctx.translate(elem_type),
-        },
+        Some(IterableKind::CustomIterator { elem_type }) => {
+            let vir_elem = ctx.translate(elem_type);
+            let iterator_interface_type = ctx
+                .name_table
+                .well_known
+                .iterator_type_def
+                .map(|def| {
+                    let iface = VirType::Interface {
+                        def,
+                        type_args: vec![vir_elem],
+                    };
+                    ctx.type_table.intern(iface, None)
+                })
+                .unwrap_or(VirTypeId::UNKNOWN);
+            VirIterKind::CustomIterator {
+                elem_type: vir_elem,
+                vir_elem_type: vir_elem,
+                iterator_interface_type,
+            }
+        }
         Some(IterableKind::CustomIterable { elem_type }) => VirIterKind::CustomIterable {
             elem_type: ctx.translate(elem_type),
             vir_elem_type: ctx.translate(elem_type),

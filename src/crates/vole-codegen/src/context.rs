@@ -968,18 +968,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_is_numeric(vir_ty, self.vir_type_table())
     }
 
-    /// Look up an existing interface type by `TypeDefId` and VIR type arguments
-    /// via VirTypeTable.
-    #[inline]
-    pub fn vir_query_lookup_interface_v(
-        &self,
-        type_def_id: vole_identity::TypeDefId,
-        type_args: Vec<VirTypeId>,
-    ) -> Option<VirTypeId> {
-        self.vir_type_table()
-            .lookup_interface_v(type_def_id, type_args)
-    }
-
     // vir_query_primitives() deleted — use TypeId constants directly
     // (e.g. TypeId::STRING, TypeId::I64)
 
