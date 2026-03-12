@@ -652,11 +652,18 @@ fn rederive_stmt(
             rederive_body(&mut vir_for.body, table, ret_ty, entities, call_ctx);
             rederive_iter_kind(&mut vir_for.kind, table);
         }
-        VirStmt::Return { value, convention } => {
+        VirStmt::Return {
+            value,
+            convention,
+            return_coercion,
+        } => {
             if let Some(v) = value {
                 rederive_ref(v, table, ret_ty, entities, call_ctx);
             }
             *convention = rederive_return_convention(ret_ty, table);
+            // Clear return coercion hint — it may no longer be valid after
+            // monomorphization.  Codegen will fall back to detection.
+            *return_coercion = None;
         }
         VirStmt::Break | VirStmt::Continue | VirStmt::Noop => {}
         VirStmt::Raise { fields, .. } => {

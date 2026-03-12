@@ -615,6 +615,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             storage,
             declared_type,
             needs_struct_copy,
+            init_coercion,
         } => VirStmt::Let {
             name: *name,
             value: rewrite_ref(value, ctx),
@@ -624,6 +625,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             storage: rewrite_let_storage(storage, ctx),
             declared_type: declared_type.map(|dt| ctx.remap(dt)),
             needs_struct_copy: *needs_struct_copy,
+            init_coercion: init_coercion.as_ref().map(|c| rewrite_coerce_kind(c, ctx)),
         },
         VirStmt::LetTuple {
             pattern,
@@ -648,9 +650,16 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             body: rewrite_body(body, ctx),
         },
         VirStmt::For(vir_for) => VirStmt::For(rewrite_for(vir_for, ctx)),
-        VirStmt::Return { value, convention } => VirStmt::Return {
+        VirStmt::Return {
+            value,
+            convention,
+            return_coercion,
+        } => VirStmt::Return {
             value: value.as_ref().map(|v| rewrite_ref(v, ctx)),
             convention: *convention,
+            return_coercion: return_coercion
+                .as_ref()
+                .map(|c| rewrite_coerce_kind(c, ctx)),
         },
         VirStmt::Break => VirStmt::Break,
         VirStmt::Continue => VirStmt::Continue,
@@ -1438,6 +1447,7 @@ mod tests {
                     storage: crate::stmt::LetStorageHint::Scalar,
                     declared_type: None,
                     needs_struct_copy: false,
+                    init_coercion: None,
                 }],
                 trailing: Some(Box::new(VirExpr::LocalLoad {
                     name: sym(3),

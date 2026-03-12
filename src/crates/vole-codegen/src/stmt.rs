@@ -40,6 +40,7 @@ impl Cg<'_, '_, '_> {
         declared_vir_opt: Option<VirTypeId>,
         sentinel_hint_type_id: Option<TypeId>,
         storage: LetStorageHint,
+        init_coercion: Option<&vole_vir::expr::CoerceKind>,
     ) -> CodegenResult<(Value, VirTypeId, bool)> {
         let mut is_stack_union = false;
 
@@ -67,7 +68,7 @@ impl Cg<'_, '_, '_> {
                     (wrapped.value, wrapped.type_id)
                 }
                 LetStorageHint::Numeric if init.type_id.is_numeric() => {
-                    let coerced = self.coerce_to_type(*init, declared_vir)?;
+                    let coerced = self.coerce_to_type_hinted(*init, declared_vir, init_coercion)?;
                     (coerced.value, coerced.type_id)
                 }
                 LetStorageHint::Interface => {
@@ -501,9 +502,11 @@ impl Cg<'_, '_, '_> {
             VirStmt::While { cond, body } => self.compile_vir_while(cond, body),
 
             // -- Control flow (simple delegation) --------------------------------
-            VirStmt::Return { value, convention } => {
-                self.compile_vir_return(value.as_deref(), *convention)
-            }
+            VirStmt::Return {
+                value,
+                convention,
+                return_coercion,
+            } => self.compile_vir_return(value.as_deref(), *convention, return_coercion.as_ref()),
             VirStmt::Break => self.compile_vir_break(),
             VirStmt::Continue => self.compile_vir_continue(),
 
@@ -529,6 +532,7 @@ impl Cg<'_, '_, '_> {
                 storage,
                 declared_type,
                 needs_struct_copy,
+                init_coercion,
             } => {
                 let binding_vir = if *vir_ty != VirTypeId::UNKNOWN {
                     self.try_substitute_type_v(*vir_ty)
@@ -543,6 +547,7 @@ impl Cg<'_, '_, '_> {
                     *storage,
                     declared_vir,
                     *needs_struct_copy,
+                    init_coercion.as_ref(),
                 )
             }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
@@ -567,6 +572,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         value: Option<&vole_vir::VirExpr>,
         convention: vole_vir::stmt::ReturnConvention,
+        _return_coercion: Option<&vole_vir::expr::CoerceKind>,
     ) -> CodegenResult<bool> {
         let return_type_vir = self.return_type;
         if let Some(value_expr) = value {
@@ -991,6 +997,7 @@ impl Cg<'_, '_, '_> {
         storage: LetStorageHint,
         declared_vir_type: Option<VirTypeId>,
         needs_struct_copy: bool,
+        init_coercion: Option<&vole_vir::expr::CoerceKind>,
     ) -> CodegenResult<bool> {
         // Pre-register recursive lambdas so they can capture themselves.
         let preregistered_var = self.preregister_recursive_vir_lambda(name, value_expr);
@@ -1020,8 +1027,13 @@ impl Cg<'_, '_, '_> {
         };
 
         let sentinel_hint_type_id = self.sentinel_hint_type_id_from_vir_expr(value_expr);
-        let (final_value, final_vir_ty, is_stack_union) =
-            self.coerce_let_init(&init, declared_vir_opt, sentinel_hint_type_id, storage)?;
+        let (final_value, final_vir_ty, is_stack_union) = self.coerce_let_init(
+            &init,
+            declared_vir_opt,
+            sentinel_hint_type_id,
+            storage,
+            init_coercion,
+        )?;
 
         // Use preregistered var for recursive lambdas, otherwise declare new.
         let var = if let Some(var) = preregistered_var {

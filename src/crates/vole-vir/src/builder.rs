@@ -257,6 +257,7 @@ impl VirBuilder {
             storage: crate::stmt::LetStorageHint::Scalar,
             declared_type: None,
             needs_struct_copy: false,
+            init_coercion: None,
         }
     }
 
@@ -279,7 +280,11 @@ impl VirBuilder {
         value: Option<VirRef>,
         convention: crate::stmt::ReturnConvention,
     ) -> VirStmt {
-        VirStmt::Return { value, convention }
+        VirStmt::Return {
+            value,
+            convention,
+            return_coercion: None,
+        }
     }
 
     /// Decrement reference count (statement form — fire-and-forget).

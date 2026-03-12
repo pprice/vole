@@ -4,7 +4,7 @@
 
 use vole_identity::{ModuleId, NameId, Symbol, UnionStorageKind, VirTypeId};
 
-use crate::expr::FieldStorage;
+use crate::expr::{CoerceKind, FieldStorage};
 use crate::func::VirBody;
 use crate::refs::VirRef;
 
@@ -43,6 +43,15 @@ pub enum VirStmt {
         /// lowering so codegen reads a decision instead of querying
         /// `vir_query_is_struct_v()`.
         needs_struct_copy: bool,
+        /// Pre-computed coercion kind for the init expression, determined
+        /// during VIR lowering when the declared type differs from the init
+        /// type.  Codegen passes this hint to `coerce_to_type_hinted()` to
+        /// skip the 6-way type detection in `coerce_to_type_detected()`.
+        ///
+        /// `None` when no coercion is needed (same type), when the coercion
+        /// is already handled by `LetStorageHint` (Union, Unknown), or when
+        /// the types could not be resolved statically (generic mode).
+        init_coercion: Option<CoerceKind>,
     },
 
     /// Tuple destructuring (`let [a, b] = ...`, `let { x, y } = ...`).
@@ -79,6 +88,14 @@ pub enum VirStmt {
         /// Pre-computed calling convention for the return value.
         /// Codegen reads this instead of querying `TypeArena` at compile time.
         convention: ReturnConvention,
+        /// Pre-computed coercion kind for the return value, determined during
+        /// VIR lowering when the value type differs from the function's return
+        /// type.  Codegen passes this hint to `coerce_to_type_hinted()` to
+        /// skip re-detection.
+        ///
+        /// `None` when no coercion is needed or when the convention already
+        /// handles the coercion (InterfaceBox, UnknownBox, Union, Fallible).
+        return_coercion: Option<CoerceKind>,
     },
 
     /// Break out of the enclosing loop.

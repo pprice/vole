@@ -7,7 +7,7 @@ use vole_frontend::PatternKind;
 use vole_frontend::ast::{ExprKind, LetInit, LetStmt, Stmt};
 use vole_identity::{TypeId, VirTypeId};
 
-use vole_vir::expr::VirExpr;
+use vole_vir::expr::{CoerceKind, VirExpr};
 use vole_vir::stmt::{
     DestructureTupleKind, LetStorageHint, ReturnConvention, UnionTagHint, VirDestructureElement,
     VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
@@ -40,7 +40,15 @@ pub fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
         Stmt::Return(ret) => {
             let value = ret.value.as_ref().map(|v| lower_expr(v, ctx));
             let convention = classify_return_convention(ctx.func_return_type, ctx);
-            VirStmt::Return { value, convention }
+            let return_coercion = ret
+                .value
+                .as_ref()
+                .and_then(|v| classify_return_coercion(ctx.func_return_type, v, ctx));
+            VirStmt::Return {
+                value,
+                convention,
+                return_coercion,
+            }
         }
         Stmt::LetTuple(let_tuple) => {
             let value = lower_expr(&let_tuple.init, ctx);
@@ -130,6 +138,7 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     // Struct values need copying for value semantics.  In generic mode the
     // init type may be a type param; codegen falls back to a type query then.
     let needs_struct_copy = !ctx.generic && ctx.type_arena.is_struct(expr_ty);
+    let init_coercion = classify_coercion(ty, expr_ty, &storage, ctx);
     VirStmt::Let {
         name: let_stmt.name,
         value,
@@ -139,6 +148,7 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
         storage,
         declared_type,
         needs_struct_copy,
+        init_coercion,
     }
 }
 
@@ -173,6 +183,115 @@ fn classify_let_storage(ty: TypeId, init_ty: TypeId, ctx: &mut LoweringCtx<'_>) 
     } else {
         LetStorageHint::Scalar
     }
+}
+
+/// Classify the coercion kind for a let-init or return value.
+///
+/// Returns `Some(CoerceKind)` when the init/value type differs from the
+/// target type and the coercion can be statically determined:
+/// - Numeric → IntExtend, IntTruncate, IntToFloat, FloatToInt, FloatExtend, FloatTruncate
+/// - Interface → InterfaceBox (with pre-decomposed type_def + type_args)
+///
+/// Returns `None` when:
+/// - The types match (no coercion needed)
+/// - The coercion is already handled by LetStorageHint (Union, Unknown)
+/// - The types cannot be resolved (generic mode, type params)
+fn classify_coercion(
+    target_ty: TypeId,
+    value_ty: TypeId,
+    storage: &LetStorageHint,
+    ctx: &mut LoweringCtx<'_>,
+) -> Option<CoerceKind> {
+    // Only compute for Numeric and Interface storage hints; Union/Unknown
+    // coercions are handled by dedicated LetStorageHint branches in codegen.
+    match storage {
+        LetStorageHint::Numeric => classify_numeric_coercion(target_ty, value_ty),
+        LetStorageHint::Interface => classify_interface_coercion(target_ty, ctx),
+        _ => None,
+    }
+}
+
+/// Classify the return-value coercion kind.
+///
+/// Computes `CoerceKind` when the return value type differs from the
+/// function's return type and the coercion is a numeric conversion or
+/// interface boxing.  Convention-handled cases (Union, Unknown, Fallible)
+/// return `None`.
+fn classify_return_coercion(
+    return_ty: TypeId,
+    value_expr: &vole_frontend::ast::Expr,
+    ctx: &mut LoweringCtx<'_>,
+) -> Option<CoerceKind> {
+    if ctx.generic || ctx.type_arena.contains_type_param(return_ty) {
+        return None;
+    }
+    let value_ty = ctx
+        .node_map
+        .get_type(value_expr.id)
+        .unwrap_or(TypeId::UNKNOWN);
+    if value_ty == return_ty || value_ty == TypeId::UNKNOWN {
+        return None;
+    }
+    if ctx.type_arena.is_numeric(return_ty) && ctx.type_arena.is_numeric(value_ty) {
+        return classify_numeric_coercion(return_ty, value_ty);
+    }
+    if ctx.type_arena.is_interface(return_ty) && !ctx.type_arena.is_interface(value_ty) {
+        return classify_interface_coercion(return_ty, ctx);
+    }
+    None
+}
+
+/// Determine the numeric `CoerceKind` for a source→target conversion.
+///
+/// Returns `None` when both types are equal or when the combination
+/// is not a recognized numeric conversion.
+fn classify_numeric_coercion(target: TypeId, source: TypeId) -> Option<CoerceKind> {
+    if target == source {
+        return None;
+    }
+    let t_int = target.is_integer();
+    let s_int = source.is_integer();
+    let t_float = target.is_float();
+    let s_float = source.is_float();
+
+    match (s_int, s_float, t_int, t_float) {
+        // int → int
+        (true, _, true, _) => {
+            if target.index() > source.index() {
+                Some(CoerceKind::IntExtend)
+            } else {
+                Some(CoerceKind::IntTruncate)
+            }
+        }
+        // float → float
+        (_, true, _, true) => {
+            if target.index() > source.index() {
+                Some(CoerceKind::FloatExtend)
+            } else {
+                Some(CoerceKind::FloatTruncate)
+            }
+        }
+        // int → float
+        (true, _, _, true) => Some(CoerceKind::IntToFloat),
+        // float → int
+        (_, true, true, _) => Some(CoerceKind::FloatToInt),
+        _ => None,
+    }
+}
+
+/// Decompose an interface TypeId into `CoerceKind::InterfaceBox`.
+///
+/// Returns `None` if the target type is not a nominal interface.
+fn classify_interface_coercion(target_ty: TypeId, ctx: &mut LoweringCtx<'_>) -> Option<CoerceKind> {
+    let (type_def_id, type_args, kind) = ctx.type_arena.unwrap_nominal(target_ty)?;
+    if !matches!(kind, crate::type_arena::NominalKind::Interface) {
+        return None;
+    }
+    let interface_type_args = type_args.iter().map(|&t| ctx.translate(t)).collect();
+    Some(CoerceKind::InterfaceBox {
+        interface_type_def: type_def_id,
+        interface_type_args,
+    })
 }
 
 /// Pre-compute the union variant tag for a value-to-union coercion.
