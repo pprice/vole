@@ -908,7 +908,7 @@ impl Cg<'_, '_, '_> {
     /// Dispatches on `CoerceKind` to emit the appropriate Cranelift
     /// instructions for numeric conversions, interface boxing/unboxing,
     /// and iterator wrapping.
-    fn compile_vir_coerce(
+    pub(crate) fn compile_vir_coerce(
         &mut self,
         value: CompiledValue,
         to: VirTypeId,

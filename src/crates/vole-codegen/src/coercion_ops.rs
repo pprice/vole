@@ -13,6 +13,8 @@ use smallvec::SmallVec;
 use vole_identity::{FunctionId, MethodId, NodeId, TypeId, VirTypeId};
 use vole_vir::numeric_model::{NumericCoercion, numeric_coercion_v};
 
+use vole_vir::expr::CoerceKind;
+
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 
@@ -182,6 +184,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         value: CompiledValue,
         target_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
+        self.coerce_to_type_hinted(value, target_vir_ty, None)
+    }
+
+    /// Coerce a value to the target type, optionally using a pre-computed
+    /// [`CoerceKind`] hint to skip the 6-way type detection.
+    ///
+    /// When `hint` is `Some`, dispatches directly to the appropriate coercion
+    /// path. When `None`, falls back to runtime type queries.
+    pub fn coerce_to_type_hinted(
+        &mut self,
+        value: CompiledValue,
+        target_vir_ty: VirTypeId,
+        hint: Option<&CoerceKind>,
+    ) -> CodegenResult<CompiledValue> {
         // Resolve generic type params in monomorphized contexts before coercion checks.
         // This keeps union/interface coercions from comparing concrete targets against
         // unresolved TypeParam values.
@@ -190,30 +206,51 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let mut resolved_value = value;
         resolved_value.type_id = resolved_value_vir;
 
-        let is_target_interface = self.vir_query_is_interface_v(resolved_target_vir);
-        let is_value_interface = self.vir_query_is_interface_v(resolved_value_vir);
-        let is_target_union = self.vir_query_is_union_v(resolved_target_vir);
-        let is_value_union = self.vir_query_is_union_v(resolved_value_vir);
-        let is_target_unknown = self.vir_query_is_unknown_v(resolved_target_vir);
-        let is_value_unknown = self.vir_query_is_unknown_v(resolved_value_vir);
+        if let Some(kind) = hint {
+            return self.compile_vir_coerce(
+                resolved_value,
+                resolved_target_vir,
+                resolved_value_vir,
+                resolved_target_vir,
+                kind,
+            );
+        }
 
-        let is_value_runtime_iterator = self.vir_query_is_runtime_iterator_v(resolved_value_vir);
-        let is_target_numeric = self.vir_query_is_numeric_v(resolved_target_vir);
-        let is_value_numeric = self.vir_query_is_numeric_v(resolved_value_vir);
+        self.coerce_to_type_detected(resolved_value, resolved_target_vir)
+    }
 
-        if is_target_numeric && is_value_numeric && resolved_target_vir != resolved_value_vir {
-            return self.coerce_numeric_to_type(resolved_value, resolved_target_vir);
+    /// Fallback coercion path: queries types to determine the coercion kind.
+    fn coerce_to_type_detected(
+        &mut self,
+        value: CompiledValue,
+        target_vir_ty: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let value_vir = value.type_id;
+
+        let is_target_interface = self.vir_query_is_interface_v(target_vir_ty);
+        let is_value_interface = self.vir_query_is_interface_v(value_vir);
+        let is_target_union = self.vir_query_is_union_v(target_vir_ty);
+        let is_value_union = self.vir_query_is_union_v(value_vir);
+        let is_target_unknown = self.vir_query_is_unknown_v(target_vir_ty);
+        let is_value_unknown = self.vir_query_is_unknown_v(value_vir);
+
+        let is_value_runtime_iterator = self.vir_query_is_runtime_iterator_v(value_vir);
+        let is_target_numeric = self.vir_query_is_numeric_v(target_vir_ty);
+        let is_value_numeric = self.vir_query_is_numeric_v(value_vir);
+
+        if is_target_numeric && is_value_numeric && target_vir_ty != value_vir {
+            return self.coerce_numeric_to_type(value, target_vir_ty);
         }
         // RuntimeIterator is a concrete type that implements Iterator dispatch
         // directly via runtime_iterator_method; skip interface boxing.
         if is_target_interface && !is_value_interface && !is_value_runtime_iterator {
-            self.box_interface_value_v(resolved_value, resolved_target_vir)
+            self.box_interface_value_v(value, target_vir_ty)
         } else if is_target_union && !is_value_union {
-            self.construct_union_id_v(resolved_value, resolved_target_vir)
+            self.construct_union_id_v(value, target_vir_ty)
         } else if is_target_unknown && !is_value_unknown {
-            self.box_to_unknown(resolved_value)
+            self.box_to_unknown(value)
         } else {
-            Ok(resolved_value)
+            Ok(value)
         }
     }
 
