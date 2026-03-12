@@ -636,6 +636,9 @@ impl<'a> VirPrinter<'a> {
             CallTarget::GlobalClosure { var_name, .. } => {
                 w!(out, "global_closure({})(", self.sym(*var_name));
             }
+            CallTarget::CompileError { message } => {
+                w!(out, "compile_error(\"{}\")(", message);
+            }
             CallTarget::Unresolved {
                 callee_sym,
                 line,

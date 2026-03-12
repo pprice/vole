@@ -129,6 +129,14 @@ pub enum CallTarget {
     /// VIR function array.
     VirDirect { function_index: usize },
 
+    /// A call that VIR lowering determined is a compile-time error.
+    ///
+    /// Emitted when VIR lowering can fully diagnose an error condition
+    /// (e.g. ambiguous or missing generic external where-clause mappings)
+    /// rather than deferring the error to codegen.  Codegen converts this
+    /// into a `CodegenError` without re-resolving.
+    CompileError { message: String },
+
     /// A call that could not be fully classified during VIR lowering.
     ///
     /// Lowering classifies many call patterns into concrete `CallTarget`

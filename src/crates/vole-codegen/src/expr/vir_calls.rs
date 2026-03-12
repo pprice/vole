@@ -111,6 +111,10 @@ impl Cg<'_, '_, '_> {
                     ty,
                 )
             }
+            CallTarget::CompileError { message } => Err(CodegenError::not_found(
+                "generic external mapping",
+                message.clone(),
+            )),
             CallTarget::Unresolved {
                 callee_sym,
                 call_node_id,

@@ -366,8 +366,32 @@ impl LoweringCtx<'_> {
             .unwrap_or_default();
 
         // Resolve the intrinsic key from the concrete types in the monomorph key.
-        let intrinsic_key =
-            resolve_intrinsic_key_from_type_mappings(&generic_ext.type_mappings, sema_type_keys)?;
+        let intrinsic_key = match resolve_intrinsic_key_from_type_mappings(
+            &generic_ext.type_mappings,
+            sema_type_keys,
+            self.type_arena,
+            self.name_table,
+            self.entities,
+        ) {
+            Ok(key) => key,
+            Err(WhereMapError::Ambiguous { matches }) => {
+                let message = format!(
+                    "{}: ambiguous where mapping; \
+                     multiple exact arms match concrete substitutions: {}",
+                    callee_name,
+                    matches.join(", ")
+                );
+                return Some(CallTarget::CompileError { message });
+            }
+            Err(WhereMapError::Missing { concrete_types }) => {
+                let message = format!(
+                    "{}: no where mapping arm for concrete type(s): {}",
+                    callee_name,
+                    concrete_types.join(", ")
+                );
+                return Some(CallTarget::CompileError { message });
+            }
+        };
 
         // Try to classify as a compiler intrinsic first.
         if let Some(key) = IntrinsicKey::try_from_name(&intrinsic_key) {
@@ -1046,6 +1070,20 @@ fn is_wide_sema_type(type_id: TypeId) -> bool {
     matches!(type_id, TypeId::I128 | TypeId::F128)
 }
 
+/// Error from where-clause type mapping resolution.
+enum WhereMapError {
+    /// Multiple exact arms matched the concrete substitution types.
+    Ambiguous {
+        /// Human-readable list of matching arms, e.g. `["i64 => \"array_len\""]`.
+        matches: Vec<String>,
+    },
+    /// No exact arm matched and no default arm was present.
+    Missing {
+        /// Human-readable list of the concrete types that had no mapping.
+        concrete_types: Vec<String>,
+    },
+}
+
 /// Resolve an intrinsic key from type mappings and concrete monomorph types.
 ///
 /// Matches the concrete type keys (from the sema-side `MonomorphKey`) against
@@ -1053,11 +1091,15 @@ fn is_wide_sema_type(type_id: TypeId) -> bool {
 /// 1. Exact type arm (`Type => "key"`) — requires exactly one match.
 /// 2. Default arm (`default => "key"`) — fallback when no exact match.
 ///
-/// Returns `None` when no mapping matches or when there are ambiguous matches.
+/// Returns `Err(WhereMapError)` when no mapping matches or when there are
+/// ambiguous matches, carrying enough info for a diagnostic.
 fn resolve_intrinsic_key_from_type_mappings(
     type_mappings: &[crate::implement_registry::TypeMappingEntry],
     sema_type_keys: &[VirTypeId],
-) -> Option<String> {
+    type_arena: &TypeArena,
+    name_table: &NameTable,
+    entities: &EntityRegistry,
+) -> Result<String, WhereMapError> {
     use crate::implement_registry::TypeMappingKind;
 
     // Collect the concrete TypeIds from the monomorph key's type_keys.
@@ -1068,15 +1110,13 @@ fn resolve_intrinsic_key_from_type_mappings(
         .collect();
 
     let mut default_key = None;
-    let mut exact_match = None;
-    let mut exact_count = 0;
+    let mut exact_matches: Vec<(TypeId, String)> = Vec::new();
 
     for mapping in type_mappings {
         match &mapping.kind {
             TypeMappingKind::Exact(type_id) => {
                 if concrete_types.contains(type_id) {
-                    exact_match = Some(mapping.intrinsic_key.clone());
-                    exact_count += 1;
+                    exact_matches.push((*type_id, mapping.intrinsic_key.clone()));
                 }
             }
             TypeMappingKind::Default => {
@@ -1086,15 +1126,39 @@ fn resolve_intrinsic_key_from_type_mappings(
     }
 
     // Exactly one exact match — use it.
-    if exact_count == 1 {
-        return exact_match;
+    if exact_matches.len() == 1 {
+        return Ok(exact_matches.into_iter().next().unwrap().1);
     }
 
-    // Ambiguous (multiple exact matches) — bail and let codegen handle it.
-    if exact_count > 1 {
-        return None;
+    // Ambiguous (multiple exact matches).
+    if exact_matches.len() > 1 {
+        let mut display: Vec<String> = exact_matches
+            .iter()
+            .map(|(ty, key)| {
+                let ty_name = crate::type_display::display_type_id_short(
+                    *ty, type_arena, name_table, entities,
+                );
+                format!("{} => \"{}\"", ty_name, key)
+            })
+            .collect();
+        display.sort();
+        display.dedup();
+        return Err(WhereMapError::Ambiguous { matches: display });
     }
 
     // No exact match — use the default if available.
-    default_key
+    if let Some(key) = default_key {
+        return Ok(key);
+    }
+
+    // No match at all.
+    let mut type_names: Vec<String> = concrete_types
+        .iter()
+        .map(|ty| crate::type_display::display_type_id_short(*ty, type_arena, name_table, entities))
+        .collect();
+    type_names.sort();
+    type_names.dedup();
+    Err(WhereMapError::Missing {
+        concrete_types: type_names,
+    })
 }
