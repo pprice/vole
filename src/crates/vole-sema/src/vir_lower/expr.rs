@@ -1492,6 +1492,14 @@ fn lower_call(
             ctx,
         ) {
             global_target
+        } else if let Some(target) = ctx.resolve_callee_target(callee_sym) {
+            match target {
+                CallTarget::Intrinsic { key, .. } => CallTarget::Intrinsic {
+                    key,
+                    line: expr.span.line,
+                },
+                other => other,
+            }
         } else {
             make_unresolved(resolved_call_args, lambda_defaults, monomorph_key)
         }
