@@ -233,7 +233,8 @@ impl Analyzer {
 
         // For recursive lambdas: if lambda has fully explicit types,
         // pre-register the variable so it's in scope during body analysis.
-        let preregistered = self.try_preregister_recursive_lambda(let_stmt, init_expr, interner);
+        let preregistered =
+            self.try_preregister_recursive_lambda(let_stmt, init_expr, interner, declared_type_id);
 
         let init_type_id = self.check_expr_expecting_id(init_expr, declared_type_id, interner)?;
 
@@ -335,14 +336,19 @@ impl Analyzer {
         let_stmt: &LetStmt,
         init_expr: &Expr,
         interner: &Interner,
+        declared_type_id: Option<ArenaTypeId>,
     ) -> bool {
         if let ExprKind::Lambda(lambda) = &init_expr.kind
             && let Some(fn_type_id) = self.lambda_explicit_type_id(lambda, interner)
         {
+            // Use the declared type annotation when present (e.g. `let m: Mapper = ...`)
+            // so that interface types are preserved in scope. Fall back to the lambda's
+            // function type for untyped recursive lambdas.
+            let ty = declared_type_id.unwrap_or(fn_type_id);
             self.env.scope.define(
                 let_stmt.name,
                 Variable {
-                    ty: fn_type_id,
+                    ty,
                     mutable: let_stmt.mutable,
                     declaration_span: let_stmt.span,
                 },
