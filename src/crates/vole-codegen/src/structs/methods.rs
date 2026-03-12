@@ -474,10 +474,15 @@ impl Cg<'_, '_, '_> {
                         .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
                 })
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
+            let builtin =
+                BuiltinMethod::from_iter_method_name(method_name_str).ok_or_else(|| {
+                    CodegenError::not_found("iterator builtin method", method_name_str)
+                })?;
             return self.runtime_iterator_method(
                 &obj,
                 &mc.arg_source(),
                 method_name_str,
+                builtin,
                 elem_type_id,
                 None,
                 return_type_hint,
@@ -510,10 +515,15 @@ impl Cg<'_, '_, '_> {
                         .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
                 })
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
+            let builtin =
+                BuiltinMethod::from_iter_method_name(method_name_str).ok_or_else(|| {
+                    CodegenError::not_found("iterator builtin method", method_name_str)
+                })?;
             return self.runtime_iterator_method(
                 &runtime_iter,
                 &mc.arg_source(),
                 method_name_str,
+                builtin,
                 elem_type,
                 None,
                 return_type_hint,

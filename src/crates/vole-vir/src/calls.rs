@@ -295,3 +295,42 @@ pub enum BuiltinMethod {
     /// `iter.next()` — advance and return next element.
     IterNext,
 }
+
+impl BuiltinMethod {
+    /// Resolve an iterator method name to a `BuiltinMethod` variant.
+    ///
+    /// Returns `None` for unrecognized names. Only handles iterator pipeline
+    /// and terminal methods (Iter* variants), not Array/String/Range methods.
+    pub fn from_iter_method_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "map" => Self::IterMap,
+            "filter" => Self::IterFilter,
+            "flat_map" => Self::IterFlatMap,
+            "filter_map" => Self::IterFilterMap,
+            "take" => Self::IterTake,
+            "skip" => Self::IterSkip,
+            "reverse" => Self::IterReverse,
+            "sorted" => Self::IterSorted,
+            "unique" => Self::IterUnique,
+            "chain" => Self::IterChain,
+            "flatten" => Self::IterFlatten,
+            "enumerate" => Self::IterEnumerate,
+            "zip" => Self::IterZip,
+            "chunks" => Self::IterChunks,
+            "windows" => Self::IterWindows,
+            "collect" => Self::IterCollect,
+            "count" => Self::IterCount,
+            "any" => Self::IterAny,
+            "all" => Self::IterAll,
+            "for_each" => Self::IterForEach,
+            "sum" => Self::IterSum,
+            "reduce" => Self::IterReduce,
+            "first" => Self::IterFirst,
+            "last" => Self::IterLast,
+            "nth" => Self::IterNth,
+            "find" => Self::IterFind,
+            "next" => Self::IterNext,
+            _ => return None,
+        })
+    }
+}

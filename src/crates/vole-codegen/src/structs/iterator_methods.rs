@@ -15,6 +15,7 @@ use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
 use vole_identity::{NodeId, TypeDefId, TypeId, VirTypeId};
+use vole_vir::BuiltinMethod;
 
 use super::methods::ArgSource;
 
@@ -168,6 +169,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         arg_source: &ArgSource<'_>,
         method_name: &str,
+        builtin: BuiltinMethod,
         elem_type_id: TypeId,
         expr_id: Option<NodeId>,
         return_type_hint: Option<TypeId>,
@@ -282,7 +284,7 @@ impl Cg<'_, '_, '_> {
         // Call the external function directly. For reduce and sum, use
         // tagged variants that accept explicit elem type tags so the runtime
         // can dispatch between integer and floating-point operations.
-        let mut result = if method_name == "reduce" {
+        let mut result = if builtin == BuiltinMethod::IterReduce {
             let tag = self.vir_query_unknown_type_tag(elem_type_id);
             let tag_val = self.iconst_cached(types::I64, tag as i64);
             args.push(tag_val); // acc_tag
@@ -299,7 +301,7 @@ impl Cg<'_, '_, '_> {
                 result_val
             };
             self.compiled_with_ty(converted, expected_cty, return_type_id)
-        } else if method_name == "sum" {
+        } else if builtin == BuiltinMethod::IterSum {
             // sum() -> T: the runtime always returns i64 (raw word). When the
             // element type is a float, the runtime does float addition and returns
             // f64 bits packed as i64. We bitcast the raw result to the proper
