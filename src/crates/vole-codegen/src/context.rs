@@ -1134,23 +1134,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::structs::helpers::get_field_slot_and_type_id_cg(type_id, field_name, self)
     }
 
-    /// Unwrap a module type from a `VirTypeId`.
-    ///
-    /// Converts `VirTypeId` → `TypeId` via VirTypeTable reverse mapping,
-    /// then looks up in VirProgram's module_exports.
-    #[expect(clippy::type_complexity)]
-    #[inline]
-    pub fn vir_query_unwrap_module_v(
-        &self,
-        vir_ty: VirTypeId,
-    ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
-        let type_id = self.vir_type_table().vir_to_type_id(vir_ty);
-        if type_id == TypeId::UNKNOWN {
-            return None;
-        }
-        self.vir_query_unwrap_module(type_id)
-    }
-
     /// Get expression type from VIR-stashed `vir_call_return_type`.
     ///
     /// Set during VIR call dispatch (`compile_vir_unresolved_call` and friends).

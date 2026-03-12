@@ -998,7 +998,7 @@ fn lower_optional_method_call(
 /// Uses the receiver's sema type and the method name to select the specific
 /// enum variant.  Falls back to `ArrayLength` if the receiver type is
 /// unavailable (e.g. in generic templates) — the variant will be corrected
-/// after monomorphization when `infer_method_dispatch_kind` re-derives.
+/// after monomorphization when `rederive_method_dispatch_kind` re-derives.
 fn resolve_builtin_method(
     receiver_ty: Option<TypeId>,
     method_name: vole_identity::Symbol,
@@ -1008,11 +1008,11 @@ fn resolve_builtin_method(
     use vole_vir::BuiltinMethod;
 
     let Some(name) = ctx.interner.try_resolve(method_name) else {
-        // Synthetic symbol (e.g. in tests) — codegen will re-derive.
+        // Synthetic symbol (e.g. in tests) — rederive will correct.
         return BuiltinMethod::ArrayLength;
     };
     let Some(ty) = receiver_ty else {
-        // Generic template — receiver type unknown; codegen will re-derive.
+        // Generic template — receiver type unknown; rederive will correct.
         return BuiltinMethod::ArrayLength;
     };
 

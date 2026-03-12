@@ -411,11 +411,17 @@ impl Cg<'_, '_, '_> {
         let method_name_str = self.interner().resolve(mc_method);
 
         // Route method dispatch based on VIR's MethodDispatchKind annotation.
-        // In monomorphized contexts sema doesn't annotate (resolution is skipped),
-        // so we fall back to type-detection for those cases.
-        let dispatch_kind = dispatch
-            .dispatch_kind
-            .unwrap_or_else(|| self.infer_method_dispatch_kind(&obj, method_name_str));
+        // Normally set by sema during VIR lowering or by rederive after
+        // monomorphization.  Interface default methods lowered with unknown
+        // param types may still arrive without dispatch_kind; derive it from
+        // the compiled receiver's VIR type.
+        let dispatch_kind = dispatch.dispatch_kind.unwrap_or_else(|| {
+            tracing::warn!(
+                method = method_name_str,
+                "dispatch_kind not set — deriving from receiver type"
+            );
+            self.derive_dispatch_kind_from_receiver(&obj, method_name_str)
+        });
         match dispatch_kind {
             VirMethodDispatchKind::Module { module_id } => {
                 let resolved = dispatch.resolved_method.as_ref().ok_or_else(|| {
@@ -1381,21 +1387,19 @@ impl Cg<'_, '_, '_> {
         self.compile_method_defaults(method_id, start_index, expected_types, is_generic_class)
     }
 
-    /// Infer the method dispatch kind from the receiver type when sema didn't
-    /// annotate (e.g. in monomorphized generic contexts where sema resolution
-    /// is skipped). RuntimeIterator dispatch is handled separately in the
-    /// caller via `unwrap_runtime_iterator` on the compiled value's type.
-    fn infer_method_dispatch_kind(
+    /// Derive dispatch kind from the compiled receiver's VIR type.
+    ///
+    /// Fallback for interface default method bodies where VIR lowering could
+    /// not determine dispatch_kind (receiver type was unknown).  Uses the VIR
+    /// type table to classify the receiver at compile time.
+    fn derive_dispatch_kind_from_receiver(
         &self,
         obj: &CompiledValue,
         method_name: &str,
     ) -> VirMethodDispatchKind {
-        if let Some((module_id, _)) = self.vir_query_unwrap_module_v(obj.type_id) {
-            return VirMethodDispatchKind::Module { module_id };
-        }
-        // Check array-specific methods: push needs its own path, other array
-        // builtins (length, iter) go through builtin_method.
-        if self.vir_query_unwrap_array_v(obj.type_id).is_some() {
+        let table = self.vir_type_table();
+        let vir_ty = obj.type_id;
+        if table.is_array(vir_ty) {
             return match method_name {
                 "push" => VirMethodDispatchKind::ArrayPush,
                 "length" => VirMethodDispatchKind::Builtin(BuiltinMethod::ArrayLength),
@@ -1403,16 +1407,14 @@ impl Cg<'_, '_, '_> {
                 _ => VirMethodDispatchKind::Standard,
             };
         }
-        // String builtins
-        if obj.type_id == VirTypeId::STRING {
+        if table.is_string(vir_ty) {
             return match method_name {
                 "length" => VirMethodDispatchKind::Builtin(BuiltinMethod::StringLength),
                 "iter" => VirMethodDispatchKind::Builtin(BuiltinMethod::StringIter),
                 _ => VirMethodDispatchKind::Standard,
             };
         }
-        // Range builtins
-        if obj.type_id == VirTypeId::RANGE && method_name == "iter" {
+        if table.is_range(vir_ty) && method_name == "iter" {
             return VirMethodDispatchKind::Builtin(BuiltinMethod::RangeIter);
         }
         VirMethodDispatchKind::Standard

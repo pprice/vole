@@ -15,10 +15,12 @@ use vole_identity::{
     Interner, ModuleId, NameTable, StringConversion, Symbol, UnionStorageKind, VirTypeId,
 };
 
+use crate::BuiltinMethod;
 use crate::calls::CallTarget;
 use crate::entity_metadata::VirEntityMetadata;
 use crate::expr::{
-    FieldCoercionHint, FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart,
+    FieldCoercionHint, FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirMethodDispatchKind,
+    VirPattern, VirStringPart,
 };
 use crate::func::{ReturnAbi, VirBody, VirFunction};
 use crate::implement_dispatch::VirImplementDispatch;
@@ -341,6 +343,7 @@ fn rederive_expr(
         }
         VirExpr::MethodCall {
             receiver,
+            method,
             args,
             dispatch,
             ..
@@ -352,6 +355,17 @@ fn rederive_expr(
             // Re-derive receiver_is_interface from the now-concrete receiver type.
             if let Some(recv_vir_ty) = extract_vir_ty(receiver) {
                 dispatch.receiver_is_interface = table.is_interface(recv_vir_ty);
+                // Re-derive dispatch_kind when it was not set in the generic template.
+                if dispatch.dispatch_kind.is_none()
+                    && let Some(ctx) = call_ctx
+                {
+                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
+                        recv_vir_ty,
+                        *method,
+                        table,
+                        ctx.interner,
+                    ));
+                }
             }
         }
 
@@ -548,6 +562,7 @@ fn rederive_expr(
         }
         VirExpr::OptionalMethodCall {
             object,
+            method,
             method_args,
             dispatch,
             ..
@@ -559,6 +574,17 @@ fn rederive_expr(
             // Re-derive receiver_is_interface from the now-concrete object type.
             if let Some(obj_vir_ty) = extract_vir_ty(object) {
                 dispatch.receiver_is_interface = table.is_interface(obj_vir_ty);
+                // Re-derive dispatch_kind when it was not set in the generic template.
+                if dispatch.dispatch_kind.is_none()
+                    && let Some(ctx) = call_ctx
+                {
+                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
+                        obj_vir_ty,
+                        *method,
+                        table,
+                        ctx.interner,
+                    ));
+                }
             }
         }
         VirExpr::Try { value, .. } => rederive_ref(value, table, ret_ty, entities, call_ctx),
@@ -1087,6 +1113,40 @@ fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
             // iterable-type metadata not carried by VirIterKind::Generic.
         }
     }
+}
+
+/// Re-derive `VirMethodDispatchKind` from the concrete receiver type.
+///
+/// In generic templates, sema may not annotate dispatch_kind (the receiver
+/// type is a type parameter).  After monomorphization, the receiver type
+/// is concrete, so we can determine dispatch from the VIR type table.
+/// Module dispatch is never missing — modules are always concrete in sema.
+fn rederive_method_dispatch_kind(
+    recv_vir_ty: VirTypeId,
+    method_name: Symbol,
+    table: &VirTypeTable,
+    interner: &Interner,
+) -> VirMethodDispatchKind {
+    let name = interner.try_resolve(method_name).unwrap_or("<unknown>");
+    if table.is_array(recv_vir_ty) {
+        return match name {
+            "push" => VirMethodDispatchKind::ArrayPush,
+            "length" => VirMethodDispatchKind::Builtin(BuiltinMethod::ArrayLength),
+            "iter" => VirMethodDispatchKind::Builtin(BuiltinMethod::ArrayIter),
+            _ => VirMethodDispatchKind::Standard,
+        };
+    }
+    if table.is_string(recv_vir_ty) {
+        return match name {
+            "length" => VirMethodDispatchKind::Builtin(BuiltinMethod::StringLength),
+            "iter" => VirMethodDispatchKind::Builtin(BuiltinMethod::StringIter),
+            _ => VirMethodDispatchKind::Standard,
+        };
+    }
+    if table.is_range(recv_vir_ty) && name == "iter" {
+        return VirMethodDispatchKind::Builtin(BuiltinMethod::RangeIter);
+    }
+    VirMethodDispatchKind::Standard
 }
 
 fn rederive_union_storage_from_array_expr(
