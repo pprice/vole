@@ -160,6 +160,7 @@ fn make_ctx<'a>(
         captures: rustc_hash::FxHashSet::default(),
         cross_module: empty_cross_module(),
         implements: empty_implements(),
+        var_declared_types: rustc_hash::FxHashMap::default(),
     }
 }
 
@@ -187,5 +188,6 @@ fn make_generic_ctx<'a>(
         captures: rustc_hash::FxHashSet::default(),
         cross_module: empty_cross_module(),
         implements: empty_implements(),
+        var_declared_types: rustc_hash::FxHashMap::default(),
     }
 }

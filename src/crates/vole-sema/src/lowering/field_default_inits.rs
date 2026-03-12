@@ -73,6 +73,7 @@ pub fn lower_field_default_inits(
         captures: rustc_hash::FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
     let mut map = FxHashMap::default();
     lower_field_default_inits_in_decls(
@@ -131,6 +132,7 @@ pub fn lower_module_field_default_inits(
             captures: rustc_hash::FxHashSet::default(),
             cross_module: &cross_module,
             implements,
+            var_declared_types: FxHashMap::default(),
         };
         lower_field_default_inits_in_decls(
             &program.declarations,

@@ -43,6 +43,7 @@ pub fn lower_global_inits(
         captures: rustc_hash::FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
 
     let mut map = FxHashMap::default();
@@ -107,6 +108,7 @@ pub fn lower_module_global_inits(
             captures: rustc_hash::FxHashSet::default(),
             cross_module: &cross_module,
             implements,
+            var_declared_types: FxHashMap::default(),
         };
 
         let mut map = FxHashMap::default();

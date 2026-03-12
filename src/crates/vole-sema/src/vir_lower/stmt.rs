@@ -120,6 +120,8 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
             .unwrap_or(TypeId::UNKNOWN)
     };
     let ty = declared_ty.unwrap_or(expr_ty);
+    // Track the declared type for narrowing detection in field access.
+    ctx.var_declared_types.insert(let_stmt.name, ty);
 
     let vir_ty = ctx.translate(ty);
     let sema_ty = ctx.compat_ty(ty);
@@ -641,7 +643,7 @@ fn lower_destructure_record(
                 .and_then(|def_id| find_destructure_field(def_id, f.field_name, ctx))
                 .unwrap_or((0, TypeId::UNKNOWN));
             let vir_ty = ctx.translate(field_ty);
-            let storage = ctx.resolve_field_storage(ty, f.field_name);
+            let storage = ctx.resolve_field_storage(ty, f.field_name, false);
             VirDestructureField {
                 field_name: f.field_name,
                 binding: f.binding,

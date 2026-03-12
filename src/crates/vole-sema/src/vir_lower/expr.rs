@@ -451,7 +451,8 @@ fn lower_assign(
         }
         vole_frontend::AssignTarget::Field { object, field, .. } => {
             let object_type = ctx.node_map.get_type(object.id).unwrap_or(TypeId::UNKNOWN);
-            let storage = ctx.resolve_field_storage(object_type, *field);
+            let narrowed = ctx.is_object_narrowed_from_unknown(object);
+            let storage = ctx.resolve_field_storage(object_type, *field, narrowed);
             let obj = lower_expr(object, ctx);
             let value = lower_expr(&assign_expr.value, ctx);
             Box::new(VirExpr::FieldStore {
@@ -536,7 +537,8 @@ fn lower_compound_assign(
         }
         vole_frontend::AssignTarget::Field { object, field, .. } => {
             let object_type = ctx.node_map.get_type(object.id).unwrap_or(TypeId::UNKNOWN);
-            let storage = ctx.resolve_field_storage(object_type, *field);
+            let narrowed = ctx.is_object_narrowed_from_unknown(object);
+            let storage = ctx.resolve_field_storage(object_type, *field, narrowed);
             let obj_for_load = lower_expr(object, ctx);
             let obj_for_store = lower_expr(object, ctx);
             let load = Box::new(VirExpr::FieldLoad {
@@ -616,7 +618,8 @@ fn lower_field_access(
         .node_map
         .get_type(fa.object.id)
         .unwrap_or(TypeId::UNKNOWN);
-    let storage = ctx.resolve_field_storage(object_type, fa.field);
+    let narrowed = ctx.is_object_narrowed_from_unknown(&fa.object);
+    let storage = ctx.resolve_field_storage(object_type, fa.field, narrowed);
     let object = lower_expr(&fa.object, ctx);
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);

@@ -102,6 +102,15 @@ pub struct LoweringCtx<'a> {
     /// Empty for top-level function bodies (no captures).
     pub captures: FxHashSet<Symbol>,
 
+    /// Declared types for local variables, populated during `Let` lowering.
+    ///
+    /// Maps each variable name to its declared (or inferred) type at the
+    /// point of declaration — before any flow-sensitive narrowing.
+    /// Used by `is_object_narrowed_from_unknown` to detect when a struct
+    /// field access targets a heap-allocated value that was narrowed from
+    /// `unknown`.
+    pub var_declared_types: FxHashMap<Symbol, TypeId>,
+
     /// Cross-module and prelude call resolution context.
     ///
     /// Used by `resolve_callee_function` to resolve calls to functions
@@ -130,6 +139,21 @@ impl LoweringCtx<'_> {
     /// Placeholder, Invalid) that have no VirTypeTable representation.
     pub fn compat_ty(&mut self, type_id: TypeId) -> VirTypeId {
         self.translate(type_id)
+    }
+
+    /// Check whether an AST object expression refers to a variable declared
+    /// as `unknown` (i.e. the runtime value is heap-allocated even though the
+    /// narrowed type may be a stack-allocated struct).
+    ///
+    /// Returns `true` when the expression is an identifier whose declared
+    /// type in `var_declared_types` is `TypeId::UNKNOWN`.
+    pub fn is_object_narrowed_from_unknown(&self, object: &vole_frontend::ast::Expr) -> bool {
+        if let vole_frontend::ast::ExprKind::Identifier(sym) = &object.kind
+            && let Some(&declared_ty) = self.var_declared_types.get(sym)
+        {
+            return declared_ty == TypeId::UNKNOWN;
+        }
+        false
     }
 
     // -- Call resolution helpers ---------------------------------------------
@@ -536,16 +560,23 @@ impl LoweringCtx<'_> {
 
     /// Resolve the field storage dispatch for a field access.
     ///
-    /// Given the object's sema type and the field name (as a `Symbol`),
-    /// returns:
+    /// Given the object's sema type, field name, and whether the object was
+    /// narrowed from `unknown`, returns:
     /// - `FieldStorage::Direct { slot }` for struct fields (logical slot index)
-    /// - `FieldStorage::Heap { slot }` for class fields (physical slot,
-    ///   accounting for wide types)
+    /// - `FieldStorage::Heap { slot }` for class fields or structs narrowed
+    ///   from `unknown` (physical slot, accounting for wide types)
+    /// - `FieldStorage::Module { module_id }` for module field access
     /// - `FieldStorage::ByName` for modules, unknown types, or generic templates
+    ///
+    /// When `narrowed_from_unknown` is `true`, struct types use heap storage
+    /// because the runtime value was obtained from an `unknown`-typed variable
+    /// (e.g. annotation struct retrieved from an array after `is` narrowing)
+    /// and is heap-allocated via `InstanceNew`.
     pub fn resolve_field_storage(
         &self,
         object_type: TypeId,
         field: Symbol,
+        narrowed_from_unknown: bool,
     ) -> vole_vir::expr::FieldStorage {
         use vole_vir::expr::FieldStorage;
 
@@ -556,13 +587,10 @@ impl LoweringCtx<'_> {
 
         let field_name = self.interner.resolve(field);
 
-        // Struct types are generally value-type, stack-allocated (Direct storage).
-        // Exception: annotation structs (@annotation) may be heap-allocated via
-        // InstanceNew (e.g. retrieved from FieldMeta.annotations array after an
-        // `is` check), so their fields use Heap storage to match class instance layout.
+        // Struct types: stack-allocated (Direct) unless narrowed from unknown,
+        // in which case the runtime value is heap-allocated (Heap).
         if let Some((type_def_id, type_args)) = self.type_arena.unwrap_struct(object_type) {
-            let is_annotation = self.entities.get_type(type_def_id).is_annotation;
-            if is_annotation {
+            if narrowed_from_unknown {
                 return self
                     .resolve_class_field_slot(type_def_id, type_args, field_name)
                     .map_or(FieldStorage::ByName, |slot| FieldStorage::Heap {
@@ -712,7 +740,12 @@ pub fn lower_function(
         captures: FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
+    // Record parameter declared types for narrowing detection.
+    for &(sym, ty) in param_types {
+        ctx.var_declared_types.insert(sym, ty);
+    }
     let params = param_types
         .iter()
         .map(|(s, t)| {
@@ -822,7 +855,12 @@ pub fn lower_method(
         captures: FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
+    // Record parameter declared types for narrowing detection.
+    for &(sym, ty) in param_types {
+        ctx.var_declared_types.insert(sym, ty);
+    }
     let params = param_types
         .iter()
         .map(|(s, t)| {
@@ -882,7 +920,12 @@ pub fn lower_interface_method(
         captures: FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
+    // Record parameter declared types for narrowing detection.
+    for &(sym, ty) in param_types {
+        ctx.var_declared_types.insert(sym, ty);
+    }
     let params = param_types
         .iter()
         .map(|(s, t)| {
@@ -948,7 +991,12 @@ pub fn lower_generic_function(
         captures: FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
+    // Record parameter declared types for narrowing detection.
+    for &(sym, ty) in param_types {
+        ctx.var_declared_types.insert(sym, ty);
+    }
     let params = param_types
         .iter()
         .map(|(s, t)| {
@@ -1030,6 +1078,7 @@ pub fn lower_test_body(
         captures: FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
     lower_func_body(body, &mut ctx)
 }

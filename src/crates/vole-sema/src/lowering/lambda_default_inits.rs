@@ -183,6 +183,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         captures: rustc_hash::FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
 
     for (slot, param) in lambda.params.iter().enumerate() {

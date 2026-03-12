@@ -2,6 +2,8 @@
 //
 // Lower test function bodies from AST to VIR.
 
+use rustc_hash::FxHashMap;
+
 use crate::LoweringEntityLookup;
 use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{lower_stmts, lower_test_body};
@@ -90,6 +92,7 @@ fn lower_tests_decl_bodies(
             captures: rustc_hash::FxHashSet::default(),
             cross_module,
             implements,
+            var_declared_types: FxHashMap::default(),
         };
         lower_stmts(&scoped_let_stmts, &mut ctx).stmts
     };

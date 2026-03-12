@@ -71,6 +71,7 @@ pub fn lower_function_default_inits(
         captures: rustc_hash::FxHashSet::default(),
         cross_module,
         implements,
+        var_declared_types: FxHashMap::default(),
     };
     let mut map = FxHashMap::default();
     lower_function_default_inits_in_decls(
@@ -130,6 +131,7 @@ pub fn lower_module_function_default_inits(
             captures: rustc_hash::FxHashSet::default(),
             cross_module: &cross_module,
             implements,
+            var_declared_types: FxHashMap::default(),
         };
         let before_keys: Vec<(FunctionId, usize)> = map.keys().copied().collect();
         lower_function_default_inits_in_decls(
