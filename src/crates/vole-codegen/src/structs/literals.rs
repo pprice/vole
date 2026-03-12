@@ -88,8 +88,15 @@ impl Cg<'_, '_, '_> {
                     Ok(value)
                 }
             }
-            Some(FieldCoercionHint::Unresolved) | None => {
-                // Fall back to full type-query path.
+            Some(FieldCoercionHint::Unresolved) => {
+                tracing::warn!(
+                    "FieldCoercionHint::Unresolved reached codegen — \
+                     should have been resolved during monomorph rederive"
+                );
+                self.coerce_field_value_v(value, field_vir_ty)
+            }
+            None => {
+                // No hint available — fall back to full type-query path.
                 self.coerce_field_value_v(value, field_vir_ty)
             }
         }

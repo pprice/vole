@@ -17,7 +17,9 @@ use vole_identity::{
 
 use crate::calls::CallTarget;
 use crate::entity_metadata::VirEntityMetadata;
-use crate::expr::{FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
+use crate::expr::{
+    FieldCoercionHint, FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart,
+};
 use crate::func::{ReturnAbi, VirBody, VirFunction};
 use crate::implement_dispatch::VirImplementDispatch;
 use crate::intrinsics::IntrinsicKey;
@@ -261,10 +263,22 @@ fn rederive_expr(
         VirExpr::RepeatLiteral { element, .. } => {
             rederive_ref(element, table, ret_ty, entities, call_ctx);
         }
-        VirExpr::StructLiteral { fields, .. } | VirExpr::ClassInstance { fields, .. } => {
+        VirExpr::StructLiteral { fields, .. } => {
             for (_, val) in fields {
                 rederive_ref(val, table, ret_ty, entities, call_ctx);
             }
+        }
+        VirExpr::ClassInstance {
+            fields,
+            field_coercions,
+            type_def,
+            vir_ty,
+            ..
+        } => {
+            for (_, val) in fields.iter_mut() {
+                rederive_ref(val, table, ret_ty, entities, call_ctx);
+            }
+            rederive_field_coercions(fields, field_coercions, *type_def, *vir_ty, table, entities);
         }
 
         // Operators
@@ -1415,6 +1429,91 @@ fn compute_class_physical_slot(
         physical_slot += if table.is_wide(fd.vir_ty) { 2 } else { 1 };
     }
     None
+}
+
+/// Re-derive `FieldCoercionHint::Unresolved` entries in a `ClassInstance` after
+/// monomorphization.
+///
+/// For each `Unresolved` hint, looks up the field's concrete VIR type via
+/// type parameter substitution, then classifies:
+/// - Field is interface, value is interface → `InterfaceCopy`
+/// - Field is interface, value is concrete → `InterfaceBox`
+/// - Otherwise → `None`
+fn rederive_field_coercions(
+    fields: &[(Symbol, VirRef)],
+    coercions: &mut [FieldCoercionHint],
+    type_def_id: vole_identity::TypeDefId,
+    instance_vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) {
+    if !coercions.contains(&FieldCoercionHint::Unresolved) {
+        return;
+    }
+    let subs = build_type_param_subs(instance_vir_ty, type_def_id, table, entities);
+    for (i, hint) in coercions.iter_mut().enumerate() {
+        if *hint != FieldCoercionHint::Unresolved {
+            continue;
+        }
+        let (field_sym, val_ref) = &fields[i];
+        *hint =
+            resolve_single_field_coercion(*field_sym, val_ref, type_def_id, &subs, table, entities);
+    }
+}
+
+/// Build a type parameter → concrete type substitution map from the
+/// concrete `ClassInstance` VIR type and the original generic type def.
+fn build_type_param_subs(
+    instance_vir_ty: VirTypeId,
+    type_def_id: vole_identity::TypeDefId,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) -> FxHashMap<vole_identity::NameId, VirTypeId> {
+    let type_args = match table.get(instance_vir_ty) {
+        VirType::Class { type_args, .. } => type_args,
+        _ => return FxHashMap::default(),
+    };
+    let Some(td) = entities.get_type_def(type_def_id) else {
+        return FxHashMap::default();
+    };
+    td.type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(param, arg)| (*param, *arg))
+        .collect()
+}
+
+/// Resolve a single field's coercion hint using the now-concrete types.
+fn resolve_single_field_coercion(
+    field_sym: Symbol,
+    val_ref: &VirRef,
+    type_def_id: vole_identity::TypeDefId,
+    subs: &FxHashMap<vole_identity::NameId, VirTypeId>,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) -> FieldCoercionHint {
+    let Some(fd) = entities.find_field_by_symbol(type_def_id, field_sym) else {
+        return FieldCoercionHint::Unresolved;
+    };
+    // Substitute generic type params to get the concrete field type.
+    let concrete_field_ty = if subs.is_empty() {
+        fd.vir_ty
+    } else {
+        match table.substitute_vir_ids(fd.vir_ty, subs) {
+            Some(ty) => ty,
+            None => return FieldCoercionHint::Unresolved,
+        }
+    };
+    if !table.is_interface(concrete_field_ty) {
+        return FieldCoercionHint::None;
+    }
+    // Field is interface-typed. Check if the init value is already an interface.
+    let val_is_iface = extract_vir_ty(val_ref).is_some_and(|vt| table.is_interface(vt));
+    if val_is_iface {
+        FieldCoercionHint::InterfaceCopy
+    } else {
+        FieldCoercionHint::InterfaceBox
+    }
 }
 
 /// Re-derive `FieldStorage` on destructure pattern fields after monomorphization.
