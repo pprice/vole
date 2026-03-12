@@ -374,7 +374,8 @@ fn extract_vir_ty_for_cleanup(expr: &VirExpr) -> Option<VirTypeId> {
         | VirExpr::Lambda { vir_ty, .. }
         | VirExpr::NullCoalesce { vir_ty, .. }
         | VirExpr::OptionalChain { vir_ty, .. }
-        | VirExpr::OptionalMethodCall { vir_ty, .. } => Some(*vir_ty),
+        | VirExpr::OptionalMethodCall { vir_ty, .. }
+        | VirExpr::ArrayFilled { vir_ty, .. } => Some(*vir_ty),
 
         VirExpr::BoolLiteral(_) => Some(VirTypeId::BOOL),
         VirExpr::StringLiteral(_) => Some(VirTypeId::STRING),

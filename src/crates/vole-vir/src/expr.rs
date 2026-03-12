@@ -218,6 +218,23 @@ pub enum VirExpr {
         vir_ty: VirTypeId,
     },
 
+    /// Pre-resolved `Array.filled<T>(count, value)` static method call.
+    ///
+    /// Emitted during VIR lowering when the method call is detected as
+    /// `Array.filled`.  Carries the pre-computed element type so codegen
+    /// can emit the runtime call without string-matching the method name.
+    ArrayFilled {
+        /// The `count` argument.
+        count: VirRef,
+        /// The `value` argument (the fill value).
+        value: VirRef,
+        /// The element type `T` of the resulting `[T]` array.
+        elem_type: VirTypeId,
+        /// The result type `[T]`.
+        ty: VirTypeId,
+        vir_ty: VirTypeId,
+    },
+
     // -- Field access -------------------------------------------------------
     /// Load a field from a struct or class instance.
     FieldLoad {

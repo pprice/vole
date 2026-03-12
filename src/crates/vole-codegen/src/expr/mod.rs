@@ -77,6 +77,7 @@ impl Cg<'_, '_, '_> {
             | VirExpr::NullCoalesce { vir_ty, ty, .. }
             | VirExpr::OptionalChain { vir_ty, ty, .. }
             | VirExpr::OptionalMethodCall { vir_ty, ty, .. }
+            | VirExpr::ArrayFilled { vir_ty, ty, .. }
             | VirExpr::Lambda { vir_ty, ty, .. } => Some(prefer(*vir_ty, *ty)),
             VirExpr::AsCast {
                 vir_target_ty,
@@ -476,6 +477,14 @@ impl Cg<'_, '_, '_> {
                 let result = self.method_call(&src, *node_id, dispatch)?;
                 Ok(self.mark_rc_owned(result))
             }
+
+            VirExpr::ArrayFilled {
+                count,
+                value,
+                elem_type,
+                ty,
+                ..
+            } => self.compile_vir_array_filled(count, value, *elem_type, *ty),
 
             // -- Control flow ---------------------------------------------
             VirExpr::If {

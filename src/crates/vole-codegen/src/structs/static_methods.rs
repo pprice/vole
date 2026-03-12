@@ -12,6 +12,7 @@ use vole_identity::{
 };
 use vole_vir::VirStaticMethodMonomorphInfo;
 use vole_vir::expr::{VirMethodDispatchMeta, VirStaticMethodMonomorphKey};
+use vole_vir::refs::VirRef;
 use vole_vir::types::VirType;
 
 use super::methods::ArgSource;
@@ -580,5 +581,45 @@ impl Cg<'_, '_, '_> {
         result.rc_lifecycle = RcLifecycle::Owned;
 
         Ok(Some(result))
+    }
+
+    /// Compile a pre-resolved `Array.filled<T>(count, value)` from VIR.
+    ///
+    /// The element type has been pre-classified during VIR lowering, so no
+    /// string matching is needed.  Emits a `vole_array_filled(count, tag,
+    /// value)` runtime call with proper union boxing and RC lifecycle.
+    pub(crate) fn compile_vir_array_filled(
+        &mut self,
+        count_ref: &VirRef,
+        value_ref: &VirRef,
+        elem_vir: VirTypeId,
+        result_vir: VirTypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let elem_vir = self.try_substitute_type_v(elem_vir);
+        let result_vir = self.try_substitute_type_v(result_vir);
+        let table = self.vir_type_table();
+        let elem_type_id = table.vir_to_type_id(elem_vir);
+        let return_type_id = table.vir_to_type_id(result_vir);
+        let is_wide_elem = matches!(elem_type_id, TypeId::I128 | TypeId::F128);
+
+        let count = self.compile_vir_expr(count_ref)?;
+        let value = self.compile_vir_expr(value_ref)?;
+
+        let (tag_val, value_bits, mut stored_value) =
+            self.prepare_dynamic_array_store(value, elem_type_id)?;
+
+        let filled_ref = self.runtime_func_ref(RuntimeKey::ArrayFilled)?;
+        let call = self.emit_call(filled_ref, &[count.value, tag_val, value_bits]);
+        let result_val = self.builder.inst_results(call)[0];
+
+        if is_wide_elem {
+            self.call_runtime_void(RuntimeKey::RcDec, &[value_bits])?;
+        } else {
+            self.consume_rc_value(&mut stored_value)?;
+        }
+
+        let mut result = self.compiled_with_ty(result_val, self.ptr_type(), return_type_id);
+        result.rc_lifecycle = RcLifecycle::Owned;
+        Ok(result)
     }
 }

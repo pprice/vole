@@ -1728,6 +1728,10 @@ fn collect_vir_direct_in_expr(expr: &VirExpr, out: &mut BTreeSet<usize>) {
                 collect_vir_direct_in_ref(arg, out);
             }
         }
+        VirExpr::ArrayFilled { count, value, .. } => {
+            collect_vir_direct_in_ref(count, out);
+            collect_vir_direct_in_ref(value, out);
+        }
         VirExpr::FieldLoad { object, .. } => collect_vir_direct_in_ref(object, out),
         VirExpr::FieldStore { object, value, .. } => {
             collect_vir_direct_in_ref(object, out);

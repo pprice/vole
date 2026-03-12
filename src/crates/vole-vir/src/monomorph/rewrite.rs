@@ -117,7 +117,8 @@ fn rewrite_expr(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         | VirExpr::RcInc { .. }
         | VirExpr::RcDec { .. }
         | VirExpr::RcMove { .. }
-        | VirExpr::Coerce { .. } => rewrite_expr_operation(expr, ctx),
+        | VirExpr::Coerce { .. }
+        | VirExpr::ArrayFilled { .. } => rewrite_expr_operation(expr, ctx),
 
         // Control flow, type ops, reflection, variables, lambda
         VirExpr::If { .. }
@@ -373,6 +374,19 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             vir_from: ctx.remap(*vir_from),
             vir_to: ctx.remap(*vir_to),
             kind: rewrite_coerce_kind(kind, ctx),
+        },
+        VirExpr::ArrayFilled {
+            count,
+            value,
+            elem_type,
+            ty,
+            vir_ty,
+        } => VirExpr::ArrayFilled {
+            count: rewrite_ref(count, ctx),
+            value: rewrite_ref(value, ctx),
+            elem_type: ctx.remap(*elem_type),
+            ty: ctx.remap(*ty),
+            vir_ty: ctx.remap(*vir_ty),
         },
         _ => unreachable!("rewrite_expr_operation called with non-operation"),
     }

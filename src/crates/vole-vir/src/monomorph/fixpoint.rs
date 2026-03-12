@@ -304,7 +304,8 @@ fn collect_from_expr(expr: &VirExpr, out: &mut Vec<MonomorphInstance>) {
         | VirExpr::RcInc { .. }
         | VirExpr::RcDec { .. }
         | VirExpr::RcMove { .. }
-        | VirExpr::Coerce { .. } => collect_from_expr_data(expr, out),
+        | VirExpr::Coerce { .. }
+        | VirExpr::ArrayFilled { .. } => collect_from_expr_data(expr, out),
 
         // Control flow, type ops, reflection, variables, lambda,
         // optional, try, yield
@@ -416,6 +417,10 @@ fn collect_from_expr_data(expr: &VirExpr, out: &mut Vec<MonomorphInstance>) {
             collect_from_ref(value, out)
         }
         VirExpr::Coerce { value, .. } => collect_from_ref(value, out),
+        VirExpr::ArrayFilled { count, value, .. } => {
+            collect_from_ref(count, out);
+            collect_from_ref(value, out);
+        }
         _ => unreachable!("collect_from_expr_data called with wrong variant"),
     }
 }

@@ -363,6 +363,19 @@ impl<'a> VirPrinter<'a> {
                 }
                 w!(out, "): {}", self.ty(*ty));
             }
+            VirExpr::ArrayFilled {
+                count,
+                value,
+                elem_type,
+                ty,
+                ..
+            } => {
+                w!(out, "Array.filled<{}>(", self.ty(*elem_type));
+                self.fmt_expr(count, out, ind);
+                w!(out, ", ");
+                self.fmt_expr(value, out, ind);
+                w!(out, "): {}", self.ty(*ty));
+            }
             VirExpr::FieldLoad {
                 object,
                 field,

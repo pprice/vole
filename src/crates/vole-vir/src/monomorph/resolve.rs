@@ -176,7 +176,8 @@ fn resolve_in_expr(expr: &mut VirExpr, ctx: &ResolveCtx<'_>) {
         | VirExpr::RcInc { .. }
         | VirExpr::RcDec { .. }
         | VirExpr::RcMove { .. }
-        | VirExpr::Coerce { .. } => resolve_in_expr_data(expr, ctx),
+        | VirExpr::Coerce { .. }
+        | VirExpr::ArrayFilled { .. } => resolve_in_expr_data(expr, ctx),
 
         // Control flow, type ops, reflection, variables, lambda,
         // optional, try, yield
@@ -281,6 +282,10 @@ fn resolve_in_expr_data(expr: &mut VirExpr, ctx: &ResolveCtx<'_>) {
             resolve_in_ref(value, ctx)
         }
         VirExpr::Coerce { value, .. } => resolve_in_ref(value, ctx),
+        VirExpr::ArrayFilled { count, value, .. } => {
+            resolve_in_ref(count, ctx);
+            resolve_in_ref(value, ctx);
+        }
         _ => {}
     }
 }

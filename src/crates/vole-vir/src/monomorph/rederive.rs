@@ -253,6 +253,10 @@ fn rederive_expr(
         | VirExpr::Import { .. }
         | VirExpr::TypeLiteral => {}
 
+        VirExpr::ArrayFilled { count, value, .. } => {
+            rederive_ref(count, table, ret_ty, entities, call_ctx);
+            rederive_ref(value, table, ret_ty, entities, call_ctx);
+        }
         VirExpr::Range { start, end, .. } => {
             rederive_ref(start, table, ret_ty, entities, call_ctx);
             rederive_ref(end, table, ret_ty, entities, call_ctx);
@@ -1389,7 +1393,8 @@ fn extract_vir_ty(expr: &VirExpr) -> Option<VirTypeId> {
         | VirExpr::Lambda { vir_ty, .. }
         | VirExpr::NullCoalesce { vir_ty, .. }
         | VirExpr::OptionalChain { vir_ty, .. }
-        | VirExpr::OptionalMethodCall { vir_ty, .. } => Some(*vir_ty),
+        | VirExpr::OptionalMethodCall { vir_ty, .. }
+        | VirExpr::ArrayFilled { vir_ty, .. } => Some(*vir_ty),
 
         // Fixed-type expressions
         VirExpr::BoolLiteral(_) => Some(VirTypeId::BOOL),

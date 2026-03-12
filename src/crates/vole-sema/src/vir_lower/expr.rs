@@ -121,6 +121,14 @@ pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                 .filter(|&t| t != VirTypeId::UNKNOWN);
             let compat_ty = dispatch_ty.unwrap_or_else(|| ctx.compat_ty(ty));
             let vir_ty = dispatch_ty.unwrap_or_else(|| ctx.translate(ty));
+
+            // Pre-resolve float constant and Array.filled static methods.
+            if let Some(specialized) =
+                try_lower_static_intrinsic(&dispatch, mc.method, &args, compat_ty, vir_ty, ctx)
+            {
+                return specialized;
+            }
+
             Box::new(VirExpr::MethodCall {
                 receiver,
                 method: mc.method,
@@ -2146,4 +2154,101 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
 
     // No `it` lambda -- lower normally.
     lower_expr(arg_expr, ctx)
+}
+
+/// Try to pre-resolve a static method call into a specialized VIR node.
+///
+/// Returns `Some(VirRef)` for:
+/// - Float constants (`f32.nan()`, `f64.infinity()`, etc.) → `FloatLiteral`
+/// - `Array.filled<T>(count, value)` → `ArrayFilled`
+///
+/// Returns `None` for all other static methods (fallback to `MethodCall`).
+fn try_lower_static_intrinsic(
+    dispatch: &VirMethodDispatchMeta,
+    method_sym: vole_identity::Symbol,
+    args: &[VirRef],
+    compat_ty: VirTypeId,
+    vir_ty: VirTypeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> Option<VirRef> {
+    let type_def_id = match &dispatch.resolved_method {
+        Some(VirResolvedMethod::Static { type_def_id, .. }) => *type_def_id,
+        _ => return None,
+    };
+
+    let type_name_id = ctx.entities.name_id(type_def_id);
+    let method_name = ctx.interner.resolve(method_sym);
+
+    // Float constants: f32.nan(), f64.infinity(), etc.
+    if args.is_empty()
+        && let Some(expr) = try_lower_float_constant(type_name_id, method_name, ctx)
+    {
+        return Some(expr);
+    }
+
+    // Array.filled<T>(count, value)
+    if args.len() == 2
+        && ctx.name_table.last_segment_str(type_name_id).as_deref() == Some("Array")
+        && method_name == "filled"
+    {
+        return try_lower_array_filled(args, compat_ty, vir_ty, ctx);
+    }
+
+    None
+}
+
+/// Lower a float constant static method (`f32.nan()`, `f64.epsilon()`, etc.)
+/// to a `VirExpr::FloatLiteral`.
+fn try_lower_float_constant(
+    type_name_id: vole_identity::NameId,
+    method_name: &str,
+    ctx: &LoweringCtx<'_>,
+) -> Option<VirRef> {
+    let prims = &ctx.name_table.primitives;
+    let is_f32 = type_name_id == prims.f32;
+    let is_f64 = type_name_id == prims.f64;
+    if !is_f32 && !is_f64 {
+        return None;
+    }
+
+    let (value, ty) = match (method_name, is_f32) {
+        ("nan", true) => (f32::NAN as f64, VirTypeId::F32),
+        ("nan", false) => (f64::NAN, VirTypeId::F64),
+        ("infinity", true) => (f32::INFINITY as f64, VirTypeId::F32),
+        ("infinity", false) => (f64::INFINITY, VirTypeId::F64),
+        ("neg_infinity", true) => (f32::NEG_INFINITY as f64, VirTypeId::F32),
+        ("neg_infinity", false) => (f64::NEG_INFINITY, VirTypeId::F64),
+        ("epsilon", true) => (f32::EPSILON as f64, VirTypeId::F32),
+        ("epsilon", false) => (f64::EPSILON, VirTypeId::F64),
+        _ => return None,
+    };
+
+    Some(Box::new(VirExpr::FloatLiteral {
+        value,
+        ty,
+        vir_ty: ty,
+    }))
+}
+
+/// Lower `Array.filled<T>(count, value)` to `VirExpr::ArrayFilled`.
+///
+/// The element type is extracted from the return type `[T]` by unwrapping
+/// the array wrapper.
+fn try_lower_array_filled(
+    args: &[VirRef],
+    compat_ty: VirTypeId,
+    vir_ty: VirTypeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> Option<VirRef> {
+    // Unwrap [T] → T from the return type.
+    let elem_type = ctx.type_table.unwrap_array(compat_ty)?;
+    let count = args[0].clone();
+    let value = args[1].clone();
+    Some(Box::new(VirExpr::ArrayFilled {
+        count,
+        value,
+        elem_type,
+        ty: compat_ty,
+        vir_ty,
+    }))
 }
