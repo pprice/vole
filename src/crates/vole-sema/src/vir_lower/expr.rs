@@ -1472,8 +1472,29 @@ fn lower_call(
         monomorph_key: mk,
     };
     let target = if ctx.generic {
-        generic_call_target(expr, ctx)
-            .unwrap_or_else(|| make_unresolved(resolved_call_args, lambda_defaults, monomorph_key))
+        if let Some(generic) = generic_call_target(expr, ctx) {
+            generic
+        } else if let Some(intrinsic) = resolve_intrinsic_target(expr, callee_sym, ctx) {
+            intrinsic
+        } else if let Some(closure_target) = resolve_closure_variable_target(
+            expr.id,
+            callee_sym,
+            &resolved_call_args,
+            &lambda_defaults,
+            ctx,
+        ) {
+            closure_target
+        } else if let Some(global_target) = resolve_global_closure_target(
+            callee_sym,
+            &resolved_call_args,
+            &lambda_defaults,
+            &monomorph_key,
+            ctx,
+        ) {
+            global_target
+        } else {
+            make_unresolved(resolved_call_args, lambda_defaults, monomorph_key)
+        }
     } else if let Some(intrinsic) = resolve_intrinsic_target(expr, callee_sym, ctx) {
         intrinsic
     } else if let Some(target) = ctx.resolve_callee_target(callee_sym) {
