@@ -1060,21 +1060,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .lookup_fixed_array_v(element, size as u32)
     }
 
-    /// Unwrap a module type, returning the module ID and exported (name, type) pairs.
-    ///
-    /// Uses VirProgram's pre-populated module_exports map.
-    #[allow(dead_code, clippy::type_complexity)]
-    #[inline]
-    pub fn vir_query_unwrap_module(
-        &self,
-        type_id: TypeId,
-    ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
-        let vir = self.env.analyzed;
-        vir.module_exports
-            .get(&type_id)
-            .map(|(mid, exports)| (*mid, exports.iter().copied().collect()))
-    }
-
     /// Look up module exports by `ModuleId`.
     ///
     /// Scans `VirProgram::module_exports` for a matching `ModuleId`.
