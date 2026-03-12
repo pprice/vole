@@ -188,9 +188,16 @@ impl Cg<'_, '_, '_> {
         vir_inner_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let value = self.compile_vir_expr(value_expr)?;
-        let nil_tag = self.find_nil_variant_vir(value.type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
-        })?;
+        let nil_tag = self
+            .cached_optional_meta(value.type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
+                    "null coalesce operator",
+                    "optional type",
+                    "non-optional",
+                )
+            })?
+            .nil_position;
 
         let is_multi_variant_inner = self.vir_query_is_union_v(vir_inner_type_id);
         if is_multi_variant_inner {
@@ -312,14 +319,15 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self
-            .find_nil_variant_vir(scrutinee.type_id)
+            .cached_optional_meta(scrutinee.type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "optional chain operator",
                     "optional type",
                     "non-optional",
                 )
-            })?;
+            })?
+            .nil_position;
 
         let result_vir_ty = self.try_substitute_type_v(vir_result_type_id);
         let result_cranelift_type = self.cranelift_type_v(result_vir_ty);
@@ -384,14 +392,15 @@ impl Cg<'_, '_, '_> {
 
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self
-            .find_nil_variant_vir(scrutinee.type_id)
+            .cached_optional_meta(scrutinee.type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "optional chain operator",
                     "optional type",
                     "non-optional",
                 )
-            })?;
+            })?
+            .nil_position;
 
         let result_vir_ty = self.try_substitute_type_v(vir_result_type_id);
         let result_cranelift_type = self.cranelift_type_v(result_vir_ty);

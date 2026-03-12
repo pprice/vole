@@ -226,17 +226,17 @@ impl Cg<'_, '_, '_> {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type (using VirTypeId)
-            if let Some(inner_vir) = self.vir_query_unwrap_optional_v(left.type_id)
-                && (inner_vir == right.type_id
-                    || (self.vir_query_is_integer_v(inner_vir)
+            if let Some(meta) = self.cached_optional_meta(left.type_id)
+                && (meta.inner_type == right.type_id
+                    || (self.vir_query_is_integer_v(meta.inner_type)
                         && self.vir_query_is_integer_v(right.type_id)))
             {
                 return self.optional_value_compare(left, right, op);
             }
             // Check if right is optional and left is a compatible value type (using VirTypeId)
-            if let Some(inner_vir) = self.vir_query_unwrap_optional_v(right.type_id)
-                && (inner_vir == left.type_id
-                    || (self.vir_query_is_integer_v(inner_vir)
+            if let Some(meta) = self.cached_optional_meta(right.type_id)
+                && (meta.inner_type == left.type_id
+                    || (self.vir_query_is_integer_v(meta.inner_type)
                         && self.vir_query_is_integer_v(left.type_id)))
             {
                 return self.optional_value_compare(right, left, op);
@@ -712,17 +712,14 @@ impl Cg<'_, '_, '_> {
         optional: CompiledValue,
         op: VirBinOp,
     ) -> CodegenResult<CompiledValue> {
-        // Find the position of nil in the variants (this is the nil tag value)
-        // Use VIR path for correct variant ordering (round-tripped sema TypeId
-        // can have reversed variants due to arena.lookup_optional non-determinism).
-        let nil_tag = self.find_nil_variant_vir(optional.type_id).ok_or_else(|| {
+        let meta = self.cached_optional_meta(optional.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("optional_nil_compare", "optional type", "non-optional")
         })?;
 
         // Compare tag with nil_tag
         let result = match op {
-            VirBinOp::Eq => self.tag_eq(optional.value, nil_tag as i64),
-            VirBinOp::Ne => self.tag_ne(optional.value, nil_tag as i64),
+            VirBinOp::Eq => self.tag_eq(optional.value, meta.nil_position as i64),
+            VirBinOp::Ne => self.tag_ne(optional.value, meta.nil_position as i64),
             _ => unreachable!("optional_nil_compare only handles Eq and Ne"),
         };
 
@@ -737,18 +734,15 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         op: VirBinOp,
     ) -> CodegenResult<CompiledValue> {
-        // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag = self.find_nil_variant_vir(optional.type_id).ok_or_else(|| {
+        let meta = self.cached_optional_meta(optional.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("optional_value_compare", "optional type", "non-optional")
         })?;
 
         // Check if not nil (tag != nil_tag)
-        let is_not_nil = self.tag_ne(optional.value, nil_tag as i64);
+        let is_not_nil = self.tag_ne(optional.value, meta.nil_position as i64);
 
         // Resolve the inner (non-nil) VirTypeId for dispatch
-        let inner_vir_ty = self
-            .vir_query_unwrap_optional_v(optional.type_id)
-            .unwrap_or(VirTypeId::I64);
+        let inner_vir_ty = meta.inner_type;
         let payload_cranelift_type = self.cranelift_type_v(inner_vir_ty);
 
         // Struct payloads are pointers to stack data; loading fields from a nil optional's

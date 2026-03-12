@@ -14,6 +14,19 @@ use vole_identity::{TypeDefId, TypeId, VirTypeId};
 use super::context::Cg;
 use super::types::CompiledValue;
 
+/// Pre-computed metadata for optional types (nil position + inner type).
+///
+/// Cached per `VirTypeId` to avoid repeated `find_nil_variant_vir()` and
+/// `vir_query_unwrap_optional_v()` calls during optional comparison, coalescing,
+/// and chaining codegen.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OptionalMeta {
+    /// Index of the nil variant in the union's variant list (the nil tag value).
+    pub nil_position: usize,
+    /// VirTypeId of the non-nil inner type.
+    pub inner_type: VirTypeId,
+}
+
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Type context & substitution ==========
 
@@ -204,6 +217,27 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             None
         }
+    }
+
+    /// Cached lookup of optional metadata (nil position + inner type).
+    ///
+    /// Returns `Some(OptionalMeta)` when `vir_ty` is an optional (or union
+    /// containing nil).  The result is cached per `VirTypeId` since VirTypeTable
+    /// is immutable during codegen.
+    pub fn cached_optional_meta(&self, vir_ty: VirTypeId) -> Option<OptionalMeta> {
+        if let Some(cached) = self.optional_meta_cache.borrow().get(&vir_ty) {
+            return Some(*cached);
+        }
+        let nil_position = self.find_nil_variant_vir(vir_ty)?;
+        let inner_type = self
+            .vir_query_unwrap_optional_v(vir_ty)
+            .unwrap_or(VirTypeId::I64);
+        let meta = OptionalMeta {
+            nil_position,
+            inner_type,
+        };
+        self.optional_meta_cache.borrow_mut().insert(vir_ty, meta);
+        Some(meta)
     }
 
     /// Unwrap an interface `VirTypeId`, returning the `TypeDefId` if it is one.

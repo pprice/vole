@@ -267,6 +267,12 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// all immutable during codegen. The cache eliminates repeated computation
     /// across the ~53 call sites.  Uses `RefCell` so `&self` methods can populate it.
     pub(crate) rc_state_cache: RefCell<FxHashMap<VirTypeId, RcState>>,
+    /// Lazily-populated cache for optional type metadata (nil position + inner type).
+    ///
+    /// Pure function of `(VirTypeId, VirTypeTable)`, all immutable during codegen.
+    /// Eliminates repeated `find_nil_variant_vir()` and `vir_query_unwrap_optional_v()`
+    /// calls across optional comparison, coalescing, and chaining sites.
+    pub(crate) optional_meta_cache: RefCell<FxHashMap<VirTypeId, super::type_ops::OptionalMeta>>,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -332,6 +338,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             entry_block,
             iconst_cache,
             rc_state_cache: RefCell::new(FxHashMap::default()),
+            optional_meta_cache: RefCell::new(FxHashMap::default()),
             codegen_ctx,
             env,
         }
