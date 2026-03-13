@@ -152,6 +152,19 @@ impl<'a> Compiler<'a> {
             .extend(self.jit.defined_func_ids.iter().copied());
     }
 
+    /// Set the starting lambda counter value.
+    ///
+    /// Used by lazy compilation to avoid lambda name collisions across
+    /// separately-compiled modules that share the same `JITModule`.
+    pub fn set_lambda_counter(&self, value: usize) {
+        self.state.lambda_counter.set(value);
+    }
+
+    /// Read the current lambda counter value.
+    pub fn lambda_counter(&self) -> usize {
+        self.state.lambda_counter.get()
+    }
+
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
@@ -249,11 +262,15 @@ impl<'a> Compiler<'a> {
         jit_options: JitOptions,
     ) -> Option<lazy::LazyCompilationState> {
         let dispatch_table = self.dispatch_table.take()?;
+        // Pass the main compiler's lambda counter so lazy triggers
+        // continue from where eager compilation left off.
+        let lambda_counter = self.state.lambda_counter.get();
         Some(unsafe {
             lazy::LazyCompilationState::new(
                 dispatch_table,
                 self.analyzed as *const VirProgram,
                 jit_options,
+                lambda_counter,
             )
         })
     }

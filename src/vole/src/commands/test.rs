@@ -696,6 +696,7 @@ fn run_source_tests_with_modules(
         let result = compiler.compile_program_only();
 
         let tests = compiler.take_tests();
+        let main_lambda_counter = compiler.lambda_counter();
         // Construct lazy state from the cached dispatch table so that any
         // lazily-stubbed module functions can still trigger compilation.
         // SAFETY: `analyzed` outlives execution (lives on caller's stack).
@@ -709,6 +710,7 @@ fn run_source_tests_with_modules(
                             dt.clone(),
                             &analyzed as *const VirProgram,
                             options,
+                            main_lambda_counter,
                         )
                     };
                     // Populate stub symbols from the module cache so the overflow

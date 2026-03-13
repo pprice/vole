@@ -154,6 +154,13 @@ pub struct LazyCompilationState {
     /// resolve to the main JitContext's stubs (which check the compiled flag
     /// and dispatch through the table).
     stub_symbols: FxHashMap<String, *const u8>,
+    /// Running lambda counter across lazy compilations.
+    ///
+    /// Each `Compiler::new` starts with `lambda_counter=0`, but lazily-compiled
+    /// modules share the same Cranelift `JITModule`, so `__lambda_0` from
+    /// module A collides with `__lambda_0` from module B. This field persists
+    /// across triggers so each lazy compilation picks up where the last left off.
+    next_lambda_id: usize,
 }
 
 // SAFETY: LazyCompilationState contains `*const VirProgram` which is not
@@ -174,6 +181,7 @@ impl LazyCompilationState {
         dispatch_table: Arc<LazyDispatchTable>,
         analyzed: *const VirProgram,
         jit_options: JitOptions,
+        initial_lambda_id: usize,
     ) -> Self {
         // Build module_paths: module_idx -> module_path
         let mut module_paths = vec![String::new(); dispatch_table.module_index.len()];
@@ -192,6 +200,7 @@ impl LazyCompilationState {
             overflow_jit: None,
             global_passes_done: false,
             stub_symbols: FxHashMap::default(),
+            next_lambda_id: initial_lambda_id,
         }
     }
 
@@ -330,6 +339,9 @@ pub extern "C" fn compile_trigger(module_idx: i64) {
         });
 
         let mut compiler = super::Compiler::new(jit, analyzed);
+        // Seed the lambda counter from the persistent state so that
+        // lambda names don't collide across lazily-compiled modules.
+        compiler.set_lambda_counter(state.next_lambda_id);
         compiler
             .compile_single_module_lazy(&trigger_module, first_trigger)
             .unwrap_or_else(|e| {
@@ -338,6 +350,8 @@ pub extern "C" fn compile_trigger(module_idx: i64) {
                     trigger_module, e
                 )
             });
+        // Persist the updated counter for the next trigger.
+        state.next_lambda_id = compiler.lambda_counter();
         jit.finalize()
             .expect("INTERNAL: lazy module JIT finalization failed");
 

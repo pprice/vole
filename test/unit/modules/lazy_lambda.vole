@@ -1,0 +1,21 @@
+// Regression test: lambda name collision in lazy module compilation.
+// When lazy_modules=true, each module's Compiler starts lambda_counter at 0,
+// so both modules get __lambda_0, causing either:
+//   - "Duplicate definition of identifier: __lambda_0"
+//   - Signature mismatch (different lambda shapes)
+// Fixed by persisting the lambda counter across lazy compilation triggers.
+
+let lib = import "./lazy_lambda_lib"
+
+tests "lazy lambda naming" {
+    test "cross-module lambdas do not collide" {
+        // Use lambdas from imported module
+        let add5 = lib.make_adder(5)
+        assert(add5(10) == 15)
+        assert(add5(0) == 5)
+
+        let double = lib.make_multiplier(2)
+        assert(double(7) == 14)
+        assert(double(0) == 0)
+    }
+}

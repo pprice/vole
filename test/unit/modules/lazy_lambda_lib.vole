@@ -1,0 +1,11 @@
+// Helper module for lazy_lambda.vole
+// Contains lambdas that would collide with main module's lambda names
+// if lambda counter isn't properly carried across lazy compilations.
+
+func make_adder(n: i64) -> (i64) -> i64 {
+    return (x: i64) => x + n
+}
+
+func make_multiplier(n: i64) -> (i64) -> i64 {
+    return (x: i64) => x * n
+}
