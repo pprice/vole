@@ -23,7 +23,7 @@ use vole_vir::type_table::VirTypeTable;
 /// Test blocks can contain `Decl::Class` and `Decl::Struct` declarations that
 /// are scoped to a virtual module. This function recursively walks `Decl::Tests`
 /// blocks and lowers their class/struct methods (direct + default) to VIR.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_test_scoped_type_methods(
     program: &Program,
     interner: &mut Interner,
@@ -62,7 +62,7 @@ pub fn lower_test_scoped_type_methods(
 }
 
 /// Recursively lower type methods from a single `TestsDecl`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn lower_tests_decl_type_methods(
     tests_decl: &vole_frontend::ast::TestsDecl,
     program: &Program,

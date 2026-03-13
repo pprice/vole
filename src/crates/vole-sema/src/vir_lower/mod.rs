@@ -1052,7 +1052,7 @@ fn assert_concrete_types(
 /// Test bodies use the same `FuncBody` type as functions, so this delegates
 /// to `lower_func_body`.  Exposed as a public API so the lowering pipeline
 /// in `analyzed.rs` can lower test bodies alongside function bodies.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_test_body(
     body: &FuncBody,
     node_map: &NodeMap,

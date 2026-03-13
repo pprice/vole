@@ -258,7 +258,7 @@ fn lower_method_default_inits_in_decls(
 }
 
 /// Lower method default params for class/struct/interface type declarations.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn lower_type_decl_method_default_inits<'a>(
     type_name: Symbol,
     methods: &[FuncDecl],
@@ -332,7 +332,7 @@ fn lower_type_decl_method_default_inits<'a>(
 }
 
 /// Lower method default params for interface-method AST nodes.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn lower_interface_method_decl_defaults(
     type_name: Symbol,
     methods: &[InterfaceMethod],

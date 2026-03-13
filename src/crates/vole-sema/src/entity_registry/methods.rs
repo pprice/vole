@@ -47,7 +47,7 @@ impl EntityRegistry {
     }
 
     /// Register a new method with param names for named argument support.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn register_method_with_names(
         &mut self,
         defining_type: TypeDefId,

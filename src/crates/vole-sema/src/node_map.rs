@@ -748,7 +748,7 @@ impl NodeMap {
     /// Returns `(types, methods, generics, class_method_generics,
     /// static_method_generics, is_check_results, declared_var_types,
     /// struct_literal_infos)`.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn extract_cached_maps(
         &self,
     ) -> (

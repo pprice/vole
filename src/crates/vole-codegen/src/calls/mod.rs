@@ -120,7 +120,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Named-arg reordering uses `self.vir_resolved_call_args` (populated
     /// by VIR call dispatch).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn call_func_id_impl(
         &mut self,
         func_key: FunctionKey,
@@ -274,7 +274,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// `mapping[slot] = Some(j)` means arg_source[j] fills parameter slot `slot`.
     /// `mapping[slot] = None` means the slot uses its default expression.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn compile_named_args(
         &mut self,
         arg_source: &ArgSource<'_>,
@@ -336,7 +336,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Compile arguments in positional order, appending defaults for omitted params.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn compile_positional_args(
         &mut self,
         arg_source: &ArgSource<'_>,

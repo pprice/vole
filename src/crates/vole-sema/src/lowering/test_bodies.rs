@@ -18,7 +18,7 @@ use vole_vir::type_table::VirTypeTable;
 /// Walks the program's `Decl::Tests` blocks (including nested ones) and
 /// lowers each `TestCase.body` to a `VirBody`.  Returns a list of `VirTest`
 /// entries for O(1) lookup during test compilation.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_test_bodies(
     program: &Program,
     node_map: &NodeMap,
@@ -53,7 +53,7 @@ pub fn lower_test_bodies(
 }
 
 /// Recursively lower test bodies from a single `TestsDecl`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn lower_tests_decl_bodies(
     tests_decl: &vole_frontend::ast::TestsDecl,
     node_map: &NodeMap,

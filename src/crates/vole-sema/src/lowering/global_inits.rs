@@ -14,7 +14,7 @@ use vole_vir::type_table::VirTypeTable;
 ///
 /// Iterates `Decl::Let` declarations and lowers each initializer expression
 /// using `lower_expr`. The resulting map is keyed by the binding's `Symbol`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_global_inits(
     program: &Program,
     interner: &mut Interner,

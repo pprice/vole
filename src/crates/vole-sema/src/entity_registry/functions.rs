@@ -30,7 +30,7 @@ impl EntityRegistry {
     }
 
     /// Register a new free function with default expressions and param names
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn register_function_full(
         &mut self,
         name_id: NameId,

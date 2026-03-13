@@ -650,7 +650,7 @@ pub fn populate_implement_block_entries(args: PopulateImplementBlockEntriesArgs<
 }
 
 /// Recursively collect implement blocks from tests { } blocks.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn collect_tests_implement_blocks(
     decls: &[Decl],
     interner: &Interner,

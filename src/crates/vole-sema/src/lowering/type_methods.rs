@@ -19,7 +19,7 @@ use vole_vir::type_table::VirTypeTable;
 ///
 /// Iterates the program's class and struct declarations, looks up each type's
 /// methods in the entity registry, and lowers non-generic methods to VIR.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_top_level_type_methods(
     program: &Program,
     interner: &mut Interner,
@@ -126,7 +126,7 @@ pub fn lower_top_level_type_methods(
 }
 
 /// Lower instance methods and static methods for a single type declaration.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_type_methods(
     methods: &[vole_frontend::FuncDecl],
     statics: Option<&vole_frontend::ast::StaticsBlock>,
@@ -266,7 +266,7 @@ pub fn lower_type_methods(
 /// Direct methods (explicitly defined on the type) are skipped since they override
 /// the default. This covers default methods from the type's own `implements` clause,
 /// as opposed to `lower_implement_default_methods` which covers `extend T with I` blocks.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_type_default_methods(
     direct_method_names: &HashSet<String>,
     type_name: Symbol,
@@ -373,7 +373,7 @@ pub fn lower_type_default_methods(
 }
 
 /// Lower a single instance method to VIR and push it onto the functions vec.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn lower_single_method(
     method: &vole_frontend::FuncDecl,
     method_id: MethodId,
@@ -439,7 +439,7 @@ fn lower_single_method(
 /// immutable access to `module_programs` for cross-module interface AST
 /// lookup, so we collect per-type work items during the first (mutable) pass
 /// and process them in a second (immutable) pass.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lower_module_type_methods(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,

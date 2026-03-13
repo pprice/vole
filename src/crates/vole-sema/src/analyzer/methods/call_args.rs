@@ -46,7 +46,7 @@ impl Analyzer {
     ///
     /// Like `check_call_args_with_defaults_id`, but also validates and resolves
     /// named arguments, storing the resolved mapping for codegen.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn check_call_args_named_id(
         &mut self,
         args: &[CallArg],
@@ -77,7 +77,7 @@ impl Analyzer {
     /// resolved arg-index mapping in `self.results.node_map (resolved_call_args)` for codegen.
     ///
     /// Uses check_expr_expecting_id for inference (integer literals, union coercion).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn check_call_args_with_defaults_id(
         &mut self,
         args: &[CallArg],
@@ -180,7 +180,7 @@ impl Analyzer {
     /// entry `i` = `Some(j)` means `call.args[j]` fills slot `i`, and `None` means
     /// the slot uses its default value.  The mapping is stored in
     /// `self.results.node_map (resolved_call_args)` for codegen to use when emitting the call.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn check_call_args_with_named(
         &mut self,
         args: &[CallArg],

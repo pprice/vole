@@ -306,7 +306,7 @@ impl Cg<'_, '_, '_> {
 
     /// Positional argument path for module method calls: fills trailing defaults
     /// for omitted parameters and emits the call.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn module_method_call_positional(
         &mut self,
         func_ref: cranelift_codegen::ir::FuncRef,
