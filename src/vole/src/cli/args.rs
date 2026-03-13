@@ -111,6 +111,10 @@ pub enum Commands {
         /// Show all functions including prelude (for mir)
         #[arg(long)]
         all: bool,
+
+        /// Filter output to functions matching this substring
+        #[arg(long, short = 'f', value_name = "NAME")]
+        function: Option<String>,
     },
     /// Show version information
     Version,

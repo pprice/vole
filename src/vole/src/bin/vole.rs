@@ -121,7 +121,16 @@ fn main() -> ExitCode {
             files,
             no_tests,
             all,
-        } => inspect_files(&files, inspect_type, no_tests, cli.release, all, cli.color),
+            function,
+        } => inspect_files(
+            &files,
+            inspect_type,
+            no_tests,
+            cli.release,
+            all,
+            cli.color,
+            function.as_deref(),
+        ),
         Commands::Version => print_version(),
         #[cfg(feature = "bench")]
         Commands::Bench(args) => match args.command {

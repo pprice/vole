@@ -21,6 +21,7 @@ pub fn inspect_files(
     release: bool,
     show_all: bool,
     color_mode: ColorMode,
+    function_filter: Option<&str>,
 ) -> ExitCode {
     // Expand patterns and collect unique files
     let files = match expand_paths_flat(patterns) {
@@ -146,13 +147,8 @@ pub fn inspect_files(
 
                 let include_tests = !no_tests;
                 for (func_name, ir_text) in jit.get_ir() {
-                    // Skip prelude/std functions unless --all is specified
-                    if !show_all && is_prelude_function(func_name) {
-                        continue;
-                    }
-
-                    // Skip test functions when --no-tests is specified
-                    if !include_tests && is_test_function(func_name) {
+                    if !matches_function_filter(func_name, function_filter, show_all, include_tests)
+                    {
                         continue;
                     }
 
@@ -201,13 +197,8 @@ pub fn inspect_files(
 
                 // Print disassembly
                 for (func_name, asm) in jit.get_disasm() {
-                    // Skip prelude/std functions unless --all is specified
-                    if !show_all && is_prelude_function(func_name) {
-                        continue;
-                    }
-
-                    // Skip test functions when --no-tests is specified
-                    if !include_tests && is_test_function(func_name) {
+                    if !matches_function_filter(func_name, function_filter, show_all, include_tests)
+                    {
                         continue;
                     }
 
@@ -224,6 +215,7 @@ pub fn inspect_files(
                     color_mode,
                     no_tests,
                     show_all,
+                    function_filter,
                     &mut had_error,
                 );
             }
@@ -247,6 +239,7 @@ fn inspect_vir(
     color_mode: ColorMode,
     no_tests: bool,
     show_all: bool,
+    function_filter: Option<&str>,
     had_error: &mut bool,
 ) {
     let result = compile_source(
@@ -283,26 +276,32 @@ fn inspect_vir(
     let main_module = analyzed.module_id;
 
     for func in &analyzed.functions {
-        // Skip non-main-module functions unless --all
-        if !show_all && !analyzed.vir_function_in_module(func, main_module) {
+        if !matches_function_filter(&func.name, function_filter, show_all, include_tests) {
             continue;
         }
-        if !include_tests && is_test_function(&func.name) {
+        if !show_all && !analyzed.vir_function_in_module(func, main_module) {
             continue;
         }
         print!("{}", printer.print_function(func));
     }
 
     // Print generic VIR function templates (pre-monomorphization)
-    if !analyzed.generic_functions.is_empty() {
+    let has_generic_match = analyzed
+        .generic_functions
+        .iter()
+        .any(|func| matches_function_filter(&func.name, function_filter, show_all, include_tests));
+    if has_generic_match {
         println!("// --- generic VIR templates ---");
         for func in &analyzed.generic_functions {
+            if !matches_function_filter(&func.name, function_filter, show_all, include_tests) {
+                continue;
+            }
             print!("{}", printer.print_function(func));
         }
     }
 
-    // Print VIR test bodies
-    if include_tests && !analyzed.tests.is_empty() {
+    // Print VIR test bodies (skip when filtering by function name)
+    if function_filter.is_none() && include_tests && !analyzed.tests.is_empty() {
         println!("tests {{");
         for test in &analyzed.tests {
             // Indent each line of the test output
@@ -312,6 +311,27 @@ fn inspect_vir(
         }
         println!("}}");
     }
+}
+
+/// Check if a function name passes all active filters.
+fn matches_function_filter(
+    name: &str,
+    function_filter: Option<&str>,
+    show_all: bool,
+    include_tests: bool,
+) -> bool {
+    if !show_all && is_prelude_function(name) {
+        return false;
+    }
+    if !include_tests && is_test_function(name) {
+        return false;
+    }
+    if let Some(filter) = function_filter
+        && !name.contains(filter)
+    {
+        return false;
+    }
+    true
 }
 
 /// Check if a function name is from the prelude/std library.
