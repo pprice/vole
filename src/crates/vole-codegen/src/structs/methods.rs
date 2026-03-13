@@ -1020,19 +1020,54 @@ impl Cg<'_, '_, '_> {
 
         // For Iterable default methods on arrays/primitives (range, string), the
         // func_key comes from array_iterable_func_keys and the compiled function
-        // returns a raw RuntimeIterator pointer. The concrete_return_hint carries
-        // the correct RuntimeIterator<T> type from sema's VIR lowering.
+        // returns a raw RuntimeIterator pointer. Convert Iterator<T> → RuntimeIterator<T>
+        // so subsequent method calls use direct dispatch instead of vtable dispatch.
         //
         // NOTE: Do NOT apply this in all monomorphized contexts — user-defined
         // .iter() methods return boxed Iterator<T> interfaces, not raw pointers.
         // Converting those to RuntimeIterator causes segfaults.
-        if used_array_iterable_path
-            && let Some(hint) = dispatch
-                .resolved_method
-                .as_ref()
-                .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
-        {
-            return_type_id = hint;
+        if used_array_iterable_path {
+            return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
+        }
+        // In monomorphized contexts, the return type may still contain an unsubstituted
+        // type parameter from the Iterable interface (e.g. Iterator<T> where T is the
+        // interface's type param, not the function's). The function's substitution map
+        // can't resolve these. When conversion above fails, derive the correct
+        // RuntimeIterator return type from the receiver's concrete element type.
+        if used_array_iterable_path || self.substitutions.is_some() {
+            let needs_derivation = {
+                let vir_ret = self.vir_lookup(return_type_id);
+                if let Some((type_def_id, _)) = self.vir_query_unwrap_interface_v(vir_ret) {
+                    self.name_table()
+                        .well_known
+                        .is_iterator_type_def(type_def_id)
+                } else {
+                    false
+                }
+            };
+            if needs_derivation {
+                let elem_type_id =
+                    if let Some(elem_vir) = self.vir_query_unwrap_array_v(obj.type_id) {
+                        let table = self.vir_type_table();
+                        Some(table.vir_to_type_id(elem_vir))
+                    } else if self.vir_query_is_string_v(obj.type_id) {
+                        Some(TypeId::STRING)
+                    } else if obj.type_id == VirTypeId::RANGE {
+                        Some(TypeId::I64)
+                    } else {
+                        None
+                    };
+                if let Some(elem_type_id) = elem_type_id
+                    && let Some(iter_type_def) = self.name_table().well_known.iterator_type_def
+                    && let Some(derived) = self.derive_iterator_return_type(
+                        method_name_str,
+                        elem_type_id,
+                        iter_type_def,
+                    )
+                {
+                    return_type_id = derived;
+                }
+            }
         }
 
         let class_method_monomorph_key = dispatch.class_method_generic.as_ref().map(|key| {

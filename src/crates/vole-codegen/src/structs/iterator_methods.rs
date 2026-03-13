@@ -67,7 +67,7 @@ impl Cg<'_, '_, '_> {
         // Convert any remaining Iterator<T> types to RuntimeIterator<T> via the
         // inline fallback, since runtime functions return raw iterator pointers.
         let return_type_id = return_type_hint
-            .or_else(|| self.get_call_return_type())
+            .or_else(|| expr_id.and_then(|_| self.get_call_return_type()))
             .or_else(|| {
                 fallback_elem_type.and_then(|elem_type_id| {
                     self.derive_iterator_return_type(method_name, elem_type_id, iter_type_id)
@@ -90,7 +90,7 @@ impl Cg<'_, '_, '_> {
     /// Only used as a fallback when compiling Iterable default method bodies whose inner
     /// expressions are not analyzed by sema (e.g. `self.iter().map(f)` inside the
     /// default `map` implementation in traits.vole).
-    fn derive_iterator_return_type(
+    pub(super) fn derive_iterator_return_type(
         &self,
         method_name: &str,
         elem_type_id: TypeId,
