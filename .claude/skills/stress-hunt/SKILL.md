@@ -238,13 +238,18 @@ primary.
   or move on. If the same generator bug keeps appearing, fix the root cause
   in `src/tools/vole-stress/` before proceeding to the next round.
 
-**Sema error** (type checker bug):
+**Sema / VIR lowering error** (type checker or VIR bug):
 - `[E2xxx]` errors where generated code looks valid but type checker rejects it
 - Read the generated code to verify it should be valid Vole
+- Panics or wrong results where `cargo run -- inspect vir <file>` shows
+  incorrect VIR output (wrong types, missing coercions, missing RC ops)
 - Set `error_category: "sema"`
+- Note: many "codegen" symptoms have root causes in VIR lowering — always
+  inspect VIR before assuming the fix belongs in codegen
 
 **Codegen error** (code generation / runtime bug):
 - No E-code errors, timeouts, signal 11 (segfault), panics, wrong results
+  WHERE VIR output looks correct (wrong instruction emission, not wrong metadata)
 - AddressSanitizer errors (heap-use-after-free, double-free, heap-buffer-overflow,
   stack-buffer-overflow) — these are always codegen bugs indicating memory
   safety issues in the compiler runtime or generated code
@@ -343,16 +348,21 @@ Give the sub-agent a detailed prompt including:
 
 The sub-agent MUST:
 1. Reproduce the bug by running the test case
-2. Investigate the root cause — read relevant compiler code, use debuggers
-3. Track findings with `tk add-note <id> "..."` as it goes
-4. Attempt to fix the bug
-5. Add a regression test to `test/unit/` covering the pattern
-6. Run `just pre-commit` to verify
-7. If fixed: commit, record the commit hash, `tk close <id>`
-8. **15-minute time limit**: if unable to fix within ~15 minutes, stop.
-   Add a final note to the ticket explaining what was tried, what the
-   blocker is, and any leads for future investigation. Leave the ticket
-   open as a backlog item.
+2. **Inspect VIR** for the failing file: `cargo run -- inspect vir <file>`
+   to understand what sema/VIR lowering produces. If VIR looks wrong, fix
+   in sema or VIR lowering. If VIR looks correct, fix in codegen.
+3. Investigate the root cause — read relevant compiler code, use debuggers
+4. Track findings with `tk add-note <id> "..."` as it goes
+5. **Fix upstream**: prefer sema/VIR lowering fixes over codegen special cases.
+   Codegen reads decisions, it does not make them. See "Fix Location" section.
+6. Attempt to fix the bug
+7. Add a regression test to `test/unit/` covering the pattern
+8. Run `just pre-commit` to verify
+9. If fixed: commit, record the commit hash, `tk close <id>`
+10. **15-minute time limit**: if unable to fix within ~15 minutes, stop.
+    Add a final note to the ticket explaining what was tried, what the
+    blocker is, and any leads for future investigation. Leave the ticket
+    open as a backlog item.
 
 **After the sub-agent completes:**
 
@@ -655,6 +665,70 @@ Examples:
   generator change, fix the compiler (see Classifying validation failures)
 - Reference `test/` files for syntax, but don't copy tests wholesale
 
+## Fix Location: Where to Put the Fix
+
+When fixing compiler bugs, **always prefer fixing upstream** in the pipeline.
+The compiler has a strict layered architecture:
+
+```
+Parser → Sema → VIR Lowering → Codegen
+```
+
+**The golden rule:** Codegen should read decisions, never make them. Desugar
+early — when codegen needs type-specific behavior, add annotations/lowering
+in sema or VIR rather than type-detection special cases in codegen.
+
+### Decision hierarchy (fix at the FIRST applicable level)
+
+1. **Sema** (`src/crates/vole-sema/src/analyzer/`) — type-driven decisions,
+   annotations, error detection. If the bug is "codegen doesn't know X about
+   this expression", the fix is to have sema annotate X in the NodeMap or
+   VIR metadata, NOT to have codegen re-derive X from types.
+
+2. **VIR Lowering** (`src/crates/vole-sema/src/vir_lower/`) — desugaring,
+   normalization, making implicit operations explicit. If the bug involves
+   a missing operation (e.g. RC inc/dec, type coercion, iterator wrapping),
+   the fix is usually to emit the correct VIR nodes during lowering rather
+   than adding special-case detection in codegen.
+
+3. **VIR types/metadata** (`src/crates/vole-sema/src/vir/`) — if codegen
+   needs additional type information to generate correct code, prefer adding
+   it to VIR node metadata (e.g. `VirExpr` fields, `VirType` variants) so
+   codegen can read it mechanically.
+
+4. **Codegen** (`src/crates/vole-codegen/src/`) — instruction selection and
+   memory layout ONLY. Fix here only when the bug is genuinely about wrong
+   instruction emission, not wrong type classification or missing metadata.
+
+### Red flags that you're fixing in the wrong place
+
+- Adding `if type_id.is_X()` checks in codegen → should be sema/VIR annotation
+- Codegen inspecting interface/class names to decide behavior → should be sema
+- Codegen calling back into sema types or name table for decisions → wrong layer
+- Adding a new `match` arm in codegen for a type variant → likely needs VIR node
+- Codegen computing something that sema already knows → pipe it through VIR
+
+### Using VIR inspect for debugging
+
+Always inspect VIR output for the failing test case to understand what sema
+and VIR lowering are producing:
+
+```bash
+cargo run -- inspect vir path/to/reduced/file.vole
+cargo run -- inspect vir -f function_name path/to/file.vole
+```
+
+This shows the VIR that codegen receives. If the VIR looks wrong (missing
+coercions, wrong types, missing RC ops), the fix belongs in VIR lowering.
+If the VIR looks correct but codegen produces wrong code, the fix belongs
+in codegen.
+
+Also useful:
+```bash
+cargo run -- inspect ir path/to/file.vole    # Cranelift IR (what codegen emits)
+cargo run -- inspect ast path/to/file.vole   # Parser output
+```
+
 ## Regression Tests
 
 When fixing **sema** or **codegen** bugs, always add a regression test to
@@ -675,6 +749,8 @@ When fixing **sema** or **codegen** bugs, always add a regression test to
   (e.g. indexing empty arrays from `filter().collect()`), find and fix the
   root cause in `src/tools/vole-stress/`. A recurring generator bug that is
   never fixed is wasted signal in every future round.
+- **Fix upstream, not downstream** — sema/VIR fixes over codegen special cases.
+  See "Fix Location" section above.
 - Always `just pre-commit` before any commit
 - Track shortcuts in tickets with `tk` if any are taken
 - Fix ONE bug per iteration to keep commits focused

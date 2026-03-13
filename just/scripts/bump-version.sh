@@ -6,6 +6,9 @@ set -euo pipefail
 CARGO_TOML="Cargo.toml"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# --- Pull remote ---
+git pull --rebase
+
 # --- Bump version ---
 current=$(grep -m1 '^version = ' "$CARGO_TOML" | sed 's/version = "\(.*\)"/\1/')
 IFS='.' read -r cur_year cur_month cur_patch <<< "$current"
