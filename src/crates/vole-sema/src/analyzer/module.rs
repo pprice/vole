@@ -204,7 +204,22 @@ impl Analyzer {
                 module_path,
                 native_name,
             };
-            let method_impl = MethodImpl::external(func_type.clone(), external_info);
+
+            // Preserve is_builtin flag from any prior registration (e.g. from
+            // register_builtin_methods) so that codegen routes builtin methods
+            // like range.iter() through the Builtin dispatch path rather than
+            // the Standard path which would call the external function with the
+            // wrong argument count.
+            let is_builtin = self
+                .implement_registry_mut()
+                .get_method(&impl_type_id, method_id)
+                .is_some_and(|m| m.is_builtin);
+
+            let method_impl = if is_builtin {
+                MethodImpl::external_builtin(func_type.clone(), external_info)
+            } else {
+                MethodImpl::external(func_type.clone(), external_info)
+            };
             let method_impl = match trait_name {
                 Some(name) => method_impl.with_trait_name(name),
                 None => method_impl,
@@ -223,7 +238,7 @@ impl Analyzer {
                     MethodBinding {
                         method_name: method_id,
                         func_type,
-                        is_builtin: false,
+                        is_builtin,
                         external_info: Some(external_info),
                     },
                 );
