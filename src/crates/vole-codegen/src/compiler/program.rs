@@ -118,7 +118,7 @@ impl Compiler<'_> {
     pub fn compile_single_module_lazy(
         &mut self,
         target_module: &str,
-        first_trigger: bool,
+        _first_trigger: bool,
     ) -> CodegenResult<()> {
         // Bail early if any modules had sema errors.
         if !self.analyzed.modules_with_errors.is_empty() {
@@ -157,26 +157,19 @@ impl Compiler<'_> {
         // Import other modules with Import linkage (resolved via stub symbols).
         self.import_module_types_and_functions(&other_paths)?;
 
-        if first_trigger {
-            // Passes 1.5a–1.8: global passes (array Iterable defaults, monomorphs,
-            // VIR monomorphs, abstract class method expansion, monomorph index).
-            // Only needed on first trigger; subsequent triggers see the compiled
-            // results via defined_functions.
-            self.compile_array_iterable_default_methods()?;
-            self.declare_all_monomorphized_instances()?;
-            self.declare_vir_monomorphized_functions()?;
-            self.expand_abstract_class_method_monomorphs()?;
-            self.build_monomorph_index();
-            self.compile_all_monomorphized_instances(false)?;
-            self.compile_vir_monomorphized_functions_phased(false)?;
-        } else {
-            // On subsequent triggers we still need the monomorph declarations
-            // and index so that demand-declaration during body compilation works.
-            self.declare_all_monomorphized_instances()?;
-            self.declare_vir_monomorphized_functions()?;
-            self.expand_abstract_class_method_monomorphs()?;
-            self.build_monomorph_index();
-        }
+        // Global passes: array Iterable defaults, monomorphs, VIR monomorphs,
+        // abstract class method expansion, monomorph index. Run on every trigger
+        // because each creates a fresh Compiler with empty CodegenState — the
+        // method_func_keys / array_iterable_func_keys registrations from earlier
+        // triggers are lost. finalize_function() guards against re-defining
+        // function bodies that were already compiled on previous triggers.
+        self.compile_array_iterable_default_methods()?;
+        self.declare_all_monomorphized_instances()?;
+        self.declare_vir_monomorphized_functions()?;
+        self.expand_abstract_class_method_monomorphs()?;
+        self.build_monomorph_index();
+        self.compile_all_monomorphized_instances(false)?;
+        self.compile_vir_monomorphized_functions_phased(false)?;
 
         // Pass 2: Compile function bodies ONLY for the target module.
         self.compile_module_function_bodies(target_module)?;
