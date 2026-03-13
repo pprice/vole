@@ -311,18 +311,32 @@ pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>)
     for (method, method_id, method_def) in resolved {
         let method_name_str = interner.resolve(method.name);
         let display_name = format!("{}::{}", type_name_str, method_name_str);
-        let param_types: Vec<_> = method
-            .params
-            .iter()
-            .map(|param| (param.name, vole_identity::TypeId::UNKNOWN))
-            .collect();
+        // Unwrap function signature to get real param types and return type.
+        let (param_types, return_type) = if let Some((sig_params, ret, _)) =
+            type_arena.unwrap_function(method_def.signature_id)
+        {
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .zip(sig_params.iter())
+                .map(|(p, &ty)| (p.name, ty))
+                .collect();
+            (params, ret)
+        } else {
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+                .collect();
+            (params, method_def.signature_id)
+        };
 
         let vir = lower_method(
             method,
             method_id,
             display_name,
             &param_types,
-            method_def.signature_id,
+            return_type,
             node_map,
             interner,
             type_arena,

@@ -218,17 +218,33 @@ pub fn lower_type_methods(
     for (method, mid, method_def) in resolved_statics {
         let method_name_str = interner.resolve(method.name);
         let display_name = format!("{}::{}", type_name_str, method_name_str);
-        let param_types: Vec<_> = method
-            .params
-            .iter()
-            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
-            .collect();
+        // Unwrap function signature to get real param types and return type.
+        // Using UNKNOWN param types causes is_object_narrowed_from_unknown to
+        // misclassify struct params as heap-allocated, breaking field access.
+        let (param_types, static_return_type) = if let Some((sig_params, ret, _)) =
+            type_arena.unwrap_function(method_def.signature_id)
+        {
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .zip(sig_params.iter())
+                .map(|(p, &ty)| (p.name, ty))
+                .collect();
+            (params, ret)
+        } else {
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+                .collect();
+            (params, method_def.signature_id)
+        };
         if let Some(vir) = lower_interface_method(
             method,
             mid,
             display_name,
             &param_types,
-            method_def.signature_id,
+            static_return_type,
             node_map,
             interner,
             type_arena,
@@ -315,18 +331,32 @@ pub fn lower_type_default_methods(
 
         let method_def = entities.get_method(impl_method_id);
         let display_name = format!("{}::{}", type_name_str, method_name_str);
-        let param_types: Vec<_> = iface_method
-            .params
-            .iter()
-            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
-            .collect();
+        // Unwrap function signature to get real param types and return type.
+        let (param_types, iface_return_type) = if let Some((sig_params, ret, _)) =
+            type_arena.unwrap_function(method_def.signature_id)
+        {
+            let params: Vec<_> = iface_method
+                .params
+                .iter()
+                .zip(sig_params.iter())
+                .map(|(p, &ty)| (p.name, ty))
+                .collect();
+            (params, ret)
+        } else {
+            let params: Vec<_> = iface_method
+                .params
+                .iter()
+                .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+                .collect();
+            (params, method_def.signature_id)
+        };
 
         if let Some(vir) = lower_interface_method(
             iface_method,
             impl_method_id,
             display_name,
             &param_types,
-            method_def.signature_id,
+            iface_return_type,
             node_map,
             lowering_interner,
             type_arena,
@@ -360,29 +390,35 @@ fn lower_single_method(
     cross_module: &CrossModuleCtx,
     implements: &ImplementRegistry,
 ) {
-    let arena_sig = method_def.signature_id;
-    // We need the type arena to unwrap the signature, but we don't have it here.
-    // Instead, use the AST param names + entity registry param types.
-    // MethodDef doesn't store params_id directly, so we extract from signature.
-    // Since we can't unwrap_function without the TypeArena, pass param names
-    // paired with placeholder types (UNKNOWN). VIR lowering embeds types from
-    // sema's NodeMap, so the placeholder types are not used for codegen.
+    // Unwrap the function signature to extract param and return types.
+    // Using UNKNOWN param types causes is_object_narrowed_from_unknown to
+    // misclassify struct params as heap-allocated, breaking field access.
+    let (param_types, return_type) =
+        if let Some((sig_params, ret, _)) = type_arena.unwrap_function(method_def.signature_id) {
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .zip(sig_params.iter())
+                .map(|(p, &ty)| (p.name, ty))
+                .collect();
+            (params, ret)
+        } else {
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+                .collect();
+            (params, method_def.signature_id)
+        };
     let method_name_str = interner.resolve(method.name);
     let display_name = format!("{}::{}", type_name_str, method_name_str);
-
-    // Create placeholder entries matching the AST params.
-    let param_types: Vec<_> = method
-        .params
-        .iter()
-        .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
-        .collect();
 
     let vir = lower_method(
         method,
         method_id,
         display_name,
         &param_types,
-        arena_sig, // return_type from entity registry
+        return_type,
         node_map,
         interner,
         type_arena,
