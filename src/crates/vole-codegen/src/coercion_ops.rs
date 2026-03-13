@@ -22,6 +22,23 @@ use super::context::Cg;
 use super::types::CompiledValue;
 use crate::ops::{sextend_const, uextend_const};
 
+/// Pre-computed type classification for a coercion source/target pair.
+///
+/// Groups the boolean type queries needed by `coerce_to_type_detected()` so
+/// the dispatch logic reads as a match on properties rather than 9 separate
+/// let bindings.
+struct CoercionClassification {
+    target_interface: bool,
+    value_interface: bool,
+    target_union: bool,
+    value_union: bool,
+    target_unknown: bool,
+    value_unknown: bool,
+    value_runtime_iterator: bool,
+    target_numeric: bool,
+    value_numeric: bool,
+}
+
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Cranelift IR value coercion ==========
 
@@ -219,35 +236,42 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.coerce_to_type_detected(resolved_value, resolved_target_vir)
     }
 
+    fn classify_coercion_types(
+        &self,
+        value_vir: VirTypeId,
+        target_vir: VirTypeId,
+    ) -> CoercionClassification {
+        CoercionClassification {
+            target_interface: self.vir_query_is_interface_v(target_vir),
+            value_interface: self.vir_query_is_interface_v(value_vir),
+            target_union: self.vir_query_is_union_v(target_vir),
+            value_union: self.vir_query_is_union_v(value_vir),
+            target_unknown: self.vir_query_is_unknown_v(target_vir),
+            value_unknown: self.vir_query_is_unknown_v(value_vir),
+            value_runtime_iterator: self.vir_query_is_runtime_iterator_v(value_vir),
+            target_numeric: self.vir_query_is_numeric_v(target_vir),
+            value_numeric: self.vir_query_is_numeric_v(value_vir),
+        }
+    }
+
     /// Fallback coercion path: queries types to determine the coercion kind.
     fn coerce_to_type_detected(
         &mut self,
         value: CompiledValue,
         target_vir_ty: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        let value_vir = value.type_id;
+        let c = self.classify_coercion_types(value.type_id, target_vir_ty);
 
-        let is_target_interface = self.vir_query_is_interface_v(target_vir_ty);
-        let is_value_interface = self.vir_query_is_interface_v(value_vir);
-        let is_target_union = self.vir_query_is_union_v(target_vir_ty);
-        let is_value_union = self.vir_query_is_union_v(value_vir);
-        let is_target_unknown = self.vir_query_is_unknown_v(target_vir_ty);
-        let is_value_unknown = self.vir_query_is_unknown_v(value_vir);
-
-        let is_value_runtime_iterator = self.vir_query_is_runtime_iterator_v(value_vir);
-        let is_target_numeric = self.vir_query_is_numeric_v(target_vir_ty);
-        let is_value_numeric = self.vir_query_is_numeric_v(value_vir);
-
-        if is_target_numeric && is_value_numeric && target_vir_ty != value_vir {
+        if c.target_numeric && c.value_numeric && target_vir_ty != value.type_id {
             return self.coerce_numeric_to_type(value, target_vir_ty);
         }
         // RuntimeIterator is a concrete type that implements Iterator dispatch
         // directly via runtime_iterator_method; skip interface boxing.
-        if is_target_interface && !is_value_interface && !is_value_runtime_iterator {
+        if c.target_interface && !c.value_interface && !c.value_runtime_iterator {
             self.box_interface_value_v(value, target_vir_ty)
-        } else if is_target_union && !is_value_union {
+        } else if c.target_union && !c.value_union {
             self.construct_union_id_v(value, target_vir_ty)
-        } else if is_target_unknown && !is_value_unknown {
+        } else if c.target_unknown && !c.value_unknown {
             self.box_to_unknown(value)
         } else {
             Ok(value)
