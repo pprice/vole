@@ -85,34 +85,7 @@ impl Cg<'_, '_, '_> {
             return self.struct_field_load(obj.value, slot, field_type_id, obj.type_id);
         }
 
-        // i128 fields use 2 consecutive slots - load both and reconstruct
-        let wide = self.vir_query_wide_type(field_type_id);
-        let mut cv = if let Some(wide) = wide {
-            let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
-            let wide_i128 = super::helpers::load_wide_field(self, get_func_ref, obj.value, slot);
-            wide.compiled_value_from_i128(self.builder, wide_i128, field_type_id)
-        } else {
-            let result_raw = self.get_field_cached(obj.value, slot as u32)?;
-            self.convert_field_value(result_raw, field_type_id)
-        };
-
-        // If the object is an owned RC temporary (e.g., method call result used
-        // inline: `obj.method().field`), we must clean it up after extracting
-        // the field. If the field itself is RC, we must rc_inc it first so the
-        // field value survives the container's rc_dec (which may free the container
-        // and cascade to its fields).
-        if obj.is_owned() && self.cached_rc_state_v(obj.type_id).needs_cleanup() {
-            if self.rc_state(field_type_id).needs_cleanup() {
-                self.emit_rc_inc_for_type(cv.value, field_type_id)?;
-                // The field is now an owned reference (we inc'd it out of the container)
-                cv.rc_lifecycle = RcLifecycle::Owned;
-            }
-            self.emit_rc_dec_for_type_v(obj.value, obj.type_id)?;
-        } else {
-            self.mark_borrowed_if_rc(&mut cv);
-        }
-
-        Ok(cv)
+        self.heap_field_load(obj, slot, field_type_id)
     }
 
     /// Load a field from a heap-allocated class instance at the given slot.
