@@ -1,0 +1,11 @@
+// Helper module for empty() cross-module regression test.
+// Tests that external FFI functions resolve correctly when called
+// from imported modules.
+
+func count_empty() -> i64 {
+    return empty().count()
+}
+
+func count_once() -> i64 {
+    return once(42).count()
+}

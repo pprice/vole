@@ -1,0 +1,16 @@
+// Regression test: external FFI functions (empty(), once(), repeat()) called
+// from imported modules must resolve correctly. Previously, CallTarget::Unresolved
+// reached codegen for external FFI functions when called inside generic function
+// templates, because the rederive pass could not construct CallTarget::Native
+// without &mut Interner access.
+let helper = import "./empty_cross_module_helper"
+
+tests "cross-module external FFI calls" {
+    test "empty().count() from imported module" {
+        assert(helper.count_empty() == 0)
+    }
+
+    test "once().count() from imported module" {
+        assert(helper.count_once() == 1)
+    }
+}

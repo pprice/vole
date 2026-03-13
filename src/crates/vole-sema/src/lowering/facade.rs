@@ -131,7 +131,7 @@ where
 
     // Build per-file metadata (NOT cached — these depend on shared registries
     // that grow as more modules are analyzed).
-    let implement_dispatch = build_implement_dispatch(implements);
+    let implement_dispatch = build_implement_dispatch(implements, interner, names);
     let (module_constants, module_exports) = collect_module_metadata(type_arena);
 
     // Try to use the cached module VIR functions and type table.
@@ -1020,18 +1020,30 @@ fn build_vir_method_map(vir_functions: &[VirFunction]) -> FxHashMap<MethodId, us
 }
 
 /// Build VIR implement-dispatch metadata from sema's `ImplementRegistry`.
-fn build_implement_dispatch(registry: &ImplementRegistry) -> VirImplementDispatch {
+///
+/// Pre-interns module_path and native_name strings as `Symbol`s so the
+/// post-monomorphization rederive pass can construct `CallTarget::Native`
+/// without needing `&mut Interner`.
+fn build_implement_dispatch(
+    registry: &ImplementRegistry,
+    interner: &mut Interner,
+    names: &NameTable,
+) -> VirImplementDispatch {
     use crate::implement_registry::ImplTypeId;
     use vole_vir::{VirExternalFuncInfo, VirFuncSignature, VirMethodImplInfo};
 
     let mut dispatch = VirImplementDispatch::new();
 
     for (name, info) in registry.external_func_entries() {
+        let module_path_str = names.last_segment_str(info.module_path).unwrap_or_default();
+        let native_name_str = names.last_segment_str(info.native_name).unwrap_or_default();
         dispatch.insert_external_func(
             name.to_string(),
             VirExternalFuncInfo {
                 module_path: info.module_path,
                 native_name: info.native_name,
+                module_path_sym: interner.intern(&module_path_str),
+                native_name_sym: interner.intern(&native_name_str),
             },
         );
     }
@@ -1059,9 +1071,15 @@ fn build_implement_dispatch(registry: &ImplementRegistry) -> VirImplementDispatc
                     params: method_impl.func_type.params_id.to_vec(),
                     return_type: method_impl.func_type.return_type_id,
                 },
-                external_info: method_impl.external_info.map(|ei| VirExternalFuncInfo {
-                    module_path: ei.module_path,
-                    native_name: ei.native_name,
+                external_info: method_impl.external_info.map(|ei| {
+                    let mp_str = names.last_segment_str(ei.module_path).unwrap_or_default();
+                    let nn_str = names.last_segment_str(ei.native_name).unwrap_or_default();
+                    VirExternalFuncInfo {
+                        module_path: ei.module_path,
+                        native_name: ei.native_name,
+                        module_path_sym: interner.intern(&mp_str),
+                        native_name_sym: interner.intern(&nn_str),
+                    }
                 }),
             },
         );

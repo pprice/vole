@@ -8,7 +8,7 @@
 // without reaching back into sema.
 
 use rustc_hash::FxHashMap;
-use vole_identity::{NameId, TypeDefId, TypeId};
+use vole_identity::{NameId, Symbol, TypeDefId, TypeId};
 
 // ---------------------------------------------------------------------------
 // External function binding
@@ -16,12 +16,20 @@ use vole_identity::{NameId, TypeDefId, TypeId};
 
 /// External (native) function binding metadata.
 ///
-/// Both fields are single-segment `NameId`s for cheap Copy.
+/// `module_path` and `native_name` are single-segment `NameId`s for cheap Copy.
 /// Use `name_table.last_segment_str(field)` to get the string value.
+///
+/// `module_path_sym` and `native_name_sym` are pre-interned `Symbol`s of the
+/// same strings, so that post-monomorphization rederive can construct
+/// `CallTarget::Native` without needing `&mut Interner`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VirExternalFuncInfo {
     pub module_path: NameId,
     pub native_name: NameId,
+    /// Pre-interned Symbol for the module path string (e.g. "vole:std:runtime").
+    pub module_path_sym: Symbol,
+    /// Pre-interned Symbol for the native function name string (e.g. "empty").
+    pub native_name_sym: Symbol,
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +228,8 @@ mod tests {
         let info = VirExternalFuncInfo {
             module_path: make_name_id(100),
             native_name: make_name_id(101),
+            module_path_sym: Symbol::new_for_test(100),
+            native_name_sym: Symbol::new_for_test(101),
         };
         dispatch.insert_external_func("print".into(), info);
 

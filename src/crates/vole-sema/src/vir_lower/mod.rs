@@ -215,6 +215,15 @@ impl LoweringCtx<'_> {
             }
         }
 
+        // Stage 4: implement registry fallback for external FFI functions.
+        // When CrossModuleCtx has no prelude module IDs (e.g. during generic
+        // VIR template lowering), prelude external functions like `empty()`,
+        // `once()`, `repeat()` won't be found in stages 1-3. Look them up
+        // directly in the implement registry.
+        if let Some(target) = self.resolve_external_call_target(&callee_name) {
+            return Some(target);
+        }
+
         None
     }
 

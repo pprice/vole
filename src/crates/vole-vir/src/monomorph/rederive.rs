@@ -16,7 +16,7 @@ use vole_identity::{
 };
 
 use crate::BuiltinMethod;
-use crate::calls::CallTarget;
+use crate::calls::{CallTarget, NativeAbi};
 use crate::entity_metadata::VirEntityMetadata;
 use crate::expr::{
     FieldCoercionHint, FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirMethodDispatchKind,
@@ -806,8 +806,6 @@ fn try_as_functional_interface(
 /// 7. **Global closure calls** via `NameTable` + `VirEntityMetadata` global
 ///    variable lookup.
 ///
-/// **Not reclassified** (left for codegen's `call_dispatch`):
-/// - Regular FFI external calls (would need `&mut Interner` to create `Symbol`s)
 fn rederive_call_target(
     target: &mut CallTarget,
     table: &VirTypeTable,
@@ -955,7 +953,7 @@ fn rederive_call_target(
         return;
     }
 
-    // 4. Compiler intrinsics via implement-dispatch (e.g. `panic`).
+    // 4. External functions via implement-dispatch (intrinsics + FFI).
     if let Some(ext_info) = ctx.implement_dispatch.external_func_by_name(callee_name) {
         let module_path_str = ctx
             .name_table
@@ -969,11 +967,14 @@ fn rederive_call_target(
             if let Some(key) = IntrinsicKey::try_from_name(&native_name_str) {
                 *target = CallTarget::Intrinsic { key, line };
             }
+        } else {
+            // Regular FFI external: use pre-interned Symbols from VIR lowering.
+            *target = CallTarget::Native {
+                module_path: ext_info.module_path_sym,
+                native_name: ext_info.native_name_sym,
+                abi: NativeAbi::Simple,
+            };
         }
-        // Regular FFI external calls are NOT reclassified here because
-        // producing CallTarget::Native requires interning new Symbol values
-        // (module_path, native_name) which needs &mut Interner.
-        // These remain Unresolved for codegen's call_dispatch().
     }
 }
 
