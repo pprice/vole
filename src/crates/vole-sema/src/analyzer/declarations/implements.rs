@@ -289,15 +289,22 @@ impl Analyzer {
                     None,
                 );
 
+                // Reject explicit `self` parameter — self is implicit in methods.
+                for p in &method.params {
+                    if interner.resolve(p.name) == "self" {
+                        self.add_error(
+                            SemanticError::SelfAsParameter {
+                                span: p.span.into(),
+                            },
+                            p.span,
+                        );
+                    }
+                }
                 // Use target_type_id as Self when resolving method signatures
                 // This ensures `Self` in method params/return types resolves to the implementing type
-                // Skip explicit `self` parameter — implement block methods have self added
-                // implicitly by codegen (via SelfParam). Including it in the signature
-                // would double-count it, causing argument count mismatches.
                 let params_id: Vec<ArenaTypeId> = method
                     .params
                     .iter()
-                    .filter(|p| interner.resolve(p.name) != "self")
                     .map(|p| self.resolve_type_id_with_self(&p.ty, interner, Some(target_type_id)))
                     .collect();
                 let return_type_id = method
@@ -356,7 +363,6 @@ impl Analyzer {
                     let impl_param_names: Vec<String> = method
                         .params
                         .iter()
-                        .filter(|p| interner.resolve(p.name) != "self")
                         .map(|p| interner.resolve(p.name).to_string())
                         .collect();
                     let mut method_builder = MethodDefBuilder::new(

@@ -29,7 +29,7 @@ struct LegacyData {
 class OldService {
     data: i64,
 
-    func get_data(self: Self) -> i64 {
+    func get_data() -> i64 {
         return self.data
     }
 }
@@ -37,7 +37,7 @@ class OldService {
 // Use annotations on interfaces
 @deprecated
 interface Obsolete {
-    func do_thing(self: Self) -> i64
+    func do_thing() -> i64
 }
 
 // Multiple annotations on one declaration
@@ -67,7 +67,7 @@ class AnnotatedService {
     @tag(name: "old_data")
     data: i64,
 
-    func get_data(self: Self) -> i64 {
+    func get_data() -> i64 {
         return self.data
     }
 }

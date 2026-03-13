@@ -12,7 +12,7 @@ class Counter {
 }
 
 interface Showable {
-    func show(self: Self) -> string
+    func show() -> string
 }
 
 // Static meta access: TypeName.@meta

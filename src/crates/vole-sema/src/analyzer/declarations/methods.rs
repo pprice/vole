@@ -242,28 +242,33 @@ impl Analyzer {
 
         let (method_name_id, full_method_name_id) =
             self.build_method_names(type_name, method.name, interner);
-        // Filter out explicit `self` parameter — instance methods have self added
-        // implicitly by codegen. Including it in the signature would double-count it.
-        let non_self_params: Vec<_> = method
-            .params
-            .iter()
-            .filter(|p| interner.resolve(p.name) != "self")
-            .cloned()
-            .collect();
+        // Reject explicit `self` parameter — self is implicit in methods.
+        for p in &method.params {
+            if interner.resolve(p.name) == "self" {
+                self.add_error(
+                    SemanticError::SelfAsParameter {
+                        span: p.span.into(),
+                    },
+                    p.span,
+                );
+            }
+        }
         let signature_id = self.build_method_signature(
-            &non_self_params,
+            &method.params,
             &method.return_type,
             interner,
             type_param_scope,
             self_type,
         );
 
-        let required_params = self.validate_param_defaults(&non_self_params, interner);
-        let param_defaults: Vec<Option<Box<Expr>>> = non_self_params
+        let required_params = self.validate_param_defaults(&method.params, interner);
+        let param_defaults: Vec<Option<Box<Expr>>> = method
+            .params
             .iter()
             .map(|p| p.default_value.clone())
             .collect();
-        let param_names: Vec<String> = non_self_params
+        let param_names: Vec<String> = method
+            .params
             .iter()
             .map(|p| interner.resolve(p.name).to_string())
             .collect();

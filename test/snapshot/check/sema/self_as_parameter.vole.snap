@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E2126]: 'self' cannot be used as a parameter name
+   ╭─[<path>/self_as_parameter.vole:6:14]
+ 5 │ 
+ 6 │     func bad(self: Foo) -> i64 {
+   ·              ──┬─
+   ·                ╰── 'self' is not a valid parameter name
+ 7 │         return self.x
+   ╰────
+  help: 'self' is implicit in methods — remove it from the parameter list

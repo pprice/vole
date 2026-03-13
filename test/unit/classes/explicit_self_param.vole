@@ -1,53 +1,51 @@
-// Regression test: methods with explicit `self: T` parameter in implement blocks
-// and class bodies must not double-count the self parameter.
-// Bug: codegen added self via SelfParam AND included it from the signature params,
-// producing a Cranelift function with 2 params but callers only passing 1.
+// Test: methods work correctly without explicit self parameter.
+// `self` is always implicit in methods — it cannot be used as a parameter name (E2126).
 
 class Counter {
     value: i64
 }
 
 implement Counter {
-    func get(self: Counter) -> i64 => self.value
-    func increment(self: Counter, amount: i64) -> i64 => self.value + amount
+    func get() -> i64 => self.value
+    func increment(amount: i64) -> i64 => self.value + amount
 }
 
 class Point {
     x: i64,
     y: i64,
 
-    func sum(self: Point) -> i64 => self.x + self.y
-    func offset(self: Point, dx: i64, dy: i64) -> i64 => self.x + dx + self.y + dy
+    func sum() -> i64 => self.x + self.y
+    func offset(dx: i64, dy: i64) -> i64 => self.x + dx + self.y + dy
 }
 
-tests "explicit self parameter" {
-    test "implement block method with self param, no other args" {
+tests "implicit self in methods" {
+    test "implement block method, no args" {
         let c = Counter { value: 42 }
         assert(c.get() == 42)
     }
 
-    test "implement block method with self param and other args" {
+    test "implement block method with args" {
         let c = Counter { value: 10 }
         assert(c.increment(5) == 15)
     }
 
-    test "class body method with self param, no other args" {
+    test "class body method, no args" {
         let p = Point { x: 3, y: 4 }
         assert(p.sum() == 7)
     }
 
-    test "class body method with self param and other args" {
+    test "class body method with args" {
         let p = Point { x: 1, y: 2 }
         assert(p.offset(10, 20) == 33)
     }
 
-    test "closure capturing class and calling method with self param" {
+    test "closure capturing class and calling method" {
         let c = Counter { value: 42 }
         let get_val = () => c.get()
         assert(get_val() == 42)
     }
 
-    test "closure capturing class and calling method with self param and args" {
+    test "closure capturing class and calling method with args" {
         let c = Counter { value: 10 }
         let inc = (n: i64) => c.increment(n)
         assert(inc(5) == 15)

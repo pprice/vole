@@ -886,6 +886,16 @@ pub enum SemanticError {
         #[label("this import failed due to errors in the module")]
         span: SourceSpan,
     },
+
+    #[error("'self' cannot be used as a parameter name")]
+    #[diagnostic(
+        code(E2126),
+        help("'self' is implicit in methods — remove it from the parameter list")
+    )]
+    SelfAsParameter {
+        #[label("'self' is not a valid parameter name")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues
