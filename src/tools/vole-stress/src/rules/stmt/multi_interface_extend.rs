@@ -20,13 +20,13 @@
 //! }
 //!
 //! extend Data_12345 with Showable_12345 {
-//!     func show(self: Data_12345) -> string {
+//!     func show() -> string {
 //!         return "({self.x}, {self.y})"
 //!     }
 //! }
 //!
 //! extend Data_12345 with Summable_12345 {
-//!     func total(self: Data_12345) -> i64 {
+//!     func total() -> i64 {
 //!         return self.x + self.y
 //!     }
 //! }
@@ -214,16 +214,16 @@ impl StmtRule for MultiInterfaceExtend {
         // --- Module decl 4: extend struct with interface A ---
         let string_body = build_string_body(&struct_name, &fields, emit);
         let extend_a_decl = format!(
-            "extend {} with {} {{\n    func {}(self: {}) -> string {{\n        {}\n    }}\n}}",
-            struct_name, iface_a_name, method_a, struct_name, string_body,
+            "extend {} with {} {{\n    func {}() -> string {{\n        {}\n    }}\n}}",
+            struct_name, iface_a_name, method_a, string_body,
         );
         scope.add_module_decl(extend_a_decl);
 
         // --- Module decl 5: extend struct with interface B ---
         let i64_body = build_i64_body(&fields, emit);
         let extend_b_decl = format!(
-            "extend {} with {} {{\n    func {}(self: {}) -> i64 {{\n        {}\n    }}\n}}",
-            struct_name, iface_b_name, method_b, struct_name, i64_body,
+            "extend {} with {} {{\n    func {}() -> i64 {{\n        {}\n    }}\n}}",
+            struct_name, iface_b_name, method_b, i64_body,
         );
         scope.add_module_decl(extend_b_decl);
 
@@ -452,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn extend_blocks_have_explicit_self() {
+    fn extend_blocks_have_implicit_self() {
         let table = make_table_with_module();
         let mut scope = Scope::new(&[], &table);
         scope.module_id = Some(ModuleId(0));
@@ -465,17 +465,17 @@ mod tests {
             .generate(&mut scope, &mut emit, &params)
             .expect("should generate code");
 
-        // Both extend blocks (decls 3 and 4) should have explicit self parameter
+        // Both extend blocks (decls 3 and 4) should NOT have explicit self parameter
         let extend_a = &scope.module_decls[3];
         assert!(
-            extend_a.contains("(self:"),
-            "expected explicit self param in extend A: {extend_a}"
+            !extend_a.contains("(self:"),
+            "expected implicit self (no self param) in extend A: {extend_a}"
         );
 
         let extend_b = &scope.module_decls[4];
         assert!(
-            extend_b.contains("(self:"),
-            "expected explicit self param in extend B: {extend_b}"
+            !extend_b.contains("(self:"),
+            "expected implicit self (no self param) in extend B: {extend_b}"
         );
     }
 

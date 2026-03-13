@@ -22,13 +22,13 @@
 //! }
 //!
 //! extend Box_12345 with Labelable_12345 {
-//!     func label(self: Box_12345) -> string {
+//!     func label() -> string {
 //!         return "{self.width}x{self.height}x{self.depth}"
 //!     }
 //! }
 //!
 //! extend Box_12345 with Totalable_12345 {
-//!     func total(self: Box_12345) -> i64 {
+//!     func total() -> i64 {
 //!         return self.width + self.height + self.depth
 //!     }
 //! }
@@ -62,13 +62,13 @@
 //! }
 //!
 //! extend Pair_12345 with Describable_12345 {
-//!     func describe(self: Pair_12345) -> string {
+//!     func describe() -> string {
 //!         return "pair(" + self.a.to_string() + "," + self.b.to_string() + ")"
 //!     }
 //! }
 //!
 //! extend Pair_12345 with Productable_12345 {
-//!     func product(self: Pair_12345) -> i64 {
+//!     func product() -> i64 {
 //!         return self.a * self.b
 //!     }
 //! }
@@ -103,13 +103,13 @@
 //! }
 //!
 //! extend Triple_12345 with Formattable_12345 {
-//!     func format(self: Triple_12345) -> string {
+//!     func format() -> string {
 //!         return "{self.p}/{self.q}/{self.r}"
 //!     }
 //! }
 //!
 //! extend Triple_12345 with Maxable_12345 {
-//!     func max_val(self: Triple_12345) -> i64 {
+//!     func max_val() -> i64 {
 //!         var result = self.p
 //!         if self.q > result {
 //!             result = self.q
@@ -250,8 +250,8 @@ fn emit_sum_label_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String> 
     let label_body = format!("return \"{}\"", label_parts.join(sep));
 
     let extend_a_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> string {{\n        {}\n    }}\n}}",
-        class_name, iface_a_name, method_a, class_name, label_body,
+        "extend {} with {} {{\n    func {}() -> string {{\n        {}\n    }}\n}}",
+        class_name, iface_a_name, method_a, label_body,
     );
     scope.add_module_decl(extend_a_decl);
 
@@ -260,8 +260,8 @@ fn emit_sum_label_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String> 
     let i64_body = format!("return {}", sum_expr.join(" + "));
 
     let extend_b_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> i64 {{\n        {}\n    }}\n}}",
-        class_name, iface_b_name, method_b, class_name, i64_body,
+        "extend {} with {} {{\n    func {}() -> i64 {{\n        {}\n    }}\n}}",
+        class_name, iface_b_name, method_b, i64_body,
     );
     scope.add_module_decl(extend_b_decl);
 
@@ -370,16 +370,16 @@ fn emit_product_describe_variant(scope: &mut Scope, emit: &mut Emit) -> Option<S
         f1 = fields[1],
     );
     let extend_a_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> string {{\n        {}\n    }}\n}}",
-        class_name, iface_a_name, method_a, class_name, describe_body,
+        "extend {} with {} {{\n    func {}() -> string {{\n        {}\n    }}\n}}",
+        class_name, iface_a_name, method_a, describe_body,
     );
     scope.add_module_decl(extend_a_decl);
 
     // --- Module decl 5: extend with interface B (product method) ---
     let product_body = format!("return self.{} * self.{}", fields[0], fields[1]);
     let extend_b_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> i64 {{\n        {}\n    }}\n}}",
-        class_name, iface_b_name, method_b, class_name, product_body,
+        "extend {} with {} {{\n    func {}() -> i64 {{\n        {}\n    }}\n}}",
+        class_name, iface_b_name, method_b, product_body,
     );
     scope.add_module_decl(extend_b_decl);
 
@@ -505,8 +505,8 @@ fn emit_max_format_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String>
     let format_body = format!("return \"{}\"", format_parts.join(sep));
 
     let extend_a_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> string {{\n        {}\n    }}\n}}",
-        class_name, iface_a_name, method_a, class_name, format_body,
+        "extend {} with {} {{\n    func {}() -> string {{\n        {}\n    }}\n}}",
+        class_name, iface_a_name, method_a, format_body,
     );
     scope.add_module_decl(extend_a_decl);
 
@@ -526,8 +526,8 @@ fn emit_max_format_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String>
         f2 = fields[2],
     );
     let extend_b_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> i64 {{\n        {}\n    }}\n}}",
-        class_name, iface_b_name, method_b, class_name, max_body,
+        "extend {} with {} {{\n    func {}() -> i64 {{\n        {}\n    }}\n}}",
+        class_name, iface_b_name, method_b, max_body,
     );
     scope.add_module_decl(extend_b_decl);
 
@@ -728,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    fn extend_blocks_have_explicit_self() {
+    fn extend_blocks_have_implicit_self() {
         let table = SymbolTable::new();
         let mut scope = Scope::new(&[], &table);
         scope.module_id = Some(ModuleId(0));
@@ -740,17 +740,17 @@ mod tests {
             .generate(&mut scope, &mut emit, &test_params())
             .expect("should generate code");
 
-        // Both extend blocks (decls 3 and 4) should have explicit self parameter
+        // Both extend blocks (decls 3 and 4) should NOT have explicit self parameter
         let extend_a = &scope.module_decls[3];
         assert!(
-            extend_a.contains("(self:"),
-            "expected explicit self param in extend A: {extend_a}",
+            !extend_a.contains("(self:"),
+            "expected implicit self (no self param) in extend A: {extend_a}",
         );
 
         let extend_b = &scope.module_decls[4];
         assert!(
-            extend_b.contains("(self:"),
-            "expected explicit self param in extend B: {extend_b}",
+            !extend_b.contains("(self:"),
+            "expected implicit self (no self param) in extend B: {extend_b}",
         );
     }
 

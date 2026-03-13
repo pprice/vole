@@ -6,7 +6,7 @@
 //! **Variant 1 -- closure calling struct method directly:**
 //! ```vole
 //! extend StructName {
-//!     func compute_42918(self: StructName) -> i64 {
+//!     func compute_42918() -> i64 {
 //!         return self.field1 + self.field2
 //!     }
 //! }
@@ -18,7 +18,7 @@
 //! **Variant 2 -- generic function applying closure to struct:**
 //! ```vole
 //! extend StructName {
-//!     func compute_42918(self: StructName) -> i64 {
+//!     func compute_42918() -> i64 {
 //!         return self.field1 * self.field2
 //!     }
 //! }
@@ -160,7 +160,7 @@ fn emit_direct_closure(
 
     // Module decl: extend block with method
     let extend_decl = format!(
-        "extend {sn} {{\n    func {method}(self: {sn}) -> i64 {{\n        return self.{f0} {op} self.{f1}\n    }}\n}}",
+        "extend {sn} {{\n    func {method}() -> i64 {{\n        return self.{f0} {op} self.{f1}\n    }}\n}}",
         sn = struct_name,
         method = method_name,
         f0 = field0,
@@ -228,7 +228,7 @@ fn emit_generic_apply(
 
     // Module decl 1: extend block with method
     let extend_decl = format!(
-        "extend {sn} {{\n    func {method}(self: {sn}) -> i64 {{\n        return self.{f0} {op} self.{f1}\n    }}\n}}",
+        "extend {sn} {{\n    func {method}() -> i64 {{\n        return self.{f0} {op} self.{f1}\n    }}\n}}",
         sn = struct_name,
         method = method_name,
         f0 = field0,
@@ -434,8 +434,8 @@ mod tests {
                         "expected extend decl: {decl}"
                     );
                     assert!(
-                        decl.contains("self: Point"),
-                        "expected explicit self param: {decl}"
+                        decl.contains("func") && !decl.contains("(self:"),
+                        "expected implicit self (no self param): {decl}"
                     );
                     // Inline code should have closure with typed param
                     assert!(

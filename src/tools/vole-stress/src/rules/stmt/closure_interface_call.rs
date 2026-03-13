@@ -17,7 +17,7 @@
 //! }
 //!
 //! extend Pair_12345 with Summable_12345 {
-//!     func total(self: Pair_12345) -> i64 {
+//!     func total() -> i64 {
 //!         return self.a + self.b
 //!     }
 //! }
@@ -43,7 +43,7 @@
 //! }
 //!
 //! extend Point_12345 with Showable_12345 {
-//!     func show(self: Point_12345) -> string {
+//!     func show() -> string {
 //!         return "{self.x},{self.y}"
 //!     }
 //! }
@@ -70,7 +70,7 @@
 //! }
 //!
 //! extend Triple_12345 with Combinable_12345 {
-//!     func combine(self: Triple_12345) -> i64 {
+//!     func combine() -> i64 {
 //!         return self.a + self.b + self.c
 //!     }
 //! }
@@ -170,8 +170,8 @@ fn emit_i64_sum_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String> {
     // --- Module decl 3: extend with interface ---
     let sum_expr = format!("self.{} + self.{}", fields[0], fields[1]);
     let extend_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> i64 {{\n        return {}\n    }}\n}}",
-        class_name, iface_name, method, class_name, sum_expr,
+        "extend {} with {} {{\n    func {}() -> i64 {{\n        return {}\n    }}\n}}",
+        class_name, iface_name, method, sum_expr,
     );
     scope.add_module_decl(extend_decl);
 
@@ -260,8 +260,8 @@ fn emit_string_show_variant(scope: &mut Scope, emit: &mut Emit) -> Option<String
         fields[0], sep, fields[1],
     );
     let extend_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> string {{\n        {}\n    }}\n}}",
-        class_name, iface_name, method, class_name, interp_body,
+        "extend {} with {} {{\n    func {}() -> string {{\n        {}\n    }}\n}}",
+        class_name, iface_name, method, interp_body,
     );
     scope.add_module_decl(extend_decl);
 
@@ -359,8 +359,8 @@ fn emit_two_closures_variant(scope: &mut Scope, emit: &mut Emit) -> Option<Strin
         fields[0], fields[1], fields[2]
     );
     let extend_decl = format!(
-        "extend {} with {} {{\n    func {}(self: {}) -> i64 {{\n        return {}\n    }}\n}}",
-        class_name, iface_name, method, class_name, sum_expr,
+        "extend {} with {} {{\n    func {}() -> i64 {{\n        return {}\n    }}\n}}",
+        class_name, iface_name, method, sum_expr,
     );
     scope.add_module_decl(extend_decl);
 
@@ -536,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn extend_blocks_have_explicit_self() {
+    fn extend_blocks_have_implicit_self() {
         let table = SymbolTable::new();
         for seed in 0..30 {
             let mut scope = Scope::new(&[], &table);
@@ -549,11 +549,11 @@ mod tests {
                 .generate(&mut scope, &mut emit, &test_params())
                 .expect("should generate code");
 
-            // The extend block (decl 2) should have explicit self parameter
+            // The extend block (decl 2) should NOT have explicit self parameter
             let extend = &scope.module_decls[2];
             assert!(
-                extend.contains("(self:"),
-                "seed {seed}: expected explicit self param in extend: {extend}",
+                !extend.contains("(self:"),
+                "seed {seed}: expected implicit self (no self param) in extend: {extend}",
             );
         }
     }

@@ -6,7 +6,7 @@
 //! **Variant 1 -- getter**: Method returning `() -> i64` capturing a single field:
 //! ```vole
 //! extend Point {
-//!     func get_x_getter_12345(self: Point) -> () -> i64 {
+//!     func get_x_getter_12345() -> () -> i64 {
 //!         let captured_x = self.x
 //!         return () => captured_x
 //!     }
@@ -19,7 +19,7 @@
 //! **Variant 2 -- adder**: Method returning `(i64) -> i64` capturing a computation:
 //! ```vole
 //! extend Point {
-//!     func get_adder_12345(self: Point) -> (i64) -> i64 {
+//!     func get_adder_12345() -> (i64) -> i64 {
 //!         let base = self.x + self.y
 //!         return (n: i64) => base + n
 //!     }
@@ -84,7 +84,7 @@ fn gen_struct_literal(struct_name: &str, struct_info: &StructInfo, emit: &mut Em
 ///
 /// ```vole
 /// extend Point {
-///     func get_x_getter_UID(self: Point) -> () -> i64 {
+///     func get_x_getter_UID() -> () -> i64 {
 ///         let captured_x = self.x
 ///         return () => captured_x
 ///     }
@@ -111,7 +111,7 @@ fn emit_getter_variant(
     // Build the extend block
     let extend_decl = format!(
         "extend {sn} {{\n\
-         \x20   func {method}(self: {sn}) -> () -> i64 {{\n\
+         \x20   func {method}() -> () -> i64 {{\n\
          \x20       let captured_{f} = self.{f}\n\
          \x20       return () => captured_{f}\n\
          \x20   }}\n\
@@ -153,7 +153,7 @@ fn emit_getter_variant(
 ///
 /// ```vole
 /// extend Point {
-///     func get_adder_UID(self: Point) -> (i64) -> i64 {
+///     func get_adder_UID() -> (i64) -> i64 {
 ///         let base = self.x + self.y
 ///         return (n: i64) => base + n
 ///     }
@@ -187,7 +187,7 @@ fn emit_adder_variant(
     // Build the extend block
     let extend_decl = format!(
         "extend {sn} {{\n\
-         \x20   func {method}(self: {sn}) -> (i64) -> i64 {{\n\
+         \x20   func {method}() -> (i64) -> i64 {{\n\
          \x20       let base = self.{f0} {op} self.{f1}\n\
          \x20       return (n: i64) => base + n\n\
          \x20   }}\n\
