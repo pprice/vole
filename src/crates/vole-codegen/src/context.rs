@@ -36,41 +36,23 @@ pub(crate) struct ExternalMethodRef {
     pub native_name: NameId,
 }
 
-impl From<crate::analyzed::ExternalMethodInfoRef> for ExternalMethodRef {
-    fn from(value: crate::analyzed::ExternalMethodInfoRef) -> Self {
-        Self {
-            module_path: value.module_path,
-            native_name: value.native_name,
+macro_rules! impl_from_external_ref {
+    ($source:ty) => {
+        impl From<$source> for ExternalMethodRef {
+            fn from(value: $source) -> Self {
+                Self {
+                    module_path: value.module_path,
+                    native_name: value.native_name,
+                }
+            }
         }
-    }
+    };
 }
 
-impl From<vole_vir::expr::VirExternalMethodInfo> for ExternalMethodRef {
-    fn from(value: vole_vir::expr::VirExternalMethodInfo) -> Self {
-        Self {
-            module_path: value.module_path,
-            native_name: value.native_name,
-        }
-    }
-}
-
-impl From<&vole_vir::expr::VirExternalMethodInfo> for ExternalMethodRef {
-    fn from(value: &vole_vir::expr::VirExternalMethodInfo) -> Self {
-        Self {
-            module_path: value.module_path,
-            native_name: value.native_name,
-        }
-    }
-}
-
-impl From<vole_vir::VirExternalFuncInfo> for ExternalMethodRef {
-    fn from(value: vole_vir::VirExternalFuncInfo) -> Self {
-        Self {
-            module_path: value.module_path,
-            native_name: value.native_name,
-        }
-    }
-}
+impl_from_external_ref!(crate::analyzed::ExternalMethodInfoRef);
+impl_from_external_ref!(vole_vir::expr::VirExternalMethodInfo);
+impl_from_external_ref!(&vole_vir::expr::VirExternalMethodInfo);
+impl_from_external_ref!(vole_vir::VirExternalFuncInfo);
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
