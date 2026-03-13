@@ -67,8 +67,7 @@ impl Cg<'_, '_, '_> {
         // Convert any remaining Iterator<T> types to RuntimeIterator<T> via the
         // inline fallback, since runtime functions return raw iterator pointers.
         let return_type_id = return_type_hint
-            .or_else(|| expr_id.and_then(|id| self.get_substituted_return_type(&id)))
-            .or_else(|| expr_id.and_then(|id| self.get_expr_type(&id)))
+            .or_else(|| self.get_call_return_type())
             .or_else(|| {
                 fallback_elem_type.and_then(|elem_type_id| {
                     self.derive_iterator_return_type(method_name, elem_type_id, iter_type_id)

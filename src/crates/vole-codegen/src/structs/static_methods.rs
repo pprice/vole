@@ -70,7 +70,7 @@ impl Cg<'_, '_, '_> {
                         })
                     })
             })
-            .or_else(|| self.get_expr_type_substituted(&expr_id));
+            .or_else(|| self.get_call_return_type());
 
         // Check for Array.filled<T> intrinsic (compiled as ArrayFilled runtime call)
         if let Some(result) = self.try_array_filled_intrinsic(
@@ -547,7 +547,7 @@ impl Cg<'_, '_, '_> {
         };
         let hint_array_elem = return_type_hint.and_then(&unwrap_array_sema);
         let expr_array_elem = expr_id
-            .and_then(|id| self.get_expr_type_substituted(&id))
+            .and(self.get_call_return_type())
             .and_then(unwrap_array_sema);
         let (return_type_id, elem_type_id) =
             hint_array_elem.or(expr_array_elem).ok_or_else(|| {

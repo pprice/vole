@@ -241,8 +241,7 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Pre-resolved return type from VIR `Call` node.
     ///
     /// Set by VIR call dispatch (ClosureVariable, GlobalClosure), consumed by
-    /// `get_expr_type()` / `get_expr_type_substituted()` /
-    /// `get_substituted_return_type()`.
+    /// `get_call_return_type()`.
     pub(crate) vir_call_return_type: Option<TypeId>,
     /// Cached `iconst.i64 0` created in the entry block for void returns.
     /// Reused by every `void_value()` call to avoid emitting thousands of
@@ -621,7 +620,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         vir_ty: VirTypeId,
     ) -> Option<crate::types::wide_ops::WideType> {
-        crate::types::wide_ops::WideType::from_vir_type_id(vir_ty, self.vir_type_table())
+        crate::types::wide_ops::WideType::from_vir_type_id(vir_ty)
     }
 
     /// Classify a sema `TypeId` as a `WideType` (i128/f128) via VirTypeTable.
@@ -1140,22 +1139,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::structs::helpers::get_field_slot_and_type_id_cg(type_id, field_name, self)
     }
 
-    /// Get expression type from VIR-stashed `vir_call_return_type`.
+    /// Get the VIR-stashed return type for the current call expression.
     ///
     /// Set during VIR call dispatch (`compile_vir_unresolved_call` and friends).
     /// All call sites now flow through VIR, so the stashed value is always
     /// present when this method is reached from a live path.
     #[inline]
-    pub fn get_expr_type(&self, _node_id: &vole_identity::NodeId) -> Option<TypeId> {
-        self.vir_call_return_type
-    }
-
-    /// Get expression type from VIR-stashed `vir_call_return_type`.
-    ///
-    /// VIR return types are already concrete (post-monomorphization), so no
-    /// type-parameter substitution is needed.
-    #[inline]
-    pub fn get_expr_type_substituted(&self, _node_id: &vole_identity::NodeId) -> Option<TypeId> {
+    pub fn get_call_return_type(&self) -> Option<TypeId> {
         self.vir_call_return_type
     }
 
@@ -1227,15 +1217,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .insert(type_def_id, new_type_id);
 
         Some(new_type_id)
-    }
-
-    /// Get substituted return type from VIR-stashed `vir_call_return_type`.
-    ///
-    /// VIR return types are already concrete (post-monomorphization), so no
-    /// type-parameter substitution is needed.
-    #[inline]
-    pub fn get_substituted_return_type(&self, _node_id: &vole_identity::NodeId) -> Option<TypeId> {
-        self.vir_call_return_type
     }
 
     /// Get type metadata map

@@ -27,7 +27,7 @@ impl Cg<'_, '_, '_> {
         native_func: &NativeFunction,
         callee_sym: Symbol,
         arg_source: &ArgSource<'_>,
-        call_expr_id: &NodeId,
+        _call_expr_id: &NodeId,
     ) -> CodegenResult<CompiledValue> {
         let expected_types: Vec<Type> = native_func
             .signature
@@ -42,7 +42,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.void_value());
         }
         let type_id = self
-            .get_expr_type_substituted(call_expr_id)
+            .get_call_return_type()
             .expect("INTERNAL: native call: missing sema return type");
         let type_id = self.convert_interface_iterator_return_by_type(type_id);
         self.native_call_result(call_inst, native_func, type_id)
@@ -67,7 +67,7 @@ impl Cg<'_, '_, '_> {
             let func_key = self.funcs().intern_name_id(name_id);
             if let Some(func_id) = self.funcs_ref().func_id(func_key) {
                 // Found compiled module function
-                let return_type_override = self.get_expr_type_substituted(&call_expr_id);
+                let return_type_override = self.get_call_return_type();
                 return self.call_func_id_impl(
                     func_key,
                     func_id,

@@ -1824,9 +1824,8 @@ mod tests {
     #[test]
     fn wide_type_from_vir_i128() {
         use crate::types::wide_ops::WideType;
-        let table = test_table();
         assert_eq!(
-            WideType::from_vir_type_id(VirTypeId::I128, &table),
+            WideType::from_vir_type_id(VirTypeId::I128),
             Some(WideType::I128),
         );
     }
@@ -1834,9 +1833,8 @@ mod tests {
     #[test]
     fn wide_type_from_vir_f128() {
         use crate::types::wide_ops::WideType;
-        let table = test_table();
         assert_eq!(
-            WideType::from_vir_type_id(VirTypeId::F128, &table),
+            WideType::from_vir_type_id(VirTypeId::F128),
             Some(WideType::F128),
         );
     }
@@ -1844,15 +1842,13 @@ mod tests {
     #[test]
     fn wide_type_from_vir_i64_none() {
         use crate::types::wide_ops::WideType;
-        let table = test_table();
-        assert_eq!(WideType::from_vir_type_id(VirTypeId::I64, &table), None);
+        assert_eq!(WideType::from_vir_type_id(VirTypeId::I64), None);
     }
 
     #[test]
     fn wide_type_from_vir_string_none() {
         use crate::types::wide_ops::WideType;
-        let table = test_table();
-        assert_eq!(WideType::from_vir_type_id(VirTypeId::STRING, &table), None);
+        assert_eq!(WideType::from_vir_type_id(VirTypeId::STRING), None);
     }
 
     #[test]
