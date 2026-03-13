@@ -568,34 +568,27 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Default parameter compilation ==========
 
-    /// Compile default expressions for omitted parameters using typed function ID.
+    /// Core loop for compiling default parameter values.
     ///
-    /// Looks up default expressions from `EntityRegistry` by `FunctionId` and parameter
-    /// index. No raw pointers: the registry is accessed via `'ctx`-lifetime references
-    /// that outlive `&mut self`.
+    /// `lookup_default` returns `Ok(Some(vir_expr))` for parameters with defaults,
+    /// `Ok(None)` for parameters without (skipped), or `Err` when a default was
+    /// expected but its VIR lowering is missing (internal error).
     ///
-    /// # Arguments
-    /// - `func_id`: The sema `FunctionId` whose defaults to compile
-    /// - `start_index`: Index of the first omitted parameter
-    /// - `expected_type_ids`: TypeIds for parameters starting at `start_index`
-    pub fn compile_function_defaults(
+    /// `post_process` optionally transforms the final value (e.g., `emit_word`
+    /// for generic class method defaults).
+    fn compile_defaults_core(
         &mut self,
-        func_id: FunctionId,
         start_index: usize,
         expected_type_ids: &[TypeId],
+        mut lookup_default: impl FnMut(&mut Self, usize) -> CodegenResult<Option<vole_vir::VirExpr>>,
+        mut post_process: impl FnMut(&mut Self, CompiledValue) -> CodegenResult<Value>,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let mut args = Vec::new();
         let mut rc_owned = Vec::new();
 
         for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
             let slot = start_index + offset;
-            let Some(default_vir) = self.function_default_vir_init(func_id, slot).cloned() else {
-                if self.analyzed().has_function_default_expr(func_id, slot) {
-                    return Err(CodegenError::internal_with_context(
-                        "missing VIR function default expression",
-                        format!("{func_id:?} param {slot}"),
-                    ));
-                }
+            let Some(default_vir) = lookup_default(self, slot)? else {
                 continue;
             };
 
@@ -610,22 +603,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let compiled =
                 self.coerce_int_width(compiled, expected_ty, param_type_id, param_vir_ty);
 
-            args.push(compiled.value);
+            args.push(post_process(self, compiled)?);
         }
 
         Ok((args, rc_owned))
     }
 
+    /// Compile default expressions for omitted parameters using typed function ID.
+    pub fn compile_function_defaults(
+        &mut self,
+        func_id: FunctionId,
+        start_index: usize,
+        expected_type_ids: &[TypeId],
+    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
+        self.compile_defaults_core(
+            start_index,
+            expected_type_ids,
+            |cg, slot| match cg.function_default_vir_init(func_id, slot).cloned() {
+                Some(vir) => Ok(Some(vir)),
+                None if cg.analyzed().has_function_default_expr(func_id, slot) => {
+                    Err(CodegenError::internal_with_context(
+                        "missing VIR function default expression",
+                        format!("{func_id:?} param {slot}"),
+                    ))
+                }
+                None => Ok(None),
+            },
+            |_, cv| Ok(cv.value),
+        )
+    }
+
     /// Compile default expressions for omitted parameters using typed method ID.
-    ///
-    /// Looks up default expressions from `EntityRegistry` by `MethodId` and parameter
-    /// index. No raw pointers: the registry is accessed via `'ctx`-lifetime references.
-    ///
-    /// # Arguments
-    /// - `method_id`: The sema `MethodId` whose defaults to compile
-    /// - `start_index`: Index of the first omitted parameter
-    /// - `expected_type_ids`: TypeIds for parameters starting at `start_index`
-    /// - `is_generic_class`: Whether this is a generic class call (needs value_to_word)
     pub fn compile_method_defaults(
         &mut self,
         method_id: MethodId,
@@ -633,41 +641,27 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         expected_type_ids: &[TypeId],
         is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        let mut args = Vec::new();
-        let mut rc_owned = Vec::new();
-
-        for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
-            let slot = start_index + offset;
-            let Some(default_vir) = self.method_default_vir_init(method_id, slot).cloned() else {
-                if self.analyzed().has_method_default_expr(method_id, slot) {
-                    return Err(CodegenError::internal_with_context(
+        self.compile_defaults_core(
+            start_index,
+            expected_type_ids,
+            |cg, slot| match cg.method_default_vir_init(method_id, slot).cloned() {
+                Some(vir) => Ok(Some(vir)),
+                None if cg.analyzed().has_method_default_expr(method_id, slot) => {
+                    Err(CodegenError::internal_with_context(
                         "missing VIR method default expression",
                         format!("{method_id:?} param {slot}"),
-                    ));
+                    ))
                 }
-                continue;
-            };
-            let compiled = self.compile_vir_expr(&default_vir)?;
-
-            if compiled.is_owned() {
-                rc_owned.push(compiled);
-            }
-
-            let param_vir_ty = self.vir_lookup_or_compat(param_type_id);
-            let compiled = self.coerce_to_type(compiled, param_vir_ty)?;
-            let expected_ty = self.cranelift_type(param_type_id);
-            let compiled =
-                self.coerce_int_width(compiled, expected_ty, param_type_id, param_vir_ty);
-
-            let arg_value = if is_generic_class && compiled.ty != types::I64 {
-                self.emit_word(&compiled, None)?
-            } else {
-                compiled.value
-            };
-            args.push(arg_value);
-        }
-
-        Ok((args, rc_owned))
+                None => Ok(None),
+            },
+            |cg, cv| {
+                if is_generic_class && cv.ty != types::I64 {
+                    cg.emit_word(&cv, None)
+                } else {
+                    Ok(cv.value)
+                }
+            },
+        )
     }
 
     /// Compile default expressions for omitted lambda parameters from VIR.
@@ -677,36 +671,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         start_index: usize,
         expected_type_ids: &[TypeId],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        let mut args = Vec::new();
-        let mut rc_owned = Vec::new();
-
-        for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
-            let slot = start_index + offset;
-            let Some(default_vir) = self.lambda_default_vir_init(lambda_node_id, slot).cloned()
-            else {
-                return Err(CodegenError::internal_with_context(
+        self.compile_defaults_core(
+            start_index,
+            expected_type_ids,
+            |cg, slot| match cg.lambda_default_vir_init(lambda_node_id, slot).cloned() {
+                Some(vir) => Ok(Some(vir)),
+                None => Err(CodegenError::internal_with_context(
                     "missing VIR lambda default expression",
                     format!("lambda={lambda_node_id:?} param {slot}"),
-                ));
-            };
-            let compiled = self.compile_vir_expr(&default_vir)?;
-
-            // Track owned RC values for cleanup after the call.
-            if compiled.is_owned() {
-                rc_owned.push(compiled);
-            }
-
-            // Coerce to the expected param type (handles interface boxing, union construction).
-            let param_vir_ty = self.vir_lookup_or_compat(param_type_id);
-            let compiled = self.coerce_to_type(compiled, param_vir_ty)?;
-
-            // Handle integer narrowing/widening if needed.
-            let expected_ty = self.cranelift_type(param_type_id);
-            let compiled =
-                self.coerce_int_width(compiled, expected_ty, param_type_id, param_vir_ty);
-            args.push(compiled.value);
-        }
-
-        Ok((args, rc_owned))
+                )),
+            },
+            |_, cv| Ok(cv.value),
+        )
     }
 }
