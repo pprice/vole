@@ -290,6 +290,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(CompiledValue::new(converted, target_ty, target_vir_ty))
     }
 
+    /// Bitcast an F128 value to I128 for passing to runtime conversion functions.
+    ///
+    /// Cranelift cannot operate on F128 directly; all F128 arithmetic routes
+    /// through runtime calls that accept/return I128 bit patterns.
+    #[inline]
+    fn f128_to_i128_bits(&mut self, f128_val: Value) -> Value {
+        self.builder
+            .ins()
+            .bitcast(types::I128, MemFlags::new(), f128_val)
+    }
+
+    /// Bitcast an I128 bit pattern (from a runtime call) back to F128.
+    #[inline]
+    fn i128_bits_to_f128(&mut self, i128_bits: Value) -> Value {
+        self.builder
+            .ins()
+            .bitcast(types::F128, MemFlags::new(), i128_bits)
+    }
+
     /// Float widening: F32→F64 (fpromote), or anything→F128 (runtime calls).
     fn float_widen(&mut self, value: CompiledValue, to: VirTypeId) -> CodegenResult<Value> {
         let target_ty = self.cranelift_type_v(to);
@@ -304,10 +323,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 }
                 _ => unreachable!("float_widen to F128: unexpected source type"),
             };
-            Ok(self
-                .builder
-                .ins()
-                .bitcast(types::F128, MemFlags::new(), bits))
+            Ok(self.i128_bits_to_f128(bits))
         } else {
             // F32→F64: direct fpromote
             Ok(self.builder.ins().fpromote(target_ty, value.value))
@@ -318,10 +334,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     fn float_narrow(&mut self, value: CompiledValue, to: VirTypeId) -> CodegenResult<Value> {
         let target_ty = self.cranelift_type_v(to);
         if value.ty == types::F128 {
-            let f128_bits = self
-                .builder
-                .ins()
-                .bitcast(types::I128, MemFlags::new(), value.value);
+            let f128_bits = self.f128_to_i128_bits(value.value);
             match target_ty {
                 ty if ty == types::F64 => self.call_runtime(RuntimeKey::F128ToF64, &[f128_bits]),
                 ty if ty == types::F32 => self.call_runtime(RuntimeKey::F128ToF32, &[f128_bits]),
@@ -346,10 +359,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // I128→F128 gets its own runtime call; all others route through i64.
             if value.ty == types::I128 {
                 let bits = self.call_runtime(RuntimeKey::I128ToF128, &[value.value])?;
-                return Ok(self
-                    .builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), bits));
+                return Ok(self.i128_bits_to_f128(bits));
             }
             // Narrow or widen the source integer to i64 first.
             let i64_val = if value.ty == types::I64 {
@@ -364,10 +374,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.builder.ins().ireduce(types::I64, value.value)
             };
             let bits = self.call_runtime(RuntimeKey::I64ToF128, &[i64_val])?;
-            Ok(self
-                .builder
-                .ins()
-                .bitcast(types::F128, MemFlags::new(), bits))
+            Ok(self.i128_bits_to_f128(bits))
         } else if from_signed {
             Ok(self.builder.ins().fcvt_from_sint(target_ty, value.value))
         } else {
@@ -385,10 +392,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CodegenResult<Value> {
         let target_ty = self.cranelift_type_v(to);
         if value.ty == types::F128 {
-            let f128_bits = self
-                .builder
-                .ins()
-                .bitcast(types::I128, MemFlags::new(), value.value);
+            let f128_bits = self.f128_to_i128_bits(value.value);
             if target_ty == types::I128 {
                 return self.call_runtime(RuntimeKey::F128ToI128, &[f128_bits]);
             }
