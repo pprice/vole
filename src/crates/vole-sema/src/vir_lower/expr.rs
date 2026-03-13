@@ -1081,9 +1081,22 @@ fn lower_method_dispatch_meta(
         .map(|kind| match kind {
             crate::node_map::CoercionKind::IteratorWrap { elem_type } => {
                 let vir_elem_type = ctx.translate(elem_type);
+                let iterator_interface_type = ctx
+                    .name_table
+                    .well_known
+                    .iterator_type_def
+                    .map(|def| {
+                        let iface = vole_vir::types::VirType::Interface {
+                            def,
+                            type_args: vec![vir_elem_type],
+                        };
+                        ctx.type_table.intern(iface, None)
+                    })
+                    .unwrap_or(VirTypeId::UNKNOWN);
                 VirMethodReceiverCoercion::IteratorWrap {
                     elem_type: vir_elem_type,
                     vir_elem_type,
+                    iterator_interface_type,
                 }
             }
         });

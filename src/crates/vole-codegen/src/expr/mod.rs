@@ -969,9 +969,10 @@ impl Cg<'_, '_, '_> {
                 interface_type_args,
             ),
             CoerceKind::Unbox => self.compile_coerce_unbox_v(value, to),
-            CoerceKind::IteratorWrap { interface_type, .. } => {
-                self.compile_coerce_iterator_wrap_enriched(value, to, *interface_type)
-            }
+            CoerceKind::IteratorWrap {
+                elem_type,
+                interface_type,
+            } => self.box_and_wrap_as_runtime_iterator(value, *interface_type, *elem_type),
         }
     }
 
@@ -1021,39 +1022,6 @@ impl Cg<'_, '_, '_> {
             concrete_val,
             concrete_ty,
             concrete_vir_ty,
-        ))
-    }
-
-    /// Wrap a concrete iterator as a `RuntimeIterator` (enriched path).
-    ///
-    /// Uses pre-resolved `interface_type` from `CoerceKind::IteratorWrap`
-    /// to skip `unwrap_runtime_iterator` and `lookup_interface` arena queries.
-    ///
-    /// 1. Resolves the `Iterator<elem>` VirTypeId through monomorphization.
-    /// 2. Boxes the value as that interface via VirTypeId-native path.
-    /// 3. Wraps via `InterfaceIter` runtime call.
-    /// 4. Consumes the intermediate boxed interface.
-    fn compile_coerce_iterator_wrap_enriched(
-        &mut self,
-        value: CompiledValue,
-        runtime_iter_vir_ty: VirTypeId,
-        interface_type: VirTypeId,
-    ) -> CodegenResult<CompiledValue> {
-        let resolved_interface = self.try_substitute_type_v(interface_type);
-
-        // Box as Iterator<elem> interface
-        let mut boxed = self.box_interface_value_v(value, resolved_interface)?;
-
-        // Wrap via InterfaceIter runtime call
-        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[boxed.value])?;
-
-        // Release the intermediate boxed interface (InterfaceIter took its own ref)
-        self.consume_rc_value(&mut boxed)?;
-
-        Ok(CompiledValue::owned(
-            wrapped,
-            types::I64,
-            runtime_iter_vir_ty,
         ))
     }
 

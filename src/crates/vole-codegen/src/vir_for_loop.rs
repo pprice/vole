@@ -455,9 +455,8 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Value, VirTypeId, bool)> {
         let elem_vir = self.try_substitute_type_v(elem_type);
         let iterable = self.compile_vir_expr(&vir_for.iterable)?;
-        let interface_vir = self.try_substitute_type_v(iterator_interface_type);
-        let boxed = self.box_interface_value_v(iterable, interface_vir)?;
-        let iter = self.wrap_interface_iter_v(boxed, elem_vir)?;
+        let iter =
+            self.box_and_wrap_as_runtime_iterator(iterable, iterator_interface_type, elem_type)?;
         self.enter_iter_rc_scope(&iter, None);
         Ok((iter.value, elem_vir, false))
     }
@@ -556,6 +555,24 @@ impl Cg<'_, '_, '_> {
         let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iface.value])?;
         self.consume_rc_value(&mut iface)?;
         Ok(self.make_runtime_iter_value_v(wrapped, elem_vir))
+    }
+
+    /// Box a value as `Iterator<T>` interface and wrap via `InterfaceIter` into
+    /// a `RuntimeIterator`.
+    ///
+    /// This is the unified path for creating `RuntimeIterator` values from
+    /// custom iterators and coercion sites. Handles interface boxing, wrapping,
+    /// and RC cleanup of the intermediate boxed interface.
+    pub(crate) fn box_and_wrap_as_runtime_iterator(
+        &mut self,
+        obj: super::types::CompiledValue,
+        interface_vir_ty: VirTypeId,
+        elem_vir_ty: VirTypeId,
+    ) -> CodegenResult<super::types::CompiledValue> {
+        let resolved_interface = self.try_substitute_type_v(interface_vir_ty);
+        let boxed = self.box_interface_value_v(obj, resolved_interface)?;
+        let elem_vir = self.try_substitute_type_v(elem_vir_ty);
+        self.wrap_interface_iter_v(boxed, elem_vir)
     }
 
     /// Convert a raw i64 value from iter_next to the element's Cranelift type (VirTypeId-native).

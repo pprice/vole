@@ -115,51 +115,6 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Box a custom Iterator<T> implementor as a RuntimeIterator.
-    ///
-    /// Boxes the class instance as an Iterator<T> interface, then wraps it via
-    /// InterfaceIter to create a RuntimeIterator that can be dispatched via
-    /// the standard runtime iterator methods (collect, map, filter, count, etc.).
-    pub(super) fn box_custom_iterator_to_runtime(
-        &mut self,
-        obj: &CompiledValue,
-        elem_type_id: TypeId,
-    ) -> CodegenResult<CompiledValue> {
-        // Look up the Iterator<T> interface type (already interned by sema)
-        let iterator_type_def = self
-            .name_table()
-            .well_known
-            .iterator_type_def
-            .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
-        let interface_type_id = self
-            .vir_type_table()
-            .lookup_interface_sema(iterator_type_def, &[elem_type_id])
-            .ok_or_else(|| {
-                CodegenError::internal_with_context(
-                    "Iterator<T> interface type not pre-interned by sema",
-                    format!("elem_type_id={elem_type_id:?}"),
-                )
-            })?;
-
-        // Box the class instance as Iterator<T>
-        let boxed = self.box_interface_value(*obj, interface_type_id)?;
-
-        // Wrap in RcIterator via InterfaceIter
-        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[boxed.value])?;
-        // Release the boxed interface ref (InterfaceIter took its own reference)
-        let mut boxed_iface = boxed;
-        self.consume_rc_value(&mut boxed_iface)?;
-
-        // Fall back to RuntimeIterator<i64> when the specific element type
-        // wasn't pre-interned (e.g. propagated class method monomorphs).
-        // All RuntimeIterator types share the same RC-pointer layout.
-        let runtime_iter_type_id = self
-            .vir_query_lookup_runtime_iterator(elem_type_id)
-            .or_else(|| self.vir_query_lookup_runtime_iterator(TypeId::I64))
-            .expect("RuntimeIterator<i64> must always be pre-interned");
-        Ok(self.compiled_owned_with_ty(wrapped, types::I64, runtime_iter_type_id))
-    }
-
     /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
     pub(super) fn runtime_iterator_method(
         &mut self,

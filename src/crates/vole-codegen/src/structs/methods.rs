@@ -498,15 +498,21 @@ impl Cg<'_, '_, '_> {
         // Handle custom Iterator<T> implementors: box as Iterator<T> interface,
         // wrap via InterfaceIter into RuntimeIterator, then dispatch the method.
         // Driven by sema's CoercionKind annotation — no type re-detection needed.
-        let iterator_wrap_elem_type = dispatch.receiver_coercion.map(|coercion| match coercion {
-            VirMethodReceiverCoercion::IteratorWrap { elem_type, .. } => {
-                let v = self.try_substitute_type_v(elem_type);
+        let iterator_wrap_info = dispatch.receiver_coercion.map(|coercion| match coercion {
+            VirMethodReceiverCoercion::IteratorWrap {
+                elem_type,
+                iterator_interface_type,
+                ..
+            } => (elem_type, iterator_interface_type),
+        });
+        if let Some((elem_vir_type, interface_vir_type)) = iterator_wrap_info {
+            let runtime_iter =
+                self.box_and_wrap_as_runtime_iterator(obj, interface_vir_type, elem_vir_type)?;
+            let elem_type = {
+                let v = self.try_substitute_type_v(elem_vir_type);
                 let table = self.vir_type_table();
                 table.vir_to_type_id(v)
-            }
-        });
-        if let Some(elem_type) = iterator_wrap_elem_type {
-            let runtime_iter = self.box_custom_iterator_to_runtime(&obj, elem_type)?;
+            };
             let table = self.vir_type_table();
             let return_type_hint = dispatch
                 .substituted_return_type

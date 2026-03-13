@@ -882,9 +882,11 @@ fn rewrite_method_dispatch_meta(
             crate::expr::VirMethodReceiverCoercion::IteratorWrap {
                 elem_type,
                 vir_elem_type,
+                iterator_interface_type,
             } => crate::expr::VirMethodReceiverCoercion::IteratorWrap {
                 elem_type: ctx.remap(elem_type),
                 vir_elem_type: ctx.remap(vir_elem_type),
+                iterator_interface_type: ctx.remap(iterator_interface_type),
             },
         }),
         resolved_method: meta
@@ -2191,6 +2193,7 @@ mod tests {
                             crate::expr::VirMethodReceiverCoercion::IteratorWrap {
                                 elem_type: type_id(10),
                                 vir_elem_type: param_id,
+                                iterator_interface_type: type_id(10),
                             },
                         ),
                         resolved_method: Some(crate::expr::VirResolvedMethod::Implemented {

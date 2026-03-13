@@ -691,6 +691,11 @@ pub enum VirMethodReceiverCoercion {
     IteratorWrap {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
+        /// The `Iterator<T>` interface type, pre-resolved by sema.
+        ///
+        /// Eliminates codegen's need to reconstruct `Iterator<elem_type>`
+        /// via well-known type def lookup.
+        iterator_interface_type: VirTypeId,
     },
 }
 
