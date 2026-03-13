@@ -1022,15 +1022,16 @@ fn derive_is_check_result(
             .map(|idx| IsCheckResult::CheckTag(idx as u32))
             .unwrap_or(IsCheckResult::AlwaysFalse),
 
-        // Optional lowers as a dedicated VIR type and does not preserve sema's
-        // union variant order, so we conservatively keep runtime checking when
-        // testing either possible optional variant.
+        // Optional types expand to [inner, nil] or [nil, inner] depending on
+        // sort key order.  Use `expand_optional_variants` to compute the
+        // correct tag index, matching the layout codegen uses.
         VirType::Optional { inner } => {
-            if tested_vir_ty == *inner || tested_vir_ty == VirTypeId::NIL {
-                IsCheckResult::CheckUnknown(tested_type, tested_vir_ty)
-            } else {
-                IsCheckResult::AlwaysFalse
-            }
+            let expanded = table.expand_optional_variants(*inner);
+            expanded
+                .iter()
+                .position(|&variant| variant == tested_vir_ty)
+                .map(|idx| IsCheckResult::CheckTag(idx as u32))
+                .unwrap_or(IsCheckResult::AlwaysFalse)
         }
 
         _ => {

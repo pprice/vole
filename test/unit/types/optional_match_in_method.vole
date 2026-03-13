@@ -1,0 +1,62 @@
+// Regression test: match on optional struct inside a method body
+// Previously caused SIGILL because the rederive pass converted CheckTag to
+// CheckUnknown for VirType::Optional scrutinees, producing wrong codegen
+// (i64 tag loads instead of i8, wrong tag constants).
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+struct Container {
+    value: i64,
+}
+
+extend Container {
+    func extract_from_optional() -> i64 {
+        let p: Point? = Point { x: 42, y: 99 }
+        let result = match p {
+            Point { x: a, y: b } => a + b
+            nil => -1
+        }
+        return result
+    }
+
+    func extract_nil_case() -> i64 {
+        let p: Point? = nil
+        let result = match p {
+            Point { x: a, y: b } => a + b
+            nil => -1
+        }
+        return result
+    }
+}
+
+class Wrapper {
+    data: i64,
+
+    func match_optional_struct() -> i64 {
+        let p: Point? = Point { x: 10, y: 20 }
+        return match p {
+            Point { x: a, y: b } => a * b
+            nil => 0
+        }
+    }
+}
+
+tests "optional match in method" {
+    test "extend method - some case" {
+        let c = Container { value: 0 }
+        assert(c.extract_from_optional() == 141)
+    }
+
+    test "extend method - nil case" {
+        let c = Container { value: 0 }
+        assert(c.extract_nil_case() == -1)
+    }
+
+    test "class method - some case" {
+        let w = Wrapper { data: 0 }
+        assert(w.match_optional_struct() == 200)
+    }
+}
