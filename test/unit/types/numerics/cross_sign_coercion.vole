@@ -1,0 +1,65 @@
+// Test cross-sign integer coercion (unsigned → signed widening).
+//
+// Regression test for: ireduce.i32 emitted instead of uextend.i32 when
+// assigning u8 to i32, because classify_numeric_coercion compared TypeId
+// indices instead of bit widths. (vol-v9lp)
+
+func u8_to_i32(x: u8) -> i32 {
+    let y: i32 = x
+    return y
+}
+
+func u8_to_i64(x: u8) -> i64 {
+    let y: i64 = x
+    return y
+}
+
+func u8_to_i16(x: u8) -> i16 {
+    let y: i16 = x
+    return y
+}
+
+func u16_to_i32(x: u16) -> i32 {
+    let y: i32 = x
+    return y
+}
+
+func u16_to_i64(x: u16) -> i64 {
+    let y: i64 = x
+    return y
+}
+
+func u32_to_i64(x: u32) -> i64 {
+    let y: i64 = x
+    return y
+}
+
+tests "cross-sign integer coercion" {
+    test "u8 to i32 widens correctly" {
+        assert(u8_to_i32(42_u8) == 42)
+        assert(u8_to_i32(255_u8) == 255)
+    }
+
+    test "u8 to i64 widens correctly" {
+        assert(u8_to_i64(0_u8) == 0)
+        assert(u8_to_i64(200_u8) == 200)
+    }
+
+    test "u8 to i16 widens correctly" {
+        assert(u8_to_i16(127_u8) == 127)
+        assert(u8_to_i16(255_u8) == 255)
+    }
+
+    test "u16 to i32 widens correctly" {
+        assert(u16_to_i32(1000_u16) == 1000)
+        assert(u16_to_i32(65535_u16) == 65535)
+    }
+
+    test "u16 to i64 widens correctly" {
+        assert(u16_to_i64(50000_u16) == 50000)
+    }
+
+    test "u32 to i64 widens correctly" {
+        assert(u32_to_i64(100000_u32) == 100000)
+    }
+}

@@ -255,12 +255,21 @@ fn classify_numeric_coercion(target: TypeId, source: TypeId) -> Option<CoerceKin
     let s_float = source.is_float();
 
     match (s_int, s_float, t_int, t_float) {
-        // int → int
+        // int → int: compare bit widths, not TypeId indices, because
+        // signed/unsigned types have non-contiguous indices (e.g. U8=6 > I32=3
+        // even though u8 is narrower than i32).
+        // Same-width cross-sign (u32→i32) needs no IR instruction — the
+        // Cranelift representation is identical, so return None to let the
+        // fallback path retag the value.
         (true, _, true, _) => {
-            if target.index() > source.index() {
+            let tw = target.integer_bit_width();
+            let sw = source.integer_bit_width();
+            if tw > sw {
                 Some(CoerceKind::IntExtend)
-            } else {
+            } else if tw < sw {
                 Some(CoerceKind::IntTruncate)
+            } else {
+                None
             }
         }
         // float → float
