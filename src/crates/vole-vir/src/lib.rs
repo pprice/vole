@@ -50,8 +50,8 @@ pub use expr::{
 };
 pub use func::{ReturnAbi, VirBody, VirFunction, VirTest};
 pub use implement_dispatch::{
-    VirExternalFuncInfo, VirFuncSignature, VirGenericExternalInfo, VirImplementDispatch,
-    VirMethodImplInfo, VirTypeMappingEntry, VirTypeMappingKind,
+    VirExternalFuncInfo, VirExternalImport, VirFuncSignature, VirGenericExternalInfo,
+    VirImplementDispatch, VirMethodImplInfo, VirTypeMappingEntry, VirTypeMappingKind,
 };
 pub use intrinsics::IntrinsicKey;
 pub use monomorph::{

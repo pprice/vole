@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
+use cranelift_module::Module;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::{Compiler, DeclareMode};
@@ -136,6 +137,9 @@ impl Compiler<'_> {
 
         let module_paths = self.analyzed.module_paths();
 
+        // Pass 0: Pre-declare external function imports (idempotent).
+        self.declare_external_imports();
+
         // Pass 1: Declare types and functions for all modules.
         //
         // Target module: Export linkage (will be defined).
@@ -192,6 +196,61 @@ impl Compiler<'_> {
     /// Use with compile_modules_only for batched compilation.
     pub fn compile_program_only(&mut self) -> CodegenResult<()> {
         self.compile_program_body()
+    }
+
+    /// Pre-declare all external function imports from `VirProgram.external_imports`.
+    ///
+    /// For each external function declared in `external("module:path") { ... }` blocks,
+    /// looks up the native function in the runtime's `NativeRegistry`, builds a
+    /// Cranelift signature, and declares it as an import in the JIT module.
+    ///
+    /// This runs before any function compilation (VIR or AST) so that native
+    /// imports are available for direct calls. Idempotent: Cranelift returns
+    /// existing `FuncId`s on re-declaration.
+    fn declare_external_imports(&mut self) {
+        use cranelift::prelude::AbiParam;
+        use vole_runtime::native_registry::NativeType;
+
+        let ptr_type = self.pointer_type;
+        for import in &self.analyzed.external_imports {
+            let Some(native_func) = self
+                .state
+                .native_registry
+                .lookup(&import.module_path, &import.func_name)
+            else {
+                continue;
+            };
+
+            // Look up the JIT symbol name from the function pointer.
+            let Some(symbol_name) = self.state.ptr_to_symbol.get(&(native_func.ptr as usize))
+            else {
+                continue;
+            };
+
+            // Build the Cranelift signature from the native function's signature.
+            let mut sig = self.jit.module.make_signature();
+            for param_type in &native_func.signature.params {
+                sig.params
+                    .push(AbiParam::new(crate::types::native_type_to_cranelift(
+                        param_type, ptr_type,
+                    )));
+            }
+            if native_func.signature.return_type != NativeType::Nil {
+                sig.returns
+                    .push(AbiParam::new(crate::types::native_type_to_cranelift(
+                        &native_func.signature.return_type,
+                        ptr_type,
+                    )));
+            }
+
+            // Declare the function as an import in the JIT module.
+            // This is idempotent — returns existing FuncId if already declared.
+            let _ = self.jit.module.declare_function(
+                symbol_name,
+                cranelift_module::Linkage::Import,
+                &sig,
+            );
+        }
     }
 
     /// First pass: declare all functions and tests, collect globals, finalize type metadata.
@@ -423,6 +482,10 @@ impl Compiler<'_> {
     /// Compile the main program body (functions, tests, classes, etc.)
     fn compile_program_body(&mut self) -> CodegenResult<()> {
         use vole_vir::entity_metadata::VirTypeDefKind;
+
+        // Pre-declare all external function imports from VirProgram.
+        // Idempotent: JIT returns existing FuncIds on re-declaration.
+        self.declare_external_imports();
 
         // Pre-pass: Register all type names from VirEntityMetadata so they're
         // available for field type resolution (classes can reference each other).
@@ -660,6 +723,11 @@ impl Compiler<'_> {
             ?module_paths,
             "compile_module_functions: processing module paths"
         );
+
+        // Pass 0: Pre-declare all external function imports from VirProgram.
+        // This ensures native function imports are available in the JIT module
+        // before any compilation (VIR or AST) begins.
+        self.declare_external_imports();
 
         // Pass 1: Declare all functions and finalize types across all modules
         self.declare_module_types_and_functions(&module_paths)?;

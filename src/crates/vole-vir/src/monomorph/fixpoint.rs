@@ -647,6 +647,7 @@ mod tests {
             vir_instance_index: FxHashMap::default(),
             entity_metadata: crate::entity_metadata::VirEntityMetadata::new(),
             implement_dispatch: crate::implement_dispatch::VirImplementDispatch::new(),
+            external_imports: Vec::new(),
             free_monomorphs: FxHashMap::default(),
             free_monomorphs_by_key: FxHashMap::default(),
             class_method_monomorphs: FxHashMap::default(),

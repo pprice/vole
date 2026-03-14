@@ -17,7 +17,8 @@ use vole_identity::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorph
 use crate::entity_metadata::VirEntityMetadata;
 use crate::func::{VirBody, VirFunction, VirTest};
 use crate::implement_dispatch::{
-    VirExternalFuncInfo, VirGenericExternalInfo, VirImplementDispatch, VirMethodImplInfo,
+    VirExternalFuncInfo, VirExternalImport, VirGenericExternalInfo, VirImplementDispatch,
+    VirMethodImplInfo,
 };
 use crate::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
@@ -162,6 +163,14 @@ pub struct VirProgram {
     /// during VIR lowering from sema's `ImplementRegistry`.  Replaces
     /// codegen's `ImplementView` as the lookup source.
     pub implement_dispatch: VirImplementDispatch,
+
+    /// Pre-resolved external function imports for codegen pre-declaration.
+    ///
+    /// Collected during VIR lowering from all `external("module:path") { ... }`
+    /// blocks across the program and imported modules. Codegen iterates these
+    /// at startup to declare native imports in the JIT module before any
+    /// compilation begins, replacing lazy discovery during AST compilation.
+    pub external_imports: Vec<VirExternalImport>,
 
     /// VIR-native free-function monomorph instances.
     ///

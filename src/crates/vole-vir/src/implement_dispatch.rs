@@ -11,6 +11,26 @@ use rustc_hash::FxHashMap;
 use vole_identity::{NameId, Symbol, TypeDefId, TypeId};
 
 // ---------------------------------------------------------------------------
+// External function import (pre-declaration for codegen)
+// ---------------------------------------------------------------------------
+
+/// A pre-resolved external function import.
+///
+/// Collected during VIR lowering from `external("module:path") { ... }` blocks.
+/// Contains the module path and function name strings needed for codegen to
+/// pre-declare native imports before any compilation begins.
+///
+/// This replaces lazy discovery: codegen iterates `external_imports` at
+/// startup instead of discovering external functions during AST compilation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VirExternalImport {
+    /// The native module path (e.g. "std:io", "vole:builtins").
+    pub module_path: String,
+    /// The native function name (e.g. "read_line", "flush").
+    pub func_name: String,
+}
+
+// ---------------------------------------------------------------------------
 // External function binding
 // ---------------------------------------------------------------------------
 

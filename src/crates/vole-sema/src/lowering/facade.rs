@@ -66,7 +66,7 @@ use crate::vir_lower::type_translate::sweep_unmapped_type_ids;
 use vole_frontend::{Interner, Program};
 use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, Span};
 use vole_vir::entity_metadata::VirEntityMetadata;
-use vole_vir::implement_dispatch::VirImplementDispatch;
+use vole_vir::implement_dispatch::{VirExternalImport, VirImplementDispatch};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirFunction, VirProgram};
 
@@ -137,6 +137,7 @@ where
     // Build per-file metadata (NOT cached — these depend on shared registries
     // that grow as more modules are analyzed).
     let implement_dispatch = build_implement_dispatch(implements, interner, names);
+    let external_imports = collect_external_imports(implements, names);
     let (module_constants, module_exports) = collect_module_metadata(type_arena);
 
     // Try to use the cached module VIR functions, type table, full
@@ -266,6 +267,7 @@ where
         type_table: &mut type_table,
         module_vir: ModuleVirOutput {
             implement_dispatch,
+            external_imports,
             module_constants,
             module_exports,
             module_vir_functions,
@@ -445,6 +447,8 @@ fn apply_cached_interners(
 pub struct ModuleVirOutput {
     /// Implement-dispatch metadata from the implement registry.
     pub implement_dispatch: VirImplementDispatch,
+    /// Pre-resolved external function imports for codegen pre-declaration.
+    pub external_imports: Vec<VirExternalImport>,
     /// Per-module compile-time constant values.
     pub module_constants: FxHashMap<(ModuleId, NameId), vole_identity::ConstantValue>,
     /// Module type exports.
@@ -615,6 +619,7 @@ where
     // Destructure module_vir up front so we can move fields independently.
     let ModuleVirOutput {
         implement_dispatch: module_implement_dispatch,
+        external_imports,
         module_constants,
         module_exports,
         module_vir_functions,
@@ -995,6 +1000,7 @@ where
         vir_module_bindings,
         vir_module_module_bindings,
         module_implement_dispatch,
+        external_imports,
         module_constants,
         module_exports,
         monomorph_info,
@@ -1038,6 +1044,7 @@ struct AssembleVirProgramArgs<'a> {
         >,
     >,
     module_implement_dispatch: VirImplementDispatch,
+    external_imports: Vec<VirExternalImport>,
     module_constants: FxHashMap<(ModuleId, NameId), vole_identity::ConstantValue>,
     module_exports:
         FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>,
@@ -1068,6 +1075,7 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         vir_module_bindings,
         vir_module_module_bindings,
         module_implement_dispatch,
+        external_imports,
         module_constants,
         module_exports,
         monomorph_info,
@@ -1106,6 +1114,7 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         vir_instance_index: early_instance_index,
         entity_metadata,
         implement_dispatch: module_implement_dispatch,
+        external_imports,
         free_monomorphs: monomorph_info.free_monomorphs,
         free_monomorphs_by_key: monomorph_info.free_monomorphs_by_key,
         class_method_monomorphs: monomorph_info.class_method_monomorphs,
@@ -1253,6 +1262,52 @@ fn build_implement_dispatch(
     }
 
     dispatch
+}
+
+/// Collect all external function imports from sema's `ImplementRegistry`.
+///
+/// Extracts `(module_path, func_name)` pairs from:
+/// - Top-level external function entries (`external("mod") { func name() }`)
+/// - Implement-block method entries with external bindings
+///
+/// These are stored in `VirProgram.external_imports` so codegen can
+/// pre-declare all native imports before any compilation begins.
+fn collect_external_imports(
+    registry: &ImplementRegistry,
+    names: &NameTable,
+) -> Vec<VirExternalImport> {
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut imports = Vec::new();
+
+    // Collect from top-level external functions.
+    for (_name, info) in registry.external_func_entries() {
+        let module_path = names.last_segment_str(info.module_path).unwrap_or_default();
+        let func_name = names.last_segment_str(info.native_name).unwrap_or_default();
+        let key = (module_path.clone(), func_name.clone());
+        if seen.insert(key) {
+            imports.push(VirExternalImport {
+                module_path,
+                func_name,
+            });
+        }
+    }
+
+    // Collect from implement-block method entries with external bindings.
+    for (_key, method_impl) in registry.method_entries() {
+        if let Some(ei) = method_impl.external_info {
+            let module_path = names.last_segment_str(ei.module_path).unwrap_or_default();
+            let func_name = names.last_segment_str(ei.native_name).unwrap_or_default();
+            let key = (module_path.clone(), func_name.clone());
+            if seen.insert(key) {
+                imports.push(VirExternalImport {
+                    module_path,
+                    func_name,
+                });
+            }
+        }
+    }
+
+    imports
 }
 
 fn convert_generic_info(
