@@ -1542,6 +1542,12 @@ impl Compiler<'_> {
     /// From those roots, walk `VirDirect` edges transitively and collect
     /// target indices that must be declared/compiled.
     fn vir_monomorph_indices(&self) -> Vec<usize> {
+        // When vir_monomorph_base is usize::MAX, no VIR monomorphs exist and
+        // the entire graph traversal (including recursive test body walking)
+        // can be skipped.  ~71% of test files have zero monomorphs.
+        if self.analyzed.vir_monomorph_base == usize::MAX {
+            return Vec::new();
+        }
         collect_reachable_vir_direct_targets(&self.analyzed.functions, &self.analyzed.tests)
     }
 
@@ -1620,9 +1626,10 @@ impl Compiler<'_> {
             // via compile_function_inner_with_vir, which passes substitutions
             // and uses the proper compilation environment.
             if let Some(mangled_name_id) = vir_func.mangled_name_id
-                && self.analyzed.free_monomorphs.contains_key(&mangled_name_id) {
-                    continue;
-                }
+                && self.analyzed.free_monomorphs.contains_key(&mangled_name_id)
+            {
+                continue;
+            }
 
             // Determine the module of the original generic template.
             // During the module phase, skip functions that belong to the
