@@ -541,6 +541,10 @@ pub struct PopulateImplementBlockEntriesArgs<'a> {
 /// resolving each to a `(TypeDefId, self_type_id, instance_methods, static_methods)`
 /// tuple stored as a `VirImplementBlockEntry`.  Codegen iterates these instead
 /// of walking AST `Decl::Implement` nodes.
+///
+/// This is a wrapper that delegates to `populate_implement_block_entries_file`
+/// (main program + test blocks) and `populate_implement_block_entries_modules`
+/// (imported module programs).
 pub fn populate_implement_block_entries(args: PopulateImplementBlockEntriesArgs<'_>) {
     let PopulateImplementBlockEntriesArgs {
         program,
@@ -557,6 +561,43 @@ pub fn populate_implement_block_entries(args: PopulateImplementBlockEntriesArgs<
     let registry = entities.as_entity_registry();
     let name_to_type_id = build_name_to_type_id_map(registry, type_arena);
 
+    populate_implement_block_entries_file(
+        meta,
+        program,
+        interner,
+        names,
+        entities,
+        type_arena,
+        module_id,
+        &name_to_type_id,
+    );
+
+    populate_implement_block_entries_modules(
+        meta,
+        module_programs,
+        modules_with_errors,
+        names,
+        entities,
+        type_arena,
+        &name_to_type_id,
+    );
+}
+
+/// Populate implement block entries from the main program file.
+///
+/// Processes implement blocks in the program's top-level declarations and
+/// recursively within `tests { }` blocks.
+#[expect(clippy::too_many_arguments)]
+fn populate_implement_block_entries_file(
+    meta: &mut VirEntityMetadata,
+    program: &Program,
+    interner: &Interner,
+    names: &NameTable,
+    entities: &dyn LoweringEntityLookup,
+    type_arena: &TypeArena,
+    module_id: ModuleId,
+    name_to_type_id: &FxHashMap<NameId, TypeId>,
+) {
     // Main program implement blocks
     for decl in &program.declarations {
         let Decl::Implement(impl_block) = decl else {
@@ -572,7 +613,7 @@ pub fn populate_implement_block_entries(args: PopulateImplementBlockEntriesArgs<
             continue;
         };
         let Some(self_type_id) =
-            resolve_self_type_id(type_def_id, entities, &name_to_type_id, type_arena)
+            resolve_self_type_id(type_def_id, entities, name_to_type_id, type_arena)
         else {
             continue;
         };
@@ -596,11 +637,24 @@ pub fn populate_implement_block_entries(args: PopulateImplementBlockEntriesArgs<
         entities,
         type_arena,
         module_id,
-        &name_to_type_id,
+        name_to_type_id,
         meta,
     );
+}
 
-    // Module implement blocks
+/// Populate implement block entries from imported module programs.
+///
+/// Iterates each module's implement blocks, skipping modules with errors.
+#[expect(clippy::too_many_arguments)]
+fn populate_implement_block_entries_modules(
+    meta: &mut VirEntityMetadata,
+    module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
+    modules_with_errors: &HashSet<String>,
+    names: &NameTable,
+    entities: &dyn LoweringEntityLookup,
+    type_arena: &TypeArena,
+    name_to_type_id: &FxHashMap<NameId, TypeId>,
+) {
     for (module_path, (mod_program, mod_interner)) in module_programs {
         if modules_with_errors.contains(module_path.as_str()) {
             continue;
@@ -623,7 +677,7 @@ pub fn populate_implement_block_entries(args: PopulateImplementBlockEntriesArgs<
                 continue;
             };
             let Some(self_type_id) =
-                resolve_self_type_id(type_def_id, entities, &name_to_type_id, type_arena)
+                resolve_self_type_id(type_def_id, entities, name_to_type_id, type_arena)
             else {
                 continue;
             };
