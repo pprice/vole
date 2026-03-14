@@ -23,6 +23,7 @@ pub mod monomorph;
 pub mod numeric_model;
 pub mod program;
 pub mod refs;
+pub mod remap;
 pub mod stmt;
 pub mod type_table;
 pub mod types;
@@ -67,6 +68,7 @@ pub use numeric_model::{
 };
 pub use program::{SubstituteFallbackFn, VirProgram};
 pub use refs::VirRef;
+pub use remap::remap_entity_metadata;
 pub use stmt::{
     AssignTarget, DestructureTupleKind, LetStorageHint, ReturnConvention, VirDestructureElement,
     VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,

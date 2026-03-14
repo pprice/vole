@@ -1267,6 +1267,37 @@ impl VirEntityMetadata {
 }
 
 // ---------------------------------------------------------------------------
+// Crate-internal mutable access for VirTypeId remapping
+// ---------------------------------------------------------------------------
+
+impl VirEntityMetadata {
+    /// Mutable access to type definitions (for remapping).
+    pub(crate) fn type_defs_mut(&mut self) -> &mut FxHashMap<TypeDefId, VirTypeDef> {
+        &mut self.type_defs
+    }
+
+    /// Mutable access to field definitions (for remapping).
+    pub(crate) fn field_defs_mut(&mut self) -> &mut FxHashMap<FieldId, VirFieldDef> {
+        &mut self.field_defs
+    }
+
+    /// Mutable access to method definitions (for remapping).
+    pub(crate) fn method_defs_mut(&mut self) -> &mut FxHashMap<MethodId, VirMethodDef> {
+        &mut self.method_defs
+    }
+
+    /// Mutable access to global definitions (for remapping).
+    pub(crate) fn global_defs_mut(&mut self) -> &mut FxHashMap<GlobalId, VirGlobalDef> {
+        &mut self.global_defs
+    }
+
+    /// Mutable access to function definitions (for remapping).
+    pub(crate) fn function_defs_mut(&mut self) -> &mut FxHashMap<FunctionId, VirFunctionDef> {
+        &mut self.function_defs
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
 
