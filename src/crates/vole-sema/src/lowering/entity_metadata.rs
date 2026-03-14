@@ -103,6 +103,79 @@ pub fn build_entity_metadata(
     meta
 }
 
+/// Extend cached `VirEntityMetadata` with entities added after the cache
+/// was built.
+///
+/// The entity registry grows across test file compilations (test-scoped
+/// types, functions, etc.).  After restoring a cached `VirEntityMetadata`,
+/// this function adds entries for any entities not already present.
+///
+/// Uses the same populate logic as `build_entity_metadata`: type
+/// translations are idempotent (VirTypeTable deduplicates), and HashMap
+/// inserts overwrite existing entries harmlessly.
+pub fn extend_entity_metadata(
+    meta: &mut VirEntityMetadata,
+    entities: &impl LoweringEntityLookup,
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+    interner: &mut Interner,
+    name_table: &NameTable,
+) {
+    let registry = entities.as_entity_registry();
+
+    // Only process entities beyond what the cache already contains.
+    // Entity IDs are sequential indices, so we can skip the prefix that
+    // the cache already covers.
+    let td_start = meta.type_def_count();
+    let all_type_defs = registry.all_type_defs();
+    let all_field_defs = registry.all_field_defs();
+    if td_start < all_type_defs.len() {
+        populate_type_defs(
+            &all_type_defs[td_start..],
+            all_field_defs,
+            type_arena,
+            type_table,
+            meta,
+        );
+        populate_short_name_map(&all_type_defs[td_start..], name_table, meta);
+    }
+
+    let fd_start = meta.field_def_count();
+    if fd_start < all_field_defs.len() {
+        populate_field_defs(
+            &all_field_defs[fd_start..],
+            type_arena,
+            type_table,
+            meta,
+            interner,
+            name_table,
+        );
+    }
+
+    let all_method_defs = registry.all_method_defs();
+    let md_start = meta.method_def_count();
+    if md_start < all_method_defs.len() {
+        populate_method_defs(&all_method_defs[md_start..], type_arena, type_table, meta);
+    }
+
+    let all_func_defs = registry.all_function_defs();
+    let func_start = meta.function_def_count();
+    if func_start < all_func_defs.len() {
+        populate_function_defs(&all_func_defs[func_start..], type_arena, type_table, meta);
+    }
+
+    let all_global_defs = registry.all_global_defs();
+    let gd_start = meta.global_def_count();
+    if gd_start < all_global_defs.len() {
+        populate_global_defs(&all_global_defs[gd_start..], type_arena, type_table, meta);
+    }
+
+    // Mirror any new function_by_name entries from the registry.
+    for (&name_id, &func_id) in registry.function_by_name_map() {
+        meta.insert_function_by_name(name_id, func_id);
+    }
+}
+
 /// Convert a sema `TypeDefKind` to a VIR `VirTypeDefKind`.
 fn convert_type_def_kind(kind: TypeDefKind) -> VirTypeDefKind {
     match kind {

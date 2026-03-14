@@ -18,8 +18,8 @@ use rustc_hash::FxHashMap;
 use super::annotation_inits::lower_annotation_inits;
 use super::entity_metadata::{
     PopulateImplementBlockEntriesArgs, build_entity_metadata, build_name_to_type_id_map,
-    populate_implement_block_entries, populate_implement_block_entries_file,
-    populate_implement_block_entries_modules,
+    extend_entity_metadata, populate_implement_block_entries,
+    populate_implement_block_entries_file, populate_implement_block_entries_modules,
 };
 use super::field_default_inits::{
     LowerFieldDefaultInitsArgs, LowerModuleFieldDefaultInitsArgs, lower_field_default_inits,
@@ -839,9 +839,11 @@ where
     let monomorph_info = populate_monomorph_info(entities, type_arena, type_table);
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
     let entity_metadata = if let Some(cached_meta) = cached_entity_metadata {
-        // Cache hit: skip build_entity_metadata entirely.
-        // Only populate file-specific implement block entries.
+        // Cache hit: extend with entities registered after the cache was
+        // built (e.g. test-scoped types/functions), then populate
+        // file-specific implement block entries.
         let mut meta = cached_meta;
+        extend_entity_metadata(&mut meta, entities, type_arena, type_table, interner, names);
         let registry = entities.as_entity_registry();
         let name_to_type_id = build_name_to_type_id_map(registry, type_arena);
         populate_implement_block_entries_file(
