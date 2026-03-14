@@ -46,7 +46,9 @@ use super::method_default_inits::{
 use super::module_bindings::{
     extract_cross_module_bindings, lower_module_bindings, lower_module_module_bindings,
 };
-use super::monomorph_info::populate_monomorph_info;
+use super::monomorph_info::{
+    PopulatedMonomorphInfo, populate_monomorph_info, remap_monomorph_info,
+};
 use super::test_bodies::lower_test_bodies;
 use super::test_scoped_type_methods::lower_test_scoped_type_methods;
 use super::type_method_monomorph::{
@@ -137,84 +139,116 @@ where
     let implement_dispatch = build_implement_dispatch(implements, interner, names);
     let (module_constants, module_exports) = collect_module_metadata(type_arena);
 
-    // Try to use the cached module VIR functions, type table, and full
-    // entity metadata (skipping build_entity_metadata on cache hit).
-    let (module_vir_functions, mut type_table, cached_entity_metadata) = if let Some(cached) =
-        try_use_cache(&module_vir_cache, &module_paths)
-    {
-        // Restore module interners from cache so codegen can resolve
-        // symbols referenced by cached VIR functions.
-        apply_cached_interners(&mut module_programs, &cached.module_interners);
+    // Try to use the cached module VIR functions, type table, full
+    // entity metadata, and monomorph info (skipping build_entity_metadata
+    // and populate_monomorph_info on cache hit).
+    let (module_vir_functions, mut type_table, cached_entity_metadata, cached_monomorph_info) =
+        if let Some(cached) = try_use_cache(&module_vir_cache, &module_paths) {
+            // Restore module interners from cache so codegen can resolve
+            // symbols referenced by cached VIR functions.
+            apply_cached_interners(&mut module_programs, &cached.module_interners);
 
-        // Merge cached module type table entries into this file's sema
-        // type table so both module and file-specific types are available.
-        let mut type_table = vir_type_table;
-        let merge_mapping = type_table.merge_from_additive(&cached.type_table);
+            // Merge cached module type table entries into this file's sema
+            // type table so both module and file-specific types are available.
+            let mut type_table = vir_type_table;
+            let merge_mapping = type_table.merge_from_additive(&cached.type_table);
 
-        // Remap VirTypeIds in cached module VIR functions and entity
-        // metadata if the merge placed any entries at different positions.
-        let needs_remap = merge_mapping.iter().any(|(&old, &new)| old != new);
-        let module_vir_functions = if needs_remap {
-            let remap_ctx = vole_vir::monomorph::rewrite::RewriteCtx::new(merge_mapping.clone());
-            cached
-                .module_vir_functions
-                .iter()
-                .map(|f| vole_vir::monomorph::rewrite::rewrite_function(f, &remap_ctx))
-                .collect()
+            // Remap VirTypeIds in cached module VIR functions, entity
+            // metadata, and monomorph info if the merge shifted IDs.
+            let needs_remap = merge_mapping.iter().any(|(&old, &new)| old != new);
+            let module_vir_functions = if needs_remap {
+                let remap_ctx =
+                    vole_vir::monomorph::rewrite::RewriteCtx::new(merge_mapping.clone());
+                cached
+                    .module_vir_functions
+                    .iter()
+                    .map(|f| vole_vir::monomorph::rewrite::rewrite_function(f, &remap_ctx))
+                    .collect()
+            } else {
+                cached.module_vir_functions
+            };
+
+            let entity_metadata = if needs_remap {
+                vole_vir::remap_entity_metadata(&cached.entity_metadata, &merge_mapping)
+            } else {
+                cached.entity_metadata
+            };
+
+            // Use cached monomorph info only if the entity registry hasn't
+            // grown (test-scoped generics can register new monomorphs).
+            let current_counts = MonomorphCounts::from_entities(entities);
+            let monomorph_info = if current_counts == cached.monomorph_counts {
+                if needs_remap {
+                    Some(remap_monomorph_info(&cached.monomorph_info, &merge_mapping))
+                } else {
+                    Some(cached.monomorph_info)
+                }
+            } else {
+                tracing::debug!("monomorph info cache miss: counts changed");
+                None
+            };
+
+            (
+                module_vir_functions,
+                type_table,
+                Some(entity_metadata),
+                monomorph_info,
+            )
         } else {
-            cached.module_vir_functions
+            // Cache miss: run module VIR lowering (mutates module_programs
+            // in place — their Interners gain symbols used by VIR functions).
+            let mut type_table = vir_type_table;
+            let module_vir_functions = lower_module_vir_functions(LowerModuleVirArgs {
+                names,
+                entities,
+                type_arena,
+                node_map,
+                module_programs: &mut module_programs,
+                modules_with_errors,
+                type_table: &mut type_table,
+                implements,
+            });
+
+            // Build full entity metadata and populate module implement blocks.
+            // The entity metadata is cached for subsequent files, which skip
+            // build_entity_metadata entirely.
+            let mut entity_metadata =
+                build_entity_metadata(entities, type_arena, &mut type_table, interner, names);
+            let registry = entities.as_entity_registry();
+            let name_to_type_id = build_name_to_type_id_map(registry, type_arena);
+            populate_implement_block_entries_modules(
+                &mut entity_metadata,
+                &module_programs,
+                modules_with_errors,
+                names,
+                entities,
+                type_arena,
+                &name_to_type_id,
+            );
+
+            // Populate monomorph info now (before type_table snapshot) so
+            // the interned VirType entries are included in the cached table.
+            let monomorph_info = populate_monomorph_info(entities, type_arena, &mut type_table);
+            let monomorph_counts = MonomorphCounts::from_entities(entities);
+
+            // Store full entity metadata and monomorph info in cache.
+            store_cache(
+                &module_vir_cache,
+                &module_vir_functions,
+                &type_table,
+                &module_programs,
+                entity_metadata.clone(),
+                monomorph_info.clone(),
+                monomorph_counts,
+                module_paths,
+            );
+            (
+                module_vir_functions,
+                type_table,
+                Some(entity_metadata),
+                Some(monomorph_info),
+            )
         };
-
-        let entity_metadata = if needs_remap {
-            vole_vir::remap_entity_metadata(&cached.entity_metadata, &merge_mapping)
-        } else {
-            cached.entity_metadata
-        };
-
-        (module_vir_functions, type_table, Some(entity_metadata))
-    } else {
-        // Cache miss: run module VIR lowering (mutates module_programs
-        // in place — their Interners gain symbols used by VIR functions).
-        let mut type_table = vir_type_table;
-        let module_vir_functions = lower_module_vir_functions(LowerModuleVirArgs {
-            names,
-            entities,
-            type_arena,
-            node_map,
-            module_programs: &mut module_programs,
-            modules_with_errors,
-            type_table: &mut type_table,
-            implements,
-        });
-
-        // Build full entity metadata and populate module implement blocks.
-        // The entity metadata is cached for subsequent files, which skip
-        // build_entity_metadata entirely.
-        let mut entity_metadata =
-            build_entity_metadata(entities, type_arena, &mut type_table, interner, names);
-        let registry = entities.as_entity_registry();
-        let name_to_type_id = build_name_to_type_id_map(registry, type_arena);
-        populate_implement_block_entries_modules(
-            &mut entity_metadata,
-            &module_programs,
-            modules_with_errors,
-            names,
-            entities,
-            type_arena,
-            &name_to_type_id,
-        );
-
-        // Store full entity metadata in cache for subsequent files.
-        store_cache(
-            &module_vir_cache,
-            &module_vir_functions,
-            &type_table,
-            &module_programs,
-            entity_metadata.clone(),
-            module_paths,
-        );
-        (module_vir_functions, type_table, Some(entity_metadata))
-    };
 
     // Phase F: file-specific passes.
     lower_file_vir(LowerFileVirArgs {
@@ -238,7 +272,33 @@ where
         },
         implements,
         cached_entity_metadata,
+        cached_monomorph_info,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Monomorph counts (for cache invalidation)
+// ---------------------------------------------------------------------------
+
+/// Snapshot of entity registry monomorph cache sizes.
+///
+/// Used to detect whether new monomorphs were registered since the VIR
+/// cache was built (e.g. by test-scoped generics in a later file).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct MonomorphCounts {
+    free: usize,
+    class_method: usize,
+    static_method: usize,
+}
+
+impl MonomorphCounts {
+    fn from_entities(entities: &impl LoweringEntityLookup) -> Self {
+        Self {
+            free: entities.monomorph_keyed_instances().len(),
+            class_method: entities.class_method_monomorph_keyed_instances().len(),
+            static_method: entities.static_method_monomorph_keyed_instances().len(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +337,22 @@ pub struct CachedModuleVir {
     /// `build_entity_metadata()` entirely and only runs
     /// `populate_implement_block_entries_file()` for file-specific entries.
     entity_metadata: VirEntityMetadata,
+    /// Populated monomorph info (free, class-method, static-method maps).
+    ///
+    /// `populate_monomorph_info()` reads from the entity registry and
+    /// translates type keys via `VirTypeTable`.  On cache hit, the type
+    /// table snapshot already contains the interned types, so the cached
+    /// result is cloned (and VirTypeId-remapped if the merge shifted IDs).
+    ///
+    /// Because test-scoped generics can register new monomorphs between
+    /// files, we store the entity registry's monomorph counts at cache
+    /// time.  If they grow, we fall back to recomputing.
+    monomorph_info: PopulatedMonomorphInfo,
+    /// Entity registry monomorph counts at cache-store time.
+    ///
+    /// Used to detect whether new monomorphs were registered since the
+    /// cache was built (e.g. by test-scoped generics in a later file).
+    monomorph_counts: MonomorphCounts,
     /// Sorted module paths — the cache key for invalidation.
     module_paths: Vec<String>,
 }
@@ -305,6 +381,8 @@ fn try_use_cache(
         type_table: cached.type_table.clone(),
         module_interners: cached.module_interners.clone(),
         entity_metadata: cached.entity_metadata.clone(),
+        monomorph_info: cached.monomorph_info.clone(),
+        monomorph_counts: cached.monomorph_counts,
         module_paths: cached.module_paths.clone(),
     })
 }
@@ -316,6 +394,8 @@ fn store_cache(
     type_table: &VirTypeTable,
     module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
     entity_metadata: VirEntityMetadata,
+    monomorph_info: PopulatedMonomorphInfo,
+    monomorph_counts: MonomorphCounts,
     module_paths: Vec<String>,
 ) {
     if let Some(cache_rc) = cache_cell.as_ref() {
@@ -328,6 +408,8 @@ fn store_cache(
             type_table: type_table.clone(),
             module_interners,
             entity_metadata,
+            monomorph_info,
+            monomorph_counts,
             module_paths,
         });
     }
@@ -421,6 +503,11 @@ where
     /// `populate_implement_block_entries_file()` runs to add file-specific
     /// implement blocks to the pre-built metadata.
     cached_entity_metadata: Option<VirEntityMetadata>,
+    /// Cached monomorph info from a previous compilation.
+    ///
+    /// When `Some`, `populate_monomorph_info()` is skipped — the cached
+    /// result (already VirTypeId-remapped) is used directly.
+    cached_monomorph_info: Option<PopulatedMonomorphInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -522,6 +609,7 @@ where
         module_vir,
         implements,
         cached_entity_metadata,
+        cached_monomorph_info,
     } = args;
 
     // Destructure module_vir up front so we can move fields independently.
@@ -836,7 +924,11 @@ where
     // Entity metadata and monomorph info
     // -----------------------------------------------------------------------
 
-    let monomorph_info = populate_monomorph_info(entities, type_arena, type_table);
+    let monomorph_info = if let Some(cached) = cached_monomorph_info {
+        cached
+    } else {
+        populate_monomorph_info(entities, type_arena, type_table)
+    };
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
     let entity_metadata = if let Some(cached_meta) = cached_entity_metadata {
         // Cache hit: extend with entities registered after the cache was
@@ -949,7 +1041,7 @@ struct AssembleVirProgramArgs<'a> {
     module_constants: FxHashMap<(ModuleId, NameId), vole_identity::ConstantValue>,
     module_exports:
         FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>,
-    monomorph_info: super::monomorph_info::PopulatedMonomorphInfo,
+    monomorph_info: PopulatedMonomorphInfo,
     entity_metadata: VirEntityMetadata,
     module_interners: FxHashMap<String, Rc<Interner>>,
     early_instance_index: vole_vir::InstanceIndex,
