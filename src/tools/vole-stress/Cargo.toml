@@ -6,10 +6,10 @@ description = "Generate synthetic Vole codebases for benchmarking"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-rand = "0.8"
+rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "1.0"
 vole-fmt = { path = "../../crates/vole-fmt" }
 
 [build-dependencies]

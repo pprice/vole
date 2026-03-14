@@ -152,7 +152,7 @@ pub extern "C" fn rng_float(rng_ptr: *mut RcRng) -> f64 {
     if rng_ptr.is_null() {
         return 0.0;
     }
-    unsafe { (*rng_ptr).rng.r#gen::<f64>() }
+    unsafe { (*rng_ptr).rng.random::<f64>() }
 }
 
 /// Convert a random float in [0.0, 1.0) to an i64 in [min, max] (inclusive).
@@ -186,7 +186,7 @@ pub extern "C" fn rng_int(rng_ptr: *mut RcRng, min: i64, max: i64) -> i64 {
     if rng_ptr.is_null() || min > max {
         return min;
     }
-    let f = unsafe { (*rng_ptr).rng.r#gen::<f64>() };
+    let f = unsafe { (*rng_ptr).rng.random::<f64>() };
     int_from_float(f, min, max)
 }
 
@@ -197,7 +197,7 @@ pub extern "C" fn rng_coin(rng_ptr: *mut RcRng) -> bool {
     if rng_ptr.is_null() {
         return false;
     }
-    unsafe { (*rng_ptr).rng.r#gen::<f64>() < 0.5 }
+    unsafe { (*rng_ptr).rng.random::<f64>() < 0.5 }
 }
 
 // =============================================================================

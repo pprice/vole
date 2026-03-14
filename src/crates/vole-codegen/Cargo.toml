@@ -11,11 +11,11 @@ vole-runtime = { path = "../vole-runtime" }
 vole-vir = { path = "../vole-vir" }
 
 # Cranelift for JIT compilation
-cranelift = "0.127"
-cranelift-jit = "0.127"
-cranelift-module = "0.127"
-cranelift-codegen = "0.127"
-cranelift-native = "0.127"
+cranelift = "0.129"
+cranelift-jit = "0.129"
+cranelift-module = "0.129"
+cranelift-codegen = "0.129"
+cranelift-native = "0.129"
 
 # Error handling and diagnostics
 miette = "7.4"

@@ -168,7 +168,7 @@ mod platform {
             }
 
             let mut action: libc::sigaction = std::mem::zeroed();
-            action.sa_sigaction = segfault_handler as usize;
+            action.sa_sigaction = segfault_handler as *const () as usize;
             action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
 
             libc::sigaction(libc::SIGSEGV, &action, std::ptr::null_mut());
