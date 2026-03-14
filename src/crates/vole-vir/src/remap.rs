@@ -13,6 +13,10 @@ use vole_identity::VirTypeId;
 use crate::entity_metadata::{
     VirEntityMetadata, VirFunctionDef, VirImplementation, VirMethodDef, VirTypeDef,
 };
+use crate::monomorph::instance::{
+    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
+};
+use vole_identity::{ClassMethodMonomorphKey, MonomorphKey, NameId, StaticMethodMonomorphKey};
 
 /// Look up a VirTypeId in the mapping, falling back to identity.
 fn remap(mapping: &FxHashMap<VirTypeId, VirTypeId>, vir_ty: VirTypeId) -> VirTypeId {
@@ -128,6 +132,106 @@ fn remap_function_def(fd: &mut VirFunctionDef, mapping: &FxHashMap<VirTypeId, Vi
     fd.return_type = remap(mapping, fd.return_type);
     if let Some(ref mut gen_ty) = fd.generator_element_type {
         *gen_ty = remap(mapping, *gen_ty);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Monomorph info remapping
+// ---------------------------------------------------------------------------
+
+/// Remap VirTypeId fields in a `VirMonomorphInfo`.
+///
+/// Remaps `vir_func_type` and values of `vir_substitutions`.
+/// Non-VirTypeId fields (NameIds, instance_id, sema FunctionType,
+/// sema substitutions) are cloned verbatim.
+pub fn remap_vir_monomorph_info(
+    info: &VirMonomorphInfo,
+    mapping: &FxHashMap<VirTypeId, VirTypeId>,
+) -> VirMonomorphInfo {
+    let mut result = info.clone();
+    result.vir_func_type = remap(mapping, result.vir_func_type);
+    remap_vir_substitutions(&mut result.vir_substitutions, mapping);
+    result
+}
+
+/// Remap VirTypeId fields in a `VirClassMethodMonomorphInfo`.
+///
+/// Remaps `vir_func_type`, `vir_self_type`, and values of
+/// `vir_substitutions`. Non-VirTypeId fields are cloned verbatim.
+pub fn remap_class_method_monomorph_info(
+    info: &VirClassMethodMonomorphInfo,
+    mapping: &FxHashMap<VirTypeId, VirTypeId>,
+) -> VirClassMethodMonomorphInfo {
+    let mut result = info.clone();
+    result.vir_func_type = remap(mapping, result.vir_func_type);
+    result.vir_self_type = remap(mapping, result.vir_self_type);
+    remap_vir_substitutions(&mut result.vir_substitutions, mapping);
+    result
+}
+
+/// Remap VirTypeId fields in a `VirStaticMethodMonomorphInfo`.
+///
+/// Remaps `vir_func_type` and values of `vir_substitutions`.
+/// Non-VirTypeId fields are cloned verbatim.
+pub fn remap_static_method_monomorph_info(
+    info: &VirStaticMethodMonomorphInfo,
+    mapping: &FxHashMap<VirTypeId, VirTypeId>,
+) -> VirStaticMethodMonomorphInfo {
+    let mut result = info.clone();
+    result.vir_func_type = remap(mapping, result.vir_func_type);
+    remap_vir_substitutions(&mut result.vir_substitutions, mapping);
+    result
+}
+
+/// Remap VirTypeId values in a `MonomorphKey`.
+pub fn remap_monomorph_key(
+    key: &MonomorphKey,
+    mapping: &FxHashMap<VirTypeId, VirTypeId>,
+) -> MonomorphKey {
+    MonomorphKey::new(
+        key.func_name,
+        key.type_keys.iter().map(|&t| remap(mapping, t)).collect(),
+    )
+}
+
+/// Remap VirTypeId values in a `ClassMethodMonomorphKey`.
+pub fn remap_class_method_monomorph_key(
+    key: &ClassMethodMonomorphKey,
+    mapping: &FxHashMap<VirTypeId, VirTypeId>,
+) -> ClassMethodMonomorphKey {
+    ClassMethodMonomorphKey::new(
+        key.class_name,
+        key.method_name,
+        key.type_keys.iter().map(|&t| remap(mapping, t)).collect(),
+    )
+}
+
+/// Remap VirTypeId values in a `StaticMethodMonomorphKey`.
+pub fn remap_static_method_monomorph_key(
+    key: &StaticMethodMonomorphKey,
+    mapping: &FxHashMap<VirTypeId, VirTypeId>,
+) -> StaticMethodMonomorphKey {
+    StaticMethodMonomorphKey::new(
+        key.class_name,
+        key.method_name,
+        key.class_type_keys
+            .iter()
+            .map(|&t| remap(mapping, t))
+            .collect(),
+        key.method_type_keys
+            .iter()
+            .map(|&t| remap(mapping, t))
+            .collect(),
+    )
+}
+
+/// Remap VirTypeId values in a substitutions map in-place.
+fn remap_vir_substitutions(
+    subs: &mut FxHashMap<NameId, VirTypeId>,
+    mapping: &FxHashMap<VirTypeId, VirTypeId>,
+) {
+    for vir_ty in subs.values_mut() {
+        *vir_ty = remap(mapping, *vir_ty);
     }
 }
 
@@ -549,5 +653,181 @@ mod tests {
         let func = remapped.get_function_def(make_function_id(1)).unwrap();
         assert_eq!(func.param_types, vec![VirTypeId::F64]);
         assert_eq!(func.return_type, VirTypeId::STRING);
+    }
+
+    // -----------------------------------------------------------------------
+    // Monomorph info remap tests
+    // -----------------------------------------------------------------------
+
+    fn make_vir_monomorph_info(
+        vir_func_type: VirTypeId,
+        subs: Vec<(NameId, VirTypeId)>,
+    ) -> VirMonomorphInfo {
+        VirMonomorphInfo {
+            original_name: make_name_id(1),
+            mangled_name: make_name_id(2),
+            instance_id: 0,
+            func_type: FunctionType {
+                is_closure: false,
+                params_id: TypeIdVec::new(),
+                return_type_id: TypeId::from_raw(0),
+            },
+            vir_func_type,
+            substitutions: FxHashMap::default(),
+            vir_substitutions: subs.into_iter().collect(),
+        }
+    }
+
+    #[test]
+    fn remap_vir_monomorph_info_func_type() {
+        let info = make_vir_monomorph_info(VirTypeId::I64, vec![]);
+        let remapped = remap_vir_monomorph_info(&info, &test_mapping());
+        assert_eq!(remapped.vir_func_type, VirTypeId::STRING);
+        // Non-VirTypeId fields unchanged
+        assert_eq!(remapped.original_name, make_name_id(1));
+        assert_eq!(remapped.mangled_name, make_name_id(2));
+        assert_eq!(remapped.instance_id, 0);
+    }
+
+    #[test]
+    fn remap_vir_monomorph_info_substitutions() {
+        let info = make_vir_monomorph_info(
+            VirTypeId::VOID,
+            vec![
+                (make_name_id(10), VirTypeId::I64),
+                (make_name_id(11), VirTypeId::BOOL),
+            ],
+        );
+        let remapped = remap_vir_monomorph_info(&info, &test_mapping());
+        assert_eq!(
+            remapped.vir_substitutions[&make_name_id(10)],
+            VirTypeId::STRING
+        );
+        assert_eq!(
+            remapped.vir_substitutions[&make_name_id(11)],
+            VirTypeId::F64
+        );
+        // sema substitutions unchanged
+        assert!(remapped.substitutions.is_empty());
+    }
+
+    #[test]
+    fn remap_vir_monomorph_info_unmapped_identity() {
+        let info = make_vir_monomorph_info(VirTypeId::F32, vec![]);
+        let remapped = remap_vir_monomorph_info(&info, &test_mapping());
+        assert_eq!(remapped.vir_func_type, VirTypeId::F32);
+    }
+
+    #[test]
+    fn remap_class_method_monomorph_info_all_fields() {
+        let info = VirClassMethodMonomorphInfo {
+            class_name: make_name_id(10),
+            method_name: make_name_id(11),
+            mangled_name: make_name_id(12),
+            instance_id: 1,
+            func_type: FunctionType {
+                is_closure: false,
+                params_id: TypeIdVec::new(),
+                return_type_id: TypeId::from_raw(0),
+            },
+            vir_func_type: VirTypeId::I64,
+            substitutions: FxHashMap::default(),
+            vir_substitutions: [(make_name_id(20), VirTypeId::BOOL)].into_iter().collect(),
+            external_info: None,
+            self_type: TypeId::from_raw(0),
+            vir_self_type: VirTypeId::STRING,
+        };
+        let remapped = remap_class_method_monomorph_info(&info, &test_mapping());
+        // VirTypeId fields remapped
+        assert_eq!(remapped.vir_func_type, VirTypeId::STRING);
+        assert_eq!(remapped.vir_self_type, VirTypeId::I64);
+        assert_eq!(
+            remapped.vir_substitutions[&make_name_id(20)],
+            VirTypeId::F64
+        );
+        // Non-VirTypeId fields unchanged
+        assert_eq!(remapped.class_name, make_name_id(10));
+        assert_eq!(remapped.method_name, make_name_id(11));
+        assert_eq!(remapped.self_type, TypeId::from_raw(0));
+    }
+
+    #[test]
+    fn remap_static_method_monomorph_info_all_fields() {
+        let info = VirStaticMethodMonomorphInfo {
+            class_name: make_name_id(20),
+            method_name: make_name_id(21),
+            mangled_name: make_name_id(22),
+            instance_id: 3,
+            func_type: FunctionType {
+                is_closure: false,
+                params_id: TypeIdVec::new(),
+                return_type_id: TypeId::from_raw(0),
+            },
+            vir_func_type: VirTypeId::BOOL,
+            substitutions: FxHashMap::default(),
+            vir_substitutions: [(make_name_id(30), VirTypeId::I64)].into_iter().collect(),
+        };
+        let remapped = remap_static_method_monomorph_info(&info, &test_mapping());
+        assert_eq!(remapped.vir_func_type, VirTypeId::F64);
+        assert_eq!(
+            remapped.vir_substitutions[&make_name_id(30)],
+            VirTypeId::STRING
+        );
+        // Non-VirTypeId fields unchanged
+        assert_eq!(remapped.class_name, make_name_id(20));
+        assert_eq!(remapped.instance_id, 3);
+    }
+
+    #[test]
+    fn remap_monomorph_key_type_keys() {
+        let key = MonomorphKey::new(
+            make_name_id(1),
+            vec![VirTypeId::I64, VirTypeId::BOOL, VirTypeId::F32],
+        );
+        let remapped = remap_monomorph_key(&key, &test_mapping());
+        assert_eq!(remapped.func_name, make_name_id(1));
+        assert_eq!(
+            remapped.type_keys,
+            vec![VirTypeId::STRING, VirTypeId::F64, VirTypeId::F32]
+        );
+    }
+
+    #[test]
+    fn remap_class_method_monomorph_key_type_keys() {
+        let key = ClassMethodMonomorphKey::new(
+            make_name_id(1),
+            make_name_id(2),
+            vec![VirTypeId::I64, VirTypeId::STRING],
+        );
+        let remapped = remap_class_method_monomorph_key(&key, &test_mapping());
+        assert_eq!(remapped.class_name, make_name_id(1));
+        assert_eq!(remapped.method_name, make_name_id(2));
+        assert_eq!(remapped.type_keys, vec![VirTypeId::STRING, VirTypeId::I64]);
+    }
+
+    #[test]
+    fn remap_static_method_monomorph_key_type_keys() {
+        let key = StaticMethodMonomorphKey::new(
+            make_name_id(1),
+            make_name_id(2),
+            vec![VirTypeId::I64],
+            vec![VirTypeId::BOOL, VirTypeId::STRING],
+        );
+        let remapped = remap_static_method_monomorph_key(&key, &test_mapping());
+        assert_eq!(remapped.class_name, make_name_id(1));
+        assert_eq!(remapped.method_name, make_name_id(2));
+        assert_eq!(remapped.class_type_keys, vec![VirTypeId::STRING]);
+        assert_eq!(
+            remapped.method_type_keys,
+            vec![VirTypeId::F64, VirTypeId::I64]
+        );
+    }
+
+    #[test]
+    fn remap_monomorph_key_empty_mapping() {
+        let key = MonomorphKey::new(make_name_id(1), vec![VirTypeId::I64]);
+        let empty: FxHashMap<VirTypeId, VirTypeId> = FxHashMap::default();
+        let remapped = remap_monomorph_key(&key, &empty);
+        assert_eq!(remapped.type_keys, vec![VirTypeId::I64]);
     }
 }

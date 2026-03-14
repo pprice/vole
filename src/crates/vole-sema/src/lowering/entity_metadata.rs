@@ -421,7 +421,7 @@ fn populate_impl_type_names(
 ///
 /// This allows `resolve_self_type_id` to find the sema TypeId for a
 /// primitive TypeDef without walking the AST's `TypeExprKind`.
-fn build_name_to_type_id_map(
+pub fn build_name_to_type_id_map(
     registry: &crate::EntityRegistry,
     type_arena: &TypeArena,
 ) -> FxHashMap<NameId, TypeId> {
@@ -588,7 +588,7 @@ pub fn populate_implement_block_entries(args: PopulateImplementBlockEntriesArgs<
 /// Processes implement blocks in the program's top-level declarations and
 /// recursively within `tests { }` blocks.
 #[expect(clippy::too_many_arguments)]
-fn populate_implement_block_entries_file(
+pub fn populate_implement_block_entries_file(
     meta: &mut VirEntityMetadata,
     program: &Program,
     interner: &Interner,
@@ -646,7 +646,7 @@ fn populate_implement_block_entries_file(
 ///
 /// Iterates each module's implement blocks, skipping modules with errors.
 #[expect(clippy::too_many_arguments)]
-fn populate_implement_block_entries_modules(
+pub fn populate_implement_block_entries_modules(
     meta: &mut VirEntityMetadata,
     module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
     modules_with_errors: &HashSet<String>,

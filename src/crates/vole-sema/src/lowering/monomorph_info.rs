@@ -23,6 +23,11 @@ use vole_vir::VirExternalMethodInfo;
 use vole_vir::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
 };
+use vole_vir::remap::{
+    remap_class_method_monomorph_info, remap_class_method_monomorph_key, remap_monomorph_key,
+    remap_static_method_monomorph_info, remap_static_method_monomorph_key,
+    remap_vir_monomorph_info,
+};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::VirType;
 
@@ -55,6 +60,62 @@ pub struct PopulatedMonomorphInfo {
     pub free_monomorphs_by_key: FxHashMap<MonomorphKey, NameId>,
     pub class_method_monomorphs: FxHashMap<ClassMethodMonomorphKey, VirClassMethodMonomorphInfo>,
     pub static_method_monomorphs: FxHashMap<StaticMethodMonomorphKey, VirStaticMethodMonomorphInfo>,
+}
+
+/// Clone a `PopulatedMonomorphInfo` with all `VirTypeId` fields remapped.
+///
+/// Walks every monomorph info entry and key, replacing each `VirTypeId`
+/// according to the provided mapping. Unmapped IDs are left unchanged
+/// (identity fallback). Non-`VirTypeId` fields (NameIds, sema TypeIds,
+/// instance_ids, FunctionTypes, etc.) are cloned verbatim.
+pub fn remap_monomorph_info(
+    info: &PopulatedMonomorphInfo,
+    mapping: &FxHashMap<VirTypeId, VirTypeId>,
+) -> PopulatedMonomorphInfo {
+    // Free monomorphs: values contain VirTypeId fields, keys are NameId (no remap needed).
+    let free_monomorphs = info
+        .free_monomorphs
+        .iter()
+        .map(|(&name, entry)| (name, remap_vir_monomorph_info(entry, mapping)))
+        .collect();
+
+    // Free monomorphs by key: keys contain VirTypeId type_keys, values are NameId.
+    let free_monomorphs_by_key = info
+        .free_monomorphs_by_key
+        .iter()
+        .map(|(key, &name)| (remap_monomorph_key(key, mapping), name))
+        .collect();
+
+    // Class method monomorphs: both keys and values contain VirTypeId fields.
+    let class_method_monomorphs = info
+        .class_method_monomorphs
+        .iter()
+        .map(|(key, entry)| {
+            (
+                remap_class_method_monomorph_key(key, mapping),
+                remap_class_method_monomorph_info(entry, mapping),
+            )
+        })
+        .collect();
+
+    // Static method monomorphs: both keys and values contain VirTypeId fields.
+    let static_method_monomorphs = info
+        .static_method_monomorphs
+        .iter()
+        .map(|(key, entry)| {
+            (
+                remap_static_method_monomorph_key(key, mapping),
+                remap_static_method_monomorph_info(entry, mapping),
+            )
+        })
+        .collect();
+
+    PopulatedMonomorphInfo {
+        free_monomorphs,
+        free_monomorphs_by_key,
+        class_method_monomorphs,
+        static_method_monomorphs,
+    }
 }
 
 // ============================================================================
@@ -299,4 +360,178 @@ fn translate_substitutions(
             (name, vir_type_id)
         })
         .collect()
+}
+
+// ============================================================================
+// Unit tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vole_identity::{FunctionType, TypeId, TypeIdVec};
+
+    fn name(n: u32) -> NameId {
+        NameId::new_for_test(n)
+    }
+
+    fn test_mapping() -> FxHashMap<VirTypeId, VirTypeId> {
+        let mut m = FxHashMap::default();
+        m.insert(VirTypeId::I64, VirTypeId::STRING);
+        m.insert(VirTypeId::STRING, VirTypeId::I64);
+        m.insert(VirTypeId::BOOL, VirTypeId::F64);
+        m
+    }
+
+    fn dummy_func_type() -> FunctionType {
+        FunctionType {
+            is_closure: false,
+            params_id: TypeIdVec::new(),
+            return_type_id: TypeId::from_raw(0),
+        }
+    }
+
+    #[test]
+    fn remap_monomorph_info_free_monomorphs() {
+        let mut free = FxHashMap::default();
+        free.insert(
+            name(1),
+            VirMonomorphInfo {
+                original_name: name(10),
+                mangled_name: name(1),
+                instance_id: 0,
+                func_type: dummy_func_type(),
+                vir_func_type: VirTypeId::I64,
+                substitutions: FxHashMap::default(),
+                vir_substitutions: [(name(20), VirTypeId::BOOL)].into_iter().collect(),
+            },
+        );
+
+        let info = PopulatedMonomorphInfo {
+            free_monomorphs: free,
+            free_monomorphs_by_key: FxHashMap::default(),
+            class_method_monomorphs: FxHashMap::default(),
+            static_method_monomorphs: FxHashMap::default(),
+        };
+
+        let remapped = remap_monomorph_info(&info, &test_mapping());
+        let entry = &remapped.free_monomorphs[&name(1)];
+        assert_eq!(entry.vir_func_type, VirTypeId::STRING);
+        assert_eq!(entry.vir_substitutions[&name(20)], VirTypeId::F64);
+        // sema fields unchanged
+        assert_eq!(entry.original_name, name(10));
+    }
+
+    #[test]
+    fn remap_monomorph_info_free_by_key() {
+        let key = MonomorphKey::new(name(1), vec![VirTypeId::I64, VirTypeId::BOOL]);
+        let mut by_key = FxHashMap::default();
+        by_key.insert(key, name(100));
+
+        let info = PopulatedMonomorphInfo {
+            free_monomorphs: FxHashMap::default(),
+            free_monomorphs_by_key: by_key,
+            class_method_monomorphs: FxHashMap::default(),
+            static_method_monomorphs: FxHashMap::default(),
+        };
+
+        let remapped = remap_monomorph_info(&info, &test_mapping());
+        let expected_key = MonomorphKey::new(name(1), vec![VirTypeId::STRING, VirTypeId::F64]);
+        assert_eq!(remapped.free_monomorphs_by_key[&expected_key], name(100));
+        assert_eq!(remapped.free_monomorphs_by_key.len(), 1);
+    }
+
+    #[test]
+    fn remap_monomorph_info_class_methods() {
+        let key = ClassMethodMonomorphKey::new(name(1), name(2), vec![VirTypeId::I64]);
+        let mut class = FxHashMap::default();
+        class.insert(
+            key,
+            VirClassMethodMonomorphInfo {
+                class_name: name(1),
+                method_name: name(2),
+                mangled_name: name(3),
+                instance_id: 0,
+                func_type: dummy_func_type(),
+                vir_func_type: VirTypeId::BOOL,
+                substitutions: FxHashMap::default(),
+                vir_substitutions: FxHashMap::default(),
+                external_info: None,
+                self_type: TypeId::from_raw(0),
+                vir_self_type: VirTypeId::STRING,
+            },
+        );
+
+        let info = PopulatedMonomorphInfo {
+            free_monomorphs: FxHashMap::default(),
+            free_monomorphs_by_key: FxHashMap::default(),
+            class_method_monomorphs: class,
+            static_method_monomorphs: FxHashMap::default(),
+        };
+
+        let remapped = remap_monomorph_info(&info, &test_mapping());
+        let expected_key = ClassMethodMonomorphKey::new(name(1), name(2), vec![VirTypeId::STRING]);
+        let entry = &remapped.class_method_monomorphs[&expected_key];
+        assert_eq!(entry.vir_func_type, VirTypeId::F64);
+        assert_eq!(entry.vir_self_type, VirTypeId::I64);
+    }
+
+    #[test]
+    fn remap_monomorph_info_static_methods() {
+        let key = StaticMethodMonomorphKey::new(
+            name(1),
+            name(2),
+            vec![VirTypeId::STRING],
+            vec![VirTypeId::BOOL],
+        );
+        let mut static_ = FxHashMap::default();
+        static_.insert(
+            key,
+            VirStaticMethodMonomorphInfo {
+                class_name: name(1),
+                method_name: name(2),
+                mangled_name: name(3),
+                instance_id: 0,
+                func_type: dummy_func_type(),
+                vir_func_type: VirTypeId::I64,
+                substitutions: FxHashMap::default(),
+                vir_substitutions: [(name(30), VirTypeId::STRING)].into_iter().collect(),
+            },
+        );
+
+        let info = PopulatedMonomorphInfo {
+            free_monomorphs: FxHashMap::default(),
+            free_monomorphs_by_key: FxHashMap::default(),
+            class_method_monomorphs: FxHashMap::default(),
+            static_method_monomorphs: static_,
+        };
+
+        let remapped = remap_monomorph_info(&info, &test_mapping());
+        let expected_key = StaticMethodMonomorphKey::new(
+            name(1),
+            name(2),
+            vec![VirTypeId::I64],
+            vec![VirTypeId::F64],
+        );
+        let entry = &remapped.static_method_monomorphs[&expected_key];
+        assert_eq!(entry.vir_func_type, VirTypeId::STRING);
+        assert_eq!(entry.vir_substitutions[&name(30)], VirTypeId::I64);
+    }
+
+    #[test]
+    fn remap_monomorph_info_empty_is_identity() {
+        let info = PopulatedMonomorphInfo {
+            free_monomorphs: FxHashMap::default(),
+            free_monomorphs_by_key: FxHashMap::default(),
+            class_method_monomorphs: FxHashMap::default(),
+            static_method_monomorphs: FxHashMap::default(),
+        };
+
+        let empty: FxHashMap<VirTypeId, VirTypeId> = FxHashMap::default();
+        let remapped = remap_monomorph_info(&info, &empty);
+        assert!(remapped.free_monomorphs.is_empty());
+        assert!(remapped.free_monomorphs_by_key.is_empty());
+        assert!(remapped.class_method_monomorphs.is_empty());
+        assert!(remapped.static_method_monomorphs.is_empty());
+    }
 }

@@ -17,7 +17,9 @@ use rustc_hash::FxHashMap;
 
 use super::annotation_inits::lower_annotation_inits;
 use super::entity_metadata::{
-    PopulateImplementBlockEntriesArgs, build_entity_metadata, populate_implement_block_entries,
+    PopulateImplementBlockEntriesArgs, build_entity_metadata, build_name_to_type_id_map,
+    populate_implement_block_entries, populate_implement_block_entries_file,
+    populate_implement_block_entries_modules,
 };
 use super::field_default_inits::{
     LowerFieldDefaultInitsArgs, LowerModuleFieldDefaultInitsArgs, lower_field_default_inits,
@@ -61,6 +63,7 @@ use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::type_translate::sweep_unmapped_type_ids;
 use vole_frontend::{Interner, Program};
 use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, Span};
+use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::implement_dispatch::VirImplementDispatch;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirFunction, VirProgram};
@@ -134,57 +137,84 @@ where
     let implement_dispatch = build_implement_dispatch(implements, interner, names);
     let (module_constants, module_exports) = collect_module_metadata(type_arena);
 
-    // Try to use the cached module VIR functions and type table.
-    let (module_vir_functions, mut type_table) =
-        if let Some(cached) = try_use_cache(&module_vir_cache, &module_paths) {
-            // Restore module interners from cache so codegen can resolve
-            // symbols referenced by cached VIR functions.
-            apply_cached_interners(&mut module_programs, &cached.module_interners);
+    // Try to use the cached module VIR functions, type table, and full
+    // entity metadata (skipping build_entity_metadata on cache hit).
+    let (module_vir_functions, mut type_table, cached_entity_metadata) = if let Some(cached) =
+        try_use_cache(&module_vir_cache, &module_paths)
+    {
+        // Restore module interners from cache so codegen can resolve
+        // symbols referenced by cached VIR functions.
+        apply_cached_interners(&mut module_programs, &cached.module_interners);
 
-            // Merge cached module type table entries into this file's sema
-            // type table so both module and file-specific types are available.
-            let mut type_table = vir_type_table;
-            let merge_mapping = type_table.merge_from_additive(&cached.type_table);
+        // Merge cached module type table entries into this file's sema
+        // type table so both module and file-specific types are available.
+        let mut type_table = vir_type_table;
+        let merge_mapping = type_table.merge_from_additive(&cached.type_table);
 
-            // Remap VirTypeIds in cached module VIR functions if the merge
-            // placed any entries at different positions.
-            let needs_remap = merge_mapping.iter().any(|(&old, &new)| old != new);
-            let module_vir_functions = if needs_remap {
-                let remap_ctx = vole_vir::monomorph::rewrite::RewriteCtx::new(merge_mapping);
-                cached
-                    .module_vir_functions
-                    .iter()
-                    .map(|f| vole_vir::monomorph::rewrite::rewrite_function(f, &remap_ctx))
-                    .collect()
-            } else {
-                cached.module_vir_functions
-            };
-            (module_vir_functions, type_table)
+        // Remap VirTypeIds in cached module VIR functions and entity
+        // metadata if the merge placed any entries at different positions.
+        let needs_remap = merge_mapping.iter().any(|(&old, &new)| old != new);
+        let module_vir_functions = if needs_remap {
+            let remap_ctx = vole_vir::monomorph::rewrite::RewriteCtx::new(merge_mapping.clone());
+            cached
+                .module_vir_functions
+                .iter()
+                .map(|f| vole_vir::monomorph::rewrite::rewrite_function(f, &remap_ctx))
+                .collect()
         } else {
-            // Cache miss: run module VIR lowering (mutates module_programs
-            // in place — their Interners gain symbols used by VIR functions).
-            let mut type_table = vir_type_table;
-            let module_vir_functions = lower_module_vir_functions(LowerModuleVirArgs {
-                names,
-                entities,
-                type_arena,
-                node_map,
-                module_programs: &mut module_programs,
-                modules_with_errors,
-                type_table: &mut type_table,
-                implements,
-            });
-
-            // Store in cache for subsequent files.
-            store_cache(
-                &module_vir_cache,
-                &module_vir_functions,
-                &type_table,
-                &module_programs,
-                module_paths,
-            );
-            (module_vir_functions, type_table)
+            cached.module_vir_functions
         };
+
+        let entity_metadata = if needs_remap {
+            vole_vir::remap_entity_metadata(&cached.entity_metadata, &merge_mapping)
+        } else {
+            cached.entity_metadata
+        };
+
+        (module_vir_functions, type_table, Some(entity_metadata))
+    } else {
+        // Cache miss: run module VIR lowering (mutates module_programs
+        // in place — their Interners gain symbols used by VIR functions).
+        let mut type_table = vir_type_table;
+        let module_vir_functions = lower_module_vir_functions(LowerModuleVirArgs {
+            names,
+            entities,
+            type_arena,
+            node_map,
+            module_programs: &mut module_programs,
+            modules_with_errors,
+            type_table: &mut type_table,
+            implements,
+        });
+
+        // Build full entity metadata and populate module implement blocks.
+        // The entity metadata is cached for subsequent files, which skip
+        // build_entity_metadata entirely.
+        let mut entity_metadata =
+            build_entity_metadata(entities, type_arena, &mut type_table, interner, names);
+        let registry = entities.as_entity_registry();
+        let name_to_type_id = build_name_to_type_id_map(registry, type_arena);
+        populate_implement_block_entries_modules(
+            &mut entity_metadata,
+            &module_programs,
+            modules_with_errors,
+            names,
+            entities,
+            type_arena,
+            &name_to_type_id,
+        );
+
+        // Store full entity metadata in cache for subsequent files.
+        store_cache(
+            &module_vir_cache,
+            &module_vir_functions,
+            &type_table,
+            &module_programs,
+            entity_metadata.clone(),
+            module_paths,
+        );
+        (module_vir_functions, type_table, Some(entity_metadata))
+    };
 
     // Phase F: file-specific passes.
     lower_file_vir(LowerFileVirArgs {
@@ -207,6 +237,7 @@ where
             module_vir_functions,
         },
         implements,
+        cached_entity_metadata,
     })
 }
 
@@ -217,8 +248,13 @@ where
 /// Cached module VIR lowering results for reuse across test file compilations.
 ///
 /// Stores the module VIR functions (the expensive lowering result), a snapshot
-/// of the `VirTypeTable`, and the module Interners (which contain symbols
-/// referenced by the VIR functions).
+/// of the `VirTypeTable`, the module Interners (which contain symbols
+/// referenced by the VIR functions), and the full `VirEntityMetadata`
+/// (including module-level implement blocks).
+///
+/// On cache hit, `build_entity_metadata()` is skipped entirely — only the
+/// file-specific `populate_implement_block_entries_file()` runs against the
+/// pre-built metadata.
 ///
 /// Metadata that depends on shared registries (implement dispatch, module
 /// constants, module exports) is NOT cached because those registries grow as
@@ -234,6 +270,13 @@ pub struct CachedModuleVir {
     /// Interners.  On cache hit, we inject these into the current file's
     /// `module_programs` so codegen can resolve those symbols.
     module_interners: FxHashMap<String, Rc<Interner>>,
+    /// Full VIR entity metadata including module-level implement blocks.
+    ///
+    /// On cache hit, this is cloned (and remapped if type table positions
+    /// shifted) then passed to `lower_file_vir`, which skips
+    /// `build_entity_metadata()` entirely and only runs
+    /// `populate_implement_block_entries_file()` for file-specific entries.
+    entity_metadata: VirEntityMetadata,
     /// Sorted module paths — the cache key for invalidation.
     module_paths: Vec<String>,
 }
@@ -261,6 +304,7 @@ fn try_use_cache(
         module_vir_functions: cached.module_vir_functions.clone(),
         type_table: cached.type_table.clone(),
         module_interners: cached.module_interners.clone(),
+        entity_metadata: cached.entity_metadata.clone(),
         module_paths: cached.module_paths.clone(),
     })
 }
@@ -271,6 +315,7 @@ fn store_cache(
     module_vir_functions: &[VirFunction],
     type_table: &VirTypeTable,
     module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
+    entity_metadata: VirEntityMetadata,
     module_paths: Vec<String>,
 ) {
     if let Some(cache_rc) = cache_cell.as_ref() {
@@ -282,6 +327,7 @@ fn store_cache(
             module_vir_functions: module_vir_functions.to_vec(),
             type_table: type_table.clone(),
             module_interners,
+            entity_metadata,
             module_paths,
         });
     }
@@ -369,6 +415,12 @@ where
     type_table: &'a mut VirTypeTable,
     module_vir: ModuleVirOutput,
     implements: &'a ImplementRegistry,
+    /// Cached entity metadata from a previous compilation.
+    ///
+    /// When `Some`, `build_entity_metadata()` is skipped entirely — only
+    /// `populate_implement_block_entries_file()` runs to add file-specific
+    /// implement blocks to the pre-built metadata.
+    cached_entity_metadata: Option<VirEntityMetadata>,
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +521,7 @@ where
         type_table,
         module_vir,
         implements,
+        cached_entity_metadata,
     } = args;
 
     // Destructure module_vir up front so we can move fields independently.
@@ -785,20 +838,40 @@ where
 
     let monomorph_info = populate_monomorph_info(entities, type_arena, type_table);
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
-    let mut entity_metadata =
-        build_entity_metadata(entities, type_arena, type_table, interner, names);
-    // Populate implement block entries (mixed pass: file + module portions).
-    populate_implement_block_entries(PopulateImplementBlockEntriesArgs {
-        program,
-        interner,
-        names,
-        entities,
-        type_arena,
-        module_id,
-        module_programs: &module_programs,
-        modules_with_errors,
-        meta: &mut entity_metadata,
-    });
+    let entity_metadata = if let Some(cached_meta) = cached_entity_metadata {
+        // Cache hit: skip build_entity_metadata entirely.
+        // Only populate file-specific implement block entries.
+        let mut meta = cached_meta;
+        let registry = entities.as_entity_registry();
+        let name_to_type_id = build_name_to_type_id_map(registry, type_arena);
+        populate_implement_block_entries_file(
+            &mut meta,
+            program,
+            interner,
+            names,
+            entities,
+            type_arena,
+            module_id,
+            &name_to_type_id,
+        );
+        meta
+    } else {
+        // No cache — build entity metadata and populate all implement
+        // block entries (file + modules).
+        let mut meta = build_entity_metadata(entities, type_arena, type_table, interner, names);
+        populate_implement_block_entries(PopulateImplementBlockEntriesArgs {
+            program,
+            interner,
+            names,
+            entities,
+            type_arena,
+            module_id,
+            module_programs: &module_programs,
+            modules_with_errors,
+            meta: &mut meta,
+        });
+        meta
+    };
 
     // Collect module interners from module_programs for VirProgram.
     let module_interners: FxHashMap<String, Rc<Interner>> = module_programs
@@ -875,7 +948,7 @@ struct AssembleVirProgramArgs<'a> {
     module_exports:
         FxHashMap<vole_identity::TypeId, (ModuleId, Vec<(NameId, vole_identity::TypeId)>)>,
     monomorph_info: super::monomorph_info::PopulatedMonomorphInfo,
-    entity_metadata: vole_vir::entity_metadata::VirEntityMetadata,
+    entity_metadata: VirEntityMetadata,
     module_interners: FxHashMap<String, Rc<Interner>>,
     early_instance_index: vole_vir::InstanceIndex,
     type_table: &'a mut VirTypeTable,

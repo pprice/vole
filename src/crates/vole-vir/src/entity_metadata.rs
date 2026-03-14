@@ -661,6 +661,28 @@ impl VirEntityMetadata {
             .or_default()
             .push(entry);
     }
+
+    /// Set all module implement block entries at once.
+    ///
+    /// Used on cache hit to inject cached module implement block entries
+    /// into freshly-built entity metadata, skipping the expensive
+    /// `populate_implement_block_entries_modules` pass.
+    pub fn set_module_implement_blocks(
+        &mut self,
+        blocks: FxHashMap<String, Vec<VirImplementBlockEntry>>,
+    ) {
+        self.module_implement_blocks = blocks;
+    }
+
+    /// Take ownership of the module implement block entries.
+    ///
+    /// Returns the full map, leaving an empty map in its place.
+    /// Used to extract module implement blocks for caching without cloning.
+    pub fn take_module_implement_blocks(
+        &mut self,
+    ) -> FxHashMap<String, Vec<VirImplementBlockEntry>> {
+        std::mem::take(&mut self.module_implement_blocks)
+    }
 }
 
 // ---------------------------------------------------------------------------

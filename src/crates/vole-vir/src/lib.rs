@@ -68,7 +68,11 @@ pub use numeric_model::{
 };
 pub use program::{SubstituteFallbackFn, VirProgram};
 pub use refs::VirRef;
-pub use remap::remap_entity_metadata;
+pub use remap::{
+    remap_class_method_monomorph_info, remap_class_method_monomorph_key, remap_entity_metadata,
+    remap_monomorph_key, remap_static_method_monomorph_info, remap_static_method_monomorph_key,
+    remap_vir_monomorph_info,
+};
 pub use stmt::{
     AssignTarget, DestructureTupleKind, LetStorageHint, ReturnConvention, VirDestructureElement,
     VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
