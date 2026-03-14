@@ -49,6 +49,7 @@ pub fn populate_monomorph_info(
 }
 
 /// Output of the monomorph info population pass.
+#[derive(Clone)]
 pub struct PopulatedMonomorphInfo {
     pub free_monomorphs: FxHashMap<NameId, VirMonomorphInfo>,
     pub free_monomorphs_by_key: FxHashMap<MonomorphKey, NameId>,
