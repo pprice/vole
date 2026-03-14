@@ -172,8 +172,9 @@ impl Compiler<'_> {
         self.declare_vir_monomorphized_functions()?;
         self.expand_abstract_class_method_monomorphs()?;
         self.build_monomorph_index();
-        self.compile_all_monomorphized_instances(false)?;
+        // VIR first (~17x cheaper), then AST fallback for remaining monomorphs.
         self.compile_vir_monomorphized_functions_phased(false)?;
+        self.compile_all_monomorphized_instances(false)?;
 
         // Pass 2: Compile function bodies ONLY for the target module.
         self.compile_module_function_bodies(target_module)?;
@@ -535,11 +536,17 @@ impl Compiler<'_> {
         // Second pass: compile function bodies and tests
         self.compile_program_declarations()?;
 
-        // Compile monomorphized instances
-        self.compile_all_monomorphized_instances(true)?;
-
-        // Compile VIR-monomorphized function bodies.
+        // Compile VIR-monomorphized function bodies first — VIR compilation is
+        // ~17x cheaper than AST fallback (18ms vs 293ms at full load). The
+        // defined_functions guard prevents double-compilation of any function.
+        // Functions with free_monomorphs entries are skipped here (their
+        // CallTarget::Native Symbols may reference the module interner) and
+        // handled correctly by compile_all_monomorphized_instances below.
         self.compile_vir_monomorphized_functions()?;
+
+        // AST fallback: compile monomorphized instances that lack VIR versions
+        // (~8% of monomorphs). Only handles instances not already compiled above.
+        self.compile_all_monomorphized_instances(true)?;
 
         // Compile any monomorphs that were lazily declared during expression compilation.
         // This fixpoint loop handles transitive demand-declarations: compiling one pending
@@ -762,18 +769,22 @@ impl Compiler<'_> {
         // Must run after declare_all + expand_abstract so all instances are visible.
         self.build_monomorph_index();
 
-        // Pass 1.7: Compile monomorphized instances whose ASTs live in modules.
-        // Passes false for is_program_phase — instances from the main program are
-        // silently skipped and compiled later in compile_program_body.
-        self.compile_all_monomorphized_instances(false)?;
-
-        // Pass 1.8: Compile VIR-monomorphized function bodies.  These are the
-        // concrete functions produced by VIR monomorphization (e.g., wrap<string>,
-        // wrap<i64>).  Must be compiled before module function bodies so that
-        // VirDirect calls from module functions can be resolved.
+        // Pass 1.7: Compile VIR-monomorphized function bodies first — VIR
+        // compilation is ~17x cheaper than AST fallback. These are the concrete
+        // functions produced by VIR monomorphization (e.g., wrap<string>,
+        // wrap<i64>). The defined_functions guard prevents double-compilation.
+        // Functions with free_monomorphs entries are skipped (their
+        // CallTarget::Native Symbols may reference the module interner) and
+        // handled by compile_all_monomorphized_instances below.
         // Passes false for is_program_phase — functions from the main program are
         // skipped and compiled later in compile_program_body.
         self.compile_vir_monomorphized_functions_phased(false)?;
+
+        // Pass 1.8: AST fallback — compile monomorphized instances that lack VIR
+        // versions (~8% of monomorphs). Passes false for is_program_phase —
+        // instances from the main program are silently skipped and compiled later
+        // in compile_program_body.
+        self.compile_all_monomorphized_instances(false)?;
 
         // Pass 2: Compile all function bodies (cross-module calls now resolved)
         // When lazy_modules is enabled, skip body compilation — functions are declared
@@ -1600,6 +1611,18 @@ impl Compiler<'_> {
                 continue;
             }
             let vir_func = &self.analyzed.functions[idx];
+
+            // Skip VIR functions that have a corresponding free_monomorphs
+            // entry. These functions were lowered from generic templates whose
+            // CallTarget::Native Symbols may reference a different interner
+            // context (module interner vs program interner). The free_monomorphs
+            // path in compile_all_monomorphized_instances handles them correctly
+            // via compile_function_inner_with_vir, which passes substitutions
+            // and uses the proper compilation environment.
+            if let Some(mangled_name_id) = vir_func.mangled_name_id
+                && self.analyzed.free_monomorphs.contains_key(&mangled_name_id) {
+                    continue;
+                }
 
             // Determine the module of the original generic template.
             // During the module phase, skip functions that belong to the
