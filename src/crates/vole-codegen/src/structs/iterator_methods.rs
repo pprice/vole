@@ -149,8 +149,8 @@ impl Cg<'_, '_, '_> {
         // Two distinct ownership contexts for closure parameters:
         //
         // A) Iterable default body (self.in_iterable_default_body == true):
-        //    The compiled body (e.g. `__array_iterable_map`) receives `f` as an
-        //    *owned* reference — the outer call-site used `used_array_iterable_path`
+        //    The compiled body receives `f` as an *owned* reference — the outer
+        //    call-site used `used_iterable_default_path`
         //    which skips rc_dec for the closure. The body therefore owns the single
         //    reference to `f`.
         //    - Pipeline methods (map/filter/flat_map): iterator takes ownership of `f`;
@@ -288,7 +288,7 @@ impl Cg<'_, '_, '_> {
         //   - Owned closures (rc_temps): fresh lambdas that are not yet refcounted to anything else
         //   - Borrowed closures (borrowed_closure_args): closures from function parameters
         //     (e.g., `f` in a compiled Iterable default body like `self.iter().any(f)`).
-        //     In that case the outer caller does NOT free the closure (used_array_iterable_path),
+        //     In that case the outer caller does NOT free the closure (used_iterable_default_path),
         //     so the inner body must dec it explicitly after the runtime call returns.
         if codegen_frees_closure {
             for mut tmp in rc_temps {

@@ -10,7 +10,9 @@
 // tickets (vol-3on3, vol-40jn, vol-bklt).
 
 use rustc_hash::FxHashMap;
-use vole_identity::{FunctionType, MonomorphInstanceTrait, NameId, TypeId, VirTypeId};
+use vole_identity::{
+    FunctionType, MethodId, MonomorphInstanceTrait, NameId, TypeDefId, TypeId, VirTypeId,
+};
 
 use crate::expr::VirExternalMethodInfo;
 
@@ -171,6 +173,58 @@ impl MonomorphInstanceTrait for VirStaticMethodMonomorphInfo {
 }
 
 // ============================================================================
+// VirImplementMethodMonomorphInfo — implement-block default method monomorphs
+// ============================================================================
+
+/// VIR-native info for a monomorphized implement-block default method.
+///
+/// Mirrors `ImplementMethodMonomorphInstance` from vole-identity but adds
+/// VirTypeId-level type information. These represent concrete instantiations
+/// of interface default methods for specific implementing types and type args
+/// (e.g., `[i64].map(...)`, `[i64].filter(...)` from `extend [T] with Iterable<T>`).
+#[derive(Debug, Clone)]
+pub struct VirImplementMethodMonomorphInfo {
+    /// The interface's TypeDefId (e.g., Iterable).
+    pub interface_type_def_id: TypeDefId,
+    /// The implementing type's TypeDefId (e.g., array).
+    pub implementing_type_def_id: TypeDefId,
+    /// The method's MethodId on the implementing type.
+    pub method_id: MethodId,
+    /// The method's NameId.
+    pub method_name: NameId,
+    /// Mangled name for this instance (e.g., "__array_iterable_4_count").
+    pub mangled_name: NameId,
+    /// Unique ID for this instance.
+    pub instance_id: u32,
+    /// Concrete method type after substitution (sema TypeIds).
+    ///
+    /// Retained for the transition period while codegen still builds
+    /// Cranelift signatures from `TypeId`-based param/return types.
+    pub func_type: FunctionType,
+    /// VIR-level function type (params + return as VirTypeIds).
+    pub vir_func_type: VirTypeId,
+    /// Type parameter substitutions (sema TypeIds).
+    pub substitutions: FxHashMap<NameId, TypeId>,
+    /// VIR-level type parameter substitutions.
+    pub vir_substitutions: FxHashMap<NameId, VirTypeId>,
+}
+
+impl MonomorphInstanceTrait for VirImplementMethodMonomorphInfo {
+    fn mangled_name(&self) -> NameId {
+        self.mangled_name
+    }
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+    fn func_type(&self) -> &FunctionType {
+        &self.func_type
+    }
+    fn substitutions(&self) -> &FxHashMap<NameId, TypeId> {
+        &self.substitutions
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -276,5 +330,31 @@ mod tests {
         assert_eq!(info.method_name, name(21));
         assert_eq!(info.mangled_name, name(22));
         assert_eq!(info.instance_id, 3);
+    }
+
+    #[test]
+    fn vir_implement_method_monomorph_info_fields() {
+        let info = VirImplementMethodMonomorphInfo {
+            interface_type_def_id: TypeDefId::new(1),
+            implementing_type_def_id: TypeDefId::new(2),
+            method_id: MethodId::new(5),
+            method_name: name(30),
+            mangled_name: name(31),
+            instance_id: 4,
+            func_type: FunctionType {
+                is_closure: false,
+                params_id: TypeIdVec::new(),
+                return_type_id: TypeId::from_raw(0),
+            },
+            vir_func_type: VirTypeId::VOID,
+            substitutions: FxHashMap::default(),
+            vir_substitutions: FxHashMap::default(),
+        };
+        assert_eq!(info.interface_type_def_id, TypeDefId::new(1));
+        assert_eq!(info.implementing_type_def_id, TypeDefId::new(2));
+        assert_eq!(info.method_id, MethodId::new(5));
+        assert_eq!(info.method_name, name(30));
+        assert_eq!(info.mangled_name, name(31));
+        assert_eq!(info.instance_id, 4);
     }
 }

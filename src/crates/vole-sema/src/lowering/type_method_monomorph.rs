@@ -6,11 +6,15 @@ use rustc_hash::FxHashMap;
 use super::monomorph_functions::body_has_sema_data;
 use crate::LoweringEntityLookup;
 use crate::implement_registry::ImplementRegistry;
+use crate::vir_lower::type_translate::translate_type_id;
 use crate::vir_lower::{CrossModuleCtx, lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{MethodId, ModuleId, NameId, NameTable, Span};
 use vole_vir::VirFunction;
+use vole_vir::func::ReturnAbi;
+use vole_vir::monomorph::rewrite::{RewriteCtx, rewrite_function};
+use vole_vir::monomorph::substitute::{TypeSubstitution, substitute_types};
 use vole_vir::type_table::VirTypeTable;
 
 /// Shared references used while lowering class/static method monomorphs to VIR.
@@ -270,6 +274,75 @@ fn lower_static_method_monomorph_vir(
     vir.method_id = None;
     vir.mangled_name_id = Some(instance.mangled_name);
     Some(vir)
+}
+
+/// Lower implement-block default method monomorph instances into concrete VIR.
+///
+/// For each instance in `implement_method_monomorph_cache` (registered by sema
+/// for each element_type × Iterable default method combination), looks up the
+/// generic VIR template (lowered earlier by `lower_implement_default_methods`),
+/// clones it with type substitutions applied (T → concrete element type), and
+/// adds the concrete function to `vir_functions`.
+pub fn lower_implement_method_monomorphized_instances(
+    work: &mut MethodMonomorphLoweringWork<'_>,
+    ctx: &MethodMonomorphLoweringCtx<'_>,
+) {
+    let instances = ctx.entities.implement_method_monomorph_instances();
+    if instances.is_empty() {
+        return;
+    }
+
+    // Collect the unique method IDs we need templates for, then build a
+    // MethodId → cloned VirFunction map. This avoids an O(n) linear scan
+    // per instance when multiple element types share the same method.
+    let needed: rustc_hash::FxHashSet<MethodId> = instances.iter().map(|i| i.method_id).collect();
+    let template_by_method: FxHashMap<MethodId, VirFunction> = work
+        .vir_functions
+        .iter()
+        .filter(|f| f.method_id.is_some_and(|id| needed.contains(&id)))
+        .map(|f| (f.method_id.unwrap(), f.clone()))
+        .collect();
+
+    // Snapshot the type table so substitute_types can read from source
+    // while writing new entries into the (mutable) work type table.
+    let source_table = work.type_table.clone();
+    let mut count = 0usize;
+
+    for instance in &instances {
+        let Some(template) = template_by_method.get(&instance.method_id) else {
+            continue;
+        };
+
+        // Build VirTypeId substitution map from sema's NameId→TypeId map.
+        let mut vir_subs: TypeSubstitution = FxHashMap::default();
+        for (&name_id, &sema_type_id) in &instance.substitutions {
+            let vir_ty = translate_type_id(work.type_table, sema_type_id, ctx.type_arena);
+            vir_subs.insert(name_id, vir_ty);
+        }
+
+        // Apply type substitution and rewrite the function body.
+        let type_map = substitute_types(&source_table, work.type_table, &vir_subs);
+        let rewrite_ctx = RewriteCtx::new(type_map);
+        let mut concrete = rewrite_function(template, &rewrite_ctx);
+
+        // Recompute return ABI from the now-concrete return type.
+        concrete.return_abi = ReturnAbi::classify(concrete.vir_return_type, work.type_table);
+
+        // Tag with mangled name; clear method_id (looked up by mangled name).
+        concrete.method_id = None;
+        concrete.mangled_name_id = Some(instance.mangled_name);
+        concrete.type_params = Vec::new();
+
+        let mangled_str = ctx.names.display(instance.mangled_name);
+        concrete.name = mangled_str.to_string();
+
+        work.vir_functions.push(concrete);
+        count += 1;
+    }
+
+    if count > 0 {
+        tracing::debug!(count, "lowered implement method monomorph VIR functions");
+    }
 }
 
 /// Find an instance method AST on a generic class/struct or matching implement block.

@@ -11,7 +11,10 @@ pub mod rewrite;
 pub mod substitute;
 
 pub use fixpoint::{MonomorphInstance, MonomorphResult, monomorphize, monomorphize_with_seeds};
-pub use instance::{VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo};
+pub use instance::{
+    VirClassMethodMonomorphInfo, VirImplementMethodMonomorphInfo, VirMonomorphInfo,
+    VirStaticMethodMonomorphInfo,
+};
 pub use rederive::{
     RederiveCallCtx, classify_capture_rc_kind, classify_rc_cleanup, rederive_decisions,
     rederive_decisions_with_calls, rederive_monomorphized_calls,

@@ -787,12 +787,12 @@ impl Cg<'_, '_, '_> {
         // Get func_key, return_type_id, and fallback_param_type_ids from resolution or fallback.
         // fallback_param_type_ids is used when resolution doesn't provide param types (e.g. in
         // monomorphized generic contexts where sema skips the generic body).
-        // used_array_iterable_path tracks whether the method is a compiled Iterable default that
+        // used_iterable_default_path tracks whether the method is a compiled Iterable default that
         // returns raw *mut RcIterator (not a boxed interface). This happens for:
-        // 1. Array/primitive types whose Iterable default is in array_iterable_func_keys
+        // 1. Array/primitive types whose Iterable default is in implement_method_func_keys
         // 2. Primitive types (range, string) whose Iterable default is in method_func_keys
         //    (compiled via compile_implement_block) — these also return *mut RcIterator.
-        let mut used_array_iterable_path = false;
+        let mut used_iterable_default_path = false;
         let (func_key, return_type_id, fallback_param_type_ids) = if let Some(resolved) = resolution
         {
             // Use method resolution's type_def_id for method_func_keys lookup.
@@ -819,20 +819,19 @@ impl Cg<'_, '_, '_> {
                 .copied()
                 .inspect(|_k| {
                     if is_iterable_default_method {
-                        used_array_iterable_path = true;
+                        used_iterable_default_path = true;
                     }
                 })
                 .or_else(|| {
-                    // Fallback: check array_iterable_func_keys for Iterable default methods on
+                    // Fallback: check implement_method_func_keys for Iterable default methods on
                     // arrays and primitives (range, string). Each concrete self-type (e.g. [i64],
-                    // range) has its own compiled function keyed by (method_name_id, self_type_id).
-                    let obj_sema = self.vir_type_table().vir_to_type_id(obj.type_id);
+                    // range) has its own compiled function keyed by (method_name_id, self_vir_type).
                     let key = self
-                        .array_iterable_func_keys()
-                        .get(&(method_name_id, obj_sema))
+                        .implement_method_func_keys()
+                        .get(&(method_name_id, obj.type_id))
                         .copied();
                     if key.is_some() {
-                        used_array_iterable_path = true;
+                        used_iterable_default_path = true;
                     }
                     key
                 });
@@ -947,13 +946,13 @@ impl Cg<'_, '_, '_> {
                 .get(&(type_name_id, method_name_id))
                 .copied()
                 .or_else(|| {
-                    // Fallback: check array_iterable_func_keys for Iterable default
+                    // Fallback: check implement_method_func_keys for Iterable default
                     // methods (filter, map, etc.) on arrays in monomorphized context.
-                    self.array_iterable_func_keys()
-                        .get(&(method_name_id, resolved_obj_type_id))
+                    self.implement_method_func_keys()
+                        .get(&(method_name_id, resolved_obj_vir))
                         .copied()
                         .inspect(|_| {
-                            used_array_iterable_path = true;
+                            used_iterable_default_path = true;
                         })
                 });
 
@@ -1019,14 +1018,14 @@ impl Cg<'_, '_, '_> {
             .unwrap_or(return_type_id);
 
         // For Iterable default methods on arrays/primitives (range, string), the
-        // func_key comes from array_iterable_func_keys and the compiled function
+        // func_key comes from implement_method_func_keys and the compiled function
         // returns a raw RuntimeIterator pointer. Convert Iterator<T> → RuntimeIterator<T>
         // so subsequent method calls use direct dispatch instead of vtable dispatch.
         //
         // NOTE: Do NOT apply this in all monomorphized contexts — user-defined
         // .iter() methods return boxed Iterator<T> interfaces, not raw pointers.
         // Converting those to RuntimeIterator causes segfaults.
-        if used_array_iterable_path {
+        if used_iterable_default_path {
             return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
         }
         // In monomorphized contexts, the return type may still contain an unsubstituted
@@ -1034,7 +1033,7 @@ impl Cg<'_, '_, '_> {
         // interface's type param, not the function's). The function's substitution map
         // can't resolve these. When conversion above fails, derive the correct
         // RuntimeIterator return type from the receiver's concrete element type.
-        if used_array_iterable_path || self.substitutions.is_some() {
+        if used_iterable_default_path || self.substitutions.is_some() {
             let needs_derivation = {
                 let vir_ret = self.vir_lookup(return_type_id);
                 if let Some((type_def_id, _)) = self.vir_query_unwrap_interface_v(vir_ret) {
@@ -1321,7 +1320,7 @@ impl Cg<'_, '_, '_> {
                 let union_copy = self.copy_union_ptr_to_local(src_ptr, return_type_id);
 
                 // Now consume RC receiver and arg temps.
-                // For compiled Iterable default methods (used_array_iterable_path), the callee
+                // For compiled Iterable default methods (used_iterable_default_path), the callee
                 // owns RC args (closures) and frees them internally. Mark them consumed without
                 // emitting rc_dec to avoid a double-free.
                 let mut obj = obj;
@@ -1330,7 +1329,7 @@ impl Cg<'_, '_, '_> {
                     receiver_is_global_init_rc_iface,
                     dispatch.receiver_is_interface,
                 )?;
-                if used_array_iterable_path {
+                if used_iterable_default_path {
                     for cv in rc_temps.iter_mut() {
                         cv.mark_consumed();
                     }
@@ -1348,7 +1347,7 @@ impl Cg<'_, '_, '_> {
         // corruption. Similarly, Owned class arguments (e.g., b.equals(Id{n:5}))
         // need cleanup after the callee has consumed them.
         //
-        // Exception: compiled Iterable default methods (used_array_iterable_path) take
+        // Exception: compiled Iterable default methods (used_iterable_default_path) take
         // ownership of all RC arguments (closures, etc.) and free them internally —
         // either by storing them in iterators (map/filter/flat_map), passing them through
         // to runtime functions that free them (reduce/for_each via vole_iter_reduce_tagged),
@@ -1360,7 +1359,7 @@ impl Cg<'_, '_, '_> {
             receiver_is_global_init_rc_iface,
             dispatch.receiver_is_interface,
         )?;
-        if used_array_iterable_path {
+        if used_iterable_default_path {
             // Ownership of RC args transferred to the compiled Iterable default method.
             // Mark as consumed to satisfy lifecycle tracking without emitting a double-free.
             for cv in rc_temps.iter_mut() {

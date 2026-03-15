@@ -5,7 +5,7 @@
 use rustc_hash::FxHashMap;
 use std::cell::{Cell, RefCell};
 
-use vole_identity::{ClassMethodMonomorphKey, NameId, TypeDefId, TypeId};
+use vole_identity::{ClassMethodMonomorphKey, NameId, TypeDefId, TypeId, VirTypeId};
 use vole_runtime::NativeRegistry;
 use vole_vir::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
@@ -113,11 +113,10 @@ pub(crate) struct CodegenState {
     /// Unified method function key lookup: (type_name_id, method_name_id) -> FunctionKey
     /// Uses NameId for both to ensure stable lookup across different analyzer instances.
     pub method_func_keys: FxHashMap<(NameId, NameId), FunctionKey>,
-    /// Array Iterable default method keys: (method_name_id, elem_type_id) -> FunctionKey
+    /// Implement-block default method keys: (method_name_id, self_vir_type) -> FunctionKey
     /// Used for `[T].count()`, `[T].map()`, etc. which are compiled per element type.
-    /// Since `method_func_keys` maps a single key to one FunctionKey, array Iterable methods
-    /// use a separate map keyed on (method_name_id, concrete_elem_type_id).
-    pub array_iterable_func_keys: FxHashMap<(NameId, TypeId), FunctionKey>,
+    /// Populated by `compile_vir_implement_method_monomorphs` from VIR monomorph data.
+    pub implement_method_func_keys: FxHashMap<(NameId, VirTypeId), FunctionKey>,
     /// Interface vtable registry (uses interior mutability)
     pub interface_vtables: RefCell<InterfaceVtableRegistry>,
     /// Registry of native functions for external method calls
@@ -183,7 +182,7 @@ impl CodegenState {
         Self {
             type_metadata: TypeMetadataMap::new(),
             method_func_keys: FxHashMap::default(),
-            array_iterable_func_keys: FxHashMap::default(),
+            implement_method_func_keys: FxHashMap::default(),
             interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
             native_registry,
             intrinsics_registry: IntrinsicsRegistry::new(),

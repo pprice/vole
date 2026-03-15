@@ -512,9 +512,9 @@ impl Analyzer {
     /// `Iterable<T>` implementation, registers an
     /// `ImplementMethodMonomorphInstance` in the entity registry cache.
     ///
-    /// This mirrors what codegen's `compile_array_iterable_default_methods`
-    /// discovers at compile time, but records the instances in sema so that
-    /// VIR lowering can later create concrete functions from them.
+    /// Records the instances in sema so that VIR lowering can later create
+    /// concrete functions from them. Codegen then registers the compiled
+    /// functions in `implement_method_func_keys` for call-site dispatch.
     pub(in crate::analyzer) fn register_implement_method_monomorphs(&mut self) {
         // Get array TypeDefId
         let array_tdef_id = {

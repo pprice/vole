@@ -361,19 +361,6 @@ impl<'a> Compiler<'a> {
         lookup.unwrap_or(VirTypeId::UNKNOWN)
     }
 
-    /// Look up an existing array type by element `TypeId` via VirTypeTable.
-    #[inline]
-    fn vir_query_lookup_array(&self, elem: TypeId) -> Option<TypeId> {
-        self.vir_type_table().lookup_array_sema(elem)
-    }
-
-    /// Return all concrete element types for which a RuntimeIterator exists.
-    #[inline]
-    fn vir_query_all_concrete_runtime_iterator_elem_types(&self) -> Vec<TypeId> {
-        self.vir_type_table()
-            .all_concrete_runtime_iterator_elem_types_sema()
-    }
-
     /// Unwrap a type parameter `VirTypeId` to its `NameId` via VirTypeTable.
     #[inline]
     fn vir_query_unwrap_type_param_v(&self, vir_ty: VirTypeId) -> Option<NameId> {

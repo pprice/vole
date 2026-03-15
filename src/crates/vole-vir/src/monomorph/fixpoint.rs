@@ -652,6 +652,7 @@ mod tests {
             free_monomorphs_by_key: FxHashMap::default(),
             class_method_monomorphs: FxHashMap::default(),
             static_method_monomorphs: FxHashMap::default(),
+            implement_method_monomorphs: FxHashMap::default(),
             module_interners: FxHashMap::default(),
             interner: std::rc::Rc::new(vole_identity::Interner::new()),
             name_table: std::rc::Rc::new(vole_identity::NameTable::new()),

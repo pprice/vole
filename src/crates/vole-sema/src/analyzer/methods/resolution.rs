@@ -613,7 +613,7 @@ impl Analyzer {
         };
 
         // Pre-create RuntimeIterator<elem_type> for any Iterable<T> elem types so codegen can
-        // find it. Without this, compile_array_iterable_default_methods won't see the elem type.
+        // find it. Without this, VIR implement method monomorphs won't see the elem type.
         for &elem_type_id in iface_subs.values() {
             self.type_arena_mut().runtime_iterator(elem_type_id);
         }

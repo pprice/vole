@@ -241,6 +241,7 @@ fn build_empty_vir_program(
         free_monomorphs_by_key: FxHashMap::default(),
         class_method_monomorphs: FxHashMap::default(),
         static_method_monomorphs: FxHashMap::default(),
+        implement_method_monomorphs: FxHashMap::default(),
         module_interners: FxHashMap::default(),
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),

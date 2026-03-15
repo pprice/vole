@@ -186,11 +186,11 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Yielder pointer variable for generator body functions.
     /// When set, `ExprKind::Yield` compiles to `vole_generator_yield(yielder, value)`.
     pub yielder_var: Option<Variable>,
-    /// True when compiling an Iterable default method body (e.g. `__array_iterable_4_map`).
+    /// True when compiling an Iterable default method body.
     ///
     /// In these compiled bodies, closure parameters (like `f` in `fn map(f)`) are owned by
     /// the body — the outer caller transferred ownership without emitting rc_dec (due to
-    /// `used_array_iterable_path`). This means:
+    /// `used_iterable_default_path`). This means:
     ///   - For pipeline methods (map/filter): do NOT emit rc_inc for borrowed closure params
     ///     (the iterator gets the single reference and frees it on drop)
     ///   - For terminal methods (any/all/find): DO emit rc_dec after the runtime call
@@ -1331,11 +1331,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.state.method_func_keys
     }
 
-    /// Get array Iterable default method key map.
-    /// Keyed by (method_name_id, elem_type_id) for per-element-type lookup.
+    /// Get implement-block default method key map.
+    /// Keyed by (method_name_id, self_vir_type) for per-element-type lookup.
     #[inline]
-    pub fn array_iterable_func_keys(&self) -> &'ctx FxHashMap<(NameId, TypeId), FunctionKey> {
-        &self.env.state.array_iterable_func_keys
+    pub fn implement_method_func_keys(&self) -> &'ctx FxHashMap<(NameId, VirTypeId), FunctionKey> {
+        &self.env.state.implement_method_func_keys
     }
 
     /// Look up a free-function monomorph by `MonomorphKey` via VirProgram.

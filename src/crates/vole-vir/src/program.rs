@@ -12,7 +12,9 @@ use vole_identity::{
     Span, Symbol, TypeDefId, TypeId, VirTypeId,
 };
 
-use vole_identity::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
+use vole_identity::{
+    ClassMethodMonomorphKey, ImplementMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey,
+};
 
 use crate::entity_metadata::VirEntityMetadata;
 use crate::func::{VirBody, VirFunction, VirTest};
@@ -21,7 +23,8 @@ use crate::implement_dispatch::{
     VirMethodImplInfo,
 };
 use crate::monomorph::instance::{
-    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
+    VirClassMethodMonomorphInfo, VirImplementMethodMonomorphInfo, VirMonomorphInfo,
+    VirStaticMethodMonomorphInfo,
 };
 use crate::refs::VirRef;
 use crate::type_table::VirTypeTable;
@@ -198,6 +201,14 @@ pub struct VirProgram {
     /// monomorph population pass (vol-bklt). Codegen reads these instead
     /// of sema's `StaticMethodMonomorphCache`.
     pub static_method_monomorphs: FxHashMap<StaticMethodMonomorphKey, VirStaticMethodMonomorphInfo>,
+
+    /// VIR-native implement-block default method monomorph instances.
+    ///
+    /// Keyed by `ImplementMethodMonomorphKey`. Populated during the VIR
+    /// monomorph population pass (vol-cg1s). Codegen reads these instead
+    /// of sema's `ImplementMethodMonomorphCache`.
+    pub implement_method_monomorphs:
+        FxHashMap<ImplementMethodMonomorphKey, VirImplementMethodMonomorphInfo>,
 
     /// Per-module string interners for resolving module-local Symbol IDs.
     ///

@@ -53,7 +53,7 @@ use super::test_bodies::lower_test_bodies;
 use super::test_scoped_type_methods::lower_test_scoped_type_methods;
 use super::type_method_monomorph::{
     MethodMonomorphLoweringCtx, MethodMonomorphLoweringWork,
-    lower_type_method_monomorphized_instances,
+    lower_implement_method_monomorphized_instances, lower_type_method_monomorphized_instances,
 };
 use super::type_methods::{lower_module_type_methods, lower_top_level_type_methods};
 use super::vir_monomorph::{
@@ -799,6 +799,13 @@ where
             &method_monomorph_ctx,
         );
     }
+    {
+        let _t = compile_timing!(DEBUG, "lower_implement_method_monomorphized_instances").entered();
+        lower_implement_method_monomorphized_instances(
+            &mut method_monomorph_work,
+            &method_monomorph_ctx,
+        );
+    }
 
     // -----------------------------------------------------------------------
     // Lookup maps
@@ -1184,6 +1191,7 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         free_monomorphs_by_key: monomorph_info.free_monomorphs_by_key,
         class_method_monomorphs: monomorph_info.class_method_monomorphs,
         static_method_monomorphs: monomorph_info.static_method_monomorphs,
+        implement_method_monomorphs: monomorph_info.implement_method_monomorphs,
         module_interners,
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),

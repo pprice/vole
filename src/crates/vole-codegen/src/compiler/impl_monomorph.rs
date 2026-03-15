@@ -7,11 +7,9 @@
 //! - Individual implement method compilation: `compile_implement_method`, `compile_module_implement_method`
 //! - Implement statics compilation: `compile_implement_statics`
 //! - Interface interner resolution: `find_interface_method_interner`
-//! - Array iterable default methods: `compile_array_iterable_default_methods`, `import_array_iterable_default_methods`
+//! - VIR implement method monomorphs: `compile_vir_implement_method_monomorphs`
 
 use std::rc::Rc;
-
-use rustc_hash::FxHashMap;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::{Compiler, DeclareMode, SelfParam, VirSelfParam};
@@ -873,281 +871,16 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Declare and compile array Iterable default methods for each concrete element type.
+    /// Declare, compile, and register implement-block default methods for
+    /// call-site dispatch in `implement_method_func_keys`.
     ///
-    /// Called after `declare_module_types_and_functions` so all types are registered.
-    ///
-    /// For each concrete RuntimeIterator element type (e.g. i64, string) found in the arena,
-    /// and for each non-external Iterable default method registered on the array TypeDef,
-    /// this function:
-    ///   1. Builds a concrete substitution `{T_name_id -> elem_type}`
-    ///   2. Declares a JIT function with a mangled name (e.g. "__array_iterable_4_count")
-    ///   3. Registers the func_key in `state.array_iterable_func_keys[(method_name_id, elem_type)]`
-    ///   4. Compiles the Iterable default method body with the concrete substitution
-    pub(super) fn compile_array_iterable_default_methods(&mut self) -> CodegenResult<()> {
-        // Get array TypeDefId and Iterable TypeDefId
-        let array_tdef_id = {
-            let array_name_id = match self.analyzed.array_type_name_id() {
-                Some(id) => id,
-                None => return Ok(()), // array not registered, nothing to do
-            };
-            match self.analyzed.try_type_def_id(array_name_id) {
-                Some(id) => id,
-                None => return Ok(()),
-            }
-        };
+    /// Walks all concrete element types (e.g. i64, string) and compiles
+    /// each non-external Iterable default method (map, filter, count, etc.)
+    /// with the generic VIR template body and concrete substitutions.
+    pub(super) fn compile_vir_implement_method_monomorphs(&mut self) -> CodegenResult<()> {
+        use rustc_hash::FxHashMap;
 
-        // Find Iterable TypeDefId (the interface array implements)
-        let iterable_tdef_id = {
-            let interfaces = self.analyzed.implemented_interfaces(array_tdef_id);
-            if interfaces.is_empty() {
-                return Ok(());
-            }
-            interfaces[0] // array implements exactly one interface: Iterable<T>
-        };
-
-        // Find T's NameId from the abstract substitution map {T_name_id -> TypeParam(T)}
-        let t_name_id: NameId = {
-            let subs = self
-                .analyzed
-                .interface_impl_type_param_subs(array_tdef_id, iterable_tdef_id);
-            if subs.is_empty() {
-                return Ok(());
-            }
-            // For `extend [T] with Iterable<T>`, T's value is TypeParam(T_name_id)
-            // Get the first (only) T's NameId — the key in the subs map IS T's NameId
-            match subs.into_keys().next() {
-                Some(name_id) => name_id,
-                None => return Ok(()),
-            }
-        };
-
-        // Get the interface name string for find_interface_method_interner
-        let iface_name_str: String = {
-            let iface_name_id = self.analyzed.entity_type_name_id(iterable_tdef_id);
-            self.analyzed
-                .name_table()
-                .last_segment_str(iface_name_id)
-                .unwrap_or("Iterable".to_string())
-        };
-
-        // Collect non-external Iterable default methods registered on the array type
-        // We skip external methods (provided by runtime, not compiled from Vole source)
-        let default_methods: Vec<(MethodId, NameId, String)> = {
-            let query = self.analyzed;
-            let mut results = Vec::new();
-            for iface_method_id in query.type_methods(iterable_tdef_id) {
-                let method_def = query.get_method_def(iface_method_id);
-                if !method_def.has_default {
-                    continue;
-                }
-                if method_def.external_binding.is_some() {
-                    continue; // External methods are already handled by runtime
-                }
-                let method_name_str = query
-                    .last_segment(method_def.name_id)
-                    .unwrap_or_default()
-                    .to_string();
-                // Find this method as registered on the array implementing type
-                if let Some(array_method_id) = query.find_method(array_tdef_id, method_def.name_id)
-                {
-                    results.push((array_method_id, method_def.name_id, method_name_str));
-                }
-            }
-            results
-        };
-
-        if default_methods.is_empty() {
-            return Ok(());
-        }
-
-        // Get all concrete element types for which we need to compile array Iterable methods
-        let elem_types: Vec<TypeId> = self.vir_query_all_concrete_runtime_iterator_elem_types();
-
-        for elem_type in elem_types {
-            let _t = vole_log::compile_timing!(TRACE, "array_iterable_elem_type").entered();
-            // Get the concrete array TypeId for this element type
-            let self_type_id = match self.vir_query_lookup_array(elem_type) {
-                Some(tid) => tid,
-                None => continue, // No array of this elem type in arena, skip
-            };
-
-            // Skip element types whose iterable methods were already imported from
-            // the module cache. Check the first default method as a sentinel — all
-            // methods for an element type are imported/compiled as a batch.
-            if let Some((_, first_name_id, _)) = default_methods.first()
-                && self
-                    .state
-                    .array_iterable_func_keys
-                    .contains_key(&(*first_name_id, self_type_id))
-            {
-                continue;
-            }
-
-            // VirTypeId-native substitution: T_name_id -> vir_elem_type
-            let vir_elem_type = self.vir_lookup(elem_type);
-            let mut concrete_vir_subs: FxHashMap<NameId, VirTypeId> = FxHashMap::default();
-            concrete_vir_subs.insert(t_name_id, vir_elem_type);
-
-            let self_vir_ty = self.vir_lookup(self_type_id);
-
-            for (semantic_method_id, method_name_id, method_name_str) in &default_methods {
-                // Build a unique mangled name: "__array_iterable_{elem_type_idx}_{method_name}"
-                // elem_type.index() is a stable u32 index that uniquely identifies the type.
-                let mangled_name =
-                    format!("__array_iterable_{}_{}", elem_type.index(), method_name_str);
-
-                // Substitute VirTypeIds: UNKNOWN → self, TypeParam(T) → concrete elem type.
-                // If the return type cannot be resolved (e.g. T? not interned for this
-                // elem_type), skip this method.
-                let method_def = self.analyzed.get_method_def(*semantic_method_id);
-                let Some((subst_param_virs, return_vir_ty)) = self.substitute_method_vir_types(
-                    &method_def.param_types,
-                    method_def.return_type,
-                    self_vir_ty,
-                    &concrete_vir_subs,
-                ) else {
-                    continue; // return type unresolvable for this elem_type; skip
-                };
-
-                // Also verify the substituted return type has a sema TypeId mapping.
-                // VIR substitution may succeed (e.g. Optional<bool> exists at VIR level)
-                // but the sema TypeId may be absent when the element type arose from an
-                // iterator transformation like .map() rather than a direct Iterable<T>
-                // implementation. Without a sema TypeId, inner runtime iterator method
-                // calls (e.g. self.iter().find(pred)) would fail to resolve the return
-                // type. Skip this method for this element type; the method is only
-                // needed if user code actually calls it on this type.
-                {
-                    let table = self.vir_type_table();
-                    if table.lookup_vir_type_id(return_vir_ty).is_none()
-                        && return_vir_ty.raw() >= VirTypeId::FIRST_DYNAMIC
-                    {
-                        continue;
-                    }
-                }
-
-                let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
-                let sig = self.build_signature_from_vir_types(
-                    &subst_param_virs,
-                    return_vir_ty,
-                    VirSelfParam::Typed(self_vir_ty),
-                    abi,
-                );
-
-                // If this function already exists in CompiledModules, import it
-                // instead of compiling. This avoids redundant Cranelift IR
-                // building for functions whose machine code is already available.
-                if self.jit.has_precompiled_symbol(&mangled_name) {
-                    let func_id = self.jit.import_function(&mangled_name, &sig);
-                    let func_key = self.func_registry.intern_raw(mangled_name);
-                    self.func_registry.set_func_id(func_key, func_id);
-                    self.state
-                        .array_iterable_func_keys
-                        .insert((*method_name_id, self_type_id), func_key);
-                    continue;
-                }
-
-                // Declare JIT function with the mangled name and register in func_registry
-                let func_id = self.jit.declare_function(&mangled_name, &sig);
-                let func_key = self.func_registry.intern_raw(mangled_name);
-                self.func_registry.set_func_id(func_key, func_id);
-
-                // Register in array_iterable_func_keys for call-site lookup.
-                // Key is (method_name_id, self_type_id) so arrays and primitives (range)
-                // can each have their own compiled function for the same method.
-                self.state
-                    .array_iterable_func_keys
-                    .insert((*method_name_id, self_type_id), func_key);
-
-                // Find the interface's interner and module_id
-                let iface_info =
-                    self.find_interface_method_interner(&iface_name_str, method_name_str);
-                let Some((iface_interner, iface_module_id)) = iface_info else {
-                    continue;
-                };
-
-                // Set the function signature for compilation
-                self.jit.ctx.func.signature = sig;
-
-                // Build params from VirMethodDef.param_names using the interface's interner
-                let method_def = self.analyzed.get_method_def(*semantic_method_id);
-                let param_cranelift_types = self.vir_ids_to_cranelift(&subst_param_virs);
-                let params: Vec<_> = method_def
-                    .param_names
-                    .iter()
-                    .zip(subst_param_virs.iter())
-                    .zip(param_cranelift_types.iter())
-                    .map(|((name_str, &vir_ty), &cranelift_type)| {
-                        let sym = iface_interner
-                            .lookup(name_str)
-                            .or_else(|| self.analyzed.interner().lookup(name_str))
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "param name '{}' not interned for iterable default method",
-                                    name_str
-                                )
-                            });
-                        (sym, vir_ty, cranelift_type)
-                    })
-                    .collect();
-
-                let self_sym = iface_interner
-                    .lookup("self")
-                    .unwrap_or_else(|| self.self_symbol());
-
-                let source_file_ptr = self.source_file_ptr();
-                let table = self.vir_type_table();
-                let self_cranelift_type =
-                    vir_type_to_cranelift(self_vir_ty, table, self.pointer_type);
-                let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
-
-                let mut builder_ctx = FunctionBuilderContext::new();
-                {
-                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env = compile_env!(self, &iface_interner, source_file_ptr);
-                    let mut codegen_ctx = CodegenCtx::new(
-                        &mut self.jit.module,
-                        &mut self.func_registry,
-                        &mut self.pending_monomorphs,
-                    );
-                    let config =
-                        FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
-                            .with_iterable_default_body()
-                            .with_self_vir_type(self_vir_ty);
-                    let vir_func = self.analyzed.get_method(*semantic_method_id)
-                        .unwrap_or_else(|| {
-                            panic!("VIR must be available for array iterable default method (MethodId={semantic_method_id:?})")
-                        });
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir_func.body,
-                        iface_module_id,
-                        Some(&concrete_vir_subs),
-                    )?;
-                }
-                self.finalize_function(func_id)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Import (not compile) array Iterable default methods from a pre-compiled module cache.
-    ///
-    /// Called in the module cache path (when `can_use_cache == true`) instead of
-    /// `compile_array_iterable_default_methods`. The functions were already compiled
-    /// and stored in `CompiledModules`. This function:
-    ///   1. Rebuilds the same mangled names as `compile_array_iterable_default_methods`
-    ///   2. Declares them with Import linkage in the new JIT context
-    ///   3. Registers them in `state.array_iterable_func_keys[(method_name_id, self_type_id)]`
-    ///
-    /// Must be called after `import_module_functions` sets up type metadata.
-    pub(super) fn import_array_iterable_default_methods(&mut self) -> CodegenResult<()> {
-        // Get array TypeDefId and Iterable TypeDefId
+        // Get array TypeDefId and Iterable TypeDefId.
         let array_tdef_id = {
             let array_name_id = match self.analyzed.array_type_name_id() {
                 Some(id) => id,
@@ -1167,19 +900,26 @@ impl Compiler<'_> {
             interfaces[0]
         };
 
+        // Find T's NameId from the abstract substitution map.
         let t_name_id: NameId = {
             let subs = self
                 .analyzed
                 .interface_impl_type_param_subs(array_tdef_id, iterable_tdef_id);
-            if subs.is_empty() {
-                return Ok(());
-            }
             match subs.into_keys().next() {
                 Some(name_id) => name_id,
                 None => return Ok(()),
             }
         };
 
+        let iface_name_str: String = {
+            let iface_name_id = self.analyzed.entity_type_name_id(iterable_tdef_id);
+            self.analyzed
+                .name_table()
+                .last_segment_str(iface_name_id)
+                .unwrap_or("Iterable".to_string())
+        };
+
+        // Collect non-external Iterable default methods.
         let default_methods: Vec<(MethodId, NameId, String)> = {
             let query = self.analyzed;
             let mut results = Vec::new();
@@ -1204,28 +944,37 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let elem_types: Vec<TypeId> = self.vir_query_all_concrete_runtime_iterator_elem_types();
+        let elem_types: Vec<TypeId> = self
+            .vir_type_table()
+            .all_concrete_runtime_iterator_elem_types_sema();
 
         for elem_type in elem_types {
-            let self_type_id = match self.vir_query_lookup_array(elem_type) {
+            let self_type_id = match self.vir_type_table().lookup_array_sema(elem_type) {
                 Some(tid) => tid,
                 None => continue,
             };
 
-            // VirTypeId-native substitution: T_name_id -> vir_elem_type
             let vir_elem_type = self.vir_lookup(elem_type);
             let mut concrete_vir_subs: FxHashMap<NameId, VirTypeId> = FxHashMap::default();
             concrete_vir_subs.insert(t_name_id, vir_elem_type);
             let self_vir_ty = self.vir_lookup(self_type_id);
 
+            // Skip if already registered (sentinel check on first method).
+            if let Some((_, first_name_id, _)) = default_methods.first()
+                && self
+                    .state
+                    .implement_method_func_keys
+                    .contains_key(&(*first_name_id, self_vir_ty))
+            {
+                continue;
+            }
+
             for (semantic_method_id, method_name_id, method_name_str) in &default_methods {
                 let mangled_name =
                     format!("__array_iterable_{}_{}", elem_type.index(), method_name_str);
 
-                // Substitute VirTypeIds and build signature (same as compile path).
-                // Returns None if return type unresolvable for this elem_type; skip.
                 let method_def = self.analyzed.get_method_def(*semantic_method_id);
-                let Some((_, return_vir_ty)) = self.substitute_method_vir_types(
+                let Some((subst_param_virs, return_vir_ty)) = self.substitute_method_vir_types(
                     &method_def.param_types,
                     method_def.return_type,
                     self_vir_ty,
@@ -1234,7 +983,6 @@ impl Compiler<'_> {
                     continue;
                 };
 
-                // Check sema TypeId mapping (same guard as compile path).
                 {
                     let table = self.vir_type_table();
                     if table.lookup_vir_type_id(return_vir_ty).is_none()
@@ -1244,29 +992,100 @@ impl Compiler<'_> {
                     }
                 }
 
-                let Some(sig) = self.build_substituted_method_sig(
-                    &method_def.param_types,
-                    method_def.return_type,
-                    self_vir_ty,
-                    &concrete_vir_subs,
+                let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
+                let sig = self.build_signature_from_vir_types(
+                    &subst_param_virs,
+                    return_vir_ty,
                     VirSelfParam::Typed(self_vir_ty),
-                ) else {
+                    abi,
+                );
+
+                // Import from cache or declare for compilation.
+                if self.jit.has_precompiled_symbol(&mangled_name) {
+                    let func_id = self.jit.import_function(&mangled_name, &sig);
+                    let func_key = self.func_registry.intern_raw(mangled_name);
+                    self.func_registry.set_func_id(func_key, func_id);
+                    self.state
+                        .implement_method_func_keys
+                        .insert((*method_name_id, self_vir_ty), func_key);
+                    continue;
+                }
+
+                let func_id = self.jit.declare_function(&mangled_name, &sig);
+                let func_key = self.func_registry.intern_raw(mangled_name);
+                self.func_registry.set_func_id(func_key, func_id);
+                self.state
+                    .implement_method_func_keys
+                    .insert((*method_name_id, self_vir_ty), func_key);
+
+                let iface_info =
+                    self.find_interface_method_interner(&iface_name_str, method_name_str);
+                let Some((iface_interner, iface_module_id)) = iface_info else {
                     continue;
                 };
 
-                // Only import functions that exist in the pre-compiled module cache.
-                // Element types from non-module code (e.g. test files) won't have
-                // compiled iterable methods in the cache.
-                if !self.jit.has_precompiled_symbol(&mangled_name) {
-                    continue;
-                }
-                let func_id = self.jit.import_function(&mangled_name, &sig);
-                let func_key = self.func_registry.intern_raw(mangled_name);
-                self.func_registry.set_func_id(func_key, func_id);
+                self.jit.ctx.func.signature = sig;
 
-                self.state
-                    .array_iterable_func_keys
-                    .insert((*method_name_id, self_type_id), func_key);
+                let method_def = self.analyzed.get_method_def(*semantic_method_id);
+                let param_cranelift_types = self.vir_ids_to_cranelift(&subst_param_virs);
+                let params: Vec<_> = method_def
+                    .param_names
+                    .iter()
+                    .zip(subst_param_virs.iter())
+                    .zip(param_cranelift_types.iter())
+                    .map(|((name_str, &vir_ty), &cranelift_type)| {
+                        let sym = iface_interner
+                            .lookup(name_str)
+                            .or_else(|| self.analyzed.interner().lookup(name_str))
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "param name '{}' not interned for iterable default method",
+                                    name_str
+                                )
+                            });
+                        (sym, vir_ty, cranelift_type)
+                    })
+                    .collect();
+
+                let self_sym = iface_interner
+                    .lookup("self")
+                    .unwrap_or_else(|| self.self_symbol());
+                let source_file_ptr = self.source_file_ptr();
+                let table = self.vir_type_table();
+                let self_cranelift_type =
+                    vir_type_to_cranelift(self_vir_ty, table, self.pointer_type);
+                let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
+
+                let mut builder_ctx = FunctionBuilderContext::new();
+                {
+                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+                    let env = compile_env!(self, &iface_interner, source_file_ptr);
+                    let mut codegen_ctx = CodegenCtx::new(
+                        &mut self.jit.module,
+                        &mut self.func_registry,
+                        &mut self.pending_monomorphs,
+                    );
+                    let config =
+                        FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
+                            .with_iterable_default_body()
+                            .with_self_vir_type(self_vir_ty);
+                    let vir_func = self
+                        .analyzed
+                        .get_method(*semantic_method_id)
+                        .unwrap_or_else(|| {
+                            panic!("VIR must be available for iterable default method")
+                        });
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir_func.body,
+                        iface_module_id,
+                        Some(&concrete_vir_subs),
+                    )?;
+                }
+                self.finalize_function(func_id)?;
             }
         }
 

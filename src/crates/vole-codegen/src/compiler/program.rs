@@ -181,15 +181,15 @@ impl Compiler<'_> {
         // Import other modules with Import linkage (resolved via stub symbols).
         self.import_module_types_and_functions(&other_paths)?;
 
-        // Global passes: array Iterable defaults, monomorphs, VIR monomorphs,
+        // Global passes: monomorphs, VIR monomorphs, implement method dispatch,
         // abstract class method expansion, monomorph index. Run on every trigger
         // because each creates a fresh Compiler with empty CodegenState — the
-        // method_func_keys / array_iterable_func_keys registrations from earlier
+        // method_func_keys / implement_method_func_keys registrations from earlier
         // triggers are lost. finalize_function() guards against re-defining
         // function bodies that were already compiled on previous triggers.
-        self.compile_array_iterable_default_methods()?;
         self.declare_all_monomorphized_instances()?;
         self.declare_vir_monomorphized_functions()?;
+        self.compile_vir_implement_method_monomorphs()?;
         self.expand_abstract_class_method_monomorphs()?;
         self.build_monomorph_index();
         // VIR first (~17x cheaper), then AST fallback for remaining monomorphs.
@@ -569,13 +569,13 @@ impl Compiler<'_> {
             self.expand_abstract_class_method_monomorphs()?;
         }
 
-        // Compile array Iterable default methods for program-level element types.
-        // Module-level types already have methods from the module cache (imported
-        // via import_array_iterable_default_methods); the sentinel check inside
-        // compile_array_iterable_default_methods skips those.
+        // Register implement method monomorphs for call-site dispatch.
+        // VIR functions are declared above by declare_vir_monomorphized_functions;
+        // this bridges their FuncIds into implement_method_func_keys.
         {
-            let _timing = compile_timing!(DEBUG, "compile_array_iterable_defaults").entered();
-            self.compile_array_iterable_default_methods()?;
+            let _timing =
+                compile_timing!(DEBUG, "compile_vir_implement_method_monomorphs").entered();
+            self.compile_vir_implement_method_monomorphs()?;
         }
 
         // Build monomorph name index for O(1) lookup during body compilation.
@@ -784,11 +784,6 @@ impl Compiler<'_> {
             }
         }
 
-        // Import array Iterable default methods so array_iterable_func_keys is
-        // populated and the sentinel skip in compile_array_iterable_default_methods
-        // can fire, avoiding redundant recompilation per element type.
-        self.import_array_iterable_default_methods()?;
-
         Ok(())
     }
 
@@ -831,10 +826,6 @@ impl Compiler<'_> {
             self.declare_module_types_and_functions(&module_paths)?;
         }
 
-        // Pass 1.5a: Declare and compile array Iterable default methods for each concrete
-        // element type (e.g. count/map/filter on [i64], [string], etc.).
-        self.compile_array_iterable_default_methods()?;
-
         // Pass 1.5: Declare all monomorphized instances (functions, class methods,
         // static methods). This pre-declares known monomorphs so they have FuncIds
         // before any body compilation begins. Instances whose ASTs live in the main
@@ -849,6 +840,10 @@ impl Compiler<'_> {
         // wrap<string>).  Without declaring them here, compile_module_function_bodies
         // would fail with "VirDirect function not found".
         self.declare_vir_monomorphized_functions()?;
+
+        // Register implement method monomorphs for call-site dispatch.
+        // Must run after declare_vir so vir_direct_func_ids is populated.
+        self.compile_vir_implement_method_monomorphs()?;
 
         // Pass 1.6: Expand abstract class method templates into concrete instances.
         // Abstract templates are created by sema when generic code (e.g. Task.stream<T>)
@@ -1388,12 +1383,6 @@ impl Compiler<'_> {
                 self.import_module_implement_block(entry)?;
             }
         }
-
-        // Import array Iterable default methods from the pre-compiled module cache.
-        // compile_array_iterable_default_methods is only called in compile_modules_only;
-        // when using the module cache, we must import these functions instead so that
-        // array_iterable_func_keys is populated for call-site dispatch.
-        self.import_array_iterable_default_methods()?;
 
         Ok(())
     }
