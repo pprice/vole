@@ -65,6 +65,7 @@ use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::type_translate::sweep_unmapped_type_ids;
 use vole_frontend::{Interner, Program};
 use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, Span};
+use vole_log::compile_timing;
 use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::implement_dispatch::{VirExternalImport, VirImplementDispatch};
 use vole_vir::type_table::VirTypeTable;
@@ -653,33 +654,40 @@ where
     // -----------------------------------------------------------------------
 
     // File functions first, then module functions (preserves original ordering).
-    let mut vir_functions = lower_top_level_functions(LowerTopLevelFunctionsArgs {
-        program,
-        interner,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        module_id,
-        type_table,
-        cross_module: &cross_module_ctx,
-        implements,
-    });
-    vir_functions.extend(module_vir_functions);
+    let mut vir_functions = {
+        let _timing = compile_timing!(DEBUG, "lower_top_level_functions").entered();
+        let mut fns = lower_top_level_functions(LowerTopLevelFunctionsArgs {
+            program,
+            interner,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            module_id,
+            type_table,
+            cross_module: &cross_module_ctx,
+            implements,
+        });
+        fns.extend(module_vir_functions);
+        fns
+    };
 
     // -----------------------------------------------------------------------
     // Monomorphization (mixed pass)
     // -----------------------------------------------------------------------
 
     let (generic_vir_functions, generic_vir_map) = build_generic_vir_storage(generic_vir_functions);
-    let early_instance_index = run_early_vir_monomorphize(
-        &mut vir_functions,
-        &generic_vir_functions,
-        &generic_vir_map,
-        type_table,
-        entities,
-        type_arena,
-    );
+    let early_instance_index = {
+        let _timing = compile_timing!(DEBUG, "run_early_vir_monomorphize").entered();
+        run_early_vir_monomorphize(
+            &mut vir_functions,
+            &generic_vir_functions,
+            &generic_vir_map,
+            type_table,
+            entities,
+            type_arena,
+        )
+    };
 
     // -----------------------------------------------------------------------
     // Type methods and implement-block methods (file-level only)
@@ -719,21 +727,24 @@ where
     // Test-scoped type methods and method monomorphization
     // -----------------------------------------------------------------------
 
-    lower_test_scoped_type_methods(
-        program,
-        interner,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        tests_virtual_modules,
-        Some(&module_programs),
-        module_id,
-        &mut vir_functions,
-        type_table,
-        &cross_module_ctx,
-        implements,
-    );
+    {
+        let _timing = compile_timing!(DEBUG, "lower_test_scoped_type_methods").entered();
+        lower_test_scoped_type_methods(
+            program,
+            interner,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            tests_virtual_modules,
+            Some(&module_programs),
+            module_id,
+            &mut vir_functions,
+            type_table,
+            &cross_module_ctx,
+            implements,
+        );
+    }
     let method_monomorph_ctx = MethodMonomorphLoweringCtx {
         names,
         entities,
@@ -766,18 +777,21 @@ where
     // Test bodies, global inits, module bindings (file + module)
     // -----------------------------------------------------------------------
 
-    let vir_tests = lower_test_bodies(
-        program,
-        node_map,
-        interner,
-        type_arena,
-        entities,
-        names,
-        type_table,
-        module_id,
-        &cross_module_ctx,
-        implements,
-    );
+    let vir_tests = {
+        let _timing = compile_timing!(DEBUG, "lower_test_bodies").entered();
+        lower_test_bodies(
+            program,
+            node_map,
+            interner,
+            type_arena,
+            entities,
+            names,
+            type_table,
+            module_id,
+            &cross_module_ctx,
+            implements,
+        )
+    };
     let vir_global_inits = lower_global_inits(
         program,
         interner,
@@ -982,6 +996,7 @@ where
     // Assemble the final VirProgram
     // -----------------------------------------------------------------------
 
+    let _timing = compile_timing!(DEBUG, "assemble_vir_program").entered();
     assemble_vir_program(AssembleVirProgramArgs {
         vir_functions,
         vir_monomorph_map,
@@ -1127,11 +1142,17 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         modules_with_errors: HashSet::new(),
         substitute_fallback: None,
     };
-    run_vir_monomorphize(&mut vir_program);
+    {
+        let _timing = compile_timing!(DEBUG, "run_vir_monomorphize").entered();
+        run_vir_monomorphize(&mut vir_program);
+    }
 
     // Sweep all TypeIds in the arena and populate VirTypeId mappings for any
     // that were not encountered during on-demand lowering.
-    sweep_unmapped_type_ids(&mut vir_program.type_table, type_arena);
+    {
+        let _timing = compile_timing!(DEBUG, "sweep_unmapped_type_ids").entered();
+        sweep_unmapped_type_ids(&mut vir_program.type_table, type_arena);
+    }
 
     LowerVirProgramOutput { vir_program }
 }

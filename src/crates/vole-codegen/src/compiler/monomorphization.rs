@@ -8,6 +8,7 @@ use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_identity::{ModuleId, MonomorphInstanceTrait, NameId, TypeId, VirTypeId};
+use vole_log::compile_timing;
 use vole_vir::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
 };
@@ -33,6 +34,10 @@ struct ExpandedMethodData {
 impl Compiler<'_> {
     /// Declare a single monomorphized instance using the common trait interface.
     /// `has_self_param` indicates if a self pointer should be prepended to parameters.
+    ///
+    /// If the function's mangled name is already registered as a pre-compiled symbol
+    /// (from `CompiledModules`), it is imported with `Import` linkage and marked as
+    /// defined so the compile phase skips IR building entirely.
     pub(super) fn declare_monomorph_instance<T: MonomorphInstanceTrait>(
         &mut self,
         instance: &T,
@@ -56,7 +61,19 @@ impl Compiler<'_> {
         };
         let sig =
             self.build_signature_from_type_ids(&param_type_ids, Some(return_type_id), self_param);
-        let func_id = self.jit.declare_function(&mangled_name, &sig);
+
+        // If the function already exists in CompiledModules, import it instead
+        // of declaring for local compilation. This avoids redundant Cranelift
+        // IR building and compilation for functions whose machine code is
+        // already available.
+        let func_id = if self.jit.has_precompiled_symbol(&mangled_name) {
+            let fid = self.jit.import_function(&mangled_name, &sig);
+            self.defined_functions.insert(fid);
+            fid
+        } else {
+            self.jit.declare_function(&mangled_name, &sig)
+        };
+
         let func_key = self.func_registry.intern_name_id(instance.mangled_name());
         self.func_registry.set_func_id(func_key, func_id);
 
@@ -233,6 +250,7 @@ impl Compiler<'_> {
     /// incomplete (e.g. structural type parameter monomorphs).
     fn compile_monomorphized_function(&mut self, instance: &VirMonomorphInfo) -> CodegenResult<()> {
         let mangled_name = self.analyzed.display_name(instance.mangled_name);
+        let _timing = compile_timing!(TRACE, "compile_monomorph", name = %mangled_name).entered();
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
             .func_registry

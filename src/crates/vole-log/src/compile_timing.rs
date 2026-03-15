@@ -137,9 +137,10 @@ where
         // Spans without a `path` field always pass (they are sub-phases like "sema").
         if let Some(ref pattern) = self.filter
             && let Some((_, path_value)) = visitor.fields.iter().find(|(k, _)| k == "path")
-                && !path_value.contains(pattern.as_str()) {
-                    return;
-                }
+            && !path_value.contains(pattern.as_str())
+        {
+            return;
+        }
 
         if let Some(span) = ctx.span(id) {
             let mut extensions = span.extensions_mut();

@@ -1034,6 +1034,19 @@ impl Compiler<'_> {
                     abi,
                 );
 
+                // If this function already exists in CompiledModules, import it
+                // instead of compiling. This avoids redundant Cranelift IR
+                // building for functions whose machine code is already available.
+                if self.jit.has_precompiled_symbol(&mangled_name) {
+                    let func_id = self.jit.import_function(&mangled_name, &sig);
+                    let func_key = self.func_registry.intern_raw(mangled_name);
+                    self.func_registry.set_func_id(func_key, func_id);
+                    self.state
+                        .array_iterable_func_keys
+                        .insert((*method_name_id, self_type_id), func_key);
+                    continue;
+                }
+
                 // Declare JIT function with the mangled name and register in func_registry
                 let func_id = self.jit.declare_function(&mangled_name, &sig);
                 let func_key = self.func_registry.intern_raw(mangled_name);

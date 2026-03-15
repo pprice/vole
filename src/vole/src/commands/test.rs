@@ -30,6 +30,7 @@ use crate::sema::lowering::CachedModuleVir;
 use crate::util::format_duration;
 use std::cell::RefCell;
 use std::rc::Rc;
+use vole_log::compile_timing;
 
 /// Unicode symbols for test output
 mod symbols {
@@ -584,6 +585,8 @@ fn run_source_tests_with_modules(
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
+    let _file_timing = compile_timing!(INFO, "file", path = %file_path).entered();
+
     // Parse and type check with shared cache, capturing diagnostics
     let mut diag_buffer = Vec::new();
     let analyzed = match compile_source(
@@ -637,6 +640,7 @@ fn run_source_tests_with_modules(
     // pass table-A indices to compile_trigger, which interprets them using
     // table B from the LazyCompilationState.
     if !can_use_cache && !analyzed.module_paths().is_empty() {
+        let _timing = compile_timing!(INFO, "module_compilation").entered();
         let is_extending = compiled_modules.is_some();
         let mut module_options = options;
         if is_extending {
@@ -682,6 +686,7 @@ fn run_source_tests_with_modules(
             .all(|module_path| modules.has_module(module_path))
     });
 
+    let _codegen_timing = compile_timing!(INFO, "codegen").entered();
     let (jit, compile_result, tests, lazy_state) = if can_use_cache {
         let modules = compiled_modules.as_ref().unwrap();
         // Use pre-compiled modules (fast import path, no module codegen)
@@ -690,7 +695,10 @@ fn run_source_tests_with_modules(
         compiler.set_source_file(file_path);
 
         // Import module functions (fast - just declarations, no codegen)
-        let _ = compiler.import_modules();
+        {
+            let _timing = compile_timing!(DEBUG, "import_modules").entered();
+            let _ = compiler.import_modules();
+        }
 
         // Compile just the main program
         let result = compiler.compile_program_only();
@@ -746,7 +754,10 @@ fn run_source_tests_with_modules(
 
     // Finalize only on successful compilation
     let mut jit = jit;
-    jit.finalize()?;
+    {
+        let _timing = compile_timing!(DEBUG, "finalize").entered();
+        jit.finalize()?;
+    }
 
     // Activate lazy compilation state (if any) so compile_trigger can fire
     // when JIT code calls a lazily-stubbed module function.
@@ -754,6 +765,8 @@ fn run_source_tests_with_modules(
         state.populate_stub_symbols(&jit);
         state.activate();
     }
+
+    drop(_codegen_timing);
 
     // Filter tests if a filter is provided
     let tests: Vec<_> = if let Some(pattern) = config.filter {
@@ -764,6 +777,8 @@ fn run_source_tests_with_modules(
     } else {
         tests
     };
+
+    let _execute_timing = compile_timing!(INFO, "execute").entered();
 
     // Update progress line with discovered test count
     if let Some(p) = progress {

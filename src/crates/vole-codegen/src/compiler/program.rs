@@ -11,6 +11,7 @@ use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_identity::{Interner, NameId, Symbol, TypeId, VirTypeId};
+use vole_log::compile_timing;
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use vole_vir::func::VirBody;
@@ -486,7 +487,10 @@ impl Compiler<'_> {
 
         // Pre-declare all external function imports from VirProgram.
         // Idempotent: JIT returns existing FuncIds on re-declaration.
-        self.declare_external_imports();
+        {
+            let _timing = compile_timing!(DEBUG, "declare_external_imports").entered();
+            self.declare_external_imports();
+        }
 
         // Pre-pass: Register all type names from VirEntityMetadata so they're
         // available for field type resolution (classes can reference each other).
@@ -510,10 +514,16 @@ impl Compiler<'_> {
         }
 
         // First pass: declare all functions and tests, collect globals, finalize type metadata
-        self.declare_program_declarations()?;
+        {
+            let _timing = compile_timing!(DEBUG, "declare_program_declarations").entered();
+            self.declare_program_declarations()?;
+        }
 
         // Declare monomorphized function instances before second pass
-        self.declare_all_monomorphized_instances()?;
+        {
+            let _timing = compile_timing!(DEBUG, "declare_all_monomorphized_instances").entered();
+            self.declare_all_monomorphized_instances()?;
+        }
 
         // Declare VIR-monomorphized functions (produced by run_vir_monomorphize).
         self.declare_vir_monomorphized_functions()?;
@@ -521,20 +531,33 @@ impl Compiler<'_> {
         // Expand abstract class method templates for program-level generics.
         // MUST run after declarations (which provide concrete substitutions) but
         // before any body compilation (which may call expanded methods).
-        self.expand_abstract_class_method_monomorphs()?;
+        {
+            let _timing =
+                compile_timing!(DEBUG, "expand_abstract_class_method_monomorphs").entered();
+            self.expand_abstract_class_method_monomorphs()?;
+        }
 
         // Compile array Iterable default methods for program-level element types.
         // Module-level types already have methods from the module cache (imported
         // via import_array_iterable_default_methods); the sentinel check inside
         // compile_array_iterable_default_methods skips those.
-        self.compile_array_iterable_default_methods()?;
+        {
+            let _timing = compile_timing!(DEBUG, "compile_array_iterable_defaults").entered();
+            self.compile_array_iterable_default_methods()?;
+        }
 
         // Build monomorph name index for O(1) lookup during body compilation.
         // Must run after declare_all + expand_abstract so all instances are visible.
-        self.build_monomorph_index();
+        {
+            let _timing = compile_timing!(DEBUG, "build_monomorph_index").entered();
+            self.build_monomorph_index();
+        }
 
         // Second pass: compile function bodies and tests
-        self.compile_program_declarations()?;
+        {
+            let _timing = compile_timing!(DEBUG, "compile_program_declarations").entered();
+            self.compile_program_declarations()?;
+        }
 
         // Compile VIR-monomorphized function bodies first — VIR compilation is
         // ~17x cheaper than AST fallback (18ms vs 293ms at full load). The
@@ -542,16 +565,25 @@ impl Compiler<'_> {
         // Functions with free_monomorphs entries are skipped here (their
         // CallTarget::Native Symbols may reference the module interner) and
         // handled correctly by compile_all_monomorphized_instances below.
-        self.compile_vir_monomorphized_functions()?;
+        {
+            let _timing = compile_timing!(DEBUG, "compile_vir_monomorphized_functions").entered();
+            self.compile_vir_monomorphized_functions()?;
+        }
 
         // AST fallback: compile monomorphized instances that lack VIR versions
         // (~8% of monomorphs). Only handles instances not already compiled above.
-        self.compile_all_monomorphized_instances(true)?;
+        {
+            let _timing = compile_timing!(DEBUG, "compile_monomorphized_instances").entered();
+            self.compile_all_monomorphized_instances(true)?;
+        }
 
         // Compile any monomorphs that were lazily declared during expression compilation.
         // This fixpoint loop handles transitive demand-declarations: compiling one pending
         // monomorph body may trigger demand-declaration of another.
-        self.compile_pending_monomorphs()?;
+        {
+            let _timing = compile_timing!(DEBUG, "compile_pending_monomorphs").entered();
+            self.compile_pending_monomorphs()?;
+        }
 
         Ok(())
     }
@@ -1424,6 +1456,7 @@ impl Compiler<'_> {
     fn compile_main_function_by_name_id(&mut self, name_id: NameId) -> CodegenResult<()> {
         let func_key = self.func_registry.intern_name_id(name_id);
         let display_name = self.analyzed.display_name(name_id);
+        let _timing = compile_timing!(TRACE, "compile_function", name = %display_name).entered();
         let jit_func_id = self
             .func_registry
             .func_id(func_key)
@@ -1580,7 +1613,16 @@ impl Compiler<'_> {
 
             let sig = self.build_signature_for_vir_func(vir_func);
             let jit_name = format!("__vir_monomorph_{}", vir_func.name);
-            let func_id = self.jit.declare_function(&jit_name, &sig);
+
+            // If already compiled in CompiledModules, import instead of declaring
+            // for local compilation. Mark as defined to skip body compilation.
+            let func_id = if self.jit.has_precompiled_symbol(&jit_name) {
+                let fid = self.jit.import_function(&jit_name, &sig);
+                self.defined_functions.insert(fid);
+                fid
+            } else {
+                self.jit.declare_function(&jit_name, &sig)
+            };
             self.state.vir_direct_func_ids.insert(idx, func_id);
         }
         Ok(())

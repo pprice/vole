@@ -21,6 +21,7 @@ use crate::runtime::{
     write_to_stderr_capture,
 };
 use crate::sema::{ModuleCache, ModuleLoader, TypeError, TypeWarning, optimize_all};
+use vole_log::compile_timing;
 
 // Re-export VirProgram for callers that need it
 pub use vole_vir::VirProgram;
@@ -216,7 +217,7 @@ pub fn compile_source(
 
     // Parse phase
     let (mut program, mut interner) = {
-        let _span = tracing::info_span!("parse", file = %file_path).entered();
+        let _timing = compile_timing!(INFO, "parse").entered();
         let mut parser = Parser::new(source, ModuleId::new(0));
         parser.set_skip_tests(skip_tests);
         let program = match parser.parse_program() {
@@ -251,8 +252,6 @@ pub fn compile_source(
         let entry_path = std::path::Path::new(file_path);
         let has_imports = !crate::frontend::imports::extract_imports(&program).is_empty();
         if has_imports && entry_path.exists() && module_cache.is_none() {
-            let _span = tracing::info_span!("parallel_parse").entered();
-
             // Create a module loader matching what AnalyzerBuilder would create.
             let mut loader = ModuleLoader::new();
             let effective_root = if let Some(root) = project_root {
@@ -297,7 +296,7 @@ pub fn compile_source(
 
     // Sema phase (type checking)
     let mut analyzer = {
-        let _span = tracing::info_span!("sema").entered();
+        let _timing = compile_timing!(INFO, "sema").entered();
         let mut builder =
             crate::sema::AnalyzerBuilder::new(file_path).with_project_root(project_root);
         if let Some(cache) = module_cache {
@@ -324,7 +323,7 @@ pub fn compile_source(
 
     // Optimizer phase (constant folding, algebraic simplifications)
     {
-        let _span = tracing::info_span!("optimize").entered();
+        let _timing = compile_timing!(INFO, "optimize").entered();
         let stats = optimize_all(&mut program, &mut output.node_map);
         tracing::debug!(
             constants_folded = stats.constants_folded,
@@ -335,6 +334,7 @@ pub fn compile_source(
         );
     }
 
+    let _timing = compile_timing!(INFO, "vir_lower").entered();
     Ok(build_analyzed_program(
         program,
         interner,
@@ -397,16 +397,22 @@ pub fn build_analyzed_program(
     // ran with an empty interner, so call reclassification was a no-op).
     // Test body rederive converts Unresolved calls (with monomorph keys) to
     // GenericCall, which the subsequent resolve pass converts to VirDirect.
-    vole_vir::rederive_monomorphized_calls(&mut vir_program);
+    {
+        let _timing = compile_timing!(DEBUG, "rederive_monomorphized_calls").entered();
+        vole_vir::rederive_monomorphized_calls(&mut vir_program);
+    }
 
     // Resolve GenericCall → VirDirect in test bodies using the instance index.
     // rederive_monomorphized_calls above may have converted Unresolved calls
     // (with monomorph keys) to GenericCall; this resolves them to VirDirect.
-    vole_vir::resolve_test_calls(
-        &mut vir_program.tests,
-        &vir_program.vir_instance_index,
-        &vir_program.entity_metadata,
-    );
+    {
+        let _timing = compile_timing!(DEBUG, "resolve_test_calls").entered();
+        vole_vir::resolve_test_calls(
+            &mut vir_program.tests,
+            &vir_program.vir_instance_index,
+            &vir_program.entity_metadata,
+        );
+    }
 
     // Inject TypeArena substitution fallback for compound types not yet in VirTypeTable.
     let type_arena = Rc::clone(&db.types);
@@ -440,7 +446,7 @@ pub struct RunOptions<'a> {
 pub fn compile_and_run(analyzed: &VirProgram, opts: &RunOptions) -> Result<(), PipelineError> {
     // Codegen phase
     let (jit, lazy_state) = {
-        let _span = tracing::info_span!("codegen").entered();
+        let _timing = compile_timing!(INFO, "codegen").entered();
         let mut jit = JitContext::with_options(opts.jit_options);
         let lazy_state = {
             let mut compiler = Compiler::new(&mut jit, analyzed);
@@ -481,7 +487,7 @@ pub fn compile_and_run(analyzed: &VirProgram, opts: &RunOptions) -> Result<(), P
         }
     };
 
-    let _span = tracing::info_span!("execute").entered();
+    let _timing = compile_timing!(INFO, "execute").entered();
     // SAFETY: `fn_ptr` is obtained from `JitContext::get_function_ptr("main")`, which
     // returns a pointer to JIT-compiled code with the extern "C" fn() calling convention.
     // The codegen backend guarantees the "main" entry point takes no arguments and returns
