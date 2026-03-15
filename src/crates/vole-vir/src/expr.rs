@@ -668,6 +668,16 @@ pub enum CoerceKind {
         elem_type: VirTypeId,
         interface_type: VirTypeId,
     },
+    /// Wrap a non-union value into a union type.
+    ///
+    /// Codegen delegates to `construct_union_id_v` which finds the matching
+    /// variant tag and builds the tagged union buffer.
+    UnionWrap,
+    /// Box a non-unknown value as `unknown` (TaggedValue on the heap).
+    ///
+    /// Codegen delegates to `box_to_unknown` which allocates a
+    /// `(tag, value)` pair via `vole_tagged_value_new`.
+    BoxToUnknown,
 }
 
 /// Sema-independent dispatch kind annotation for VIR method calls.

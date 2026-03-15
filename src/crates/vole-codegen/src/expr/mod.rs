@@ -973,6 +973,8 @@ impl Cg<'_, '_, '_> {
                 elem_type,
                 interface_type,
             } => self.box_and_wrap_as_runtime_iterator(value, *interface_type, *elem_type),
+            CoerceKind::UnionWrap => self.construct_union_id_v(value, to),
+            CoerceKind::BoxToUnknown => self.box_to_unknown(value),
         }
     }
 

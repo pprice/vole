@@ -1144,6 +1144,8 @@ fn format_coerce(kind: &CoerceKind) -> &'static str {
         CoerceKind::InterfaceBox { .. } => "interface_box",
         CoerceKind::Unbox => "unbox",
         CoerceKind::IteratorWrap { .. } => "iterator_wrap",
+        CoerceKind::UnionWrap => "union_wrap",
+        CoerceKind::BoxToUnknown => "box_to_unknown",
     }
 }
 

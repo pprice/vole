@@ -191,22 +191,40 @@ fn classify_let_storage(ty: TypeId, init_ty: TypeId, ctx: &mut LoweringCtx<'_>) 
 /// target type and the coercion can be statically determined:
 /// - Numeric → IntExtend, IntTruncate, IntToFloat, FloatToInt, FloatExtend, FloatTruncate
 /// - Interface → InterfaceBox (with pre-decomposed type_def + type_args)
+/// - Union → UnionWrap (non-union value into union binding)
+/// - Unknown → BoxToUnknown (non-unknown value into unknown binding)
 ///
 /// Returns `None` when:
 /// - The types match (no coercion needed)
-/// - The coercion is already handled by LetStorageHint (Union, Unknown)
 /// - The types cannot be resolved (generic mode, type params)
+/// - The init is already a union/unknown (pass-through, no wrapping needed)
 fn classify_coercion(
     target_ty: TypeId,
     value_ty: TypeId,
     storage: &LetStorageHint,
     ctx: &mut LoweringCtx<'_>,
 ) -> Option<CoerceKind> {
-    // Only compute for Numeric and Interface storage hints; Union/Unknown
-    // coercions are handled by dedicated LetStorageHint branches in codegen.
     match storage {
         LetStorageHint::Numeric => classify_numeric_coercion(target_ty, value_ty),
         LetStorageHint::Interface => classify_interface_coercion(target_ty, ctx),
+        LetStorageHint::Union { init_is_union, .. } => {
+            // If the init is already a union, codegen passes through without
+            // wrapping — no coercion needed.
+            if *init_is_union {
+                None
+            } else {
+                Some(CoerceKind::UnionWrap)
+            }
+        }
+        LetStorageHint::Unknown => {
+            // Non-unknown → unknown: box to TaggedValue.  If the init is
+            // already unknown, codegen passes through.
+            if !ctx.generic && ctx.type_arena.is_unknown(value_ty) {
+                None
+            } else {
+                Some(CoerceKind::BoxToUnknown)
+            }
+        }
         _ => None,
     }
 }
@@ -214,9 +232,8 @@ fn classify_coercion(
 /// Classify the return-value coercion kind.
 ///
 /// Computes `CoerceKind` when the return value type differs from the
-/// function's return type and the coercion is a numeric conversion or
-/// interface boxing.  Convention-handled cases (Union, Unknown, Fallible)
-/// return `None`.
+/// function's return type and the coercion is a numeric, interface, union,
+/// or unknown conversion.
 fn classify_return_coercion(
     return_ty: TypeId,
     value_expr: &vole_frontend::ast::Expr,
@@ -237,6 +254,12 @@ fn classify_return_coercion(
     }
     if ctx.type_arena.is_interface(return_ty) && !ctx.type_arena.is_interface(value_ty) {
         return classify_interface_coercion(return_ty, ctx);
+    }
+    if ctx.type_arena.is_union(return_ty) && !ctx.type_arena.is_union(value_ty) {
+        return Some(CoerceKind::UnionWrap);
+    }
+    if ctx.type_arena.is_unknown(return_ty) && !ctx.type_arena.is_unknown(value_ty) {
+        return Some(CoerceKind::BoxToUnknown);
     }
     None
 }

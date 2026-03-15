@@ -22,21 +22,19 @@ use super::context::Cg;
 use super::types::CompiledValue;
 use crate::ops::{sextend_const, uextend_const};
 
-/// Pre-computed type classification for a coercion source/target pair.
+/// Classification result for the inline coercion detector.
 ///
-/// Groups the boolean type queries needed by `coerce_to_type_detected()` so
-/// the dispatch logic reads as a match on properties rather than 9 separate
-/// let bindings.
-struct CoercionClassification {
-    target_interface: bool,
-    value_interface: bool,
-    target_union: bool,
-    value_union: bool,
-    target_unknown: bool,
-    value_unknown: bool,
-    value_runtime_iterator: bool,
-    target_numeric: bool,
-    value_numeric: bool,
+/// Numeric coercions are handled separately from other coercion kinds
+/// because they require F128-aware dispatch through `coerce_numeric_to_type`
+/// rather than the simpler `compile_vir_coerce` path.
+enum InlineCoercion {
+    /// No coercion needed.
+    None,
+    /// Numeric conversion (widening, narrowing, int↔float).  Dispatched
+    /// through `coerce_numeric_to_type` for F128-aware handling.
+    Numeric,
+    /// Non-numeric coercion with a pre-computed `CoerceKind`.
+    Kind(CoerceKind),
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
@@ -205,10 +203,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Coerce a value to the target type, optionally using a pre-computed
-    /// [`CoerceKind`] hint to skip the 6-way type detection.
+    /// [`CoerceKind`] hint to skip type classification.
     ///
     /// When `hint` is `Some`, dispatches directly to the appropriate coercion
-    /// path. When `None`, falls back to runtime type queries.
+    /// path.  When `None`, classifies the coercion inline from the VIR type
+    /// table and dispatches accordingly.
     pub fn coerce_to_type_hinted(
         &mut self,
         value: CompiledValue,
@@ -233,49 +232,76 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             );
         }
 
-        self.coerce_to_type_detected(resolved_value, resolved_target_vir)
+        // Inline classification: determine the coercion kind from the VIR
+        // type table.  This replaces the old 9-query CoercionClassification.
+        match self.classify_coercion_inline(resolved_value_vir, resolved_target_vir) {
+            InlineCoercion::None => Ok(resolved_value),
+            InlineCoercion::Numeric => {
+                self.coerce_numeric_to_type(resolved_value, resolved_target_vir)
+            }
+            InlineCoercion::Kind(kind) => self.compile_vir_coerce(
+                resolved_value,
+                resolved_target_vir,
+                resolved_value_vir,
+                resolved_target_vir,
+                &kind,
+            ),
+        }
     }
 
-    fn classify_coercion_types(
+    /// Classify a coercion from the VIR type table without any external hints.
+    ///
+    /// This is a streamlined replacement for the old `classify_coercion_types`
+    /// + `coerce_to_type_detected` pair: instead of populating a 9-field
+    /// struct, it returns a single `InlineCoercion` that the caller dispatches
+    /// directly.
+    fn classify_coercion_inline(
         &self,
         value_vir: VirTypeId,
         target_vir: VirTypeId,
-    ) -> CoercionClassification {
-        CoercionClassification {
-            target_interface: self.vir_query_is_interface_v(target_vir),
-            value_interface: self.vir_query_is_interface_v(value_vir),
-            target_union: self.vir_query_is_union_v(target_vir),
-            value_union: self.vir_query_is_union_v(value_vir),
-            target_unknown: self.vir_query_is_unknown_v(target_vir),
-            value_unknown: self.vir_query_is_unknown_v(value_vir),
-            value_runtime_iterator: self.vir_query_is_runtime_iterator_v(value_vir),
-            target_numeric: self.vir_query_is_numeric_v(target_vir),
-            value_numeric: self.vir_query_is_numeric_v(value_vir),
-        }
-    }
+    ) -> InlineCoercion {
+        use crate::types::vir_conversions::{
+            vir_is_numeric, vir_is_runtime_iterator, vir_is_union,
+        };
+        let table = self.vir_type_table();
 
-    /// Fallback coercion path: queries types to determine the coercion kind.
-    fn coerce_to_type_detected(
-        &mut self,
-        value: CompiledValue,
-        target_vir_ty: VirTypeId,
-    ) -> CodegenResult<CompiledValue> {
-        let c = self.classify_coercion_types(value.type_id, target_vir_ty);
+        // Numeric → numeric: widening, narrowing, int↔float conversions.
+        if vir_is_numeric(target_vir, table)
+            && vir_is_numeric(value_vir, table)
+            && target_vir != value_vir
+        {
+            return InlineCoercion::Numeric;
+        }
 
-        if c.target_numeric && c.value_numeric && target_vir_ty != value.type_id {
-            return self.coerce_numeric_to_type(value, target_vir_ty);
+        // Interface boxing: non-interface → interface (skip RuntimeIterator).
+        // `is_interface` and `unwrap_interface` match the same VirType::Interface
+        // pattern, so unwrap_interface always succeeds when is_interface is true.
+        if table.is_interface(target_vir)
+            && !table.is_interface(value_vir)
+            && !vir_is_runtime_iterator(value_vir, table)
+        {
+            let (type_def_id, type_args) = table
+                .unwrap_interface(target_vir)
+                .expect("is_interface returned true but unwrap_interface failed");
+            return InlineCoercion::Kind(CoerceKind::InterfaceBox {
+                interface_type_def: type_def_id,
+                interface_type_args: type_args.to_vec(),
+            });
         }
-        // RuntimeIterator is a concrete type that implements Iterator dispatch
-        // directly via runtime_iterator_method; skip interface boxing.
-        if c.target_interface && !c.value_interface && !c.value_runtime_iterator {
-            self.box_interface_value_v(value, target_vir_ty)
-        } else if c.target_union && !c.value_union {
-            self.construct_union_id_v(value, target_vir_ty)
-        } else if c.target_unknown && !c.value_unknown {
-            self.box_to_unknown(value)
-        } else {
-            Ok(value)
+
+        // Union/Optional wrapping: non-union → union.
+        // Uses `vir_is_union` which matches both VirType::Union and
+        // VirType::Optional (string? is Optional, not Union).
+        if vir_is_union(target_vir, table) && !vir_is_union(value_vir, table) {
+            return InlineCoercion::Kind(CoerceKind::UnionWrap);
         }
+
+        // Unknown boxing: non-unknown → unknown.
+        if table.is_unknown(target_vir) && !table.is_unknown(value_vir) {
+            return InlineCoercion::Kind(CoerceKind::BoxToUnknown);
+        }
+
+        InlineCoercion::None
     }
 
     fn coerce_numeric_to_type(
