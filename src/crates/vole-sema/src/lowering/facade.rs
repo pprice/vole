@@ -52,8 +52,8 @@ use super::monomorph_info::{
 use super::test_bodies::lower_test_bodies;
 use super::test_scoped_type_methods::lower_test_scoped_type_methods;
 use super::type_method_monomorph::{
-    MethodMonomorphLoweringCtx, MethodMonomorphLoweringWork,
-    lower_implement_method_monomorphized_instances, lower_type_method_monomorphized_instances,
+    MethodMonomorphLoweringCtx, MethodMonomorphLoweringWork, lower_implement_method_monomorphs,
+    lower_type_method_monomorphized_instances,
 };
 use super::type_methods::{lower_module_type_methods, lower_top_level_type_methods};
 use super::vir_monomorph::{
@@ -217,7 +217,7 @@ where
             // Cache miss: run module VIR lowering (mutates module_programs
             // in place — their Interners gain symbols used by VIR functions).
             let mut type_table = vir_type_table;
-            let module_vir_functions = lower_module_vir_functions(LowerModuleVirArgs {
+            let mut module_vir_functions = lower_module_vir_functions(LowerModuleVirArgs {
                 names,
                 entities,
                 type_arena,
@@ -227,6 +227,25 @@ where
                 type_table: &mut type_table,
                 implements,
             });
+
+            // Lower implement-block default method monomorphs (e.g.
+            // Iterable<T> → concrete element types).  This reads VIR
+            // templates produced by lower_module_implement_block_methods
+            // above, clones them with type substitutions, and appends the
+            // concrete functions.  Running here (once, in the module phase)
+            // instead of per-file avoids redundant cloning + rewriting on
+            // every file compilation.
+            {
+                let _t = compile_timing!(DEBUG, "lower_implement_method_monomorphized_instances")
+                    .entered();
+                lower_implement_method_monomorphs(
+                    &mut module_vir_functions,
+                    &mut type_table,
+                    entities,
+                    type_arena,
+                    names,
+                );
+            }
 
             // Build full entity metadata and populate module implement blocks.
             // The entity metadata is cached for subsequent files, which skip
@@ -799,13 +818,8 @@ where
             &method_monomorph_ctx,
         );
     }
-    {
-        let _t = compile_timing!(DEBUG, "lower_implement_method_monomorphized_instances").entered();
-        lower_implement_method_monomorphized_instances(
-            &mut method_monomorph_work,
-            &method_monomorph_ctx,
-        );
-    }
+    // Note: lower_implement_method_monomorphized_instances has been moved to
+    // the module phase (computed once, cached for subsequent files).
 
     // -----------------------------------------------------------------------
     // Lookup maps
