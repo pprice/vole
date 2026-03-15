@@ -690,7 +690,10 @@ fn run_source_tests_with_modules(
     let (jit, compile_result, tests, lazy_state) = if can_use_cache {
         let modules = compiled_modules.as_ref().unwrap();
         // Use pre-compiled modules (fast import path, no module codegen)
-        let mut jit = JitContext::with_modules_and_options(modules, options);
+        let mut jit = {
+            let _t = compile_timing!(DEBUG, "jit_setup").entered();
+            JitContext::with_modules_and_options(modules, options)
+        };
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
 
@@ -701,7 +704,10 @@ fn run_source_tests_with_modules(
         }
 
         // Compile just the main program
-        let result = compiler.compile_program_only();
+        let result = {
+            let _t = compile_timing!(DEBUG, "compile_program").entered();
+            compiler.compile_program_only()
+        };
 
         let tests = compiler.take_tests();
         let main_lambda_counter = compiler.lambda_counter();

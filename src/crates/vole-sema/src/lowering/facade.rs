@@ -137,6 +137,7 @@ where
 
     // Build per-file metadata (NOT cached — these depend on shared registries
     // that grow as more modules are analyzed).
+    let _t_module_phase = compile_timing!(DEBUG, "module_phase").entered();
     let implement_dispatch = build_implement_dispatch(implements, interner, names);
     let external_imports = collect_external_imports(implements, names);
     let (module_constants, module_exports) = collect_module_metadata(type_arena);
@@ -252,7 +253,10 @@ where
             )
         };
 
+    drop(_t_module_phase);
+
     // Phase F: file-specific passes.
+    let _t_file_phase = compile_timing!(DEBUG, "file_phase").entered();
     lower_file_vir(LowerFileVirArgs {
         program,
         interner,
@@ -635,7 +639,10 @@ where
     // lowering so that `resolve_callee_function` can resolve cross-module
     // calls to `CallTarget::Direct` instead of falling through to codegen's
     // `call_dispatch()`.
-    let xmod_bindings = extract_cross_module_bindings(program, node_map, type_arena);
+    let xmod_bindings = {
+        let _t = compile_timing!(DEBUG, "extract_cross_module_bindings").entered();
+        extract_cross_module_bindings(program, node_map, type_arena)
+    };
 
     // Compute prelude module IDs from module_programs keys.
     let prelude_module_ids: Vec<_> = module_programs
@@ -693,35 +700,41 @@ where
     // Type methods and implement-block methods (file-level only)
     // -----------------------------------------------------------------------
 
-    lower_top_level_type_methods(
-        program,
-        interner,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        module_id,
-        Some(&module_programs),
-        &mut vir_functions,
-        type_table,
-        &cross_module_ctx,
-        implements,
-    );
+    {
+        let _t = compile_timing!(DEBUG, "lower_top_level_type_methods").entered();
+        lower_top_level_type_methods(
+            program,
+            interner,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            module_id,
+            Some(&module_programs),
+            &mut vir_functions,
+            type_table,
+            &cross_module_ctx,
+            implements,
+        );
+    }
     // Note: module type methods and module implement-block methods are now
     // handled in the module phase (cached).
-    lower_implement_block_methods(LowerImplementBlockMethodsArgs {
-        program,
-        interner,
-        names,
-        entities,
-        type_arena,
-        node_map,
-        module_id,
-        vir_functions: &mut vir_functions,
-        type_table,
-        cross_module: &cross_module_ctx,
-        implements,
-    });
+    {
+        let _t = compile_timing!(DEBUG, "lower_implement_block_methods").entered();
+        lower_implement_block_methods(LowerImplementBlockMethodsArgs {
+            program,
+            interner,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            module_id,
+            vir_functions: &mut vir_functions,
+            type_table,
+            cross_module: &cross_module_ctx,
+            implements,
+        });
+    }
 
     // -----------------------------------------------------------------------
     // Test-scoped type methods and method monomorphization
@@ -763,15 +776,26 @@ where
         vir_functions: &mut vir_functions,
         type_table,
     };
-    lower_type_method_monomorphized_instances(&mut method_monomorph_work, &method_monomorph_ctx);
+    {
+        let _t = compile_timing!(DEBUG, "lower_type_method_monomorphized_instances").entered();
+        lower_type_method_monomorphized_instances(
+            &mut method_monomorph_work,
+            &method_monomorph_ctx,
+        );
+    }
 
     // -----------------------------------------------------------------------
     // Lookup maps
     // -----------------------------------------------------------------------
 
-    let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
-    let vir_function_map = build_vir_function_map(&vir_functions);
-    let vir_method_map = build_vir_method_map(&vir_functions);
+    let (vir_monomorph_map, vir_function_map, vir_method_map) = {
+        let _t = compile_timing!(DEBUG, "build_lookup_maps").entered();
+        (
+            build_vir_monomorph_map(&vir_functions),
+            build_vir_function_map(&vir_functions),
+            build_vir_method_map(&vir_functions),
+        )
+    };
 
     // -----------------------------------------------------------------------
     // Test bodies, global inits, module bindings (file + module)
@@ -792,6 +816,7 @@ where
             implements,
         )
     };
+    let _t_globals = compile_timing!(DEBUG, "lower_global_inits").entered();
     let vir_global_inits = lower_global_inits(
         program,
         interner,
@@ -804,7 +829,6 @@ where
         &cross_module_ctx,
         implements,
     );
-    // Module global inits (type-table-dependent, logically module-only).
     let module_vir_global_inits = lower_module_global_inits(
         &mut module_programs,
         names,
@@ -816,9 +840,11 @@ where
         &prelude_module_ids,
         implements,
     );
+    drop(_t_globals);
+
+    let _t_bindings = compile_timing!(DEBUG, "lower_module_bindings").entered();
     let vir_module_bindings =
         lower_module_bindings(program, node_map, type_arena, names, interner, type_table);
-    // Module-level module bindings (type-table-dependent, logically module-only).
     let vir_module_module_bindings = lower_module_module_bindings(
         &mut module_programs,
         names,
@@ -828,10 +854,13 @@ where
         type_table,
     );
 
+    drop(_t_bindings);
+
     // -----------------------------------------------------------------------
     // Default inits (file + module)
     // -----------------------------------------------------------------------
 
+    let _t_defaults = compile_timing!(DEBUG, "lower_default_inits").entered();
     let mut vir_function_default_inits =
         lower_function_default_inits(LowerFunctionDefaultInitsArgs {
             program,
@@ -939,10 +968,13 @@ where
         });
     vir_field_default_inits.extend(module_vir_field_default_inits);
 
+    drop(_t_defaults);
+
     // -----------------------------------------------------------------------
     // Entity metadata and monomorph info
     // -----------------------------------------------------------------------
 
+    let _t_entity = compile_timing!(DEBUG, "entity_metadata_and_monomorph_info").entered();
     let monomorph_info = if let Some(cached) = cached_monomorph_info {
         cached
     } else {
@@ -985,6 +1017,8 @@ where
         });
         meta
     };
+
+    drop(_t_entity);
 
     // Collect module interners from module_programs for VirProgram.
     let module_interners: FxHashMap<String, Rc<Interner>> = module_programs
