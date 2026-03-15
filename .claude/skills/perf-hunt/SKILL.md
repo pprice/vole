@@ -157,6 +157,11 @@ Always re-profile to get fresh baseline timings and accurate hotspot data:
 - Rebuild release-local: `cargo build --profile release-local`
 - Regenerate workloads if directories don't exist (e.g. after reboot/cleanup)
 - Run `profile-round.py` on the benchmark suite
+- Also capture `--timing` data for phase breakdown:
+  ```bash
+  vole test --timing /tmp/vole-perf/<workload>/ 2>/tmp/timing-<workload>.txt 1>/dev/null
+  ```
+  This gives per-file, per-phase cost data complementary to perf's function-level samples.
 - Compare timings against previous baseline:
   - If total wall-clock time regressed >2% from a previous fix: revert and investigate
   - Otherwise: update baseline timings
@@ -386,7 +391,75 @@ Where each workload name is a directory name under `<base-dir>`.
 Progress goes to stderr. Perf.data files are kept in `/tmp/` so the sub-agent
 can use `perf annotate` for instruction-level analysis during investigation.
 
-## Key Differences from stress-hunt
+## Using `--timing` for Phase-Level Analysis
+
+In addition to `perf` sampling, use Vole's built-in `--timing` flag for
+phase-level breakdown. This is complementary to `perf`:
+- **`perf`**: instruction-level hotspots (which function is slow)
+- **`--timing`**: phase-level breakdown (which compiler phase is slow)
+
+### Quick phase breakdown
+
+```bash
+# Full timing tree for one workload
+vole test --timing /tmp/vole-perf/perf-full-1000/ 2>/tmp/timing.txt 1>/dev/null
+
+# Aggregate by phase
+grep "\[timing\]" /tmp/timing.txt | sed 's/.*\[timing\] //' | \
+  awk '{print $NF, $0}' | sort -rn | head -20
+```
+
+### Chrome trace for flame graph
+
+```bash
+vole test --timing=chrome:/tmp/trace.json /tmp/vole-perf/perf-full-1000/ 1>/dev/null 2>/dev/null
+# Open /tmp/trace.json in speedscope.dev for visual flame graph
+```
+
+### Timing levels
+
+```
+--timing                    # DEBUG level (phases + sub-phases per file)
+--timing=trace              # TRACE level (per-function compilation)
+--timing=pattern            # Filter to files matching pattern
+--timing=trace:pattern      # Both
+--timing=chrome:path.json   # Write Chrome trace JSON for flame graphs
+```
+
+### When to use which
+
+| Question | Tool |
+|----------|------|
+| Which compiler phase is slow? | `--timing` |
+| Which function within that phase is slow? | `perf annotate` |
+| Is work being duplicated across files? | `--timing` (look for repeated spans) |
+| Is a specific algorithm slow? | `perf record` + `perf report` |
+| Visual overview of compilation | `--timing=chrome:path.json` + speedscope |
+
+### Phase aggregation script
+
+To aggregate `--timing` output across all files into per-phase totals:
+
+```python
+import re
+from collections import defaultdict
+totals = defaultdict(float)
+counts = defaultdict(int)
+for line in open("/tmp/timing.txt"):
+    if not line.startswith("[timing]"): continue
+    m = re.match(r'\[timing\]\s+(\S+)\s+([\d.]+)(µs|ms|s)', line.strip())
+    if m:
+        name, val, unit = m.group(1), float(m.group(2)), m.group(3)
+        if unit == 'µs': val /= 1000
+        elif unit == 's': val *= 1000
+        totals[name] += val
+        counts[name] += 1
+for name, total in sorted(totals.items(), key=lambda x: -x[1]):
+    if total > 5:
+        print(f"{name:<45} {total:>7.0f}ms  ({counts[name]} calls)")
+```
+
+
 
 | Aspect | stress-hunt | perf-hunt |
 |--------|-------------|-----------|
