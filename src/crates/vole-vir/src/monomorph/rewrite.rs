@@ -12,8 +12,9 @@ use vole_identity::VirTypeId;
 
 use crate::calls::CallTarget;
 use crate::expr::{
-    CoerceKind, IsCheckResult, VirCapture, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind,
-    VirMethodDispatchMeta, VirPattern, VirRecordFieldBinding, VirStringPart, VirTupleBinding,
+    CoerceKind, ComparisonHint, IsCheckResult, VirCapture, VirErrorPatternKind, VirExpr,
+    VirMatchArm, VirMetaKind, VirMethodDispatchMeta, VirPattern, VirRecordFieldBinding,
+    VirStringPart, VirTupleBinding,
 };
 use crate::func::{VirBody, VirFunction};
 use crate::refs::VirRef;
@@ -254,6 +255,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             lhs_is_optional: false,
             rhs_is_optional: false,
             lhs_is_unsigned: false,
+            comparison_hint: ComparisonHint::None,
         },
         VirExpr::UnaryOp {
             op,
@@ -1453,6 +1455,7 @@ mod tests {
                         lhs_is_optional: false,
                         rhs_is_optional: false,
                         lhs_is_unsigned: false,
+                        comparison_hint: crate::expr::ComparisonHint::None,
                     }),
                     mutable: false,
                     ty: type_id(10),

@@ -12,10 +12,10 @@ use vole_identity::{ImplementMethodMonomorphKey, MonomorphKey, TypeDefId, TypeId
 use vole_vir::IntrinsicKey;
 use vole_vir::calls::{CallTarget, LambdaDefaultsInfo};
 use vole_vir::expr::{
-    AsCastKind, IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind, VirClassMethodMonomorphKey,
-    VirExpr, VirExternalMethodInfo, VirFunctionMonomorphKey, VirMetaKind, VirMethodDispatchKind,
-    VirMethodDispatchMeta, VirMethodReceiverCoercion, VirResolvedMethod,
-    VirStaticMethodMonomorphKey, VirStringPart, VirUnOp,
+    AsCastKind, ComparisonHint, IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind,
+    VirClassMethodMonomorphKey, VirExpr, VirExternalMethodInfo, VirFunctionMonomorphKey,
+    VirMetaKind, VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion,
+    VirResolvedMethod, VirStaticMethodMonomorphKey, VirStringPart, VirUnOp, classify_comparison,
 };
 use vole_vir::func::VirBody;
 use vole_vir::numeric_model::numeric_result_type_v;
@@ -278,6 +278,24 @@ fn lower_binary(
         vir_ty
     };
 
+    // Pre-compute comparison dispatch hint so codegen can match on a
+    // single enum instead of re-detecting types at 5+ dispatch sites.
+    let comparison_hint = if !ctx.generic {
+        match (
+            ctx.node_map.get_type(bin_expr.left.id),
+            ctx.node_map.get_type(bin_expr.right.id),
+        ) {
+            (Some(l), Some(r)) => {
+                let lv = ctx.translate(l);
+                let rv = ctx.translate(r);
+                classify_comparison(vir_op, lv, rv, lhs_is_optional, ctx.type_table)
+            }
+            _ => ComparisonHint::None,
+        }
+    } else {
+        ComparisonHint::None
+    };
+
     Box::new(VirExpr::BinaryOp {
         op: vir_op,
         lhs,
@@ -289,6 +307,7 @@ fn lower_binary(
         lhs_is_optional,
         rhs_is_optional,
         lhs_is_unsigned,
+        comparison_hint,
     })
 }
 
@@ -564,6 +583,7 @@ fn lower_compound_assign(
                 lhs_is_optional: false,
                 rhs_is_optional: false,
                 lhs_is_unsigned,
+                comparison_hint: ComparisonHint::None,
             });
             Box::new(VirExpr::LocalStore {
                 name: *sym,
@@ -594,6 +614,7 @@ fn lower_compound_assign(
                 lhs_is_optional: false,
                 rhs_is_optional: false,
                 lhs_is_unsigned,
+                comparison_hint: ComparisonHint::None,
             });
             Box::new(VirExpr::FieldStore {
                 object: obj_for_store,
@@ -626,6 +647,7 @@ fn lower_compound_assign(
                 lhs_is_optional: false,
                 rhs_is_optional: false,
                 lhs_is_unsigned,
+                comparison_hint: ComparisonHint::None,
             });
             Box::new(VirExpr::IndexStore {
                 object: obj_for_store,

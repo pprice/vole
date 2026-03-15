@@ -22,7 +22,7 @@ use crate::calls::{CallTarget, NativeAbi};
 use crate::entity_metadata::VirEntityMetadata;
 use crate::expr::{
     FieldCoercionHint, FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirMethodDispatchKind,
-    VirPattern, VirStringPart,
+    VirPattern, VirStringPart, classify_comparison,
 };
 use crate::func::{ReturnAbi, VirBody, VirFunction};
 use crate::implement_dispatch::VirImplementDispatch;
@@ -303,6 +303,7 @@ fn rederive_expr(
             lhs_is_optional,
             rhs_is_optional,
             lhs_is_unsigned,
+            comparison_hint,
             ..
         } => {
             rederive_ref(lhs, table, ret_ty, entities, call_ctx);
@@ -329,6 +330,12 @@ fn rederive_expr(
                 } else {
                     *promoted_ty = l;
                 }
+            }
+            // Re-derive comparison hint from now-concrete operand types.
+            if let Some(lhs_vir_ty) = lhs_ty {
+                let rhs_vir_ty = rhs_ty.unwrap_or(VirTypeId::UNKNOWN);
+                *comparison_hint =
+                    classify_comparison(*op, lhs_vir_ty, rhs_vir_ty, *lhs_is_optional, table);
             }
         }
         VirExpr::UnaryOp { operand, .. } => {

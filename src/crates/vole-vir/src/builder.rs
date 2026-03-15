@@ -5,7 +5,9 @@
 use vole_identity::{FunctionId, Symbol, VirTypeId};
 
 use crate::calls::CallTarget;
-use crate::expr::{CoerceKind, FieldStorage, VirBinOp, VirExpr, VirRcCleanup, VirUnOp};
+use crate::expr::{
+    CoerceKind, ComparisonHint, FieldStorage, VirBinOp, VirExpr, VirRcCleanup, VirUnOp,
+};
 use crate::func::{ReturnAbi, VirBody, VirFunction};
 use crate::monomorph::rederive::classify_rc_cleanup;
 use crate::refs::VirRef;
@@ -124,6 +126,7 @@ impl VirBuilder {
             lhs_is_optional: false,
             rhs_is_optional: false,
             lhs_is_unsigned: false,
+            comparison_hint: ComparisonHint::None,
         })
     }
 

@@ -8,7 +8,7 @@ use cranelift_codegen::ir::{BlockArg, Function, InstructionData};
 use crate::RuntimeKey;
 use crate::context::ExternalMethodRef;
 use vole_identity::{TypeId, VirTypeId};
-use vole_vir::VirBinOp;
+use vole_vir::{ComparisonHint, VirBinOp};
 
 use super::context::Cg;
 use super::types::{CompiledValue, convert_to_type};
@@ -104,13 +104,6 @@ fn eval_int_cc(cc: IntCC, a: i64, b: i64) -> bool {
     }
 }
 
-/// Comparison condition codes for float, unsigned int, and signed int operations.
-struct CmpCodes {
-    float: FloatCC,
-    unsigned: IntCC,
-    signed: IntCC,
-}
-
 impl Cg<'_, '_, '_> {
     /// Concatenate two values as strings.
     /// Left must be a string, right will be converted via to_string() if not already string.
@@ -195,10 +188,10 @@ impl Cg<'_, '_, '_> {
     /// for comparisons it is the common numeric type that both operands are
     /// coerced to before the comparison (the result type is always BOOL).
     ///
-    /// `lhs_is_optional` / `rhs_is_optional` are VIR-lowering hints that
-    /// short-circuit the type-table lookup for optional nil-comparison
-    /// dispatch.  When the hint is `false`, the fallback query is still
-    /// performed so that generic/unresolved paths remain correct.
+    /// `comparison_hint` pre-classifies comparison dispatch (string, float,
+    /// struct, optional, integer) so codegen reads the decision rather than
+    /// re-detecting types.  `ComparisonHint::None` falls back to the legacy
+    /// type-based dispatch for generic/unresolved paths.
     ///
     /// `lhs_is_unsigned` is a VIR-lowering hint that short-circuits the
     /// `VirTypeId::is_unsigned_int()` check for selecting unsigned
@@ -214,47 +207,51 @@ impl Cg<'_, '_, '_> {
         lhs_is_optional: bool,
         rhs_is_optional: bool,
         lhs_is_unsigned: bool,
+        comparison_hint: ComparisonHint,
     ) -> CodegenResult<CompiledValue> {
-        // Handle optional/nil comparisons specially
-        // When comparing optional == nil or optional != nil, we need to check the tag
+        // Dispatch Eq/Ne special cases via pre-resolved comparison hint.
         if matches!(op, VirBinOp::Eq | VirBinOp::Ne) {
-            // Check if left is optional and right is nil
-            let left_is_opt = lhs_is_optional || self.vir_query_is_optional_v(left.type_id);
-            let right_is_nil = right.type_id.is_nil();
-            if left_is_opt && right_is_nil {
-                return self.optional_nil_compare(left, op);
-            }
-            // Check if right is optional and left is nil
-            if (rhs_is_optional || self.vir_query_is_optional_v(right.type_id))
-                && left.type_id.is_nil()
-            {
-                return self.optional_nil_compare(right, op);
-            }
-            // Check if left is optional and right is a compatible value type (using VirTypeId)
-            if let Some(meta) = self.cached_optional_meta(left.type_id)
-                && (meta.inner_type == right.type_id
-                    || (self.vir_query_is_integer_v(meta.inner_type)
-                        && self.vir_query_is_integer_v(right.type_id)))
-            {
-                return self.optional_value_compare(left, right, op);
-            }
-            // Check if right is optional and left is a compatible value type (using VirTypeId)
-            if let Some(meta) = self.cached_optional_meta(right.type_id)
-                && (meta.inner_type == left.type_id
-                    || (self.vir_query_is_integer_v(meta.inner_type)
-                        && self.vir_query_is_integer_v(left.type_id)))
-            {
-                return self.optional_value_compare(right, left, op);
-            }
-            // Check if both operands are structs
-            if self.vir_query_is_struct_v(left.type_id) && self.vir_query_is_struct_v(right.type_id)
-            {
-                return self.struct_equality(left, right, op);
+            match comparison_hint {
+                ComparisonHint::OptionalNilEq => {
+                    return self.dispatch_optional_nil_eq(
+                        left,
+                        right,
+                        op,
+                        lhs_is_optional,
+                        rhs_is_optional,
+                    );
+                }
+                ComparisonHint::OptionalValueEq => {
+                    return self.dispatch_optional_value_eq(left, right, op);
+                }
+                ComparisonHint::StructEq => {
+                    return self.struct_equality(left, right, op);
+                }
+                ComparisonHint::StringEq => {
+                    return self.dispatch_string_eq(left, right, op);
+                }
+                ComparisonHint::None => {
+                    // Fallback: re-detect for generic/unresolved paths.
+                    if let Some(result) = self.detect_eq_special_case(
+                        left,
+                        right,
+                        op,
+                        lhs_is_optional,
+                        rhs_is_optional,
+                    )? {
+                        return Ok(result);
+                    }
+                }
+                // F128, Float, Int, UnsignedInt: handled below in numeric path
+                _ => {}
             }
         }
 
-        let left_is_string = left.type_id == VirTypeId::STRING;
-        let is_unsigned = lhs_is_unsigned || left.type_id.is_unsigned_int();
+        let is_unsigned = match comparison_hint {
+            ComparisonHint::UnsignedIntCmp => true,
+            ComparisonHint::None => lhs_is_unsigned || left.type_id.is_unsigned_int(),
+            _ => lhs_is_unsigned || left.type_id.is_unsigned_int(),
+        };
 
         // Use the pre-resolved promoted operand type from the VIR node.
         let result_vir_ty = promoted_ty;
@@ -270,7 +267,6 @@ impl Cg<'_, '_, '_> {
                 self.coerce_value_to_f128(right)?,
             )
         } else {
-            // Convert operands to matching types
             (
                 convert_to_type(self.builder, left, result_ty),
                 convert_to_type(self.builder, right, result_ty),
@@ -311,14 +307,11 @@ impl Cg<'_, '_, '_> {
                 } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fdiv(left_val, right_val)
                 } else if result_ty == types::I128 {
-                    // Cranelift x64 doesn't support sdiv.i128; use runtime helper
                     self.call_runtime(RuntimeKey::I128Sdiv, &[left_val, right_val])?
                 } else if is_unsigned {
-                    // Unsigned division: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
                     self.builder.ins().udiv(left_val, right_val)
                 } else {
-                    // Signed division: check for division by zero and MIN/-1 overflow
                     self.emit_div_by_zero_check(right_val, line)?;
                     self.emit_signed_div_overflow_check(left_val, right_val, result_ty, line)?;
                     self.builder.ins().sdiv(left_val, right_val)
@@ -333,127 +326,74 @@ impl Cg<'_, '_, '_> {
                     let mul = self.builder.ins().fmul(floor, right_val);
                     self.builder.ins().fsub(left_val, mul)
                 } else if result_ty == types::I128 {
-                    // Cranelift x64 doesn't support srem.i128; use runtime helper
                     self.call_runtime(RuntimeKey::I128Srem, &[left_val, right_val])?
                 } else if is_unsigned {
-                    // Unsigned remainder: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
                     self.builder.ins().urem(left_val, right_val)
                 } else {
-                    // Signed remainder: check for division by zero and MIN/-1 overflow
                     self.emit_div_by_zero_check(right_val, line)?;
                     self.emit_signed_div_overflow_check(left_val, right_val, result_ty, line)?;
                     self.builder.ins().srem(left_val, right_val)
                 }
             }
-            VirBinOp::Eq => {
-                if left_is_string {
-                    self.string_eq(left_val, right_val)?
-                } else if result_ty == types::F128 {
-                    self.call_f128_cmp(RuntimeKey::F128Eq, left_val, right_val)?
-                } else if result_ty == types::F64 || result_ty == types::F32 {
-                    self.builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
-                } else if let (Some(a), Some(b)) = (
-                    try_constant_value(self.builder.func, left_val),
-                    try_constant_value(self.builder.func, right_val),
-                ) {
-                    self.iconst_cached(types::I8, i64::from(eval_int_cc(IntCC::Equal, a, b)))
-                } else {
-                    self.builder.ins().icmp(IntCC::Equal, left_val, right_val)
-                }
-            }
-            VirBinOp::Ne => {
-                if left_is_string {
-                    let eq = self.string_eq(left_val, right_val)?;
-                    let one = self.iconst_cached(types::I8, 1);
-                    self.builder.ins().isub(one, eq)
-                } else if result_ty == types::F128 {
-                    let eq = self.call_f128_cmp(RuntimeKey::F128Eq, left_val, right_val)?;
-                    let one = self.iconst_cached(types::I8, 1);
-                    self.builder.ins().isub(one, eq)
-                } else if result_ty == types::F64 || result_ty == types::F32 {
-                    self.builder
-                        .ins()
-                        .fcmp(FloatCC::NotEqual, left_val, right_val)
-                } else if let (Some(a), Some(b)) = (
-                    try_constant_value(self.builder.func, left_val),
-                    try_constant_value(self.builder.func, right_val),
-                ) {
-                    self.iconst_cached(types::I8, i64::from(eval_int_cc(IntCC::NotEqual, a, b)))
-                } else {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::NotEqual, left_val, right_val)
-                }
-            }
-            VirBinOp::Lt => {
-                if result_ty == types::F128 {
-                    self.call_f128_cmp(RuntimeKey::F128Lt, left_val, right_val)?
-                } else {
-                    self.emit_cmp(
-                        result_ty,
-                        is_unsigned,
-                        left_val,
-                        right_val,
-                        CmpCodes {
-                            float: FloatCC::LessThan,
-                            unsigned: IntCC::UnsignedLessThan,
-                            signed: IntCC::SignedLessThan,
-                        },
-                    )
-                }
-            }
-            VirBinOp::Gt => {
-                if result_ty == types::F128 {
-                    self.call_f128_cmp(RuntimeKey::F128Gt, left_val, right_val)?
-                } else {
-                    self.emit_cmp(
-                        result_ty,
-                        is_unsigned,
-                        left_val,
-                        right_val,
-                        CmpCodes {
-                            float: FloatCC::GreaterThan,
-                            unsigned: IntCC::UnsignedGreaterThan,
-                            signed: IntCC::SignedGreaterThan,
-                        },
-                    )
-                }
-            }
-            VirBinOp::Le => {
-                if result_ty == types::F128 {
-                    self.call_f128_cmp(RuntimeKey::F128Le, left_val, right_val)?
-                } else {
-                    self.emit_cmp(
-                        result_ty,
-                        is_unsigned,
-                        left_val,
-                        right_val,
-                        CmpCodes {
-                            float: FloatCC::LessThanOrEqual,
-                            unsigned: IntCC::UnsignedLessThanOrEqual,
-                            signed: IntCC::SignedLessThanOrEqual,
-                        },
-                    )
-                }
-            }
-            VirBinOp::Ge => {
-                if result_ty == types::F128 {
-                    self.call_f128_cmp(RuntimeKey::F128Ge, left_val, right_val)?
-                } else {
-                    self.emit_cmp(
-                        result_ty,
-                        is_unsigned,
-                        left_val,
-                        right_val,
-                        CmpCodes {
-                            float: FloatCC::GreaterThanOrEqual,
-                            unsigned: IntCC::UnsignedGreaterThanOrEqual,
-                            signed: IntCC::SignedGreaterThanOrEqual,
-                        },
-                    )
-                }
-            }
+            VirBinOp::Eq => self.emit_eq(
+                comparison_hint,
+                result_ty,
+                left.type_id == VirTypeId::STRING,
+                left_val,
+                right_val,
+            )?,
+            VirBinOp::Ne => self.emit_ne(
+                comparison_hint,
+                result_ty,
+                left.type_id == VirTypeId::STRING,
+                left_val,
+                right_val,
+            )?,
+            VirBinOp::Lt => self.emit_ord_cmp(
+                comparison_hint,
+                result_ty,
+                is_unsigned,
+                left_val,
+                right_val,
+                FloatCC::LessThan,
+                IntCC::UnsignedLessThan,
+                IntCC::SignedLessThan,
+                RuntimeKey::F128Lt,
+            )?,
+            VirBinOp::Gt => self.emit_ord_cmp(
+                comparison_hint,
+                result_ty,
+                is_unsigned,
+                left_val,
+                right_val,
+                FloatCC::GreaterThan,
+                IntCC::UnsignedGreaterThan,
+                IntCC::SignedGreaterThan,
+                RuntimeKey::F128Gt,
+            )?,
+            VirBinOp::Le => self.emit_ord_cmp(
+                comparison_hint,
+                result_ty,
+                is_unsigned,
+                left_val,
+                right_val,
+                FloatCC::LessThanOrEqual,
+                IntCC::UnsignedLessThanOrEqual,
+                IntCC::SignedLessThanOrEqual,
+                RuntimeKey::F128Le,
+            )?,
+            VirBinOp::Ge => self.emit_ord_cmp(
+                comparison_hint,
+                result_ty,
+                is_unsigned,
+                left_val,
+                right_val,
+                FloatCC::GreaterThanOrEqual,
+                IntCC::UnsignedGreaterThanOrEqual,
+                IntCC::SignedGreaterThanOrEqual,
+                RuntimeKey::F128Ge,
+            )?,
             VirBinOp::And | VirBinOp::Or => unreachable!("handled above"),
             VirBinOp::BitAnd => self.builder.ins().band(left_val, right_val),
             VirBinOp::BitOr => self.builder.ins().bor(left_val, right_val),
@@ -468,8 +408,14 @@ impl Cg<'_, '_, '_> {
             }
         };
 
-        // Consume RC operands used by string comparison
-        if left_is_string && matches!(op, VirBinOp::Eq | VirBinOp::Ne) {
+        // Consume RC operands used by string comparison.
+        // When comparison_hint is StringEq, dispatch_string_eq handles RC
+        // cleanup and returns early. This handles the None fallback path
+        // where string Eq/Ne falls through to emit_eq/emit_ne.
+        if comparison_hint == ComparisonHint::None
+            && left.type_id == VirTypeId::STRING
+            && matches!(op, VirBinOp::Eq | VirBinOp::Ne)
+        {
             self.consume_rc_value(&mut left)?;
             self.consume_rc_value(&mut right)?;
         }
@@ -554,7 +500,7 @@ impl Cg<'_, '_, '_> {
             .bitcast(types::F128, MemFlags::new(), result_bits))
     }
 
-    fn call_f128_cmp(
+    pub(crate) fn call_f128_cmp(
         &mut self,
         key: RuntimeKey,
         left: Value,
@@ -572,7 +518,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// String equality comparison
-    fn string_eq(&mut self, left: Value, right: Value) -> CodegenResult<Value> {
+    pub(crate) fn string_eq(&mut self, left: Value, right: Value) -> CodegenResult<Value> {
         if self.funcs().has_runtime(RuntimeKey::StringEq) {
             self.call_runtime(RuntimeKey::StringEq, &[left, right])
         } else {
@@ -828,11 +774,8 @@ impl Cg<'_, '_, '_> {
 
     /// Compare an optional payload against a value, returning an I8 bool (1 = equal, 0 = not equal).
     ///
-    /// Dispatches on `inner_vir_ty` (the VirTypeId of the unwrapped optional's inner type):
-    /// - f128                -> call_f128_cmp (Cranelift has no native fcmp for F128)
-    /// - f32 / f64           -> fcmp
-    /// - String              -> string_eq (content equality via RuntimeKey::StringEq)
-    /// - Everything else     -> icmp (int, bool, pointer, interface, handle, union)
+    /// Dispatches via [`classify_eq_hint_from_type`] on the unwrapped optional's
+    /// inner type, using the same comparison hint taxonomy as `binary_op`.
     ///
     /// Note: Structs are handled before this function is called (see `optional_struct_compare`)
     /// because struct field loads must be guarded by a nil check to avoid segfaults.
@@ -843,61 +786,34 @@ impl Cg<'_, '_, '_> {
         payload_cranelift_type: Type,
         value: CompiledValue,
     ) -> CodegenResult<Value> {
-        if inner_vir_ty == VirTypeId::F128 {
-            // F128 requires a runtime call; Cranelift has no native fcmp for 128-bit floats.
-            self.call_f128_cmp(RuntimeKey::F128Eq, payload, value.value)
-        } else if self.vir_query_is_float_v(inner_vir_ty) {
-            // F32 / F64 use the native Cranelift fcmp instruction.
-            Ok(self
-                .builder
-                .ins()
-                .fcmp(FloatCC::Equal, payload, value.value))
-        } else if self.vir_query_is_string_v(inner_vir_ty) {
-            self.string_eq(payload, value.value)
-        } else {
-            // Integer, bool, pointer, interface, handle, union: compare by value/identity
-            let (cmp_payload, cmp_value) = if payload_cranelift_type.bytes() < value.ty.bytes() {
-                let extended = sextend_const(self.builder, value.ty, payload);
-                (extended, value.value)
-            } else if payload_cranelift_type.bytes() > value.ty.bytes() {
-                let extended = sextend_const(self.builder, payload_cranelift_type, value.value);
-                (payload, extended)
-            } else {
-                (payload, value.value)
-            };
-            Ok(self
-                .builder
-                .ins()
-                .icmp(IntCC::Equal, cmp_payload, cmp_value))
-        }
-    }
-
-    /// Emit a comparison instruction, dispatching based on type (float vs int, signed vs unsigned).
-    /// When both operands are known integer constants, the result is computed at compile time.
-    fn emit_cmp(
-        &mut self,
-        result_ty: Type,
-        is_unsigned: bool,
-        left_val: Value,
-        right_val: Value,
-        codes: CmpCodes,
-    ) -> Value {
-        if result_ty == types::F64 || result_ty == types::F32 {
-            self.builder.ins().fcmp(codes.float, left_val, right_val)
-        } else if let (Some(a), Some(b)) = (
-            try_constant_value(self.builder.func, left_val),
-            try_constant_value(self.builder.func, right_val),
-        ) {
-            let cc = if is_unsigned {
-                codes.unsigned
-            } else {
-                codes.signed
-            };
-            self.iconst_cached(types::I8, i64::from(eval_int_cc(cc, a, b)))
-        } else if is_unsigned {
-            self.builder.ins().icmp(codes.unsigned, left_val, right_val)
-        } else {
-            self.builder.ins().icmp(codes.signed, left_val, right_val)
+        let hint = self.classify_eq_hint_from_type(inner_vir_ty);
+        match hint {
+            ComparisonHint::F128Cmp => self.call_f128_cmp(RuntimeKey::F128Eq, payload, value.value),
+            ComparisonHint::FloatCmp => {
+                Ok(self
+                    .builder
+                    .ins()
+                    .fcmp(FloatCC::Equal, payload, value.value))
+            }
+            ComparisonHint::StringEq => self.string_eq(payload, value.value),
+            _ => {
+                // Integer, bool, pointer, interface, handle, union: compare by value/identity.
+                // Widen mismatched operands to the larger type.
+                let (cmp_payload, cmp_value) = if payload_cranelift_type.bytes() < value.ty.bytes()
+                {
+                    let extended = sextend_const(self.builder, value.ty, payload);
+                    (extended, value.value)
+                } else if payload_cranelift_type.bytes() > value.ty.bytes() {
+                    let extended = sextend_const(self.builder, payload_cranelift_type, value.value);
+                    (payload, extended)
+                } else {
+                    (payload, value.value)
+                };
+                Ok(self
+                    .builder
+                    .ins()
+                    .icmp(IntCC::Equal, cmp_payload, cmp_value))
+            }
         }
     }
 
@@ -995,5 +911,251 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(continue_block);
 
         Ok(())
+    }
+
+    // =========================================================================
+    // Comparison hint dispatch helpers
+    // =========================================================================
+
+    /// Dispatch optional == nil using the pre-resolved hint.
+    /// Determines which operand is the optional and which is nil.
+    fn dispatch_optional_nil_eq(
+        &mut self,
+        left: CompiledValue,
+        right: CompiledValue,
+        op: VirBinOp,
+        lhs_is_optional: bool,
+        rhs_is_optional: bool,
+    ) -> CodegenResult<CompiledValue> {
+        if (lhs_is_optional || self.vir_query_is_optional_v(left.type_id)) && right.type_id.is_nil()
+        {
+            self.optional_nil_compare(left, op)
+        } else if (rhs_is_optional || self.vir_query_is_optional_v(right.type_id))
+            && left.type_id.is_nil()
+        {
+            self.optional_nil_compare(right, op)
+        } else {
+            // Shouldn't happen with correct hint, but fallback gracefully.
+            self.optional_nil_compare(left, op)
+        }
+    }
+
+    /// Dispatch optional == value using the pre-resolved hint.
+    /// Determines which operand is the optional and which is the value.
+    fn dispatch_optional_value_eq(
+        &mut self,
+        left: CompiledValue,
+        right: CompiledValue,
+        op: VirBinOp,
+    ) -> CodegenResult<CompiledValue> {
+        if self.cached_optional_meta(left.type_id).is_some() {
+            self.optional_value_compare(left, right, op)
+        } else {
+            self.optional_value_compare(right, left, op)
+        }
+    }
+
+    /// Dispatch string equality/inequality with RC cleanup.
+    fn dispatch_string_eq(
+        &mut self,
+        mut left: CompiledValue,
+        mut right: CompiledValue,
+        op: VirBinOp,
+    ) -> CodegenResult<CompiledValue> {
+        let result = match op {
+            VirBinOp::Eq => self.string_eq(left.value, right.value)?,
+            VirBinOp::Ne => {
+                let eq = self.string_eq(left.value, right.value)?;
+                let one = self.iconst_cached(types::I8, 1);
+                self.builder.ins().isub(one, eq)
+            }
+            _ => unreachable!("dispatch_string_eq only handles Eq and Ne"),
+        };
+        self.consume_rc_value(&mut left)?;
+        self.consume_rc_value(&mut right)?;
+        Ok(self.bool_value(result))
+    }
+
+    /// Fallback Eq/Ne detection for `ComparisonHint::None` (generic paths).
+    fn detect_eq_special_case(
+        &mut self,
+        left: CompiledValue,
+        right: CompiledValue,
+        op: VirBinOp,
+        lhs_is_optional: bool,
+        rhs_is_optional: bool,
+    ) -> CodegenResult<Option<CompiledValue>> {
+        let left_is_opt = lhs_is_optional || self.vir_query_is_optional_v(left.type_id);
+        if left_is_opt && right.type_id.is_nil() {
+            return Ok(Some(self.optional_nil_compare(left, op)?));
+        }
+        if (rhs_is_optional || self.vir_query_is_optional_v(right.type_id)) && left.type_id.is_nil()
+        {
+            return Ok(Some(self.optional_nil_compare(right, op)?));
+        }
+        if let Some(meta) = self.cached_optional_meta(left.type_id)
+            && (meta.inner_type == right.type_id
+                || (self.vir_query_is_integer_v(meta.inner_type)
+                    && self.vir_query_is_integer_v(right.type_id)))
+        {
+            return Ok(Some(self.optional_value_compare(left, right, op)?));
+        }
+        if let Some(meta) = self.cached_optional_meta(right.type_id)
+            && (meta.inner_type == left.type_id
+                || (self.vir_query_is_integer_v(meta.inner_type)
+                    && self.vir_query_is_integer_v(left.type_id)))
+        {
+            return Ok(Some(self.optional_value_compare(right, left, op)?));
+        }
+        if self.vir_query_is_struct_v(left.type_id) && self.vir_query_is_struct_v(right.type_id) {
+            return Ok(Some(self.struct_equality(left, right, op)?));
+        }
+        Ok(None)
+    }
+
+    // =========================================================================
+    // Comparison helpers using ComparisonHint
+    // =========================================================================
+
+    /// Emit Eq comparison, dispatching on the pre-resolved hint.
+    ///
+    /// String, struct, and optional Eq cases are handled as early returns
+    /// before this function is called.  This handles numeric Eq and the
+    /// `None` fallback for unresolved/generic paths.
+    fn emit_eq(
+        &mut self,
+        hint: ComparisonHint,
+        result_ty: Type,
+        left_is_string: bool,
+        left: Value,
+        right: Value,
+    ) -> CodegenResult<Value> {
+        match hint {
+            ComparisonHint::F128Cmp => self.call_f128_cmp(RuntimeKey::F128Eq, left, right),
+            ComparisonHint::FloatCmp => Ok(self.builder.ins().fcmp(FloatCC::Equal, left, right)),
+            ComparisonHint::IntCmp | ComparisonHint::UnsignedIntCmp => {
+                Ok(self.emit_int_eq(left, right))
+            }
+            // None fallback: use operand type for string, Cranelift type for numerics.
+            _ => {
+                if left_is_string {
+                    self.string_eq(left, right)
+                } else if result_ty == types::F128 {
+                    self.call_f128_cmp(RuntimeKey::F128Eq, left, right)
+                } else if result_ty == types::F64 || result_ty == types::F32 {
+                    Ok(self.builder.ins().fcmp(FloatCC::Equal, left, right))
+                } else {
+                    Ok(self.emit_int_eq(left, right))
+                }
+            }
+        }
+    }
+
+    /// Emit Ne comparison, dispatching on the pre-resolved hint.
+    fn emit_ne(
+        &mut self,
+        hint: ComparisonHint,
+        result_ty: Type,
+        left_is_string: bool,
+        left: Value,
+        right: Value,
+    ) -> CodegenResult<Value> {
+        match hint {
+            ComparisonHint::F128Cmp => {
+                let eq = self.call_f128_cmp(RuntimeKey::F128Eq, left, right)?;
+                let one = self.iconst_cached(types::I8, 1);
+                Ok(self.builder.ins().isub(one, eq))
+            }
+            ComparisonHint::FloatCmp => Ok(self.builder.ins().fcmp(FloatCC::NotEqual, left, right)),
+            ComparisonHint::IntCmp | ComparisonHint::UnsignedIntCmp => {
+                Ok(self.emit_int_ne(left, right))
+            }
+            _ => {
+                if left_is_string {
+                    let eq = self.string_eq(left, right)?;
+                    let one = self.iconst_cached(types::I8, 1);
+                    Ok(self.builder.ins().isub(one, eq))
+                } else if result_ty == types::F128 {
+                    let eq = self.call_f128_cmp(RuntimeKey::F128Eq, left, right)?;
+                    let one = self.iconst_cached(types::I8, 1);
+                    Ok(self.builder.ins().isub(one, eq))
+                } else if result_ty == types::F64 || result_ty == types::F32 {
+                    Ok(self.builder.ins().fcmp(FloatCC::NotEqual, left, right))
+                } else {
+                    Ok(self.emit_int_ne(left, right))
+                }
+            }
+        }
+    }
+
+    /// Emit an ordered comparison (Lt, Le, Gt, Ge) using the hint.
+    #[expect(clippy::too_many_arguments)]
+    fn emit_ord_cmp(
+        &mut self,
+        hint: ComparisonHint,
+        result_ty: Type,
+        is_unsigned: bool,
+        left: Value,
+        right: Value,
+        float_cc: FloatCC,
+        unsigned_cc: IntCC,
+        signed_cc: IntCC,
+        f128_key: RuntimeKey,
+    ) -> CodegenResult<Value> {
+        match hint {
+            ComparisonHint::F128Cmp => self.call_f128_cmp(f128_key, left, right),
+            ComparisonHint::FloatCmp => Ok(self.builder.ins().fcmp(float_cc, left, right)),
+            ComparisonHint::UnsignedIntCmp => {
+                Ok(self.emit_int_cmp_with_fold(unsigned_cc, left, right))
+            }
+            ComparisonHint::IntCmp => Ok(self.emit_int_cmp_with_fold(signed_cc, left, right)),
+            _ => {
+                // Fallback for ComparisonHint::None (generic/unresolved).
+                if result_ty == types::F128 {
+                    self.call_f128_cmp(f128_key, left, right)
+                } else if result_ty == types::F64 || result_ty == types::F32 {
+                    Ok(self.builder.ins().fcmp(float_cc, left, right))
+                } else {
+                    let cc = if is_unsigned { unsigned_cc } else { signed_cc };
+                    Ok(self.emit_int_cmp_with_fold(cc, left, right))
+                }
+            }
+        }
+    }
+
+    /// Integer equality with constant folding.
+    fn emit_int_eq(&mut self, left: Value, right: Value) -> Value {
+        if let (Some(a), Some(b)) = (
+            try_constant_value(self.builder.func, left),
+            try_constant_value(self.builder.func, right),
+        ) {
+            self.iconst_cached(types::I8, i64::from(eval_int_cc(IntCC::Equal, a, b)))
+        } else {
+            self.builder.ins().icmp(IntCC::Equal, left, right)
+        }
+    }
+
+    /// Integer not-equal with constant folding.
+    fn emit_int_ne(&mut self, left: Value, right: Value) -> Value {
+        if let (Some(a), Some(b)) = (
+            try_constant_value(self.builder.func, left),
+            try_constant_value(self.builder.func, right),
+        ) {
+            self.iconst_cached(types::I8, i64::from(eval_int_cc(IntCC::NotEqual, a, b)))
+        } else {
+            self.builder.ins().icmp(IntCC::NotEqual, left, right)
+        }
+    }
+
+    /// Integer comparison with constant folding for any condition code.
+    fn emit_int_cmp_with_fold(&mut self, cc: IntCC, left: Value, right: Value) -> Value {
+        if let (Some(a), Some(b)) = (
+            try_constant_value(self.builder.func, left),
+            try_constant_value(self.builder.func, right),
+        ) {
+            self.iconst_cached(types::I8, i64::from(eval_int_cc(cc, a, b)))
+        } else {
+            self.builder.ins().icmp(cc, left, right)
+        }
     }
 }

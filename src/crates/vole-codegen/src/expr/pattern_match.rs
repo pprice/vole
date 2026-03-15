@@ -103,29 +103,33 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Compile an equality check for two values based on their Vole type (VirTypeId variant).
-    /// Handles string comparison via runtime function, floats via fcmp, and integers via icmp.
+    /// Compile an equality check for two values, dispatching via
+    /// [`ComparisonHint`] derived from the given `vir_ty`.
+    ///
+    /// Used by match-pattern literal and val comparisons.  Delegates to
+    /// the same `emit_eq` / `string_eq` helpers that `binary_op` uses,
+    /// so there is a single source of truth for comparison dispatch.
     fn compile_equality_check_v(
         &mut self,
         vir_ty: VirTypeId,
         left: Value,
         right: Value,
     ) -> CodegenResult<Value> {
-        use crate::RuntimeKey;
-        use cranelift::prelude::FloatCC;
+        use vole_vir::ComparisonHint;
 
-        if self.vir_query_is_string_v(vir_ty) {
-            Ok(self.call_runtime(RuntimeKey::StringEq, &[left, right])?)
-        } else if self.vir_query_is_float_v(vir_ty) {
-            Ok(self.builder.ins().fcmp(FloatCC::Equal, left, right))
-        } else if vir_ty.is_integer() || vir_ty == VirTypeId::BOOL {
-            Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
-        } else {
-            Err(CodegenError::type_mismatch(
+        let hint = self.classify_eq_hint_from_type(vir_ty);
+        match hint {
+            ComparisonHint::StringEq => self.string_eq(left, right),
+            ComparisonHint::FloatCmp => Ok(self.builder.ins().fcmp(FloatCC::Equal, left, right)),
+            ComparisonHint::F128Cmp => self.call_f128_cmp(crate::RuntimeKey::F128Eq, left, right),
+            ComparisonHint::IntCmp | ComparisonHint::UnsignedIntCmp => {
+                Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
+            }
+            _ => Err(CodegenError::type_mismatch(
                 "equality comparison",
                 "string, float, integer, or bool",
                 self.vir_query_display_basic_v(vir_ty),
-            ))
+            )),
         }
     }
 

@@ -745,6 +745,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_is_optional(vir_ty, self.vir_type_table())
     }
 
+    /// Classify a scalar VirTypeId into a [`ComparisonHint`] for equality checks.
+    ///
+    /// Used by pattern-match equality comparisons (Literal/Val patterns) which
+    /// lack a pre-computed hint from VIR lowering.  Only produces scalar
+    /// hints (StringEq, FloatCmp, F128Cmp, IntCmp, UnsignedIntCmp).
+    pub fn classify_eq_hint_from_type(&self, vir_ty: VirTypeId) -> vole_vir::ComparisonHint {
+        use vole_vir::ComparisonHint;
+        if self.vir_query_is_string_v(vir_ty) {
+            ComparisonHint::StringEq
+        } else if vir_ty == VirTypeId::F128 {
+            ComparisonHint::F128Cmp
+        } else if self.vir_query_is_float_v(vir_ty) {
+            ComparisonHint::FloatCmp
+        } else if vir_ty.is_unsigned_int() {
+            ComparisonHint::UnsignedIntCmp
+        } else if vir_ty.is_integer() || vir_ty == VirTypeId::BOOL {
+            ComparisonHint::IntCmp
+        } else {
+            ComparisonHint::None
+        }
+    }
+
     /// Check if a `VirTypeId` is an array type via VirTypeTable.
     #[inline]
     pub fn vir_query_is_array_v(&self, vir_ty: VirTypeId) -> bool {

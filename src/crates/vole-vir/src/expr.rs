@@ -175,6 +175,17 @@ pub enum VirExpr {
         /// without querying `VirTypeId::is_unsigned_int()` at codegen time.
         /// Set during VIR lowering; re-derived after monomorphization.
         lhs_is_unsigned: bool,
+        /// Pre-resolved comparison dispatch hint.
+        ///
+        /// Classifies Eq/Ne/Lt/Le/Gt/Ge comparisons into one of several
+        /// categories (integer, float, f128, string, struct, optional) so
+        /// codegen can match on a single enum rather than re-detecting
+        /// operand types at multiple dispatch sites.
+        ///
+        /// `ComparisonHint::None` for non-comparison ops and for generic
+        /// templates where operand types are not yet concrete.
+        /// Set during VIR lowering; re-derived after monomorphization.
+        comparison_hint: ComparisonHint,
     },
 
     /// Unary operation (negation, logical/bitwise not).
@@ -512,6 +523,127 @@ impl VirExpr {
 // ---------------------------------------------------------------------------
 // Supporting types
 // ---------------------------------------------------------------------------
+
+/// Pre-resolved comparison dispatch hint for `VirExpr::BinaryOp`.
+///
+/// Computed during VIR lowering from concrete operand types so that codegen
+/// can match on a single enum instead of re-detecting strings, floats,
+/// structs, and optionals at 5+ sites.
+///
+/// `None` means "not a comparison op" or "generic / unresolved operand types".
+/// Codegen falls back to the existing type-based dispatch for `None`.
+///
+/// Re-derived after monomorphization when operand types become concrete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ComparisonHint {
+    /// Not a comparison, or operand types are not yet concrete (generic).
+    #[default]
+    None,
+    /// Signed integer comparison (icmp with SignedXxx condition codes).
+    IntCmp,
+    /// Unsigned integer comparison (icmp with UnsignedXxx condition codes).
+    UnsignedIntCmp,
+    /// Float comparison (f32/f64 via Cranelift fcmp).
+    FloatCmp,
+    /// F128 comparison (via runtime helper calls).
+    F128Cmp,
+    /// String equality (via RuntimeKey::StringEq).
+    StringEq,
+    /// Struct field-by-field equality.
+    StructEq,
+    /// Optional == nil (tag check only).
+    OptionalNilEq,
+    /// Optional == value (unwrap payload + compare).
+    OptionalValueEq,
+}
+
+impl ComparisonHint {
+    /// Returns `true` if this is a comparison hint (not `None`).
+    pub fn is_some(self) -> bool {
+        self != ComparisonHint::None
+    }
+}
+
+/// Classify a binary comparison into a [`ComparisonHint`].
+///
+/// Called during VIR lowering (with concrete types from sema) and during
+/// monomorphization rederive (with concrete types after substitution).
+///
+/// Returns `ComparisonHint::None` for non-comparison ops, when operand types
+/// are UNKNOWN (generic templates), or when the classification doesn't match
+/// any special case (fallback to codegen dispatch).
+pub fn classify_comparison(
+    op: VirBinOp,
+    lhs_ty: VirTypeId,
+    rhs_ty: VirTypeId,
+    lhs_is_optional: bool,
+    table: &crate::type_table::VirTypeTable,
+) -> ComparisonHint {
+    let is_eq_ne = matches!(op, VirBinOp::Eq | VirBinOp::Ne);
+    let is_cmp = matches!(
+        op,
+        VirBinOp::Eq | VirBinOp::Ne | VirBinOp::Lt | VirBinOp::Le | VirBinOp::Gt | VirBinOp::Ge
+    );
+    if !is_cmp {
+        return ComparisonHint::None;
+    }
+    if lhs_ty == VirTypeId::UNKNOWN || rhs_ty == VirTypeId::UNKNOWN {
+        return ComparisonHint::None;
+    }
+
+    // Eq/Ne: check optional, struct, and string cases first.
+    if is_eq_ne {
+        // Optional == nil or nil == optional
+        if lhs_is_optional && rhs_ty.is_nil() {
+            return ComparisonHint::OptionalNilEq;
+        }
+        if table.is_optional(rhs_ty) && lhs_ty.is_nil() {
+            return ComparisonHint::OptionalNilEq;
+        }
+        // Optional == value (lhs optional, rhs is compatible value)
+        if let Some(inner) = table.unwrap_optional(lhs_ty)
+            && (inner == rhs_ty || (inner.is_integer() && rhs_ty.is_integer()))
+        {
+            return ComparisonHint::OptionalValueEq;
+        }
+        // Optional == value (rhs optional, lhs is compatible value)
+        if let Some(inner) = table.unwrap_optional(rhs_ty)
+            && (inner == lhs_ty || (inner.is_integer() && lhs_ty.is_integer()))
+        {
+            return ComparisonHint::OptionalValueEq;
+        }
+        // Struct equality (sentinel types are excluded — they are not real structs)
+        if !table.is_sentinel(lhs_ty)
+            && table.is_struct(lhs_ty)
+            && !table.is_sentinel(rhs_ty)
+            && table.is_struct(rhs_ty)
+        {
+            return ComparisonHint::StructEq;
+        }
+        // String equality
+        if table.is_string(lhs_ty) {
+            return ComparisonHint::StringEq;
+        }
+    }
+
+    // Numeric dispatch: f128, f32/f64, unsigned int, signed int.
+    if lhs_ty == VirTypeId::F128 || rhs_ty == VirTypeId::F128 {
+        return ComparisonHint::F128Cmp;
+    }
+    // F32/F64 (F128 is already handled above).
+    if lhs_ty == VirTypeId::F32
+        || lhs_ty == VirTypeId::F64
+        || rhs_ty == VirTypeId::F32
+        || rhs_ty == VirTypeId::F64
+    {
+        return ComparisonHint::FloatCmp;
+    }
+    if lhs_ty.is_unsigned_int() {
+        return ComparisonHint::UnsignedIntCmp;
+    }
+
+    ComparisonHint::IntCmp
+}
 
 /// Binary operator in VIR.
 ///

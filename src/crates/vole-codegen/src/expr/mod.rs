@@ -25,7 +25,8 @@ use vole_identity::{
     ConstantValue, ModuleId, StringConversion, Symbol, TypeDefId, TypeId, VirTypeId,
 };
 use vole_vir::{
-    AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
+    AsCastKind, CoerceKind, ComparisonHint, IsCheckResult, VirBinOp, VirExpr, VirMetaKind,
+    VirStringPart, VirUnOp,
 };
 
 use super::context::Cg;
@@ -414,6 +415,7 @@ impl Cg<'_, '_, '_> {
                 lhs_is_optional,
                 rhs_is_optional,
                 lhs_is_unsigned,
+                comparison_hint,
                 ..
             } => self.compile_vir_binary_op(
                 *op,
@@ -424,6 +426,7 @@ impl Cg<'_, '_, '_> {
                 *lhs_is_optional,
                 *rhs_is_optional,
                 *lhs_is_unsigned,
+                *comparison_hint,
             ),
             VirExpr::UnaryOp { op, operand, .. } => self.compile_vir_unary_op(*op, operand),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
@@ -759,6 +762,7 @@ impl Cg<'_, '_, '_> {
         lhs_is_optional: bool,
         rhs_is_optional: bool,
         lhs_is_unsigned: bool,
+        comparison_hint: ComparisonHint,
     ) -> CodegenResult<CompiledValue> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
@@ -774,6 +778,7 @@ impl Cg<'_, '_, '_> {
             lhs_is_optional,
             rhs_is_optional,
             lhs_is_unsigned,
+            comparison_hint,
         )
     }
 
