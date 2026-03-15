@@ -138,15 +138,25 @@ where
     // Build per-file metadata (NOT cached — these depend on shared registries
     // that grow as more modules are analyzed).
     let _t_module_phase = compile_timing!(DEBUG, "module_phase").entered();
-    let implement_dispatch = build_implement_dispatch(implements, interner, names);
-    let external_imports = collect_external_imports(implements, names);
-    let (module_constants, module_exports) = collect_module_metadata(type_arena);
+    let implement_dispatch = {
+        let _t = compile_timing!(TRACE, "build_implement_dispatch").entered();
+        build_implement_dispatch(implements, interner, names)
+    };
+    let external_imports = {
+        let _t = compile_timing!(TRACE, "collect_external_imports").entered();
+        collect_external_imports(implements, names)
+    };
+    let (module_constants, module_exports) = {
+        let _t = compile_timing!(TRACE, "collect_module_metadata").entered();
+        collect_module_metadata(type_arena)
+    };
 
     // Try to use the cached module VIR functions, type table, full
     // entity metadata, and monomorph info (skipping build_entity_metadata
     // and populate_monomorph_info on cache hit).
     let (module_vir_functions, mut type_table, cached_entity_metadata, cached_monomorph_info) =
         if let Some(cached) = try_use_cache(&module_vir_cache, &module_paths) {
+            let _t = compile_timing!(TRACE, "cache_hit_restore").entered();
             // Restore module interners from cache so codegen can resolve
             // symbols referenced by cached VIR functions.
             apply_cached_interners(&mut module_programs, &cached.module_interners);
@@ -154,12 +164,16 @@ where
             // Merge cached module type table entries into this file's sema
             // type table so both module and file-specific types are available.
             let mut type_table = vir_type_table;
-            let merge_mapping = type_table.merge_from_additive(&cached.type_table);
+            let merge_mapping = {
+                let _t = compile_timing!(TRACE, "merge_type_table").entered();
+                type_table.merge_from_additive(&cached.type_table)
+            };
 
             // Remap VirTypeIds in cached module VIR functions, entity
             // metadata, and monomorph info if the merge shifted IDs.
             let needs_remap = merge_mapping.iter().any(|(&old, &new)| old != new);
             let module_vir_functions = if needs_remap {
+                let _t = compile_timing!(TRACE, "remap_vir_functions").entered();
                 let remap_ctx =
                     vole_vir::monomorph::rewrite::RewriteCtx::new(merge_mapping.clone());
                 cached
@@ -172,6 +186,7 @@ where
             };
 
             let entity_metadata = if needs_remap {
+                let _t = compile_timing!(TRACE, "remap_entity_metadata").entered();
                 vole_vir::remap_entity_metadata(&cached.entity_metadata, &merge_mapping)
             } else {
                 cached.entity_metadata
@@ -182,6 +197,7 @@ where
             let current_counts = MonomorphCounts::from_entities(entities);
             let monomorph_info = if current_counts == cached.monomorph_counts {
                 if needs_remap {
+                    let _t = compile_timing!(TRACE, "remap_monomorph_info").entered();
                     Some(remap_monomorph_info(&cached.monomorph_info, &merge_mapping))
                 } else {
                     Some(cached.monomorph_info)

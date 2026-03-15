@@ -965,6 +965,7 @@ impl Compiler<'_> {
         let elem_types: Vec<TypeId> = self.vir_query_all_concrete_runtime_iterator_elem_types();
 
         for elem_type in elem_types {
+            let _t = vole_log::compile_timing!(TRACE, "array_iterable_elem_type").entered();
             // Get the concrete array TypeId for this element type
             let self_type_id = match self.vir_query_lookup_array(elem_type) {
                 Some(tid) => tid,

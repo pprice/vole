@@ -101,6 +101,11 @@ pub struct TypeArena {
     /// Sentinels are zero-field struct types that should not be treated as regular structs
     /// for codegen purposes (auto-boxing, field access, etc.).
     pub(super) sentinel_ids: FxHashSet<TypeId>,
+    /// Index of TypeIds that are `SemaType::Module` types.
+    ///
+    /// Populated during `module()` to avoid full arena scans in
+    /// `all_module_types()`.
+    module_type_ids: Vec<TypeId>,
 }
 
 impl std::fmt::Debug for TypeArena {
@@ -119,6 +124,7 @@ impl TypeArena {
             intern_map: FxHashMap::default(),
             module_metadata: FxHashMap::default(),
             sentinel_ids: FxHashSet::default(),
+            module_type_ids: Vec::new(),
             // Temporary placeholders - will be filled in below
             primitives: PrimitiveTypes::placeholder(),
         };
@@ -508,10 +514,17 @@ impl TypeArena {
         module_id: ModuleId,
         exports: SmallVec<[(NameId, TypeId); 8]>,
     ) -> TypeId {
-        self.intern(SemaType::Module(Box::new(InternedModule {
+        let count_before = self.types.len();
+        let type_id = self.intern(SemaType::Module(Box::new(InternedModule {
             module_id,
             exports,
-        })))
+        })));
+        // Track module TypeIds for O(1) lookup via all_module_types().
+        // Only add when intern() actually created a new entry.
+        if self.types.len() > count_before {
+            self.module_type_ids.push(type_id);
+        }
+        type_id
     }
 
     /// Register module metadata (constants, external_funcs) for codegen
@@ -574,12 +587,14 @@ impl TypeArena {
     }
 
     /// Iterate all interned Module types, yielding `(TypeId, &InternedModule)`.
+    ///
+    /// Uses the pre-built `module_type_ids` index for O(n_modules) lookup
+    /// instead of scanning the entire type arena.
     pub fn all_module_types(&self) -> Vec<(TypeId, &InternedModule)> {
-        self.types
+        self.module_type_ids
             .iter()
-            .enumerate()
-            .filter_map(|(idx, ty)| match ty {
-                SemaType::Module(m) => Some((TypeId::from_raw(idx as u32), m.as_ref())),
+            .filter_map(|&type_id| match &self.types[type_id.raw() as usize] {
+                SemaType::Module(m) => Some((type_id, m.as_ref())),
                 _ => None,
             })
             .collect()
