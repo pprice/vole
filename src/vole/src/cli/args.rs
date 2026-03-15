@@ -41,7 +41,8 @@ pub struct Cli {
     /// Enable compiler timing output (stderr)
     ///
     /// Usage: --timing (DEBUG level), --timing=trace (TRACE level),
-    /// --timing=pattern (filter by file path), --timing=trace:pattern (both)
+    /// --timing=pattern (filter by file path), --timing=trace:pattern (both),
+    /// --timing=chrome:path.json (Chrome trace JSON), --timing=chrome:trace:path.json (both)
     #[arg(long, global = true, num_args = 0..=1, default_missing_value = "", require_equals = true)]
     pub timing: Option<String>,
 

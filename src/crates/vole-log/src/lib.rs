@@ -2,8 +2,8 @@ mod compile_timing;
 mod init;
 
 pub use compile_timing::{
-    CompileTimingConfig, CompileTimingLayer, TimingSpan, format_duration, render_timing_tree,
-    take_timing_tree,
+    CompileTimingConfig, CompileTimingLayer, TimingSpan, format_duration, render_chrome_trace,
+    render_timing_spans, render_timing_tree, take_timing_tree,
 };
 pub use init::init_logging;
 

@@ -24,9 +24,14 @@ impl FormatTime for NoTimestamp {
 /// - If `timing_value` is `Some`, a `CompileTimingLayer` is added.
 /// - If `VOLE_LOG` env var is set, a fmt layer is added.
 /// - Both can be active simultaneously.
-pub fn init_logging(timing_value: Option<&str>) {
+///
+/// Returns the Chrome trace output path if `chrome:` format was specified.
+pub fn init_logging(timing_value: Option<&str>) -> Option<String> {
+    let mut chrome_output = None;
+
     let timing_layer = timing_value.map(|value| {
         let config = parse_timing_config(value);
+        chrome_output = config.chrome_output.clone();
         CompileTimingLayer::new(config)
     });
 
@@ -74,6 +79,8 @@ pub fn init_logging(timing_value: Option<&str>) {
     if has_env_log {
         tracing::debug!("tracing initialized");
     }
+
+    chrome_output
 }
 
 /// Parse the `--timing` value into a `CompileTimingConfig`.
@@ -81,17 +88,36 @@ pub fn init_logging(timing_value: Option<&str>) {
 /// Grammar:
 /// - `""` (empty / no value) → level=DEBUG, filter=None
 /// - `"trace"` → level=TRACE, filter=None
-/// - contains `/` or `.` → level=DEBUG, filter=Some(value)
 /// - `"trace:pattern"` → level=TRACE, filter=Some(pattern)
+/// - `"chrome:path.json"` → level=DEBUG, chrome_output=Some(path.json)
+/// - `"chrome:trace:path.json"` → level=TRACE, chrome_output=Some(path.json)
+/// - `"pattern"` → level=DEBUG, filter=Some(value)
 fn parse_timing_config(value: &str) -> CompileTimingConfig {
     if value.is_empty() {
         return CompileTimingConfig::default();
+    }
+
+    // Chrome trace output: "chrome:path" or "chrome:trace:path"
+    if let Some(rest) = value.strip_prefix("chrome:") {
+        if let Some(path) = rest.strip_prefix("trace:") {
+            return CompileTimingConfig {
+                level: tracing::Level::TRACE,
+                filter: None,
+                chrome_output: Some(path.to_string()),
+            };
+        }
+        return CompileTimingConfig {
+            level: tracing::Level::DEBUG,
+            filter: None,
+            chrome_output: Some(rest.to_string()),
+        };
     }
 
     if value == "trace" {
         return CompileTimingConfig {
             level: tracing::Level::TRACE,
             filter: None,
+            chrome_output: None,
         };
     }
 
@@ -99,6 +125,7 @@ fn parse_timing_config(value: &str) -> CompileTimingConfig {
         return CompileTimingConfig {
             level: tracing::Level::TRACE,
             filter: Some(pattern.to_string()),
+            chrome_output: None,
         };
     }
 
@@ -106,6 +133,7 @@ fn parse_timing_config(value: &str) -> CompileTimingConfig {
     CompileTimingConfig {
         level: tracing::Level::DEBUG,
         filter: Some(value.to_string()),
+        chrome_output: None,
     }
 }
 
@@ -146,5 +174,33 @@ mod tests {
         let config = parse_timing_config("generics");
         assert_eq!(config.level, tracing::Level::DEBUG);
         assert_eq!(config.filter.as_deref(), Some("generics"));
+    }
+
+    #[test]
+    fn parse_chrome_with_path() {
+        let config = parse_timing_config("chrome:/tmp/trace.json");
+        assert_eq!(config.level, tracing::Level::DEBUG);
+        assert!(config.filter.is_none());
+        assert_eq!(config.chrome_output.as_deref(), Some("/tmp/trace.json"));
+    }
+
+    #[test]
+    fn parse_chrome_trace_with_path() {
+        let config = parse_timing_config("chrome:trace:/tmp/trace.json");
+        assert_eq!(config.level, tracing::Level::TRACE);
+        assert!(config.filter.is_none());
+        assert_eq!(config.chrome_output.as_deref(), Some("/tmp/trace.json"));
+    }
+
+    #[test]
+    fn parse_empty_has_no_chrome_output() {
+        let config = parse_timing_config("");
+        assert!(config.chrome_output.is_none());
+    }
+
+    #[test]
+    fn parse_trace_has_no_chrome_output() {
+        let config = parse_timing_config("trace");
+        assert!(config.chrome_output.is_none());
     }
 }

@@ -19,6 +19,8 @@ pub struct CompileTimingConfig {
     /// Optional file path pattern filter. When set, only spans whose `path`
     /// field contains this substring are captured.
     pub filter: Option<String>,
+    /// Optional path to write Chrome trace JSON output.
+    pub chrome_output: Option<String>,
 }
 
 impl Default for CompileTimingConfig {
@@ -26,6 +28,7 @@ impl Default for CompileTimingConfig {
         Self {
             level: tracing::Level::DEBUG,
             filter: None,
+            chrome_output: None,
         }
     }
 }
@@ -231,9 +234,64 @@ pub fn take_timing_tree() -> Vec<TimingSpan> {
 /// Render the captured timing tree to `writer`.
 pub fn render_timing_tree(writer: &mut dyn Write) {
     let roots = take_timing_tree();
-    for root in &roots {
+    render_timing_spans(writer, &roots);
+}
+
+/// Render pre-collected timing spans to `writer` (does not drain the tree).
+pub fn render_timing_spans(writer: &mut dyn Write, spans: &[TimingSpan]) {
+    for root in spans {
         render_span(writer, root, 0);
     }
+}
+
+/// Render the captured timing tree as Chrome trace JSON to `writer`.
+///
+/// Produces a JSON array of "X" (complete) events compatible with
+/// `chrome://tracing` and [speedscope.dev](https://speedscope.dev).
+pub fn render_chrome_trace(spans: &[TimingSpan], writer: &mut dyn Write) -> std::io::Result<()> {
+    writer.write_all(b"[\n")?;
+    let mut first = true;
+    for span in spans {
+        write_chrome_events(writer, span, 0, &mut first)?;
+    }
+    writer.write_all(b"\n]\n")?;
+    Ok(())
+}
+
+/// Recursively write Chrome trace events for a span and its children.
+///
+/// `ts_offset` is the start time of this span in microseconds (relative to
+/// the beginning of the trace). Children are laid out sequentially within
+/// the parent's duration window.
+fn write_chrome_events(
+    writer: &mut dyn Write,
+    span: &TimingSpan,
+    ts_offset: u64,
+    first: &mut bool,
+) -> std::io::Result<()> {
+    let label = format_span_label(span);
+    // Escape JSON string characters.
+    let name = label.replace('\\', "\\\\").replace('"', "\\\"");
+
+    if !*first {
+        writer.write_all(b",\n")?;
+    }
+    *first = false;
+
+    write!(
+        writer,
+        r#"  {{"name":"{}","ph":"X","ts":{},"dur":{},"pid":0,"tid":0}}"#,
+        name, ts_offset, span.duration_us
+    )?;
+
+    // Lay out children sequentially within this span's time window.
+    let mut child_offset = ts_offset;
+    for child in &span.children {
+        write_chrome_events(writer, child, child_offset, first)?;
+        child_offset += child.duration_us;
+    }
+
+    Ok(())
 }
 
 fn render_span(writer: &mut dyn Write, span: &TimingSpan, depth: usize) {
@@ -330,8 +388,8 @@ mod tests {
     #[test]
     fn file_path_filtering_works() {
         let config = CompileTimingConfig {
-            level: tracing::Level::DEBUG,
             filter: Some("generics".to_string()),
+            ..Default::default()
         };
 
         let tree = with_timing_layer(config, || {
@@ -365,10 +423,7 @@ mod tests {
 
     #[test]
     fn level_filtering_works() {
-        let config = CompileTimingConfig {
-            level: tracing::Level::DEBUG,
-            filter: None,
-        };
+        let config = CompileTimingConfig::default();
 
         let tree = with_timing_layer(config, || {
             let debug_span = tracing::debug_span!(target: "vole::compile_timing", "sema");
@@ -477,8 +532,8 @@ mod tests {
     #[test]
     fn spans_without_path_pass_filter() {
         let config = CompileTimingConfig {
-            level: tracing::Level::DEBUG,
             filter: Some("generics".to_string()),
+            ..Default::default()
         };
 
         let tree = with_timing_layer(config, || {
@@ -492,5 +547,88 @@ mod tests {
             "spans without path field should pass the filter"
         );
         assert_eq!(tree[0].name, "sema");
+    }
+
+    #[test]
+    fn chrome_trace_produces_valid_json() {
+        let tree = vec![TimingSpan {
+            name: "file".to_string(),
+            duration_us: 6_200,
+            fields: vec![(
+                "path".to_string(),
+                "test/unit/generics/basic.vole".to_string(),
+            )],
+            children: vec![
+                TimingSpan {
+                    name: "parse".to_string(),
+                    duration_us: 42,
+                    fields: vec![],
+                    children: vec![],
+                },
+                TimingSpan {
+                    name: "sema".to_string(),
+                    duration_us: 580,
+                    fields: vec![],
+                    children: vec![],
+                },
+            ],
+        }];
+
+        let mut output = Vec::new();
+        render_chrome_trace(&tree, &mut output).unwrap();
+        let text = String::from_utf8(output).unwrap();
+
+        // Should be valid JSON: starts with '[', ends with ']'
+        let trimmed = text.trim();
+        assert!(trimmed.starts_with('['), "should start with [");
+        assert!(trimmed.ends_with(']'), "should end with ]");
+
+        // Should contain the root event and both children (3 events).
+        assert_eq!(
+            text.matches("\"ph\":\"X\"").count(),
+            3,
+            "should have 3 complete events"
+        );
+
+        // Root event starts at ts=0 with full duration.
+        assert!(text.contains("\"ts\":0,\"dur\":6200"));
+
+        // First child starts at ts=0 (same as parent).
+        assert!(text.contains("\"dur\":42"));
+
+        // Second child starts after first child (ts=42).
+        assert!(text.contains("\"ts\":42,\"dur\":580"));
+
+        // Check the name includes fields.
+        assert!(text.contains("file test/unit/generics/basic.vole"));
+    }
+
+    #[test]
+    fn chrome_trace_escapes_special_chars() {
+        let tree = vec![TimingSpan {
+            name: "test".to_string(),
+            duration_us: 100,
+            fields: vec![("path".to_string(), "file \"with\" quotes".to_string())],
+            children: vec![],
+        }];
+
+        let mut output = Vec::new();
+        render_chrome_trace(&tree, &mut output).unwrap();
+        let text = String::from_utf8(output).unwrap();
+
+        // Quotes should be escaped.
+        assert!(
+            text.contains(r#"\"with\" quotes"#),
+            "quotes should be escaped in JSON: {text}"
+        );
+    }
+
+    #[test]
+    fn chrome_trace_empty_tree() {
+        let tree: Vec<TimingSpan> = vec![];
+        let mut output = Vec::new();
+        render_chrome_trace(&tree, &mut output).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert_eq!(text, "[\n\n]\n");
     }
 }
