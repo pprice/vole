@@ -5,6 +5,9 @@ edition = "2024"
 description = "Name identity system for the Vole programming language"
 
 [dependencies]
+# Compiler timing instrumentation
+vole-log = { path = "../vole-log" }
+
 # Error reporting (for Span -> SourceSpan conversions)
 miette = "7.4"
 

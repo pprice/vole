@@ -23,6 +23,7 @@ path = "src/bin/vole.rs"
 vole-frontend = { path = "../crates/vole-frontend" }
 vole-fmt = { path = "../crates/vole-fmt" }
 vole-identity = { path = "../crates/vole-identity" }
+vole-log = { path = "../crates/vole-log" }
 vole-runtime = { path = "../crates/vole-runtime" }
 vole-sema = { path = "../crates/vole-sema" }
 vole-codegen = { path = "../crates/vole-codegen" }

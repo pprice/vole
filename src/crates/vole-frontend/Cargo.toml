@@ -7,6 +7,7 @@ description = "Lexer, parser, and AST for the Vole programming language"
 [dependencies]
 # Workspace crates
 vole-identity = { path = "../vole-identity" }
+vole-log = { path = "../vole-log" }
 
 # Error handling
 thiserror = "2.0"

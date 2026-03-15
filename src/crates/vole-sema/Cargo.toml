@@ -8,6 +8,7 @@ description = "Semantic analysis for the Vole programming language"
 # Workspace crates
 vole-frontend = { path = "../vole-frontend" }
 vole-identity = { path = "../vole-identity" }
+vole-log = { path = "../vole-log" }
 vole-vir = { path = "../vole-vir" }
 
 # Small vector optimization for hot paths

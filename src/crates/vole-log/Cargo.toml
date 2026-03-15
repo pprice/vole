@@ -1,0 +1,12 @@
+[package]
+name = "vole-log"
+version.workspace = true
+edition = "2024"
+description = "Compiler timing and logging infrastructure for the Vole programming language"
+
+[dependencies]
+# Tracing for span-based instrumentation
+tracing = "0.1"
+
+[lints]
+workspace = true
