@@ -8,6 +8,7 @@ description = "Compiler timing and logging infrastructure for the Vole programmi
 # Tracing for span-based instrumentation
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-chrome = "0.7.2"
 
 [lints]
 workspace = true

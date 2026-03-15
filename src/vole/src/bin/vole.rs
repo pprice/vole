@@ -48,8 +48,9 @@ fn main() -> ExitCode {
 
     // Initialize tracing: --timing enables CompileTimingLayer,
     // VOLE_LOG enables fmt layer. Both can be active simultaneously.
+    // Hold the chrome flush guard until after command execution.
     let has_timing = cli.timing.is_some();
-    let chrome_output = vole_log::init_logging(cli.timing.as_deref());
+    let _chrome_guard = vole_log::init_logging(cli.timing.as_deref());
 
     let lazy = !cli.aot;
 
@@ -131,21 +132,7 @@ fn main() -> ExitCode {
     };
 
     if has_timing {
-        let spans = vole_log::take_timing_tree();
-        vole_log::render_timing_spans(&mut std::io::stderr(), &spans);
-
-        if let Some(path) = &chrome_output {
-            match std::fs::File::create(path) {
-                Ok(mut file) => {
-                    if let Err(e) = vole_log::render_chrome_trace(&spans, &mut file) {
-                        eprintln!("[timing] failed to write chrome trace to {path}: {e}");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[timing] failed to create chrome trace file {path}: {e}");
-                }
-            }
-        }
+        vole_log::render_timing_tree(&mut std::io::stderr());
     }
 
     exit_code

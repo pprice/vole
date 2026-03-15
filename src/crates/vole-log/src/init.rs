@@ -24,9 +24,13 @@ impl FormatTime for NoTimestamp {
 /// - If `timing_value` is `Some`, a `CompileTimingLayer` is added.
 /// - If `VOLE_LOG` env var is set, a fmt layer is added.
 /// - Both can be active simultaneously.
+/// - When chrome trace output is configured, a `tracing_chrome::ChromeLayer` is
+///   added with a filter so it only captures `vole::compile_timing` spans.
 ///
-/// Returns the Chrome trace output path if `chrome:` format was specified.
-pub fn init_logging(timing_value: Option<&str>) -> Option<String> {
+/// Returns the `FlushGuard` for the chrome layer if one was created. The caller
+/// must hold this guard until after command execution to ensure the trace file
+/// is flushed.
+pub fn init_logging(timing_value: Option<&str>) -> Option<tracing_chrome::FlushGuard> {
     let mut chrome_output = None;
 
     let timing_layer = timing_value.map(|value| {
@@ -41,6 +45,22 @@ pub fn init_logging(timing_value: Option<&str>) -> Option<String> {
     let style = std::env::var("VOLE_LOG_STYLE").unwrap_or_default();
     let use_full_style = style == "full";
 
+    // Build the chrome layer when chrome trace output is requested.
+    let (chrome_layer, flush_guard) = if let Some(ref path) = chrome_output {
+        let (layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+            .file(path)
+            .include_args(true)
+            .build();
+
+        let chrome_filter = tracing_subscriber::filter::filter_fn(|metadata| {
+            metadata.target() == "vole::compile_timing"
+        });
+
+        (Some(layer.with_filter(chrome_filter)), Some(guard))
+    } else {
+        (None, None)
+    };
+
     // Build the fmt layer only when VOLE_LOG is set.
     // Split into two paths because `with_timer` changes the concrete type.
     match (env_filter, use_full_style) {
@@ -53,6 +73,7 @@ pub fn init_logging(timing_value: Option<&str>) -> Option<String> {
 
             tracing_subscriber::registry()
                 .with(timing_layer)
+                .with(chrome_layer)
                 .with(fmt_layer.with_filter(filter))
                 .init();
         }
@@ -66,12 +87,16 @@ pub fn init_logging(timing_value: Option<&str>) -> Option<String> {
 
             tracing_subscriber::registry()
                 .with(timing_layer)
+                .with(chrome_layer)
                 .with(fmt_layer.with_filter(filter))
                 .init();
         }
         (None, _) => {
-            if timing_layer.is_some() {
-                tracing_subscriber::registry().with(timing_layer).init();
+            if timing_layer.is_some() || chrome_layer.is_some() {
+                tracing_subscriber::registry()
+                    .with(timing_layer)
+                    .with(chrome_layer)
+                    .init();
             }
         }
     }
@@ -80,7 +105,7 @@ pub fn init_logging(timing_value: Option<&str>) -> Option<String> {
         tracing::debug!("tracing initialized");
     }
 
-    chrome_output
+    flush_guard
 }
 
 /// Parse the `--timing` value into a `CompileTimingConfig`.

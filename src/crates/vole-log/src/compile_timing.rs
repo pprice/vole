@@ -40,9 +40,6 @@ impl Default for CompileTimingConfig {
 pub struct TimingSpan {
     pub name: String,
     pub duration_us: u64,
-    /// Start time in microseconds relative to the global epoch (first span entry).
-    /// Used by Chrome trace output for accurate timeline positioning.
-    pub start_us: u64,
     pub fields: Vec<(String, String)>,
     pub children: Vec<TimingSpan>,
 }
@@ -175,18 +172,11 @@ where
 
         drop(extensions);
 
-        let now = Instant::now();
-        // Set global epoch on first span entry.
-        EPOCH.with(|epoch| {
-            if epoch.borrow().is_none() {
-                *epoch.borrow_mut() = Some(now);
-            }
-        });
         SPAN_STACK.with(|stack| {
             stack.borrow_mut().push(StackEntry {
                 name,
                 fields,
-                start: now,
+                start: Instant::now(),
                 children: Vec::new(),
             });
         });
@@ -204,16 +194,9 @@ where
         SPAN_STACK.with(|stack| {
             let mut stack = stack.borrow_mut();
             if let Some(entry) = stack.pop() {
-                let start_us = EPOCH.with(|epoch| {
-                    epoch
-                        .borrow()
-                        .map(|e| entry.start.duration_since(e).as_micros() as u64)
-                        .unwrap_or(0)
-                });
                 let completed = TimingSpan {
                     name: entry.name,
                     duration_us: entry.start.elapsed().as_micros() as u64,
-                    start_us,
                     fields: entry.fields,
                     children: entry.children,
                 };
@@ -239,10 +222,6 @@ thread_local! {
 
     /// Completed top-level timing spans.
     static COMPLETED_ROOTS: RefCell<Vec<TimingSpan>> = const { RefCell::new(Vec::new()) };
-
-    /// Global epoch (first span entry time). All `start_us` values are
-    /// relative to this instant for accurate Chrome trace positioning.
-    static EPOCH: RefCell<Option<Instant>> = const { RefCell::new(None) };
 }
 
 // ── Public API ───────────────────────────────────────────────────────
@@ -263,51 +242,6 @@ pub fn render_timing_spans(writer: &mut dyn Write, spans: &[TimingSpan]) {
     for root in spans {
         render_span(writer, root, 0);
     }
-}
-
-/// Render the captured timing tree as Chrome trace JSON to `writer`.
-///
-/// Produces a JSON array of "X" (complete) events compatible with
-/// `chrome://tracing` and [speedscope.dev](https://speedscope.dev).
-pub fn render_chrome_trace(spans: &[TimingSpan], writer: &mut dyn Write) -> std::io::Result<()> {
-    writer.write_all(b"[\n")?;
-    let mut first = true;
-    for span in spans {
-        write_chrome_events(writer, span, &mut first)?;
-    }
-    writer.write_all(b"\n]\n")?;
-    Ok(())
-}
-
-/// Recursively write Chrome trace events for a span and its children.
-///
-/// Uses each span's `start_us` (absolute time relative to global epoch)
-/// for accurate timeline positioning in flame graph tools.
-fn write_chrome_events(
-    writer: &mut dyn Write,
-    span: &TimingSpan,
-    first: &mut bool,
-) -> std::io::Result<()> {
-    let label = format_span_label(span);
-    // Escape JSON string characters.
-    let name = label.replace('\\', "\\\\").replace('"', "\\\"");
-
-    if !*first {
-        writer.write_all(b",\n")?;
-    }
-    *first = false;
-
-    write!(
-        writer,
-        r#"  {{"name":"{}","ph":"X","ts":{},"dur":{},"pid":0,"tid":0}}"#,
-        name, span.start_us, span.duration_us
-    )?;
-
-    for child in &span.children {
-        write_chrome_events(writer, child, first)?;
-    }
-
-    Ok(())
 }
 
 fn render_span(writer: &mut dyn Write, span: &TimingSpan, depth: usize) {
@@ -482,20 +416,17 @@ mod tests {
                 "path".to_string(),
                 "test/unit/generics/basic.vole".to_string(),
             )],
-            start_us: 0,
             children: vec![
                 TimingSpan {
                     name: "parse".to_string(),
                     duration_us: 42,
                     fields: vec![],
-                    start_us: 0,
                     children: vec![],
                 },
                 TimingSpan {
                     name: "sema".to_string(),
                     duration_us: 580,
                     fields: vec![],
-                    start_us: 0,
                     children: vec![],
                 },
             ],
@@ -566,90 +497,5 @@ mod tests {
             "spans without path field should pass the filter"
         );
         assert_eq!(tree[0].name, "sema");
-    }
-
-    #[test]
-    fn chrome_trace_produces_valid_json() {
-        let tree = vec![TimingSpan {
-            name: "file".to_string(),
-            duration_us: 6_200,
-            start_us: 0,
-            fields: vec![(
-                "path".to_string(),
-                "test/unit/generics/basic.vole".to_string(),
-            )],
-            children: vec![
-                TimingSpan {
-                    name: "parse".to_string(),
-                    duration_us: 42,
-                    start_us: 1,
-                    fields: vec![],
-                    children: vec![],
-                },
-                TimingSpan {
-                    name: "sema".to_string(),
-                    duration_us: 580,
-                    start_us: 50,
-                    fields: vec![],
-                    children: vec![],
-                },
-            ],
-        }];
-
-        let mut output = Vec::new();
-        render_chrome_trace(&tree, &mut output).unwrap();
-        let text = String::from_utf8(output).unwrap();
-
-        // Should be valid JSON: starts with '[', ends with ']'
-        let trimmed = text.trim();
-        assert!(trimmed.starts_with('['), "should start with [");
-        assert!(trimmed.ends_with(']'), "should end with ]");
-
-        // Should contain the root event and both children (3 events).
-        assert_eq!(
-            text.matches("\"ph\":\"X\"").count(),
-            3,
-            "should have 3 complete events"
-        );
-
-        // Root event starts at ts=0 with full duration.
-        assert!(text.contains("\"ts\":0,\"dur\":6200"));
-
-        // Children use their actual start_us timestamps.
-        assert!(text.contains("\"ts\":1,\"dur\":42"));
-        assert!(text.contains("\"ts\":50,\"dur\":580"));
-
-        // Check the name includes fields.
-        assert!(text.contains("file test/unit/generics/basic.vole"));
-    }
-
-    #[test]
-    fn chrome_trace_escapes_special_chars() {
-        let tree = vec![TimingSpan {
-            name: "test".to_string(),
-            duration_us: 100,
-            fields: vec![("path".to_string(), "file \"with\" quotes".to_string())],
-            start_us: 0,
-            children: vec![],
-        }];
-
-        let mut output = Vec::new();
-        render_chrome_trace(&tree, &mut output).unwrap();
-        let text = String::from_utf8(output).unwrap();
-
-        // Quotes should be escaped.
-        assert!(
-            text.contains(r#"\"with\" quotes"#),
-            "quotes should be escaped in JSON: {text}"
-        );
-    }
-
-    #[test]
-    fn chrome_trace_empty_tree() {
-        let tree: Vec<TimingSpan> = vec![];
-        let mut output = Vec::new();
-        render_chrome_trace(&tree, &mut output).unwrap();
-        let text = String::from_utf8(output).unwrap();
-        assert_eq!(text, "[\n\n]\n");
     }
 }
