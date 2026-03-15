@@ -285,10 +285,20 @@ fn write_chrome_events(
     )?;
 
     // Lay out children sequentially within this span's time window.
+    // Clamp so children never exceed parent's end time.
+    let span_end = ts_offset + span.duration_us;
     let mut child_offset = ts_offset;
     for child in &span.children {
-        write_chrome_events(writer, child, child_offset, first)?;
-        child_offset += child.duration_us;
+        let clamped_dur = child.duration_us.min(span_end.saturating_sub(child_offset));
+        if clamped_dur == 0 {
+            break; // no more room in parent
+        }
+        let clamped_child = TimingSpan {
+            duration_us: clamped_dur,
+            ..child.clone()
+        };
+        write_chrome_events(writer, &clamped_child, child_offset, first)?;
+        child_offset += clamped_dur;
     }
 
     Ok(())
