@@ -235,11 +235,13 @@ impl LazyCompilationState {
     /// Used in the module cache path: module functions are already compiled
     /// and their pointers are in the `CompiledModules.functions` map.
     /// Cross-module calls in the overflow JitContext resolve to these pointers.
+    ///
+    /// All cached functions are registered (not just those in the dispatch
+    /// table) so that cross-module references from lazily-compiled bodies
+    /// can resolve to functions added by incremental cache extensions.
     pub fn populate_stub_symbols_from_cache(&mut self, functions: &FxHashMap<String, *const u8>) {
-        for name in self.func_name_to_idx.keys() {
-            if let Some(&ptr) = functions.get(name) {
-                self.stub_symbols.insert(name.clone(), ptr);
-            }
+        for (name, &ptr) in functions {
+            self.stub_symbols.insert(name.clone(), ptr);
         }
         tracing::debug!(
             count = self.stub_symbols.len(),

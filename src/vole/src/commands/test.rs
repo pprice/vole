@@ -3,6 +3,7 @@
 // Test runner command for the Vole compiler.
 // Discovers and executes tests from Vole source files.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -616,13 +617,23 @@ fn run_source_tests_with_modules(
         }
     };
 
-    // Check if cached modules contain all modules needed by this file
-    let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {
-        analyzed
-            .module_paths()
-            .iter()
-            .all(|module_path| modules.has_module(module_path))
-    });
+    // Compute which modules are missing from the cache (incremental compilation).
+    // Instead of all-or-nothing, only compile modules not yet in CompiledModules.
+    let all_module_paths = analyzed.module_paths();
+    let cached_modules: HashSet<String> = compiled_modules
+        .as_ref()
+        .map(|modules| {
+            all_module_paths
+                .iter()
+                .filter(|path| modules.has_module(path))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let missing_modules: Vec<&String> = all_module_paths
+        .iter()
+        .filter(|path| !cached_modules.contains(*path))
+        .collect();
 
     let mut options = if config.release {
         JitOptions::release()
@@ -639,17 +650,38 @@ fn run_source_tests_with_modules(
     // dispatch tables cause module index mismatches: stubs from table A
     // pass table-A indices to compile_trigger, which interprets them using
     // table B from the LazyCompilationState.
-    if !can_use_cache && !analyzed.module_paths().is_empty() {
+    //
+    // Incremental: skip_modules tells the compiler which modules already
+    // have compiled bodies in the cache, so only missing modules get their
+    // bodies built. Declarations still run for all modules (cross-module
+    // references need resolution).
+    if !missing_modules.is_empty() {
         let _timing = compile_timing!(INFO, "module_compilation").entered();
+        tracing::debug!(
+            missing = missing_modules.len(),
+            cached = cached_modules.len(),
+            total = all_module_paths.len(),
+            "incremental module compilation"
+        );
         let is_extending = compiled_modules.is_some();
         let mut module_options = options;
         if is_extending {
             module_options.lazy_modules = false;
         }
-        let mut modules_jit = JitContext::with_options(module_options);
+        // When extending, create the JIT with pre-compiled symbols so that
+        // cross-module references to already-compiled functions can resolve.
+        let mut modules_jit = if let Some(existing) = compiled_modules.as_ref() {
+            JitContext::with_modules_and_options(existing, module_options)
+        } else {
+            JitContext::with_options(module_options)
+        };
         let compile_result = {
             let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
-            let result = modules_compiler.compile_modules_only();
+            let result = if cached_modules.is_empty() {
+                modules_compiler.compile_modules_only()
+            } else {
+                modules_compiler.compile_modules_only_incremental(&cached_modules)
+            };
             // Extract dispatch table before compiler drops.
             // Populated when lazy_modules=true; holds stub→real mappings.
             let dt = modules_compiler.take_dispatch_table();

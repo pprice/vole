@@ -83,7 +83,7 @@ impl Compiler<'_> {
             ));
         }
         // Compile module functions first (before main program)
-        self.compile_module_functions()?;
+        self.compile_module_functions(None)?;
         self.compile_program_body()
     }
 
@@ -99,7 +99,26 @@ impl Compiler<'_> {
                 module_list.join(", "),
             ));
         }
-        self.compile_module_functions()
+        self.compile_module_functions(None)
+    }
+
+    /// Compile only the modules not in `skip_modules`.
+    ///
+    /// Pass 1 (declarations) runs for ALL modules so cross-module references
+    /// resolve. Pass 2 (body compilation) skips modules already present in
+    /// `skip_modules`, avoiding redundant Cranelift IR work.
+    pub fn compile_modules_only_incremental(
+        &mut self,
+        skip_modules: &HashSet<String>,
+    ) -> CodegenResult<()> {
+        if !self.analyzed.modules_with_errors.is_empty() {
+            let module_list: Vec<_> = self.analyzed.modules_with_errors.iter().cloned().collect();
+            return Err(CodegenError::internal_with_context(
+                "module(s) with type errors",
+                module_list.join(", "),
+            ));
+        }
+        self.compile_module_functions(Some(skip_modules))
     }
 
     /// Compile a single module's function bodies during lazy compilation.
@@ -755,11 +774,15 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    pub(super) fn compile_module_functions(&mut self) -> CodegenResult<()> {
+    pub(super) fn compile_module_functions(
+        &mut self,
+        skip_modules: Option<&HashSet<String>>,
+    ) -> CodegenResult<()> {
         // Collect module paths first to avoid borrow issues
         let module_paths = self.analyzed.module_paths();
         tracing::debug!(
             ?module_paths,
+            skip_count = skip_modules.map_or(0, |s| s.len()),
             "compile_module_functions: processing module paths"
         );
 
@@ -768,8 +791,27 @@ impl Compiler<'_> {
         // before any compilation (VIR or AST) begins.
         self.declare_external_imports();
 
-        // Pass 1: Declare all functions and finalize types across all modules
-        self.declare_module_types_and_functions(&module_paths)?;
+        // Pass 1: Declare functions and finalize types across all modules.
+        // Modules in skip_modules use Import linkage (resolved from pre-compiled
+        // symbols); new modules use Export linkage (bodies will be compiled here).
+        if let Some(skip) = skip_modules {
+            let new_paths: Vec<String> = module_paths
+                .iter()
+                .filter(|p| !skip.contains(*p))
+                .cloned()
+                .collect();
+            let cached_paths: Vec<String> = module_paths
+                .iter()
+                .filter(|p| skip.contains(*p))
+                .cloned()
+                .collect();
+            // Import cached modules (Import linkage — resolved from pre-compiled symbols)
+            self.import_module_types_and_functions(&cached_paths)?;
+            // Declare new modules (Export linkage — bodies will be compiled)
+            self.declare_module_types_and_functions(&new_paths)?;
+        } else {
+            self.declare_module_types_and_functions(&module_paths)?;
+        }
 
         // Pass 1.5a: Declare and compile array Iterable default methods for each concrete
         // element type (e.g. count/map/filter on [i64], [string], etc.).
@@ -818,11 +860,17 @@ impl Compiler<'_> {
         // in compile_program_body.
         self.compile_all_monomorphized_instances(false)?;
 
-        // Pass 2: Compile all function bodies (cross-module calls now resolved)
+        // Pass 2: Compile function bodies (cross-module calls now resolved).
         // When lazy_modules is enabled, skip body compilation — functions are declared
         // with signatures but compiled on demand later.
+        // When skip_modules is provided, skip body compilation for modules already
+        // in the CompiledModules cache — only new modules need their bodies built.
         if !self.jit.lazy_modules {
             for module_path in &module_paths {
+                if skip_modules.is_some_and(|skip| skip.contains(module_path)) {
+                    tracing::debug!(module_path, "skipping already-compiled module");
+                    continue;
+                }
                 self.compile_module_function_bodies(module_path)?;
             }
 
