@@ -437,8 +437,11 @@ impl Compiler<'_> {
             .filter(|fd| !fd.is_generic && !fd.is_external)
             .filter_map(|fd| seen.insert(fd.name_id).then_some(fd.name_id))
             .collect();
-        for name_id in func_name_ids {
-            self.compile_main_function_by_name_id(name_id)?;
+        {
+            let _t = compile_timing!(TRACE, "compile_functions").entered();
+            for name_id in func_name_ids {
+                self.compile_main_function_by_name_id(name_id)?;
+            }
         }
 
         // Compile class methods in the main program module.
@@ -449,8 +452,11 @@ impl Compiler<'_> {
             .into_iter()
             .map(|td| td.id)
             .collect();
-        for type_def_id in class_ids {
-            self.compile_type_methods_by_id(type_def_id, program_module)?;
+        {
+            let _t = compile_timing!(TRACE, "compile_class_methods").entered();
+            for type_def_id in class_ids {
+                self.compile_type_methods_by_id(type_def_id, program_module)?;
+            }
         }
 
         // Compile struct methods in the main program module.
@@ -461,8 +467,11 @@ impl Compiler<'_> {
             .into_iter()
             .map(|td| td.id)
             .collect();
-        for type_def_id in struct_ids {
-            self.compile_type_methods_by_id(type_def_id, program_module)?;
+        {
+            let _t = compile_timing!(TRACE, "compile_struct_methods").entered();
+            for type_def_id in struct_ids {
+                self.compile_type_methods_by_id(type_def_id, program_module)?;
+            }
         }
 
         // Compile test-scoped class methods (registered under virtual test modules).
@@ -483,14 +492,18 @@ impl Compiler<'_> {
         }
 
         // Compile implement block methods from VIR metadata (pass 2).
-        for entry in self.analyzed.entity_metadata.implement_blocks().to_vec() {
-            self.compile_implement_block(&entry)?;
+        {
+            let _t = compile_timing!(TRACE, "compile_implement_blocks").entered();
+            for entry in self.analyzed.entity_metadata.implement_blocks().to_vec() {
+                self.compile_implement_block(&entry)?;
+            }
         }
 
         // Compile all test bodies from VirProgram's flat test list.
         // This must happen after scoped declarations are compiled above,
         // since test bodies may reference scoped functions/classes/impls.
         if !self.skip_tests {
+            let _t = compile_timing!(TRACE, "compile_tests").entered();
             let vir_tests = &self.analyzed.tests;
             // Clone the tests slice to avoid borrowing self.analyzed during compilation.
             let vir_tests: Vec<_> = vir_tests.clone();
@@ -1315,6 +1328,7 @@ impl Compiler<'_> {
         let module_paths = self.analyzed.module_paths();
 
         for module_path in &module_paths {
+            let _t = compile_timing!(TRACE, "import_module", path = %module_path).entered();
             let module_id = self.analyzed.module_id_or_main(module_path);
 
             // Import pure Vole functions from VirEntityMetadata (already compiled, just need declarations).
