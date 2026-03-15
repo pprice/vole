@@ -1256,20 +1256,31 @@ fn lower_resolved_method(
             external_info,
             concrete_return_hint,
             ..
-        } => VirResolvedMethod::Implemented {
-            type_def_id: *type_def_id,
-            func_type_id: ctx.translate(*func_type_id),
-            vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: ctx.translate(*return_type_id),
-            vir_return_type_id: ctx.translate(*return_type_id),
-            is_builtin: *is_builtin,
-            external_info: external_info.map(|info| VirExternalMethodInfo {
-                module_path: info.module_path,
-                native_name: info.native_name,
-            }),
-            concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
-            vir_concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
-        },
+        } => {
+            // Normalize Iterator<T> → RuntimeIterator<T> in the return type
+            // for external methods.  Runtime functions return raw iterator
+            // pointers, so codegen should see RuntimeIterator<T> directly.
+            let ret = ctx.translate(*return_type_id);
+            let ret = if external_info.is_some() {
+                ctx.normalize_iterator_return(ret)
+            } else {
+                ret
+            };
+            VirResolvedMethod::Implemented {
+                type_def_id: *type_def_id,
+                func_type_id: ctx.translate(*func_type_id),
+                vir_func_type_id: ctx.translate(*func_type_id),
+                return_type_id: ret,
+                vir_return_type_id: ret,
+                is_builtin: *is_builtin,
+                external_info: external_info.map(|info| VirExternalMethodInfo {
+                    module_path: info.module_path,
+                    native_name: info.native_name,
+                }),
+                concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
+                vir_concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
+            }
+        }
         crate::resolution::ResolvedMethod::FunctionalInterface {
             func_type_id,
             return_type_id,
@@ -1288,33 +1299,60 @@ fn lower_resolved_method(
             external_info,
             concrete_return_hint,
             ..
-        } => VirResolvedMethod::DefaultMethod {
-            type_def_id: *type_def_id,
-            interface_type_def_id: *interface_type_def_id,
-            func_type_id: ctx.translate(*func_type_id),
-            vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: ctx.translate(*return_type_id),
-            vir_return_type_id: ctx.translate(*return_type_id),
-            external_info: external_info.map(|info| VirExternalMethodInfo {
-                module_path: info.module_path,
-                native_name: info.native_name,
-            }),
-            concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
-        },
+        } => {
+            // Normalize Iterator<T> → RuntimeIterator<T> for default methods
+            // with external bindings (e.g. Iterable default methods like map,
+            // filter that call iter() internally and return RuntimeIterator).
+            let ret = ctx.translate(*return_type_id);
+            let ret = if external_info.is_some() {
+                ctx.normalize_iterator_return(ret)
+            } else {
+                ret
+            };
+            VirResolvedMethod::DefaultMethod {
+                type_def_id: *type_def_id,
+                interface_type_def_id: *interface_type_def_id,
+                func_type_id: ctx.translate(*func_type_id),
+                vir_func_type_id: ctx.translate(*func_type_id),
+                return_type_id: ret,
+                vir_return_type_id: ret,
+                external_info: external_info.map(|info| VirExternalMethodInfo {
+                    module_path: info.module_path,
+                    native_name: info.native_name,
+                }),
+                concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
+            }
+        }
         crate::resolution::ResolvedMethod::InterfaceMethod {
             interface_type_def_id,
             func_type_id,
             return_type_id,
             method_index,
             ..
-        } => VirResolvedMethod::InterfaceMethod {
-            interface_type_def_id: *interface_type_def_id,
-            func_type_id: ctx.translate(*func_type_id),
-            vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: ctx.translate(*return_type_id),
-            vir_return_type_id: ctx.translate(*return_type_id),
-            method_index: *method_index,
-        },
+        } => {
+            // Normalize Iterator<T> → RuntimeIterator<T> only for methods on
+            // the Iterator interface itself.  Vtable thunks for Iterator wrap
+            // results in RuntimeIterator.  Other interfaces returning
+            // Iterator<T> return boxed interface pointers — DO NOT normalize.
+            let ret = ctx.translate(*return_type_id);
+            let ret = if ctx
+                .name_table
+                .well_known
+                .is_iterator_type_def(*interface_type_def_id)
+            {
+                ctx.normalize_iterator_return(ret)
+            } else {
+                ret
+            };
+            VirResolvedMethod::InterfaceMethod {
+                interface_type_def_id: *interface_type_def_id,
+                func_type_id: ctx.translate(*func_type_id),
+                vir_func_type_id: ctx.translate(*func_type_id),
+                return_type_id: ret,
+                vir_return_type_id: ret,
+                method_index: *method_index,
+            }
+        }
         crate::resolution::ResolvedMethod::Static {
             type_def_id,
             method_id,
@@ -1659,6 +1697,18 @@ fn lower_call(
 
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
+
+    // Normalize Iterator<T> → RuntimeIterator<T> for native calls.
+    // Native (FFI) runtime functions always return raw iterator pointers,
+    // never boxed interface values.  Normalizing here eliminates the need
+    // for codegen to re-detect this conversion.
+    let (compat_ty, vir_ty) = if matches!(&target, CallTarget::Native { .. }) {
+        let norm = ctx.normalize_iterator_return(vir_ty);
+        (norm, norm)
+    } else {
+        (compat_ty, vir_ty)
+    };
+
     let result_is_fallible = !ctx.generic && ctx.type_arena.unwrap_fallible(ty).is_some();
     Box::new(VirExpr::Call {
         target,

@@ -416,6 +416,27 @@ impl VirTypeTable {
         }
     }
 
+    /// Normalize `Iterator<T>` to `RuntimeIterator<T>` in value/return contexts.
+    ///
+    /// If `ty` is `Interface { def == iterator_type_def, type_args: [elem] }`,
+    /// returns the interned `RuntimeIterator { elem }`.  Otherwise returns `ty`
+    /// unchanged.  This is the single normalization point so that codegen never
+    /// needs to re-detect this conversion.
+    pub fn normalize_iterator_return(
+        &mut self,
+        ty: VirTypeId,
+        iterator_type_def: TypeDefId,
+    ) -> VirTypeId {
+        if let VirType::Interface { def, type_args } = self.get(ty)
+            && *def == iterator_type_def
+            && type_args.len() == 1
+        {
+            let elem = type_args[0];
+            return self.intern(VirType::RuntimeIterator { elem }, None);
+        }
+        ty
+    }
+
     // -- Type identity predicates -------------------------------------------
 
     /// Whether this is a `Union` type.

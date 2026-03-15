@@ -761,14 +761,12 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 // Use concrete_return_hint if available (carries the correct
-                // RuntimeIterator type for iterator methods); otherwise convert
-                // any Iterator<T> return types to RuntimeIterator<T> inline.
-                let return_type_id =
-                    self.resolved_concrete_return_hint(resolved)
-                        .unwrap_or_else(|| {
-                            let ty = self.resolved_return_type_id(resolved);
-                            self.convert_interface_iterator_return_by_type(ty)
-                        });
+                // RuntimeIterator type for iterator methods); otherwise use
+                // the VIR-normalized return type (already RuntimeIterator<T>
+                // for external methods, see VIR lowering).
+                let return_type_id = self
+                    .resolved_concrete_return_hint(resolved)
+                    .unwrap_or_else(|| self.resolved_return_type_id(resolved));
 
                 // Generic external methods with where-mappings are dispatched through
                 // the generic intrinsic resolver (exact arm first, default arm fallback).
@@ -967,16 +965,17 @@ impl Cg<'_, '_, '_> {
                     args.push(compiled.value);
                 }
                 // Use concrete_return_hint (already RuntimeIterator) when
-                // available; otherwise convert Iterator<T> inline.
+                // available; otherwise use VIR-normalized return type (already
+                // RuntimeIterator<T> for external methods, see VIR lowering).
+                // Falls back to entity binding's return type as last resort.
                 let return_type_id = dispatch
                     .resolved_method
                     .as_ref()
-                    .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
-                    .unwrap_or_else(|| {
-                        self.convert_interface_iterator_return_by_type(
-                            binding.sema_func_type.return_type_id,
-                        )
-                    });
+                    .and_then(|r| {
+                        self.resolved_concrete_return_hint(MethodResolutionRef(r))
+                            .or_else(|| Some(self.resolved_return_type_id(MethodResolutionRef(r))))
+                    })
+                    .unwrap_or(binding.sema_func_type.return_type_id);
                 let ext = ExternalMethodRef::from(*external_info);
                 let result = self.call_external_id(&ext, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call

@@ -544,9 +544,8 @@ impl Cg<'_, '_, '_> {
         args: &[VirRef],
         return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        // Convert Iterator<T> return types to RuntimeIterator<T> so that
-        // downstream code sees the concrete iterator type.
-        let return_ty = self.convert_interface_iterator_return_by_type(return_ty);
+        // Iterator<T> → RuntimeIterator<T> normalization is now done during
+        // VIR lowering for CallTarget::Native (see lower_call_expr).
         let module_str = self.interner().resolve(module_path).to_string();
         let name_str = self.interner().resolve(native_name).to_string();
         let native_func = self
