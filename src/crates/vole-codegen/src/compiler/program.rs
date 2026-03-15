@@ -771,6 +771,11 @@ impl Compiler<'_> {
             }
         }
 
+        // Import array Iterable default methods so array_iterable_func_keys is
+        // populated and the sentinel skip in compile_array_iterable_default_methods
+        // can fire, avoiding redundant recompilation per element type.
+        self.import_array_iterable_default_methods()?;
+
         Ok(())
     }
 
