@@ -32,6 +32,16 @@ struct ExpandedMethodData {
 }
 
 impl Compiler<'_> {
+    /// Returns `true` when a monomorphized instance has already been compiled
+    /// (e.g. via the VIR path or a precompiled import).  Used as an early-exit
+    /// guard in the compile loops to skip expensive module/substitution checks.
+    fn is_monomorph_already_defined(&self, mangled_name: NameId) -> bool {
+        self.func_registry
+            .lookup_name_id(mangled_name)
+            .and_then(|fk| self.func_registry.func_id(fk))
+            .is_some_and(|fid| self.defined_functions.contains(&fid))
+    }
+
     /// Declare a single monomorphized instance using the common trait interface.
     /// `has_self_param` indicates if a self pointer should be prepended to parameters.
     ///
@@ -116,6 +126,12 @@ impl Compiler<'_> {
         let program_module = self.program_module();
 
         for instance in &instances {
+            // Fast skip: if already compiled (e.g. via VIR path or precompiled import),
+            // avoid expensive external/module checks entirely.
+            if self.is_monomorph_already_defined(instance.mangled_name) {
+                continue;
+            }
+
             // Skip external functions - they don't have VIR bodies
             // Generic externals are called directly with type erasure at call sites
             if self.is_external_func(instance.original_name) {
@@ -524,6 +540,12 @@ impl Compiler<'_> {
                 continue;
             }
 
+            // Fast skip: if already compiled (e.g. via VIR path or precompiled import),
+            // avoid expensive module/substitution checks entirely.
+            if self.is_monomorph_already_defined(instance.mangled_name) {
+                continue;
+            }
+
             // Determine module_path for interner selection
             let class_module = self.analyzed.name_table().module_of(instance.class_name);
 
@@ -725,6 +747,12 @@ impl Compiler<'_> {
 
         for instance in &instances {
             if self.is_abstract_vir_static_method_monomorph(instance) {
+                continue;
+            }
+
+            // Fast skip: if already compiled (e.g. via VIR path or precompiled import),
+            // avoid expensive module/substitution checks entirely.
+            if self.is_monomorph_already_defined(instance.mangled_name) {
                 continue;
             }
 
