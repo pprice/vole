@@ -191,7 +191,7 @@ pub struct PipelineOptions<'a> {
     ///
     /// When provided, module VIR lowering results are cached on the first
     /// compilation and reused for subsequent files (e.g. across test files).
-    pub module_vir_cache: Option<Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>>,
+    pub module_vir_cache: Option<Rc<RefCell<Vec<crate::sema::lowering::CachedModuleVir>>>>,
     /// Color mode for diagnostic rendering (used for warnings).
     pub color_mode: ColorMode,
 }
@@ -353,7 +353,7 @@ pub fn build_analyzed_program(
     program: crate::frontend::Program,
     mut interner: crate::frontend::Interner,
     output: crate::sema::AnalysisOutput,
-    module_vir_cache: Option<Rc<RefCell<Option<crate::sema::lowering::CachedModuleVir>>>>,
+    module_vir_cache: Option<Rc<RefCell<Vec<crate::sema::lowering::CachedModuleVir>>>>,
 ) -> VirProgram {
     use crate::sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 

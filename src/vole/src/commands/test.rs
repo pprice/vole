@@ -429,7 +429,7 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
     let cache = Rc::new(RefCell::new(ModuleCache::new()));
 
     // Module VIR cache - populated on first file, reused for subsequent files
-    let module_vir_cache: Rc<RefCell<Option<CachedModuleVir>>> = Rc::new(RefCell::new(None));
+    let module_vir_cache: Rc<RefCell<Vec<CachedModuleVir>>> = Rc::new(RefCell::new(Vec::new()));
 
     // Compiled modules cache (codegen caching) - populated on first file
     let mut compiled_modules: Option<CompiledModules> = None;
@@ -556,7 +556,7 @@ fn run_file_tests_with_modules(
     path: &Path,
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
-    module_vir_cache: Rc<RefCell<Option<CachedModuleVir>>>,
+    module_vir_cache: Rc<RefCell<Vec<CachedModuleVir>>>,
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
@@ -582,7 +582,7 @@ fn run_source_tests_with_modules(
     path: &Path,
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
-    module_vir_cache: Rc<RefCell<Option<CachedModuleVir>>>,
+    module_vir_cache: Rc<RefCell<Vec<CachedModuleVir>>>,
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
