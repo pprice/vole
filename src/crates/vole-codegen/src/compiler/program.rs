@@ -11,7 +11,7 @@ use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_identity::{Interner, NameId, Symbol, TypeId, VirTypeId};
-use vole_log::compile_timing;
+use vole_log::{compile_timed, compile_timing};
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use vole_vir::func::VirBody;
@@ -89,6 +89,7 @@ impl Compiler<'_> {
 
     /// Compile only module functions (prelude, imports).
     /// Call this once before compile_program_only for batched compilation.
+    #[compile_timed(DEBUG)]
     pub fn compile_modules_only(&mut self) -> CodegenResult<()> {
         // Bail early if any modules had sema errors - their expression data may
         // contain INVALID type IDs that would cause panics in codegen.
@@ -107,6 +108,7 @@ impl Compiler<'_> {
     /// Pass 1 (declarations) runs for ALL modules so cross-module references
     /// resolve. Pass 2 (body compilation) skips modules already present in
     /// `skip_modules`, avoiding redundant Cranelift IR work.
+    #[compile_timed(DEBUG)]
     pub fn compile_modules_only_incremental(
         &mut self,
         skip_modules: &HashSet<String>,
@@ -136,6 +138,7 @@ impl Compiler<'_> {
     ///   already in the overflow JitContext (guarded by `defined_functions`).
     /// - **Pass 2** (body compilation): runs ONLY for `target_module`.
     /// - **Pending monomorphs**: drained after body compilation.
+    #[compile_timed(DEBUG)]
     pub fn compile_single_module_lazy(
         &mut self,
         target_module: &str,
@@ -181,15 +184,15 @@ impl Compiler<'_> {
         // Import other modules with Import linkage (resolved via stub symbols).
         self.import_module_types_and_functions(&other_paths)?;
 
-        // Global passes: monomorphs, VIR monomorphs, implement method dispatch,
-        // abstract class method expansion, monomorph index. Run on every trigger
-        // because each creates a fresh Compiler with empty CodegenState — the
-        // method_func_keys / implement_method_func_keys registrations from earlier
-        // triggers are lost. finalize_function() guards against re-defining
-        // function bodies that were already compiled on previous triggers.
+        // Global passes: monomorphs, VIR monomorphs, abstract class method
+        // expansion, monomorph index. Run on every trigger because each creates
+        // a fresh Compiler with empty CodegenState — the method_func_keys
+        // registrations from earlier triggers are lost. finalize_function()
+        // guards against re-defining function bodies that were already compiled
+        // on previous triggers.
         self.declare_all_monomorphized_instances()?;
         self.declare_vir_monomorphized_functions()?;
-        self.compile_vir_implement_method_monomorphs()?;
+        self.compile_implement_method_monomorphs()?;
         self.expand_abstract_class_method_monomorphs()?;
         self.build_monomorph_index();
         // VIR first (~17x cheaper), then AST fallback for remaining monomorphs.
@@ -209,12 +212,14 @@ impl Compiler<'_> {
 
     /// Import pre-compiled module functions without compiling them.
     /// Use this when modules were already compiled in a shared CompiledModules cache.
+    #[compile_timed(DEBUG)]
     pub fn import_modules(&mut self) -> CodegenResult<()> {
         self.import_module_functions()
     }
 
     /// Compile a program without recompiling module functions.
     /// Use with compile_modules_only for batched compilation.
+    #[compile_timed(DEBUG)]
     pub fn compile_program_only(&mut self) -> CodegenResult<()> {
         self.compile_program_body()
     }
@@ -228,6 +233,7 @@ impl Compiler<'_> {
     /// This runs before any function compilation (VIR or AST) so that native
     /// imports are available for direct calls. Idempotent: Cranelift returns
     /// existing `FuncId`s on re-declaration.
+    #[compile_timed(DEBUG)]
     fn declare_external_imports(&mut self) {
         use cranelift::prelude::AbiParam;
         use vole_runtime::native_registry::NativeType;
@@ -277,6 +283,7 @@ impl Compiler<'_> {
     /// First pass: declare all functions and tests, collect globals, finalize type metadata.
     ///
     /// Iterates VirEntityMetadata instead of walking AST `program.declarations`.
+    #[compile_timed(DEBUG)]
     fn declare_program_declarations(&mut self) -> CodegenResult<()> {
         use vole_vir::entity_metadata::VirTypeDefKind;
 
@@ -419,6 +426,7 @@ impl Compiler<'_> {
     /// Iterates VirEntityMetadata instead of walking AST `program.declarations`.
     /// Decl::Let globals are handled by inlining their initializers when
     /// referenced (see compile_expr for ExprKind::Identifier).
+    #[compile_timed(DEBUG)]
     fn compile_program_declarations(&mut self) -> CodegenResult<()> {
         use vole_vir::entity_metadata::VirTypeDefKind;
 
@@ -514,15 +522,13 @@ impl Compiler<'_> {
     }
 
     /// Compile the main program body (functions, tests, classes, etc.)
+    #[compile_timed(DEBUG)]
     fn compile_program_body(&mut self) -> CodegenResult<()> {
         use vole_vir::entity_metadata::VirTypeDefKind;
 
         // Pre-declare all external function imports from VirProgram.
         // Idempotent: JIT returns existing FuncIds on re-declaration.
-        {
-            let _timing = compile_timing!(DEBUG, "declare_external_imports").entered();
-            self.declare_external_imports();
-        }
+        self.declare_external_imports();
 
         // Pre-pass: Register all type names from VirEntityMetadata so they're
         // available for field type resolution (classes can reference each other).
@@ -546,50 +552,27 @@ impl Compiler<'_> {
         }
 
         // First pass: declare all functions and tests, collect globals, finalize type metadata
-        {
-            let _timing = compile_timing!(DEBUG, "declare_program_declarations").entered();
-            self.declare_program_declarations()?;
-        }
+        self.declare_program_declarations()?;
 
         // Declare monomorphized function instances before second pass
-        {
-            let _timing = compile_timing!(DEBUG, "declare_all_monomorphized_instances").entered();
-            self.declare_all_monomorphized_instances()?;
-        }
+        self.declare_all_monomorphized_instances()?;
 
         // Declare VIR-monomorphized functions (produced by run_vir_monomorphize).
         self.declare_vir_monomorphized_functions()?;
+        // Declare implement method monomorphs (Iterable defaults per element type).
+        self.compile_implement_method_monomorphs()?;
 
         // Expand abstract class method templates for program-level generics.
         // MUST run after declarations (which provide concrete substitutions) but
         // before any body compilation (which may call expanded methods).
-        {
-            let _timing =
-                compile_timing!(DEBUG, "expand_abstract_class_method_monomorphs").entered();
-            self.expand_abstract_class_method_monomorphs()?;
-        }
-
-        // Register implement method monomorphs for call-site dispatch.
-        // VIR functions are declared above by declare_vir_monomorphized_functions;
-        // this bridges their FuncIds into implement_method_func_keys.
-        {
-            let _timing =
-                compile_timing!(DEBUG, "compile_vir_implement_method_monomorphs").entered();
-            self.compile_vir_implement_method_monomorphs()?;
-        }
+        self.expand_abstract_class_method_monomorphs()?;
 
         // Build monomorph name index for O(1) lookup during body compilation.
         // Must run after declare_all + expand_abstract so all instances are visible.
-        {
-            let _timing = compile_timing!(DEBUG, "build_monomorph_index").entered();
-            self.build_monomorph_index();
-        }
+        self.build_monomorph_index();
 
         // Second pass: compile function bodies and tests
-        {
-            let _timing = compile_timing!(DEBUG, "compile_program_declarations").entered();
-            self.compile_program_declarations()?;
-        }
+        self.compile_program_declarations()?;
 
         // Compile VIR-monomorphized function bodies first — VIR compilation is
         // ~17x cheaper than AST fallback (18ms vs 293ms at full load). The
@@ -597,25 +580,16 @@ impl Compiler<'_> {
         // Functions with free_monomorphs entries are skipped here (their
         // CallTarget::Native Symbols may reference the module interner) and
         // handled correctly by compile_all_monomorphized_instances below.
-        {
-            let _timing = compile_timing!(DEBUG, "compile_vir_monomorphized_functions").entered();
-            self.compile_vir_monomorphized_functions()?;
-        }
+        self.compile_vir_monomorphized_functions()?;
 
         // AST fallback: compile monomorphized instances that lack VIR versions
         // (~8% of monomorphs). Only handles instances not already compiled above.
-        {
-            let _timing = compile_timing!(DEBUG, "compile_monomorphized_instances").entered();
-            self.compile_all_monomorphized_instances(true)?;
-        }
+        self.compile_all_monomorphized_instances(true)?;
 
         // Compile any monomorphs that were lazily declared during expression compilation.
         // This fixpoint loop handles transitive demand-declarations: compiling one pending
         // monomorph body may trigger demand-declaration of another.
-        {
-            let _timing = compile_timing!(DEBUG, "compile_pending_monomorphs").entered();
-            self.compile_pending_monomorphs()?;
-        }
+        self.compile_pending_monomorphs()?;
 
         Ok(())
     }
@@ -787,6 +761,7 @@ impl Compiler<'_> {
         Ok(())
     }
 
+    #[compile_timed(DEBUG)]
     pub(super) fn compile_module_functions(
         &mut self,
         skip_modules: Option<&HashSet<String>>,
@@ -840,10 +815,8 @@ impl Compiler<'_> {
         // wrap<string>).  Without declaring them here, compile_module_function_bodies
         // would fail with "VirDirect function not found".
         self.declare_vir_monomorphized_functions()?;
-
-        // Register implement method monomorphs for call-site dispatch.
-        // Must run after declare_vir so vir_direct_func_ids is populated.
-        self.compile_vir_implement_method_monomorphs()?;
+        // Declare implement method monomorphs for metadata-based dispatch.
+        self.compile_implement_method_monomorphs()?;
 
         // Pass 1.6: Expand abstract class method templates into concrete instances.
         // Abstract templates are created by sema when generic code (e.g. Task.stream<T>)
@@ -1317,6 +1290,7 @@ impl Compiler<'_> {
     /// Import pre-compiled module functions as external symbols.
     /// This declares the functions so they can be called, but doesn't compile them.
     /// Used when modules are already compiled in a shared CompiledModules cache.
+    #[compile_timed(DEBUG)]
     fn import_module_functions(&mut self) -> CodegenResult<()> {
         use vole_vir::entity_metadata::VirTypeDefKind;
 
@@ -1688,6 +1662,7 @@ impl Compiler<'_> {
     ///
     /// Must be called after [`declare_vir_monomorphized_functions`] so that
     /// all VirDirect targets have FuncIds for cross-referencing.
+    #[compile_timed(DEBUG)]
     fn compile_vir_monomorphized_functions(&mut self) -> CodegenResult<()> {
         self.compile_vir_monomorphized_functions_phased(true)
     }

@@ -11,6 +11,7 @@ use crate::LoweringEntityLookup;
 use crate::TypeArena;
 use vole_frontend::Interner;
 use vole_identity::{NameId, NameTable};
+use vole_log::compile_timed;
 use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::implement_dispatch::VirImplementDispatch;
 use vole_vir::type_table::VirTypeTable;
@@ -43,6 +44,7 @@ pub fn build_generic_vir_storage(
 /// Returns the instance index mapping `MonomorphInstance` to absolute function
 /// index -- used later by `resolve_all_calls` to resolve `Unresolved`
 /// calls to `VirDirect`.
+#[compile_timed(DEBUG)]
 #[expect(clippy::too_many_arguments)]
 pub fn run_early_vir_monomorphize(
     vir_functions: &mut Vec<VirFunction>,
@@ -158,6 +160,7 @@ pub fn run_early_vir_monomorphize(
 /// VirProgram.  It catches any `GenericCall` sites in concrete functions
 /// (including those produced by the early VIR monomorph pass) and resolves
 /// them to `VirDirect` call targets.
+#[compile_timed(DEBUG)]
 pub fn run_vir_monomorphize(program: &mut VirProgram) {
     let result = vole_vir::monomorphize(program);
 

@@ -52,14 +52,16 @@ src/
 
 Just
 ```bash
-just pre-commit     # Pre-commit checks, like  CI,  but will format and attempt to fix clippy
+just pre-commit     # Pre-commit checks with auto-fixes (format, clippy, test, snap, mem, doc-check)
 just check          # Fast type check (run after ANY change)
-just ci             # All checks (format, clippy, test, snap)
-just unit           # Run vole unit tests
+just ci             # All CI checks (format, clippy, test, snap, mem-all, doc-check)
+just unit           # Run vole unit tests (parallel across cores)
 just snap           # Run snapshot tests
-just dev            # List dev tools (see just/dev.justfile)
-just agent          # List agent specific tools (e.g. work tree management)
+just mem            # Run memory leak tests
+just dev            # List dev tools (debug, trace-keyword, next-error, etc.)
+just agent          # Agent workflow tools (worktree, start-ticket, checklist, etc.)
 just agent checklist VirExpr  # Show all files referencing an enum, classified by role
+just trace run file.vole      # Tracing with VOLE_LOG
 ```
 
 Cargo
@@ -97,8 +99,10 @@ vole inspect ast file.vole         # Show AST
 vole inspect vir file.vole         # Show VIR
 vole inspect mir file.vole         # Show MIR
 vole inspect ir file.vole          # Show Cranelift IR
-just dev-backtrace-test file.vole  # Debug segfaults
-just trace file.vole               # Tracing with VOLE_LOG
+just dev backtrace-test file.vole  # Debug segfaults
+just trace run file.vole           # Tracing with VOLE_LOG
+vole --timing run file.vole        # Compiler phase timing (stderr)
+vole --timing=chrome:out.json run file.vole  # Chrome trace JSON
 ```
 
 For release-only issues, use `cargo build --profile release-local` which keeps symbols for debugging while maintaining release optimizations.

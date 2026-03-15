@@ -914,6 +914,14 @@ fn rewrite_method_dispatch_meta(
             .static_method_generic
             .as_ref()
             .map(|key| rewrite_static_method_monomorph_key(key, ctx)),
+        implement_method_monomorph: meta.implement_method_monomorph.as_ref().map(|key| {
+            vole_identity::ImplementMethodMonomorphKey {
+                interface_type_def_id: key.interface_type_def_id,
+                implementing_type_def_id: key.implementing_type_def_id,
+                method_name: key.method_name,
+                type_keys: key.type_keys.iter().map(|t| ctx.remap(*t)).collect(),
+            }
+        }),
         // Copied as-is; rederive_decisions will update from the now-concrete
         // receiver type after substitution.
         receiver_is_interface: meta.receiver_is_interface,
@@ -2229,6 +2237,14 @@ mod tests {
                             method_type_keys: vec![type_id(11)],
                             vir_method_type_keys: vec![param_id],
                         }),
+                        implement_method_monomorph: Some(
+                            vole_identity::ImplementMethodMonomorphKey {
+                                interface_type_def_id: vole_identity::TypeDefId::new(50),
+                                implementing_type_def_id: vole_identity::TypeDefId::new(51),
+                                method_name: name(60),
+                                type_keys: vec![param_id],
+                            },
+                        ),
                         receiver_is_interface: false,
                     },
                     node_id: NodeId::new_for_test(7),
@@ -2288,6 +2304,20 @@ mod tests {
                     .expect("missing static key");
                 assert_eq!(static_key.vir_class_type_keys, vec![VirTypeId::I64]);
                 assert_eq!(static_key.vir_method_type_keys, vec![VirTypeId::I64]);
+                let impl_key = dispatch
+                    .implement_method_monomorph
+                    .as_ref()
+                    .expect("missing implement method key");
+                assert_eq!(
+                    impl_key.interface_type_def_id,
+                    vole_identity::TypeDefId::new(50)
+                );
+                assert_eq!(
+                    impl_key.implementing_type_def_id,
+                    vole_identity::TypeDefId::new(51)
+                );
+                assert_eq!(impl_key.method_name, name(60));
+                assert_eq!(impl_key.type_keys, vec![VirTypeId::I64]);
             }
             other => panic!("expected MethodCall, got {other:?}"),
         }

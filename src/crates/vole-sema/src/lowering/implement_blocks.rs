@@ -9,6 +9,7 @@ use crate::vir_lower::{CrossModuleCtx, lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{MethodId, ModuleId, NameTable, NamerLookup, TypeDefId};
+use vole_log::compile_timed;
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
@@ -107,6 +108,7 @@ struct LowerSingleImplementBlockArgs<'a> {
 /// method's `MethodId` from the entity registry, and lowers the body.
 /// Default interface methods (not in the implement block AST) are handled
 /// by `lower_implement_default_methods`.
+#[compile_timed(DEBUG)]
 pub fn lower_implement_block_methods(args: LowerImplementBlockMethodsArgs<'_>) {
     let LowerImplementBlockMethodsArgs {
         program,

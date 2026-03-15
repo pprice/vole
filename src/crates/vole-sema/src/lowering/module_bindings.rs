@@ -6,6 +6,7 @@ use rustc_hash::FxHashMap;
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, ExprKind, Interner, PatternKind, Program, Symbol};
 use vole_identity::{ModuleId, NameTable, VirTypeId};
+use vole_log::compile_timed;
 use vole_vir::type_table::VirTypeTable;
 
 use crate::vir_lower::type_translate::translate_type_id;
@@ -16,6 +17,7 @@ pub type VirModuleExportBinding = (ModuleId, Symbol, VirTypeId);
 /// Extract lightweight module bindings (Symbol → (ModuleId, Symbol)) from top-level
 /// destructuring imports.  Used to populate `CrossModuleCtx` for VIR call resolution
 /// before VirTypeTable-dependent lowering runs.
+#[compile_timed(DEBUG)]
 pub fn extract_cross_module_bindings(
     program: &Program,
     node_map: &NodeMap,

@@ -12,6 +12,7 @@
 use crate::PrimitiveType;
 use crate::type_arena::{SemaType, TypeArena};
 use vole_identity::{TypeId, VirTypeId};
+use vole_log::compile_timed;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -547,6 +548,7 @@ fn primitive_layout(prim: PrimitiveType) -> VirTypeLayout {
 /// This eliminates the need for compat-encoded fallback VirTypeIds in
 /// codegen — every type flowing through codegen will have a real
 /// VirTypeTable entry.
+#[compile_timed(DEBUG)]
 pub fn sweep_unmapped_type_ids(table: &mut VirTypeTable, arena: &TypeArena) {
     let count = arena.type_count();
 

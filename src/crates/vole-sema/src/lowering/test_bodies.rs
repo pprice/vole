@@ -10,6 +10,7 @@ use crate::vir_lower::{lower_stmts, lower_test_body};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{ModuleId, NameTable};
+use vole_log::compile_timed;
 use vole_vir::VirTest;
 use vole_vir::type_table::VirTypeTable;
 
@@ -18,6 +19,7 @@ use vole_vir::type_table::VirTypeTable;
 /// Walks the program's `Decl::Tests` blocks (including nested ones) and
 /// lowers each `TestCase.body` to a `VirBody`.  Returns a list of `VirTest`
 /// entries for O(1) lookup during test compilation.
+#[compile_timed(DEBUG)]
 #[expect(clippy::too_many_arguments)]
 pub fn lower_test_bodies(
     program: &Program,

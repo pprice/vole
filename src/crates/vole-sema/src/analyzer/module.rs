@@ -4,6 +4,7 @@
 use super::*;
 use crate::entity_defs::MethodBinding;
 use crate::optimizer::constant_folding::eval_const_expr;
+use vole_log::compile_timed;
 
 /// RAII guard that removes a canonical path from the modules_in_progress set on drop.
 /// Replaces the `bail_module!` macro so extracted helper functions don't need the macro.
@@ -86,6 +87,7 @@ struct ModuleFinalization {
 impl Analyzer {
     /// Process module imports early so they're available for qualified implement syntax.
     /// This runs before signature collection to allow `implement mod.Interface for Type`.
+    #[compile_timed(TRACE)]
     pub(super) fn process_module_imports(&mut self, program: &Program, interner: &Interner) {
         for decl in &program.declarations {
             if let Decl::Let(let_stmt) = decl

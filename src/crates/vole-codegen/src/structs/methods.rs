@@ -14,7 +14,8 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 use vole_identity::Symbol;
 use vole_identity::{
-    ClassMethodMonomorphKey, MethodId, NameId, NamerLookup, NodeId, TypeId, VirTypeId,
+    ClassMethodMonomorphKey, ImplementMethodMonomorphKey, MethodId, NameId, NamerLookup, NodeId,
+    TypeId, VirTypeId,
 };
 use vole_vir::BuiltinMethod;
 use vole_vir::VirRef;
@@ -329,6 +330,63 @@ impl Cg<'_, '_, '_> {
             let resolved = self.interner().resolve(name);
             CodegenError::not_found("method name_id", resolved)
         })
+    }
+
+    /// Resolve an implement method monomorph from VIR dispatch metadata.
+    ///
+    /// Looks up `dispatch.implement_method_monomorph` in the VirProgram's
+    /// `implement_method_monomorphs` map, returning the function key if the
+    /// function has already been declared by `compile_implement_method_monomorphs`.
+    fn try_resolve_implement_method_monomorph(
+        &mut self,
+        dispatch: &VirMethodDispatchMeta,
+    ) -> Option<crate::FunctionKey> {
+        let info = dispatch
+            .implement_method_monomorph
+            .as_ref()
+            .and_then(|key| self.analyzed().implement_method_monomorphs.get(key))?;
+        let fk = self.funcs().intern_name_id(info.mangled_name);
+        self.funcs_ref().func_id(fk).is_some().then_some(fk)
+    }
+
+    /// Resolve an implement method monomorph by constructing the key from
+    /// the object's VIR type and method name.
+    ///
+    /// Used in monomorphized generic contexts where the VIR dispatch metadata
+    /// doesn't carry `implement_method_monomorph` (generic templates set it to
+    /// `None`). Extracts the element type from array/string/range receivers
+    /// and looks up the corresponding compiled function.
+    fn try_resolve_implement_method_by_type(
+        &mut self,
+        method_name_id: NameId,
+        obj_vir_type: VirTypeId,
+    ) -> Option<crate::FunctionKey> {
+        // Extract element VirTypeId from the receiver type.
+        let elem_vir = self.vir_query_unwrap_array_v(obj_vir_type).or_else(|| {
+            if self.vir_query_is_string_v(obj_vir_type) {
+                Some(VirTypeId::STRING)
+            } else if obj_vir_type == VirTypeId::RANGE {
+                Some(VirTypeId::I64)
+            } else {
+                None
+            }
+        })?;
+
+        // Look up the array TypeDefId and Iterable interface TypeDefId.
+        let array_name_id = self.analyzed().array_type_name_id()?;
+        let array_tdef_id = self.analyzed().try_type_def_id(array_name_id)?;
+        let interfaces = self.analyzed().implemented_interfaces(array_tdef_id);
+        let iterable_tdef_id = interfaces.first().copied()?;
+
+        let key = ImplementMethodMonomorphKey::new(
+            iterable_tdef_id,
+            array_tdef_id,
+            method_name_id,
+            vec![elem_vir],
+        );
+        let info = self.analyzed().implement_method_monomorphs.get(&key)?;
+        let fk = self.funcs().intern_name_id(info.mangled_name);
+        self.funcs_ref().func_id(fk).is_some().then_some(fk)
     }
 
     #[tracing::instrument(skip(self, mc), fields(method = %self.interner().resolve(mc.method)))]
@@ -789,7 +847,7 @@ impl Cg<'_, '_, '_> {
         // monomorphized generic contexts where sema skips the generic body).
         // used_iterable_default_path tracks whether the method is a compiled Iterable default that
         // returns raw *mut RcIterator (not a boxed interface). This happens for:
-        // 1. Array/primitive types whose Iterable default is in implement_method_func_keys
+        // 1. Array/primitive types whose Iterable default is resolved via VIR metadata
         // 2. Primitive types (range, string) whose Iterable default is in method_func_keys
         //    (compiled via compile_implement_block) — these also return *mut RcIterator.
         let mut used_iterable_default_path = false;
@@ -823,17 +881,10 @@ impl Cg<'_, '_, '_> {
                     }
                 })
                 .or_else(|| {
-                    // Fallback: check implement_method_func_keys for Iterable default methods on
-                    // arrays and primitives (range, string). Each concrete self-type (e.g. [i64],
-                    // range) has its own compiled function keyed by (method_name_id, self_vir_type).
-                    let key = self
-                        .implement_method_func_keys()
-                        .get(&(method_name_id, obj.type_id))
-                        .copied();
-                    if key.is_some() {
-                        used_iterable_default_path = true;
-                    }
-                    key
+                    // VIR metadata path: look up implement method monomorph by the
+                    // per-call-site key stored during VIR lowering.
+                    self.try_resolve_implement_method_monomorph(dispatch)
+                        .inspect(|_| used_iterable_default_path = true)
                 });
             (func_key, self.resolved_return_type_id(resolved), None)
         } else {
@@ -946,14 +997,18 @@ impl Cg<'_, '_, '_> {
                 .get(&(type_name_id, method_name_id))
                 .copied()
                 .or_else(|| {
-                    // Fallback: check implement_method_func_keys for Iterable default
-                    // methods (filter, map, etc.) on arrays in monomorphized context.
-                    self.implement_method_func_keys()
-                        .get(&(method_name_id, resolved_obj_vir))
-                        .copied()
-                        .inspect(|_| {
-                            used_iterable_default_path = true;
-                        })
+                    // VIR metadata path: look up implement method monomorph by the
+                    // per-call-site key stored during VIR lowering.
+                    self.try_resolve_implement_method_monomorph(dispatch)
+                        .inspect(|_| used_iterable_default_path = true)
+                })
+                .or_else(|| {
+                    // Fallback for monomorphized generic contexts where the VIR
+                    // dispatch metadata lacks implement_method_monomorph (generic
+                    // templates set it to None). Construct the key from the
+                    // receiver's concrete VIR type.
+                    self.try_resolve_implement_method_by_type(method_name_id, resolved_obj_vir)
+                        .inspect(|_| used_iterable_default_path = true)
                 });
 
             // Get return type and param types from entity registry
@@ -1018,7 +1073,7 @@ impl Cg<'_, '_, '_> {
             .unwrap_or(return_type_id);
 
         // For Iterable default methods on arrays/primitives (range, string), the
-        // func_key comes from implement_method_func_keys and the compiled function
+        // func_key comes from VIR metadata resolution and the compiled function
         // returns a raw RuntimeIterator pointer. Convert Iterator<T> → RuntimeIterator<T>
         // so subsequent method calls use direct dispatch instead of vtable dispatch.
         //

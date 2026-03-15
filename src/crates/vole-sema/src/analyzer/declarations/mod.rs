@@ -16,6 +16,7 @@ use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId, TypeIdVec};
 use vole_frontend::ast::{
     ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr, TypeExprKind, TypeMapping,
 };
+use vole_log::compile_timed;
 
 /// Data needed for function registration in the entity registry.
 struct FuncRegistrationData {
@@ -72,6 +73,7 @@ fn format_type_expr(type_expr: &TypeExpr, interner: &Interner) -> String {
 impl Analyzer {
     /// Pass 0.5: Register all type shells so forward references work.
     /// Must be called before collect_signatures.
+    #[compile_timed(TRACE)]
     pub(super) fn register_all_type_shells(&mut self, program: &Program, interner: &Interner) {
         for decl in &program.declarations {
             match decl {
@@ -105,6 +107,7 @@ impl Analyzer {
     }
 
     /// Pass 1: Collect signatures for functions, classes, records, interfaces, and implement blocks
+    #[compile_timed(TRACE)]
     pub(super) fn collect_signatures(&mut self, program: &Program, interner: &Interner) {
         self.collect_type_signatures(program, interner);
         self.collect_function_signatures(program, interner);

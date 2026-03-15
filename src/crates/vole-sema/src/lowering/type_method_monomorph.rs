@@ -11,6 +11,7 @@ use crate::vir_lower::{CrossModuleCtx, lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{MethodId, ModuleId, NameId, NameTable, Span};
+use vole_log::compile_timed;
 use vole_vir::VirFunction;
 use vole_vir::func::ReturnAbi;
 use vole_vir::monomorph::rewrite::{RewriteCtx, rewrite_function};
@@ -40,6 +41,7 @@ pub struct MethodMonomorphLoweringWork<'a> {
 }
 
 /// Lower class/static method monomorph cache entries into VIR.
+#[compile_timed(DEBUG)]
 pub fn lower_type_method_monomorphized_instances(
     work: &mut MethodMonomorphLoweringWork<'_>,
     ctx: &MethodMonomorphLoweringCtx<'_>,

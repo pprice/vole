@@ -497,25 +497,16 @@ impl Analyzer {
 
         // Pass 0.5: Register type shells for forward reference support
         // This allows types to reference each other regardless of declaration order
-        {
-            let _t = vole_log::compile_timing!(TRACE, "register_type_shells").entered();
-            self.register_all_type_shells(program, interner);
-        }
+        self.register_all_type_shells(program, interner);
 
         // Pass 0: Resolve type aliases (now that shells exist, can reference forward types)
         self.collect_type_aliases(program, interner);
 
         // Pass 0.75: Process module imports so they're available for implement block resolution
-        {
-            let _t = vole_log::compile_timing!(TRACE, "process_module_imports").entered();
-            self.process_module_imports(program, interner);
-        }
+        self.process_module_imports(program, interner);
 
         // Pass 1: Collect signatures for all declarations (shells already exist)
-        {
-            let _t = vole_log::compile_timing!(TRACE, "collect_signatures").entered();
-            self.collect_signatures(program, interner);
-        }
+        self.collect_signatures(program, interner);
 
         // Populate well-known TypeDefIds now that interfaces are registered
         {
@@ -536,10 +527,7 @@ impl Analyzer {
         self.process_global_lets(program, interner)?;
 
         // Pass 2: type check function bodies and tests
-        {
-            let _t = vole_log::compile_timing!(TRACE, "check_declaration_bodies").entered();
-            self.check_declaration_bodies(program, interner)?;
-        }
+        self.check_declaration_bodies(program, interner)?;
 
         // Pass 2a: Analyze generic function bodies with abstract TypeParam types
         // and lower them to VIR templates.  These templates are consumed by
@@ -550,7 +538,6 @@ impl Analyzer {
         // templates that were already lowered during check_declaration_bodies
         // (via analyze_virtual_module → lower_generic_bodies_to_vir).
         {
-            let _t = vole_log::compile_timing!(TRACE, "lower_generic_bodies_to_vir").entered();
             let top_level_vir_fns = self.lower_generic_bodies_to_vir(program, interner);
             self.results.generic_vir_functions.extend(top_level_vir_fns);
         }
@@ -636,6 +623,7 @@ impl Analyzer {
 
     /// Pass 0: Collect type aliases (so they're available for function signatures)
     /// Pass 2: Type check function bodies, tests, and methods
+    #[vole_log::compile_timed(TRACE)]
     fn check_declaration_bodies(
         &mut self,
         program: &Program,

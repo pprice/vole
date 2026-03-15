@@ -8,7 +8,7 @@ use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_identity::{ModuleId, MonomorphInstanceTrait, NameId, TypeId, VirTypeId};
-use vole_log::compile_timing;
+use vole_log::{compile_timed, compile_timing};
 use vole_vir::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
 };
@@ -105,6 +105,7 @@ impl Compiler<'_> {
     /// When `program` is `None` (module-only phase), only module programs are searched
     /// and instances whose ASTs aren't found are silently skipped — they will be
     /// compiled later by the program phase or the demand-driven fixpoint loop.
+    #[compile_timed(TRACE)]
     pub(super) fn compile_monomorphized_instances(
         &mut self,
         is_program_phase: bool,
@@ -487,6 +488,7 @@ impl Compiler<'_> {
     /// When `program` is `Some`, errors on missing VIR bodies.
     /// When `None` (module-only phase), instances that depend on program-defined
     /// types are silently skipped (compiled later during the program phase).
+    #[compile_timed(TRACE)]
     pub(super) fn compile_class_method_monomorphized_instances(
         &mut self,
         is_program_phase: bool,
@@ -701,6 +703,7 @@ impl Compiler<'_> {
     /// When `program` is `Some`, main-program class ASTs are checked first.
     /// When `None` (module-only phase), instances that depend on program-defined
     /// types are silently skipped (compiled later during the program phase).
+    #[compile_timed(TRACE)]
     pub(super) fn compile_static_method_monomorphized_instances(
         &mut self,
         is_program_phase: bool,
@@ -878,6 +881,7 @@ impl Compiler<'_> {
     /// substitutions from other monomorph caches, creates concrete instances,
     /// declares them in JIT, compiles their bodies, and registers them in
     /// `expanded_class_method_monomorphs` for lookup by `Cg`.
+    #[compile_timed(DEBUG)]
     pub(super) fn expand_abstract_class_method_monomorphs(&mut self) -> CodegenResult<()> {
         use vole_identity::{ClassMethodMonomorphKey, FunctionType};
 
@@ -1362,6 +1366,7 @@ impl Compiler<'_> {
     // ===================================================================
 
     /// Declare all monomorphized instances (functions, class methods, static methods)
+    #[compile_timed(DEBUG)]
     pub(super) fn declare_all_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Note: Nested generic calls are now discovered during sema analysis,
         // so we don't need to expand instances here.
@@ -1377,6 +1382,7 @@ impl Compiler<'_> {
     /// When `None` (module-only phase), only module programs are searched and
     /// instances whose ASTs aren't found are silently skipped — they will be
     /// compiled later by the program phase or the demand-driven fixpoint loop.
+    #[compile_timed(DEBUG)]
     pub(super) fn compile_all_monomorphized_instances(
         &mut self,
         is_program_phase: bool,
@@ -1399,6 +1405,7 @@ impl Compiler<'_> {
     /// monomorphs and compiles their bodies. Since compiling one body may trigger
     /// further demand-declarations, this repeats until the queue is empty (fixpoint).
     ///
+    #[compile_timed(DEBUG)]
     pub(super) fn compile_pending_monomorphs(&mut self) -> CodegenResult<()> {
         use crate::types::PendingMonomorph;
 
@@ -1625,6 +1632,7 @@ impl Compiler<'_> {
     ///
     /// Called before body compilation in both `compile_module_functions` and
     /// `compile_program_body`.
+    #[compile_timed(DEBUG)]
     pub(super) fn build_monomorph_index(&mut self) {
         let vir_program = self.analyzed;
         let type_table = &vir_program.type_table;

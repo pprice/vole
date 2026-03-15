@@ -7,7 +7,7 @@
 //! - Individual implement method compilation: `compile_implement_method`, `compile_module_implement_method`
 //! - Implement statics compilation: `compile_implement_statics`
 //! - Interface interner resolution: `find_interface_method_interner`
-//! - VIR implement method monomorphs: `compile_vir_implement_method_monomorphs`
+//! - VIR implement method monomorphs: resolved via `VirProgram.implement_method_monomorphs`
 
 use std::rc::Rc;
 
@@ -17,7 +17,10 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::vir_conversions::vir_type_to_cranelift;
 use crate::types::{CodegenCtx, MethodInfo};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
-use vole_identity::{Interner, MethodId, ModuleId, NameId, Symbol, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{
+    ImplementMethodMonomorphKey, Interner, MethodId, ModuleId, NameId, Symbol, TypeDefId, TypeId,
+    VirTypeId,
+};
 use vole_vir::VirImplementBlockEntry;
 
 impl Compiler<'_> {
@@ -872,15 +875,16 @@ impl Compiler<'_> {
     }
 
     /// Declare, compile, and register implement-block default methods for
-    /// call-site dispatch in `implement_method_func_keys`.
+    /// metadata-based dispatch via `try_resolve_implement_method_monomorph`.
     ///
     /// Walks all concrete element types (e.g. i64, string) and compiles
     /// each non-external Iterable default method (map, filter, count, etc.)
     /// with the generic VIR template body and concrete substitutions.
-    pub(super) fn compile_vir_implement_method_monomorphs(&mut self) -> CodegenResult<()> {
+    /// Registers each function via `intern_name_id` so that
+    /// `try_resolve_implement_method_monomorph` can find it.
+    pub(super) fn compile_implement_method_monomorphs(&mut self) -> CodegenResult<()> {
         use rustc_hash::FxHashMap;
 
-        // Get array TypeDefId and Iterable TypeDefId.
         let array_tdef_id = {
             let array_name_id = match self.analyzed.array_type_name_id() {
                 Some(id) => id,
@@ -900,7 +904,6 @@ impl Compiler<'_> {
             interfaces[0]
         };
 
-        // Find T's NameId from the abstract substitution map.
         let t_name_id: NameId = {
             let subs = self
                 .analyzed
@@ -919,7 +922,6 @@ impl Compiler<'_> {
                 .unwrap_or("Iterable".to_string())
         };
 
-        // Collect non-external Iterable default methods.
         let default_methods: Vec<(MethodId, NameId, String)> = {
             let query = self.analyzed;
             let mut results = Vec::new();
@@ -959,136 +961,192 @@ impl Compiler<'_> {
             concrete_vir_subs.insert(t_name_id, vir_elem_type);
             let self_vir_ty = self.vir_lookup(self_type_id);
 
-            // Skip if already registered (sentinel check on first method).
-            if let Some((_, first_name_id, _)) = default_methods.first()
-                && self
-                    .state
-                    .implement_method_func_keys
-                    .contains_key(&(*first_name_id, self_vir_ty))
-            {
-                continue;
-            }
-
-            for (semantic_method_id, method_name_id, method_name_str) in &default_methods {
-                let mangled_name =
-                    format!("__array_iterable_{}_{}", elem_type.index(), method_name_str);
-
-                let method_def = self.analyzed.get_method_def(*semantic_method_id);
-                let Some((subst_param_virs, return_vir_ty)) = self.substitute_method_vir_types(
-                    &method_def.param_types,
-                    method_def.return_type,
-                    self_vir_ty,
-                    &concrete_vir_subs,
-                ) else {
-                    continue;
-                };
-
-                {
-                    let table = self.vir_type_table();
-                    if table.lookup_vir_type_id(return_vir_ty).is_none()
-                        && return_vir_ty.raw() >= VirTypeId::FIRST_DYNAMIC
-                    {
+            // Skip if already registered (check first method's NameId key).
+            if let Some((_, first_name_id, _)) = default_methods.first() {
+                let key = ImplementMethodMonomorphKey::new(
+                    iterable_tdef_id,
+                    array_tdef_id,
+                    *first_name_id,
+                    vec![vir_elem_type],
+                );
+                if let Some(info) = self.analyzed.implement_method_monomorphs.get(&key) {
+                    let fk = self.func_registry.intern_name_id(info.mangled_name);
+                    if self.func_registry.func_id(fk).is_some() {
                         continue;
                     }
                 }
+            }
 
-                let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
-                let sig = self.build_signature_from_vir_types(
-                    &subst_param_virs,
-                    return_vir_ty,
-                    VirSelfParam::Typed(self_vir_ty),
-                    abi,
-                );
-
-                // Import from cache or declare for compilation.
-                if self.jit.has_precompiled_symbol(&mangled_name) {
-                    let func_id = self.jit.import_function(&mangled_name, &sig);
-                    let func_key = self.func_registry.intern_raw(mangled_name);
-                    self.func_registry.set_func_id(func_key, func_id);
-                    self.state
-                        .implement_method_func_keys
-                        .insert((*method_name_id, self_vir_ty), func_key);
-                    continue;
-                }
-
-                let func_id = self.jit.declare_function(&mangled_name, &sig);
-                let func_key = self.func_registry.intern_raw(mangled_name);
-                self.func_registry.set_func_id(func_key, func_id);
-                self.state
-                    .implement_method_func_keys
-                    .insert((*method_name_id, self_vir_ty), func_key);
-
-                let iface_info =
-                    self.find_interface_method_interner(&iface_name_str, method_name_str);
-                let Some((iface_interner, iface_module_id)) = iface_info else {
-                    continue;
-                };
-
-                self.jit.ctx.func.signature = sig;
-
-                let method_def = self.analyzed.get_method_def(*semantic_method_id);
-                let param_cranelift_types = self.vir_ids_to_cranelift(&subst_param_virs);
-                let params: Vec<_> = method_def
-                    .param_names
-                    .iter()
-                    .zip(subst_param_virs.iter())
-                    .zip(param_cranelift_types.iter())
-                    .map(|((name_str, &vir_ty), &cranelift_type)| {
-                        let sym = iface_interner
-                            .lookup(name_str)
-                            .or_else(|| self.analyzed.interner().lookup(name_str))
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "param name '{}' not interned for iterable default method",
-                                    name_str
-                                )
-                            });
-                        (sym, vir_ty, cranelift_type)
-                    })
-                    .collect();
-
-                let self_sym = iface_interner
-                    .lookup("self")
-                    .unwrap_or_else(|| self.self_symbol());
-                let source_file_ptr = self.source_file_ptr();
-                let table = self.vir_type_table();
-                let self_cranelift_type =
-                    vir_type_to_cranelift(self_vir_ty, table, self.pointer_type);
-                let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
-
-                let mut builder_ctx = FunctionBuilderContext::new();
-                {
-                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env = compile_env!(self, &iface_interner, source_file_ptr);
-                    let mut codegen_ctx = CodegenCtx::new(
-                        &mut self.jit.module,
-                        &mut self.func_registry,
-                        &mut self.pending_monomorphs,
-                    );
-                    let config =
-                        FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
-                            .with_iterable_default_body()
-                            .with_self_vir_type(self_vir_ty);
-                    let vir_func = self
-                        .analyzed
-                        .get_method(*semantic_method_id)
-                        .unwrap_or_else(|| {
-                            panic!("VIR must be available for iterable default method")
-                        });
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir_func.body,
-                        iface_module_id,
-                        Some(&concrete_vir_subs),
-                    )?;
-                }
-                self.finalize_function(func_id)?;
+            for (semantic_method_id, method_name_id, method_name_str) in &default_methods {
+                self.compile_single_implement_method_monomorph(
+                    iterable_tdef_id,
+                    array_tdef_id,
+                    *semantic_method_id,
+                    *method_name_id,
+                    method_name_str,
+                    elem_type,
+                    vir_elem_type,
+                    self_vir_ty,
+                    &concrete_vir_subs,
+                    &iface_name_str,
+                )?;
             }
         }
 
         Ok(())
+    }
+
+    /// Compile a single implement method monomorph (e.g. `[i64].count()`).
+    #[expect(clippy::too_many_arguments)]
+    fn compile_single_implement_method_monomorph(
+        &mut self,
+        iterable_tdef_id: TypeDefId,
+        array_tdef_id: TypeDefId,
+        semantic_method_id: MethodId,
+        method_name_id: NameId,
+        method_name_str: &str,
+        elem_type: TypeId,
+        vir_elem_type: VirTypeId,
+        self_vir_ty: VirTypeId,
+        concrete_vir_subs: &rustc_hash::FxHashMap<NameId, VirTypeId>,
+        iface_name_str: &str,
+    ) -> CodegenResult<()> {
+        let mangled_name = format!("__array_iterable_{}_{}", elem_type.index(), method_name_str);
+
+        let method_def = self.analyzed.get_method_def(semantic_method_id);
+        let Some((subst_param_virs, return_vir_ty)) = self.substitute_method_vir_types(
+            &method_def.param_types,
+            method_def.return_type,
+            self_vir_ty,
+            concrete_vir_subs,
+        ) else {
+            return Ok(());
+        };
+
+        {
+            let table = self.vir_type_table();
+            if table.lookup_vir_type_id(return_vir_ty).is_none()
+                && return_vir_ty.raw() >= VirTypeId::FIRST_DYNAMIC
+            {
+                return Ok(());
+            }
+        }
+
+        let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
+        let sig = self.build_signature_from_vir_types(
+            &subst_param_virs,
+            return_vir_ty,
+            VirSelfParam::Typed(self_vir_ty),
+            abi,
+        );
+
+        // Import from cache or declare for compilation.
+        let precompiled = self.jit.has_precompiled_symbol(&mangled_name);
+        let func_id = if precompiled {
+            self.jit.import_function(&mangled_name, &sig)
+        } else {
+            self.jit.declare_function(&mangled_name, &sig)
+        };
+        let func_key = self.func_registry.intern_raw(mangled_name);
+        self.func_registry.set_func_id(func_key, func_id);
+        // Register by NameId for metadata-based dispatch.
+        self.register_implement_monomorph_name_id(
+            iterable_tdef_id,
+            array_tdef_id,
+            method_name_id,
+            vir_elem_type,
+            func_id,
+        );
+        if precompiled {
+            return Ok(());
+        }
+
+        let iface_info = self.find_interface_method_interner(iface_name_str, method_name_str);
+        let Some((iface_interner, iface_module_id)) = iface_info else {
+            return Ok(());
+        };
+
+        self.jit.ctx.func.signature = sig;
+
+        let method_def = self.analyzed.get_method_def(semantic_method_id);
+        let param_cranelift_types = self.vir_ids_to_cranelift(&subst_param_virs);
+        let params: Vec<_> = method_def
+            .param_names
+            .iter()
+            .zip(subst_param_virs.iter())
+            .zip(param_cranelift_types.iter())
+            .map(|((name_str, &vir_ty), &cranelift_type)| {
+                let sym = iface_interner
+                    .lookup(name_str)
+                    .or_else(|| self.analyzed.interner().lookup(name_str))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "param name '{}' not interned for iterable default method",
+                            name_str
+                        )
+                    });
+                (sym, vir_ty, cranelift_type)
+            })
+            .collect();
+
+        let self_sym = iface_interner
+            .lookup("self")
+            .unwrap_or_else(|| self.self_symbol());
+        let source_file_ptr = self.source_file_ptr();
+        let table = self.vir_type_table();
+        let self_cranelift_type = vir_type_to_cranelift(self_vir_ty, table, self.pointer_type);
+        let self_binding = (self_sym, self_vir_ty, self_cranelift_type);
+
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+            let env = compile_env!(self, &iface_interner, source_file_ptr);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
+            let config = FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
+                .with_iterable_default_body()
+                .with_self_vir_type(self_vir_ty);
+            let vir_func = self
+                .analyzed
+                .get_method(semantic_method_id)
+                .unwrap_or_else(|| panic!("VIR must be available for iterable default method"));
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir_func.body,
+                iface_module_id,
+                Some(concrete_vir_subs),
+            )?;
+        }
+        self.finalize_function(func_id)?;
+
+        Ok(())
+    }
+
+    /// Register a NameId-based function key for an implement method monomorph
+    /// so that metadata-based dispatch can find it via `intern_name_id`.
+    fn register_implement_monomorph_name_id(
+        &mut self,
+        interface_type_def_id: TypeDefId,
+        implementing_type_def_id: TypeDefId,
+        method_name: NameId,
+        elem_vir_type: VirTypeId,
+        func_id: cranelift_module::FuncId,
+    ) {
+        let key = ImplementMethodMonomorphKey::new(
+            interface_type_def_id,
+            implementing_type_def_id,
+            method_name,
+            vec![elem_vir_type],
+        );
+        if let Some(info) = self.analyzed.implement_method_monomorphs.get(&key) {
+            let name_key = self.func_registry.intern_name_id(info.mangled_name);
+            self.func_registry.set_func_id(name_key, func_id);
+        }
     }
 }

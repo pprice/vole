@@ -9,6 +9,9 @@ description = "Vole Intermediate Representation — typed IR between sema and co
 vole-identity = { path = "../vole-identity" }
 vole-log = { path = "../vole-log" }
 
+# Tracing (required for compile_timed macro expansion)
+tracing = "0.1"
+
 # Fast hashing for internal compiler maps (non-cryptographic)
 rustc-hash = "2.1"
 

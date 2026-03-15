@@ -12,6 +12,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::runtime_registry::{
     AbiTy, SigSpec, all_linkable_symbols, codegen_symbols, signature_for,
 };
+use vole_log::compile_timed;
 
 /// Cache of compiled module functions that can be shared across JitContexts.
 /// Supports incremental growth: new JIT contexts can be added without
@@ -544,6 +545,7 @@ impl JitContext {
 
     /// Finalize all functions and get code pointers
     /// Returns Ok(()) on success, Err on finalization failure (safe to ignore)
+    #[compile_timed(DEBUG)]
     pub fn finalize(&mut self) -> CodegenResult<()> {
         tracing::debug!(
             num_functions = self.func_ids.len(),

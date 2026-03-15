@@ -15,6 +15,7 @@ use crate::vir_lower::{CrossModuleCtx, lower_function};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{ModuleId, NameTable, NamerLookup, Span};
+use vole_log::compile_timed;
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
@@ -23,6 +24,7 @@ use vole_vir::type_table::VirTypeTable;
 /// Test blocks can contain `Decl::Class` and `Decl::Struct` declarations that
 /// are scoped to a virtual module. This function recursively walks `Decl::Tests`
 /// blocks and lowers their class/struct methods (direct + default) to VIR.
+#[compile_timed(DEBUG)]
 #[expect(clippy::too_many_arguments)]
 pub fn lower_test_scoped_type_methods(
     program: &Program,

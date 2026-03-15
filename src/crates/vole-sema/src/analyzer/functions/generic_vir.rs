@@ -11,6 +11,7 @@
 //! substitution.
 
 use super::super::*;
+use vole_log::compile_timed;
 use vole_vir::func::VirFunction;
 
 impl Analyzer {
@@ -25,6 +26,7 @@ impl Analyzer {
     /// Returns the collected generic VIR functions.  These are stored in
     /// `AnalysisOutput.generic_vir_functions` and later moved into
     /// `AnalyzedProgram.generic_vir_functions`.
+    #[compile_timed(TRACE)]
     pub(in crate::analyzer) fn lower_generic_bodies_to_vir(
         &mut self,
         program: &Program,

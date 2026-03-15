@@ -12,6 +12,7 @@ use crate::vir_lower::{CrossModuleCtx, lower_interface_method, lower_method};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{MethodId, ModuleId, NameTable};
+use vole_log::compile_timed;
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
@@ -19,6 +20,7 @@ use vole_vir::type_table::VirTypeTable;
 ///
 /// Iterates the program's class and struct declarations, looks up each type's
 /// methods in the entity registry, and lowers non-generic methods to VIR.
+#[compile_timed(DEBUG)]
 #[expect(clippy::too_many_arguments)]
 pub fn lower_top_level_type_methods(
     program: &Program,

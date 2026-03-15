@@ -783,6 +783,172 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
                 static_key.vir_method_type_keys,
                 vec![vole_identity::VirTypeId::BOOL]
             );
+            // implement_method_monomorph is None for Implemented (non-DefaultMethod)
+            assert!(
+                dispatch.implement_method_monomorph.is_none(),
+                "expected None for non-DefaultMethod"
+            );
+        }
+        other => panic!("expected MethodCall, got {other:?}"),
+    }
+}
+
+// -----------------------------------------------------------------------
+// implement_method_monomorph — DefaultMethod on array populates key
+// -----------------------------------------------------------------------
+
+#[test]
+fn concrete_mode_default_method_populates_implement_method_monomorph() {
+    let mut node_map = empty_node_map();
+    let mut interner = test_interner();
+    let mut type_arena = test_type_arena();
+    let entities = test_entities();
+    let name_table = test_name_table();
+    let mut type_table = test_type_table();
+
+    let receiver_id = NodeId::new(ModuleId::new(0), 100);
+    let call_id = NodeId::new(ModuleId::new(0), 101);
+
+    // The receiver is [i64]
+    let array_ty = type_arena.array(type_arena.i64());
+    node_map.set_type(receiver_id, array_ty);
+
+    let interface_tdef = vole_identity::TypeDefId::new(80);
+    let impl_tdef = vole_identity::TypeDefId::new(81);
+    let method_name_id = NameId::new_for_test(900);
+
+    // Set dispatch kind
+    node_map.set_method_dispatch_kind(call_id, MethodDispatchKind::Standard);
+
+    // Set resolved method to DefaultMethod
+    node_map.set_method(
+        call_id,
+        ResolvedMethod::DefaultMethod {
+            type_def_id: Some(impl_tdef),
+            method_name_id,
+            interface_name: Symbol::synthetic(50),
+            interface_type_def_id: interface_tdef,
+            type_name: Symbol::synthetic(51),
+            method_name: Symbol::synthetic(52),
+            func_type_id: TypeId::UNKNOWN,
+            return_type_id: TypeId::STRING,
+            external_info: None,
+            concrete_return_hint: None,
+        },
+    );
+
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+        &mut type_table,
+    );
+
+    let receiver = Expr {
+        id: receiver_id,
+        kind: ExprKind::Identifier(Symbol::synthetic(7)),
+        span: dummy_span(),
+    };
+    let method_expr = Expr {
+        id: call_id,
+        kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
+            object: receiver,
+            method: Symbol::synthetic(8),
+            type_args: vec![],
+            args: vec![],
+            method_span: dummy_span(),
+        })),
+        span: dummy_span(),
+    };
+
+    let vir_ref = lower_expr(&method_expr, &mut ctx);
+    match vir_ref.as_ref() {
+        VirExpr::MethodCall { dispatch, .. } => {
+            let impl_key = dispatch
+                .implement_method_monomorph
+                .as_ref()
+                .expect("expected implement_method_monomorph for DefaultMethod");
+            assert_eq!(impl_key.interface_type_def_id, interface_tdef);
+            assert_eq!(impl_key.implementing_type_def_id, impl_tdef);
+            assert_eq!(impl_key.method_name, method_name_id);
+            // Element type should be i64 (from [i64] receiver)
+            assert_eq!(impl_key.type_keys, vec![vole_identity::VirTypeId::I64]);
+        }
+        other => panic!("expected MethodCall, got {other:?}"),
+    }
+}
+
+#[test]
+fn concrete_mode_default_method_without_array_receiver_yields_none() {
+    let mut node_map = empty_node_map();
+    let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let name_table = test_name_table();
+    let mut type_table = test_type_table();
+
+    let receiver_id = NodeId::new(ModuleId::new(0), 200);
+    let call_id = NodeId::new(ModuleId::new(0), 201);
+
+    // Receiver is i64 (not an array)
+    node_map.set_type(receiver_id, TypeId::I64);
+
+    let interface_tdef = vole_identity::TypeDefId::new(80);
+    let impl_tdef = vole_identity::TypeDefId::new(81);
+    let method_name_id = NameId::new_for_test(901);
+
+    node_map.set_method_dispatch_kind(call_id, MethodDispatchKind::Standard);
+    node_map.set_method(
+        call_id,
+        ResolvedMethod::DefaultMethod {
+            type_def_id: Some(impl_tdef),
+            method_name_id,
+            interface_name: Symbol::synthetic(50),
+            interface_type_def_id: interface_tdef,
+            type_name: Symbol::synthetic(51),
+            method_name: Symbol::synthetic(52),
+            func_type_id: TypeId::UNKNOWN,
+            return_type_id: TypeId::STRING,
+            external_info: None,
+            concrete_return_hint: None,
+        },
+    );
+
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+        &mut type_table,
+    );
+
+    let receiver = Expr {
+        id: receiver_id,
+        kind: ExprKind::Identifier(Symbol::synthetic(7)),
+        span: dummy_span(),
+    };
+    let method_expr = Expr {
+        id: call_id,
+        kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
+            object: receiver,
+            method: Symbol::synthetic(8),
+            type_args: vec![],
+            args: vec![],
+            method_span: dummy_span(),
+        })),
+        span: dummy_span(),
+    };
+
+    let vir_ref = lower_expr(&method_expr, &mut ctx);
+    match vir_ref.as_ref() {
+        VirExpr::MethodCall { dispatch, .. } => {
+            assert!(
+                dispatch.implement_method_monomorph.is_none(),
+                "expected None when receiver is not an array"
+            );
         }
         other => panic!("expected MethodCall, got {other:?}"),
     }

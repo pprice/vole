@@ -1895,6 +1895,16 @@ dependencies = [
  "tracing",
  "tracing-chrome",
  "tracing-subscriber",
+ "vole-log-macros",
+]
+
+[[package]]
+name = "vole-log-macros"
+version = "2026.3.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -1971,6 +1981,7 @@ version = "2026.3.1"
 dependencies = [
  "paste",
  "rustc-hash",
+ "tracing",
  "vole-identity",
  "vole-log",
 ]

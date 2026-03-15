@@ -7,7 +7,7 @@
 use crate::StringConversion;
 use vole_frontend::Expr;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
-use vole_identity::{MonomorphKey, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{ImplementMethodMonomorphKey, MonomorphKey, TypeDefId, TypeId, VirTypeId};
 
 use vole_vir::IntrinsicKey;
 use vole_vir::calls::{CallTarget, LambdaDefaultsInfo};
@@ -1101,10 +1101,8 @@ fn lower_method_dispatch_meta(
             }
         });
 
-    let resolved_method = ctx
-        .node_map
-        .get_method(expr_id)
-        .map(|resolved| lower_resolved_method(resolved, ctx));
+    let sema_method = ctx.node_map.get_method(expr_id);
+    let resolved_method = sema_method.map(|resolved| lower_resolved_method(resolved, ctx));
 
     let generic_monomorph = ctx
         .node_map
@@ -1177,6 +1175,34 @@ fn lower_method_dispatch_meta(
                     .collect(),
             });
 
+    // Build implement_method_monomorph key when the resolved method is a
+    // DefaultMethod on a type extending a generic interface (e.g., array
+    // Iterable defaults like map/filter/count).
+    let implement_method_monomorph = if !ctx.generic {
+        sema_method.and_then(|resolved| {
+            let crate::resolution::ResolvedMethod::DefaultMethod {
+                type_def_id: Some(impl_type_def_id),
+                interface_type_def_id,
+                method_name_id,
+                ..
+            } = resolved
+            else {
+                return None;
+            };
+            let receiver_ty = ctx.node_map.get_type(receiver_node_id)?;
+            let elem_ty = ctx.type_arena.unwrap_array(receiver_ty)?;
+            let elem_vir_type = ctx.translate(elem_ty);
+            Some(ImplementMethodMonomorphKey {
+                interface_type_def_id: *interface_type_def_id,
+                implementing_type_def_id: *impl_type_def_id,
+                method_name: *method_name_id,
+                type_keys: vec![elem_vir_type],
+            })
+        })
+    } else {
+        None
+    };
+
     // Pre-compute whether the receiver's type is an interface.
     // In generic mode the receiver type may be a type parameter, so default
     // to `false` — rederive will update after monomorphization.
@@ -1198,6 +1224,7 @@ fn lower_method_dispatch_meta(
         resolved_call_args,
         class_method_generic,
         static_method_generic,
+        implement_method_monomorph,
         receiver_is_interface,
     }
 }

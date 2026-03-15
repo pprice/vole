@@ -6,6 +6,7 @@
 // monomorphization.
 
 use rustc_hash::FxHashMap;
+use vole_log::compile_timed;
 
 use crate::calls::CallTarget;
 use crate::entity_metadata::VirEntityMetadata;
@@ -79,6 +80,7 @@ pub fn resolve_all_calls(
 ///
 /// Test bodies are stored separately from `VirProgram.functions` and were not
 /// previously processed by `resolve_all_calls`.
+#[compile_timed(DEBUG)]
 pub fn resolve_test_calls(
     tests: &mut [crate::func::VirTest],
     index: &InstanceIndex,

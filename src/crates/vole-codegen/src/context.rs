@@ -1331,13 +1331,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.state.method_func_keys
     }
 
-    /// Get implement-block default method key map.
-    /// Keyed by (method_name_id, self_vir_type) for per-element-type lookup.
-    #[inline]
-    pub fn implement_method_func_keys(&self) -> &'ctx FxHashMap<(NameId, VirTypeId), FunctionKey> {
-        &self.env.state.implement_method_func_keys
-    }
-
     /// Look up a free-function monomorph by `MonomorphKey` via VirProgram.
     ///
     /// Uses the `free_monomorphs_by_key` reverse index to find the mangled

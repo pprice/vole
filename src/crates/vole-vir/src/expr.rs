@@ -3,8 +3,8 @@
 // VIR expression nodes and their supporting types.
 
 use vole_identity::{
-    MethodId, ModuleId, NameId, NodeId, StringConversion, Symbol, TypeDefId, UnionStorageKind,
-    VirTypeId,
+    ImplementMethodMonomorphKey, MethodId, ModuleId, NameId, NodeId, StringConversion, Symbol,
+    TypeDefId, UnionStorageKind, VirTypeId,
 };
 
 use crate::calls::CallTarget;
@@ -921,6 +921,10 @@ pub struct VirMethodDispatchMeta {
     pub resolved_call_args: Option<Vec<Option<usize>>>,
     pub class_method_generic: Option<VirClassMethodMonomorphKey>,
     pub static_method_generic: Option<VirStaticMethodMonomorphKey>,
+    /// Key for looking up a monomorphized implement method (e.g., array Iterable defaults).
+    /// Parallel to class_method_generic — set during VIR lowering when a DefaultMethod
+    /// call is on a type that extends a generic interface with concrete type args.
+    pub implement_method_monomorph: Option<ImplementMethodMonomorphKey>,
     /// Pre-computed: the receiver's type is an interface.
     ///
     /// Used by codegen to decide whether `InterfaceMethod` dispatch from sema

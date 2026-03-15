@@ -6,6 +6,7 @@ pub use compile_timing::{
     render_timing_tree, take_timing_tree,
 };
 pub use init::init_logging;
+pub use vole_log_macros::compile_timed;
 
 /// Macro for compiler timing instrumentation.
 ///

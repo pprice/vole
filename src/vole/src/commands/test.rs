@@ -730,16 +730,10 @@ fn run_source_tests_with_modules(
         compiler.set_source_file(file_path);
 
         // Import module functions (fast - just declarations, no codegen)
-        {
-            let _timing = compile_timing!(DEBUG, "import_modules").entered();
-            let _ = compiler.import_modules();
-        }
+        let _ = compiler.import_modules();
 
         // Compile just the main program
-        let result = {
-            let _t = compile_timing!(DEBUG, "compile_program").entered();
-            compiler.compile_program_only()
-        };
+        let result = compiler.compile_program_only();
 
         let tests = compiler.take_tests();
         let main_lambda_counter = compiler.lambda_counter();
@@ -792,10 +786,7 @@ fn run_source_tests_with_modules(
 
     // Finalize only on successful compilation
     let mut jit = jit;
-    {
-        let _timing = compile_timing!(DEBUG, "finalize").entered();
-        jit.finalize()?;
-    }
+    jit.finalize()?;
 
     // Activate lazy compilation state (if any) so compile_trigger can fire
     // when JIT code calls a lazily-stubbed module function.

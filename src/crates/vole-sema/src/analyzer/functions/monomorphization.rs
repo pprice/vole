@@ -513,8 +513,8 @@ impl Analyzer {
     /// `ImplementMethodMonomorphInstance` in the entity registry cache.
     ///
     /// Records the instances in sema so that VIR lowering can later create
-    /// concrete functions from them. Codegen then registers the compiled
-    /// functions in `implement_method_func_keys` for call-site dispatch.
+    /// concrete functions from them. Codegen resolves calls via VIR metadata
+    /// in `VirProgram.implement_method_monomorphs`.
     pub(in crate::analyzer) fn register_implement_method_monomorphs(&mut self) {
         // Get array TypeDefId
         let array_tdef_id = {

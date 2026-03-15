@@ -1,0 +1,16 @@
+[package]
+name = "vole-log-macros"
+version.workspace = true
+edition = "2024"
+description = "Proc macros for Vole compiler timing instrumentation"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[lints]
+workspace = true

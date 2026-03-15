@@ -15,6 +15,8 @@ use vole_identity::{
     Interner, ModuleId, NameTable, StringConversion, Symbol, UnionStorageKind, VirTypeId,
 };
 
+use vole_log::compile_timed;
+
 use crate::BuiltinMethod;
 use crate::calls::{CallTarget, NativeAbi};
 use crate::entity_metadata::VirEntityMetadata;
@@ -116,6 +118,7 @@ pub fn rederive_decisions_with_calls(
 ///
 /// Should be called after the program's interner and name_table have been
 /// populated (i.e., after `lower_vir_program` returns and the CLI sets them).
+#[compile_timed(DEBUG)]
 pub fn rederive_monomorphized_calls(program: &mut crate::program::VirProgram) {
     let base = program.vir_monomorph_base;
     if base == usize::MAX || base >= program.functions.len() {
