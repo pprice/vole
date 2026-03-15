@@ -1,13 +1,14 @@
 // src/sema/analyzer/functions/monomorphization.rs
 //! Monomorphization: propagation and derivation of concrete monomorph
-//! instances for class/static methods.
+//! instances for class/static/implement-block methods.
 //!
 //! Free-function monomorphization is handled by the VIR monomorph pass
 //! (see `vole_vir::monomorph`).  Generic body analysis for Pass 2a lives
-//! in `functions/generic_vir.rs`.  This module handles only class/static
-//! method propagation and derivation.
+//! in `functions/generic_vir.rs`.  This module handles class/static
+//! method propagation/derivation and implement-block method registration.
 
 use super::super::*;
+use crate::generic::{ImplementMethodMonomorphInstance, ImplementMethodMonomorphKey};
 
 impl Analyzer {
     /// Propagate concrete type substitutions to class method monomorphs created
@@ -501,5 +502,170 @@ impl Analyzer {
             func_type,
             substitutions: concrete_subs.clone(),
         })
+    }
+
+    /// Register implement-block method monomorph instances for all concrete
+    /// element types known in the type arena.
+    ///
+    /// Scans the type arena for all concrete `RuntimeIterator<T>` element
+    /// types and, for each (element_type, default_method) pair on the array's
+    /// `Iterable<T>` implementation, registers an
+    /// `ImplementMethodMonomorphInstance` in the entity registry cache.
+    ///
+    /// This mirrors what codegen's `compile_array_iterable_default_methods`
+    /// discovers at compile time, but records the instances in sema so that
+    /// VIR lowering can later create concrete functions from them.
+    pub(in crate::analyzer) fn register_implement_method_monomorphs(&mut self) {
+        // Get array TypeDefId
+        let array_tdef_id = {
+            let registry = self.entity_registry();
+            let array_name_id = match registry.array_name_id() {
+                Some(id) => id,
+                None => return,
+            };
+            match registry.type_by_name(array_name_id) {
+                Some(id) => id,
+                None => return,
+            }
+        };
+
+        // Find Iterable TypeDefId (the interface array implements)
+        let iterable_tdef_id = {
+            let registry = self.entity_registry();
+            let interfaces = registry.get_implemented_interfaces(array_tdef_id);
+            if interfaces.is_empty() {
+                return;
+            }
+            interfaces[0] // array implements exactly one interface: Iterable<T>
+        };
+
+        // Find T's NameId from the abstract substitution {T_name_id -> TypeParam(T)}
+        let t_name_id: NameId = {
+            let registry = self.entity_registry();
+            let type_params = registry.type_params(iterable_tdef_id);
+            let type_args = registry.get_implementation_type_args(array_tdef_id, iterable_tdef_id);
+            let subs: FxHashMap<NameId, ArenaTypeId> = type_params
+                .into_iter()
+                .zip(type_args.iter().copied())
+                .collect();
+            match subs.into_keys().next() {
+                Some(name_id) => name_id,
+                None => return,
+            }
+        };
+
+        // Collect non-external Iterable default methods on the array type
+        let default_methods: Vec<(MethodId, NameId)> = {
+            let registry = self.entity_registry();
+            let mut results = Vec::new();
+            for iface_method_id in registry.methods_on_type(iterable_tdef_id) {
+                let method_def = registry.get_method(iface_method_id);
+                if !method_def.has_default || method_def.external_binding.is_some() {
+                    continue;
+                }
+                if let Some(array_method_id) =
+                    registry.find_method_on_type(array_tdef_id, method_def.name_id)
+                {
+                    results.push((array_method_id, method_def.name_id));
+                }
+            }
+            results
+        };
+
+        if default_methods.is_empty() {
+            return;
+        }
+
+        // Get all concrete element types from the type arena
+        let elem_types: Vec<ArenaTypeId> = {
+            let arena = self.type_arena();
+            arena.all_concrete_runtime_iterator_elem_types()
+        };
+
+        let mut count = 0u32;
+
+        for elem_type in &elem_types {
+            let mut concrete_subs: FxHashMap<NameId, ArenaTypeId> = FxHashMap::default();
+            concrete_subs.insert(t_name_id, *elem_type);
+
+            for &(method_id, method_name_id) in &default_methods {
+                let key = ImplementMethodMonomorphKey::new(
+                    iterable_tdef_id,
+                    array_tdef_id,
+                    method_name_id,
+                    vec![VirTypeId::from_type_id(*elem_type)],
+                );
+
+                // Skip if already registered
+                if self
+                    .entity_registry()
+                    .implement_method_monomorph_cache
+                    .contains(&key)
+                {
+                    continue;
+                }
+
+                // Substitute the method signature with concrete types
+                let signature_id = self.entity_registry().method_signature(method_id);
+                let (params, ret, is_closure) = {
+                    let arena = self.type_arena();
+                    match arena.unwrap_function(signature_id) {
+                        Some((p, r, c)) => (p.to_vec(), r, c),
+                        None => continue,
+                    }
+                };
+
+                let (subst_params, subst_ret) = {
+                    let mut arena = self.type_arena_mut();
+                    let sp = params
+                        .iter()
+                        .map(|&pt| arena.substitute(pt, &concrete_subs))
+                        .collect::<Vec<_>>();
+                    let sr = arena.substitute(ret, &concrete_subs);
+                    (sp, sr)
+                };
+                let func_type = FunctionType::from_ids(&subst_params, subst_ret, is_closure);
+
+                let instance_id = self
+                    .entity_registry_mut()
+                    .implement_method_monomorph_cache
+                    .next_unique_id();
+
+                let method_name_str = self
+                    .name_table()
+                    .last_segment_str(method_name_id)
+                    .unwrap_or_else(|| "method".to_string());
+                let mangled_name_str =
+                    format!("__array_iterable_{}_{}", elem_type.index(), method_name_str);
+                let mangled_name = self
+                    .name_table_mut()
+                    .intern_raw(self.module.current_module, &[&mangled_name_str]);
+
+                let instance = ImplementMethodMonomorphInstance {
+                    interface_type_def_id: iterable_tdef_id,
+                    implementing_type_def_id: array_tdef_id,
+                    method_id,
+                    method_name: method_name_id,
+                    mangled_name,
+                    instance_id,
+                    func_type,
+                    substitutions: concrete_subs.clone(),
+                };
+
+                self.entity_registry_mut()
+                    .implement_method_monomorph_cache
+                    .insert(key, instance);
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            tracing::debug!(
+                count,
+                elem_types = elem_types.len(),
+                methods = default_methods.len(),
+                "registered implement method monomorph instances"
+            );
+        }
     }
 }

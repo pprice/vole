@@ -25,7 +25,10 @@ use std::collections::HashSet;
 use rustc_hash::FxHashMap;
 
 use crate::entity_defs::{FieldDef, FunctionDef, GlobalDef, MethodDef, TypeDef, TypeDefKind};
-use crate::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
+use crate::generic::{
+    ClassMethodMonomorphCache, ImplementMethodMonomorphCache, MonomorphCache,
+    StaticMethodMonomorphCache,
+};
 use crate::implement_registry::PrimitiveTypeId;
 use crate::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
 use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, TypeDefId};
@@ -89,6 +92,12 @@ pub struct EntityRegistry {
     /// Cache of monomorphized generic static method instances
     pub static_method_monomorph_cache: StaticMethodMonomorphCache,
 
+    /// Cache of monomorphized implement-block default method instances.
+    ///
+    /// Stores concrete instantiations of interface default methods for
+    /// implement blocks (e.g., Iterable default methods for `[i64]`, `[string]`).
+    pub implement_method_monomorph_cache: ImplementMethodMonomorphCache,
+
     /// Cache of substituted field types for generic type instantiations
     pub field_substitution_cache: FieldSubstitutionCache,
 
@@ -120,6 +129,7 @@ impl EntityRegistry {
             monomorph_cache: MonomorphCache::new(),
             class_method_monomorph_cache: ClassMethodMonomorphCache::new(),
             static_method_monomorph_cache: StaticMethodMonomorphCache::new(),
+            implement_method_monomorph_cache: ImplementMethodMonomorphCache::new(),
             field_substitution_cache: FieldSubstitutionCache::new(),
             short_name_cache: std::cell::RefCell::new(ShortNameCache::default()),
         }
@@ -661,6 +671,7 @@ impl EntityRegistry {
         self.monomorph_cache = MonomorphCache::new();
         self.class_method_monomorph_cache = ClassMethodMonomorphCache::new();
         self.static_method_monomorph_cache = StaticMethodMonomorphCache::new();
+        self.implement_method_monomorph_cache = ImplementMethodMonomorphCache::new();
         self.field_substitution_cache.clear();
     }
 }

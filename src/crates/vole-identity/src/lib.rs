@@ -35,7 +35,8 @@ pub use entities::{FieldId, FunctionId, GlobalId, MethodId, TypeDefId, TypeParam
 pub use function_type::FunctionType;
 pub use monomorph::{
     ClassMethodMonomorphCache, ClassMethodMonomorphInstance, ClassMethodMonomorphKey,
-    ExternalMethodInfo, MonomorphCache, MonomorphCacheBase, MonomorphInstance,
+    ExternalMethodInfo, ImplementMethodMonomorphCache, ImplementMethodMonomorphInstance,
+    ImplementMethodMonomorphKey, MonomorphCache, MonomorphCacheBase, MonomorphInstance,
     MonomorphInstanceTrait, MonomorphKey, StaticMethodMonomorphCache,
     StaticMethodMonomorphInstance, StaticMethodMonomorphKey,
 };

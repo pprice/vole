@@ -562,6 +562,7 @@ impl Analyzer {
             let _t = vole_log::compile_timing!(TRACE, "propagate_monomorphs").entered();
             self.propagate_class_method_monomorphs();
             self.propagate_static_method_monomorphs();
+            self.register_implement_method_monomorphs();
         }
 
         if self.diagnostics.errors.is_empty() {

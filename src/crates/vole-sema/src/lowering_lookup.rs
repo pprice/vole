@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use vole_identity::{
-    ClassMethodMonomorphKey, FunctionId, MethodId, MonomorphKey, NameId, NameTable,
-    StaticMethodMonomorphKey, TypeDefId,
+    ClassMethodMonomorphKey, FunctionId, ImplementMethodMonomorphKey, MethodId, MonomorphKey,
+    NameId, NameTable, StaticMethodMonomorphKey, TypeDefId,
 };
 
 use crate::EntityRegistry;
@@ -48,6 +48,15 @@ pub trait LoweringEntityLookup {
     ) -> Vec<(
         StaticMethodMonomorphKey,
         crate::generic::StaticMethodMonomorphInstance,
+    )>;
+    fn implement_method_monomorph_instances(
+        &self,
+    ) -> Vec<crate::generic::ImplementMethodMonomorphInstance>;
+    fn implement_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        ImplementMethodMonomorphKey,
+        crate::generic::ImplementMethodMonomorphInstance,
     )>;
 }
 
@@ -144,6 +153,22 @@ impl LoweringEntityLookup for EntityRegistry {
         crate::generic::StaticMethodMonomorphInstance,
     )> {
         self.static_method_monomorph_cache.collect_keyed_instances()
+    }
+
+    fn implement_method_monomorph_instances(
+        &self,
+    ) -> Vec<crate::generic::ImplementMethodMonomorphInstance> {
+        self.implement_method_monomorph_cache.collect_instances()
+    }
+
+    fn implement_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        ImplementMethodMonomorphKey,
+        crate::generic::ImplementMethodMonomorphInstance,
+    )> {
+        self.implement_method_monomorph_cache
+            .collect_keyed_instances()
     }
 }
 
@@ -243,5 +268,20 @@ where
         crate::generic::StaticMethodMonomorphInstance,
     )> {
         (**self).static_method_monomorph_keyed_instances()
+    }
+
+    fn implement_method_monomorph_instances(
+        &self,
+    ) -> Vec<crate::generic::ImplementMethodMonomorphInstance> {
+        (**self).implement_method_monomorph_instances()
+    }
+
+    fn implement_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        ImplementMethodMonomorphKey,
+        crate::generic::ImplementMethodMonomorphInstance,
+    )> {
+        (**self).implement_method_monomorph_keyed_instances()
     }
 }

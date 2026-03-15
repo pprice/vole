@@ -7,6 +7,7 @@
 // and vole-codegen can use them without codegen reaching back into sema.
 
 use crate::NameId;
+use crate::entities::{MethodId, TypeDefId};
 use crate::function_type::FunctionType;
 use crate::type_id::TypeId;
 use crate::vir_type_id::VirTypeId;
@@ -418,3 +419,89 @@ impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
 /// Cache of monomorphized static method instances.
 pub type StaticMethodMonomorphCache =
     MonomorphCacheBase<StaticMethodMonomorphKey, StaticMethodMonomorphInstance>;
+
+// ============================================================================
+// ImplementMethodMonomorphKey + Instance + Cache
+// ============================================================================
+
+/// Key for looking up monomorphized implement-block default method instances.
+///
+/// Identifies a specific instantiation of a default method from an interface
+/// implementation (e.g., `extend [T] with Iterable<T>` provides default
+/// methods like `map`, `filter`, `count` that need monomorphization for each
+/// concrete element type).
+///
+/// See [`MonomorphKey`] for details on the `VirTypeId` key convention.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ImplementMethodMonomorphKey {
+    /// The interface's TypeDefId (e.g., Iterable)
+    pub interface_type_def_id: TypeDefId,
+    /// The implementing type's TypeDefId (e.g., array)
+    pub implementing_type_def_id: TypeDefId,
+    /// The method's NameId
+    pub method_name: NameId,
+    /// Opaque type keys for the concrete type arguments (e.g., i64 for Iterable<i64>)
+    pub type_keys: Vec<VirTypeId>,
+}
+
+impl ImplementMethodMonomorphKey {
+    /// Create a new key for an implement-block method monomorphization
+    pub fn new(
+        interface_type_def_id: TypeDefId,
+        implementing_type_def_id: TypeDefId,
+        method_name: NameId,
+        type_keys: Vec<VirTypeId>,
+    ) -> Self {
+        Self {
+            interface_type_def_id,
+            implementing_type_def_id,
+            method_name,
+            type_keys,
+        }
+    }
+}
+
+/// A monomorphized implement-block default method instance.
+///
+/// Represents a concrete instantiation of an interface default method for a
+/// specific implementing type and concrete type arguments. For example, for
+/// `extend [T] with Iterable<T>`, when `T = i64`, this stores the information
+/// needed to compile `[i64].map(...)`, `[i64].filter(...)`, etc.
+#[derive(Debug, Clone)]
+pub struct ImplementMethodMonomorphInstance {
+    /// The interface's TypeDefId (e.g., Iterable)
+    pub interface_type_def_id: TypeDefId,
+    /// The implementing type's TypeDefId (e.g., array)
+    pub implementing_type_def_id: TypeDefId,
+    /// The method's MethodId on the implementing type
+    pub method_id: MethodId,
+    /// The method's NameId
+    pub method_name: NameId,
+    /// Mangled name for this instance (e.g., "__array_iterable_4_count")
+    pub mangled_name: NameId,
+    /// Unique ID for this instance
+    pub instance_id: u32,
+    /// The concrete method type after substitution
+    pub func_type: FunctionType,
+    /// Map from type param NameId to concrete type (as TypeId handles)
+    pub substitutions: FxHashMap<NameId, TypeId>,
+}
+
+impl MonomorphInstanceTrait for ImplementMethodMonomorphInstance {
+    fn mangled_name(&self) -> NameId {
+        self.mangled_name
+    }
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+    fn func_type(&self) -> &FunctionType {
+        &self.func_type
+    }
+    fn substitutions(&self) -> &FxHashMap<NameId, TypeId> {
+        &self.substitutions
+    }
+}
+
+/// Cache of monomorphized implement-block default method instances.
+pub type ImplementMethodMonomorphCache =
+    MonomorphCacheBase<ImplementMethodMonomorphKey, ImplementMethodMonomorphInstance>;

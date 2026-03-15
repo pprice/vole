@@ -11,7 +11,8 @@ use vole_identity::{NameId, TypeParamId};
 // Re-export monomorphization types from vole-identity for backward compatibility.
 pub use vole_identity::{
     ClassMethodMonomorphCache, ClassMethodMonomorphInstance, ClassMethodMonomorphKey,
-    ExternalMethodInfo, MonomorphCache, MonomorphCacheBase, MonomorphInstance,
+    ExternalMethodInfo, ImplementMethodMonomorphCache, ImplementMethodMonomorphInstance,
+    ImplementMethodMonomorphKey, MonomorphCache, MonomorphCacheBase, MonomorphInstance,
     MonomorphInstanceTrait, MonomorphKey, StaticMethodMonomorphCache,
     StaticMethodMonomorphInstance, StaticMethodMonomorphKey,
 };
