@@ -6,13 +6,14 @@ This project uses a CLI ticket system for task management. Run `tk help` when yo
 ## General Rules
 
 <IMPORTANT>
-  - Use tools to investigate (run tests, use debuggers)
+  - Use tools to investigate (run tests, use debuggers, delta, fd, fzf, etc)
   - Use tools to modify where needed (e.g. ast-grep)
   - When planning work, do not write markdown files, use tickets with `tk`
   - NEVER "simplfy" tests in `vole/test`; you are hiding  bugs doing so
-  - NEVER assume "pre-existing failures", you likely broke it.
+  - NEVER assume failures are "pre-existing", they are not.
   - NEVER opt out of work, simplify, for think tasks are too complex, _especially_ from tickets
-  - NEVER add new just file commands unless the user asks you to
+  - NEVER add new `just` file commands unless the user asks you to
+  - NEVER downgrade or close tickets unless the work is complete.
   - If you take shortcuts, track them in tickets with `tk`
 </IMPORTANT>
 
@@ -20,11 +21,12 @@ This project uses a CLI ticket system for task management. Run `tk help` when yo
 
 <IMPORTANT>
   - Parser: Syntax only.
-  - Sema: All type-driven decisions. Annotates, lowers, and normalizes. Codegen never reaches back into sema.
-  - Codegen: Instruction selection and memory layout only. Reads sema annotations, never re-detects types or
+  - Sema: All type-driven decisions. Annotates and normalizes.
+  - VIR: Vole Intermedia Representation, lowering of sema before code gen.
+  - Codegen: Instruction selection and memory layout only. Reads VIR, never re-detects types or
     inspects interface names.
-  - Desugar early. when codegen needs type-specific behavior, add annotations/lowering in sema 
-    rather than type-detection special cases in codegen — codegen should read decisions, 
+  - Desugar early. when codegen needs type-specific behavior, add annotations/lowering in VIR
+    or sema rather than type-detection special cases in codegen — codegen should read decisions, 
     not make them.
 </IMPORTANT>
 
@@ -38,9 +40,12 @@ src/
 │   ├── vole-identity/   # NameId, NameTable, entity IDs
 │   ├── vole-frontend/   # lexer, parser, AST, interner
 │   ├── vole-sema/       # type checking, module loading
+│   ├── vole-vir/        # Vole Intermediate Representation
 │   ├── vole-runtime/    # builtins, values, instance
-│   └── vole-codegen/    # Cranelift JIT (isolated - heavy deps)
-└── tools/           # Development tools (vole-snap, vole-stress)
+│   ├── vole-codegen/    # Cranelift JIT (isolated - heavy deps)
+│   ├── vole-fmt/        # Code formatter
+│   └── vole-log/        # Logging / tracing
+└── tools/           # Development tools (vole-snap, vole-stress, vole-reduce, vole-leak, vole-doccheck)
 ```
 
 ## Tools
@@ -89,6 +94,8 @@ NEVER "simplify" tests, even if you just created them.
 
 ```bash
 vole inspect ast file.vole         # Show AST
+vole inspect vir file.vole         # Show VIR
+vole inspect mir file.vole         # Show MIR
 vole inspect ir file.vole          # Show Cranelift IR
 just dev-backtrace-test file.vole  # Debug segfaults
 just trace file.vole               # Tracing with VOLE_LOG
