@@ -1,3 +1,12 @@
+mod compile_timing;
+mod init;
+
+pub use compile_timing::{
+    CompileTimingConfig, CompileTimingLayer, TimingSpan, format_duration, render_timing_tree,
+    take_timing_tree,
+};
+pub use init::init_logging;
+
 /// Macro for compiler timing instrumentation.
 ///
 /// Creates a tracing span with target `vole::compile_timing` at the specified level.

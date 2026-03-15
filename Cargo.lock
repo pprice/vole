@@ -1792,7 +1792,6 @@ dependencies = [
  "terminal_size",
  "thiserror",
  "tracing",
- "tracing-subscriber",
  "vergen",
  "vergen-gitcl",
  "vole-codegen",
@@ -1883,6 +1882,7 @@ name = "vole-log"
 version = "2026.3.1"
 dependencies = [
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

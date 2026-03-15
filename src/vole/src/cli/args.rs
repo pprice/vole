@@ -38,6 +38,13 @@ pub struct Cli {
     #[arg(long, global = true, hide = true)]
     pub aot: bool,
 
+    /// Enable compiler timing output (stderr)
+    ///
+    /// Usage: --timing (DEBUG level), --timing=trace (TRACE level),
+    /// --timing=pattern (filter by file path), --timing=trace:pattern (both)
+    #[arg(long, global = true, num_args = 0..=1, default_missing_value = "", require_equals = true)]
+    pub timing: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

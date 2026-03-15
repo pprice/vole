@@ -5,21 +5,6 @@ use clap::{ColorChoice, CommandFactory, FromArgMatches};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::fmt::time::FormatTime;
-
-/// A timer that outputs nothing but still enables span timing calculation
-struct NoTimestamp;
-
-impl FormatTime for NoTimestamp {
-    fn format_time(
-        &self,
-        _w: &mut tracing_subscriber::fmt::format::Writer<'_>,
-    ) -> std::fmt::Result {
-        Ok(())
-    }
-}
 
 #[cfg(feature = "bench")]
 use vole::cli::BenchCommands;
@@ -37,32 +22,6 @@ use vole::install_segfault_handler;
 fn main() -> ExitCode {
     // Install signal handler early for segfault debugging
     install_segfault_handler();
-
-    // Initialize tracing if VOLE_LOG is set
-    // VOLE_LOG_STYLE: "compact" (default, LLM-friendly) or "full" (verbose with timestamps)
-    if let Ok(filter) = EnvFilter::try_from_env("VOLE_LOG") {
-        let style = std::env::var("VOLE_LOG_STYLE").unwrap_or_default();
-        if style == "full" {
-            tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .with_target(true)
-                .with_level(true)
-                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                .with_writer(std::io::stderr)
-                .init();
-        } else {
-            // Compact output: no timestamp prefix, keep target/level/ANSI and timing
-            tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .with_target(true)
-                .with_level(true)
-                .with_timer(NoTimestamp)
-                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                .with_writer(std::io::stderr)
-                .init();
-        }
-        tracing::debug!("tracing initialized");
-    }
 
     // SAFETY: This runs single-threaded at program startup in main(), before any
     // threads are spawned. env::set_var is unsafe because concurrent access to
@@ -87,9 +46,14 @@ fn main() -> ExitCode {
     )
     .expect("failed to parse arguments");
 
+    // Initialize tracing: --timing enables CompileTimingLayer,
+    // VOLE_LOG enables fmt layer. Both can be active simultaneously.
+    let has_timing = cli.timing.is_some();
+    vole_log::init_logging(cli.timing.as_deref());
+
     let lazy = !cli.aot;
 
-    match cli.command {
+    let exit_code = match cli.command {
         Commands::Run { file, root } => {
             run_file(&file, root.as_deref(), cli.release, lazy, cli.color)
         }
@@ -164,7 +128,13 @@ fn main() -> ExitCode {
             stdout,
         } => format_files(&paths, FmtOptions { check, stdout }),
         Commands::External(args) => handle_external_args(&args, cli.release, lazy, cli.color),
+    };
+
+    if has_timing {
+        vole_log::render_timing_tree(&mut std::io::stderr());
     }
+
+    exit_code
 }
 
 /// Pre-scan command line args to determine color choice before full parsing.
