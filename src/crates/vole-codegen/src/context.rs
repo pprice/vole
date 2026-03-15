@@ -343,7 +343,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn with_return_type_v(mut self, return_type: Option<VirTypeId>) -> Self {
         self.return_type = return_type;
         self.return_abi = match return_type {
-            Some(ret) => vole_vir::func::ReturnAbi::classify(ret, self.vir_type_table()),
+            Some(ret) => {
+                let struct_slots = self.vir_struct_flat_slot_count(ret);
+                vole_vir::func::ReturnAbi::classify(ret, self.vir_type_table(), struct_slots)
+            }
             None => vole_vir::func::ReturnAbi::Void,
         };
         self
@@ -2077,47 +2080,36 @@ fn build_monomorph_signature(
     let return_type_id = func_type.return_type_id;
     let ret_vir = vir_lookup(return_type_id);
 
-    // Fallible return type -> multi-value returns (dispatched via ReturnAbi)
-    let abi = vole_vir::func::ReturnAbi::classify(ret_vir, table);
-    if matches!(
-        abi,
-        vole_vir::func::ReturnAbi::Fallible | vole_vir::func::ReturnAbi::WideFallible
-    ) {
-        if abi == vole_vir::func::ReturnAbi::WideFallible {
-            // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
-            sig.returns.push(AbiParam::new(types::I64));
-            sig.returns.push(AbiParam::new(types::I64));
-            sig.returns.push(AbiParam::new(types::I64));
-        } else {
-            // Fallible returns: (tag: i64, payload: i64)
-            sig.returns.push(AbiParam::new(types::I64));
-            sig.returns.push(AbiParam::new(types::I64));
+    // Classify return ABI from the VIR return type.
+    let struct_slots =
+        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(ret_vir, table, analyzed);
+    let abi = vole_vir::func::ReturnAbi::classify(ret_vir, table, struct_slots);
+    match abi {
+        vole_vir::func::ReturnAbi::WideFallible => {
+            sig.returns.push(AbiParam::new(types::I64)); // tag
+            sig.returns.push(AbiParam::new(types::I64)); // low
+            sig.returns.push(AbiParam::new(types::I64)); // high
         }
-        return sig;
-    }
-
-    // Struct return type -> multi-value or sret
-    if let Some(field_count) =
-        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(ret_vir, table, analyzed)
-    {
-        if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
-            // Small struct: return in registers, padded to MAX_SMALL_STRUCT_FIELDS
+        vole_vir::func::ReturnAbi::Fallible => {
+            sig.returns.push(AbiParam::new(types::I64)); // tag
+            sig.returns.push(AbiParam::new(types::I64)); // payload
+        }
+        vole_vir::func::ReturnAbi::SmallStruct { .. } => {
             for _ in 0..crate::MAX_SMALL_STRUCT_FIELDS {
                 sig.returns.push(AbiParam::new(types::I64));
             }
-        } else {
-            // Large struct: sret convention — hidden first param for return buffer
-            // Insert the sret pointer before all other params
+        }
+        vole_vir::func::ReturnAbi::SretStruct { .. } => {
             sig.params.insert(0, AbiParam::new(ptr_type));
             sig.returns.push(AbiParam::new(ptr_type));
         }
-        return sig;
-    }
-
-    // Normal return type
-    if !return_type_id.is_void() {
-        let ret_cranelift = vir_type_to_cranelift(ret_vir, table, ptr_type);
-        sig.returns.push(AbiParam::new(ret_cranelift));
+        vole_vir::func::ReturnAbi::Void => {}
+        vole_vir::func::ReturnAbi::Single
+        | vole_vir::func::ReturnAbi::Wide
+        | vole_vir::func::ReturnAbi::UnionPtr => {
+            let ret_cranelift = vir_type_to_cranelift(ret_vir, table, ptr_type);
+            sig.returns.push(AbiParam::new(ret_cranelift));
+        }
     }
 
     sig

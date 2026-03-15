@@ -348,7 +348,7 @@ pub fn lower_implement_method_monomorphs(
         let mut concrete = rewrite_function(template, &rewrite_ctx);
 
         // Recompute return ABI from the now-concrete return type.
-        concrete.return_abi = ReturnAbi::classify(concrete.vir_return_type, type_table);
+        concrete.return_abi = ReturnAbi::classify(concrete.vir_return_type, type_table, None);
 
         // Tag with mangled name; clear method_id (looked up by mangled name).
         concrete.method_id = None;

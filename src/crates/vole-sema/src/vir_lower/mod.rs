@@ -763,7 +763,7 @@ pub fn lower_function(
         })
         .collect();
     let vir_return_type = ctx.translate(return_type);
-    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table);
+    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table, None);
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: func_id,
@@ -878,7 +878,7 @@ pub fn lower_method(
         })
         .collect();
     let vir_return_type = ctx.translate(return_type);
-    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table);
+    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table, None);
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
@@ -943,7 +943,7 @@ pub fn lower_interface_method(
         })
         .collect();
     let vir_return_type = ctx.translate(return_type);
-    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table);
+    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table, None);
     let body = lower_func_body(body_ast, &mut ctx);
     Some(VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
@@ -1017,7 +1017,7 @@ pub fn lower_generic_function(
     // For generic templates, return type may contain type parameters;
     // classify with best-effort (defaults to Single for unknown layouts).
     // rederive_decisions will recompute after monomorphization.
-    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table);
+    let return_abi = ReturnAbi::classify(vir_return_type, ctx.type_table, None);
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: func_id,

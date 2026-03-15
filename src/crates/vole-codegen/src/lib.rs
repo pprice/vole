@@ -70,7 +70,11 @@ pub mod loop_param_opt {
 
 /// Maximum number of flat struct fields that can be returned in registers.
 /// Structs with more fields use the sret (struct return pointer) convention.
-pub(crate) const MAX_SMALL_STRUCT_FIELDS: usize = 2;
+///
+/// Re-exported from `vole_vir::func::MAX_SMALL_STRUCT_FIELDS` — the
+/// canonical definition lives in VIR so that `ReturnAbi::classify` can
+/// reference it without a codegen dependency.
+pub(crate) const MAX_SMALL_STRUCT_FIELDS: usize = vole_vir::func::MAX_SMALL_STRUCT_FIELDS;
 
 /// Union memory layout constants used across the compiler.
 ///

@@ -789,7 +789,12 @@ impl Compiler<'_> {
                     )
                 });
 
-            let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
+            let struct_slots = self.vir_struct_field_count(return_vir_ty);
+            let abi = vole_vir::func::ReturnAbi::classify(
+                return_vir_ty,
+                self.vir_type_table(),
+                struct_slots,
+            );
             let sig = self.build_signature_from_vir_types(
                 &subst_param_virs,
                 return_vir_ty,
@@ -1032,7 +1037,9 @@ impl Compiler<'_> {
             }
         }
 
-        let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
+        let struct_slots = self.vir_struct_field_count(return_vir_ty);
+        let abi =
+            vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table(), struct_slots);
         let sig = self.build_signature_from_vir_types(
             &subst_param_virs,
             return_vir_ty,

@@ -2402,7 +2402,7 @@ mod tests {
             None,
         );
         assert_eq!(
-            ReturnAbi::classify(fallible, &table),
+            ReturnAbi::classify(fallible, &table, None),
             ReturnAbi::WideFallible
         );
     }
@@ -2424,7 +2424,10 @@ mod tests {
             },
             None,
         );
-        assert_eq!(ReturnAbi::classify(fallible, &table), ReturnAbi::Fallible);
+        assert_eq!(
+            ReturnAbi::classify(fallible, &table, None),
+            ReturnAbi::Fallible
+        );
     }
 
     #[test]
@@ -2432,7 +2435,7 @@ mod tests {
         use vole_vir::func::ReturnAbi;
         let table = test_table();
         assert_eq!(
-            ReturnAbi::classify(VirTypeId::I64, &table),
+            ReturnAbi::classify(VirTypeId::I64, &table, None),
             ReturnAbi::Single
         );
     }

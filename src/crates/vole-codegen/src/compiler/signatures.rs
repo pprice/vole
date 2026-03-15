@@ -6,7 +6,6 @@ use super::Compiler;
 use crate::types::vir_conversions::vir_type_to_cranelift;
 use vole_identity::{FunctionId, MethodId, NameId, TypeId, VirTypeId};
 use vole_vir::func::ReturnAbi;
-use vole_vir::types::VirType;
 
 /// SmallVec for function parameters - most functions have <= 8 params
 type ParamVec = SmallVec<[CraneliftType; 8]>;
@@ -99,43 +98,38 @@ impl Compiler<'_> {
             cranelift_params.push(self.vir_query_type_to_cranelift(type_id));
         }
 
-        // Check if this is a fallible return type - use multi-value returns
-        if let Some(ret_type_id) = return_type_id
-            && self.vir_query_unwrap_fallible(ret_type_id).is_some()
-        {
+        // Classify return ABI and build the appropriate signature.
+        if let Some(ret_type_id) = return_type_id {
             let ret_vir = self.vir_lookup(ret_type_id);
-            let abi = ReturnAbi::classify(ret_vir, self.vir_type_table());
+            let struct_slots = self.struct_field_count(ret_type_id);
+            let abi = ReturnAbi::classify(ret_vir, self.vir_type_table(), struct_slots);
             match abi {
                 ReturnAbi::WideFallible => {
-                    // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
                     return self.jit.create_signature_multi_return(
                         &cranelift_params,
                         &[types::I64, types::I64, types::I64],
                     );
                 }
-                _ => {
-                    // Fallible returns: (tag: i64, payload: i64)
+                ReturnAbi::Fallible => {
                     return self.jit.create_signature_multi_return(
                         &cranelift_params,
                         &[types::I64, types::I64],
                     );
                 }
+                ReturnAbi::SmallStruct { field_count } | ReturnAbi::SretStruct { field_count } => {
+                    return self.build_struct_return_sig(&cranelift_params, field_count);
+                }
+                ReturnAbi::Void => {
+                    return self.jit.create_signature(&cranelift_params, None);
+                }
+                ReturnAbi::Single | ReturnAbi::Wide | ReturnAbi::UnionPtr => {
+                    let ret = self.vir_query_type_to_cranelift(ret_type_id);
+                    return self.jit.create_signature(&cranelift_params, Some(ret));
+                }
             }
         }
 
-        // Check for struct return types - use multi-value or sret convention
-        if let Some(ret_type_id) = return_type_id
-            && let Some(field_count) = self.struct_field_count(ret_type_id)
-        {
-            return self.build_struct_return_sig(&cranelift_params, field_count);
-        }
-
-        // Convert return type (filter out void)
-        let ret = return_type_id
-            .filter(|id| !id.is_void())
-            .map(|id| self.vir_query_type_to_cranelift(id));
-
-        self.jit.create_signature(&cranelift_params, ret)
+        self.jit.create_signature(&cranelift_params, None)
     }
 
     /// Get the flat slot count for a struct (recursively counts leaf fields).
@@ -143,6 +137,16 @@ impl Compiler<'_> {
     /// Returns None if the type is not a struct.
     pub fn struct_field_count(&self, type_id: TypeId) -> Option<usize> {
         let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+            vir_ty,
+            self.vir_type_table(),
+            self.analyzed,
+        )
+    }
+
+    /// Get the flat slot count for a VIR struct type.
+    /// VIR equivalent of [`struct_field_count`](Self::struct_field_count).
+    pub fn vir_struct_field_count(&self, vir_ty: VirTypeId) -> Option<usize> {
         crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             vir_ty,
             self.vir_type_table(),
@@ -178,7 +182,8 @@ impl Compiler<'_> {
             SelfParam::Pointer => VirSelfParam::Pointer,
             SelfParam::TypedId(type_id) => VirSelfParam::Typed(self.vir_lookup(type_id)),
         };
-        let abi = ReturnAbi::classify(method_def.return_type, self.vir_type_table());
+        let struct_slots = self.vir_struct_field_count(method_def.return_type);
+        let abi = ReturnAbi::classify(method_def.return_type, self.vir_type_table(), struct_slots);
         self.build_signature_from_vir_types(
             &method_def.param_types,
             method_def.return_type,
@@ -236,7 +241,8 @@ impl Compiler<'_> {
     ) -> Option<Signature> {
         let (subst_params, subst_ret) =
             self.substitute_method_vir_types(param_vir_types, return_vir_type, self_vir_ty, subs)?;
-        let abi = ReturnAbi::classify(subst_ret, self.vir_type_table());
+        let struct_slots = self.vir_struct_field_count(subst_ret);
+        let abi = ReturnAbi::classify(subst_ret, self.vir_type_table(), struct_slots);
         Some(self.build_signature_from_vir_types(&subst_params, subst_ret, self_param, abi))
     }
 
@@ -275,36 +281,20 @@ impl Compiler<'_> {
 
         // Dispatch on pre-computed return ABI convention
         match return_abi {
-            ReturnAbi::WideFallible => {
-                // Wide fallible (i128 success): (tag, low, high)
-                self.jit.create_signature_multi_return(
-                    &cranelift_params,
-                    &[types::I64, types::I64, types::I64],
-                )
+            ReturnAbi::WideFallible => self.jit.create_signature_multi_return(
+                &cranelift_params,
+                &[types::I64, types::I64, types::I64],
+            ),
+            ReturnAbi::Fallible => self
+                .jit
+                .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64]),
+            ReturnAbi::SmallStruct { field_count } | ReturnAbi::SretStruct { field_count } => {
+                self.build_struct_return_sig(&cranelift_params, field_count)
             }
-            ReturnAbi::Fallible => {
-                // Fallible: (tag, payload)
-                self.jit
-                    .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64])
-            }
-            ReturnAbi::Void | ReturnAbi::Single | ReturnAbi::Wide => {
-                // Struct return: still uses entity-registry flat-slot counting
-                if matches!(table.get(return_vir_type), VirType::Struct { .. })
-                    && let Some(field_count) =
-                        crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
-                            return_vir_type,
-                            table,
-                            self.analyzed,
-                        )
-                {
-                    return self.build_struct_return_sig(&cranelift_params, field_count);
-                }
-
-                // Normal return (filter out void)
-                let ret = (return_abi != ReturnAbi::Void)
-                    .then(|| vir_type_to_cranelift(return_vir_type, table, ptr));
-
-                self.jit.create_signature(&cranelift_params, ret)
+            ReturnAbi::Void => self.jit.create_signature(&cranelift_params, None),
+            ReturnAbi::Single | ReturnAbi::Wide | ReturnAbi::UnionPtr => {
+                let ret = vir_type_to_cranelift(return_vir_type, table, ptr);
+                self.jit.create_signature(&cranelift_params, Some(ret))
             }
         }
     }
@@ -324,11 +314,19 @@ impl Compiler<'_> {
             .iter()
             .map(|(_, _, vir_ty)| *vir_ty)
             .collect();
+        // Recompute ABI with codegen's full struct slot count (the stored ABI
+        // from sema lowering may lack struct info).
+        let struct_slots = self.vir_struct_field_count(vir_func.vir_return_type);
+        let abi = ReturnAbi::classify(
+            vir_func.vir_return_type,
+            self.vir_type_table(),
+            struct_slots,
+        );
         self.build_signature_from_vir_types(
             &param_vir_types,
             vir_func.vir_return_type,
             VirSelfParam::None,
-            vir_func.return_abi,
+            abi,
         )
     }
 
@@ -347,11 +345,18 @@ impl Compiler<'_> {
             .iter()
             .map(|(_, _, vir_ty)| *vir_ty)
             .collect();
+        // Recompute ABI with codegen's full struct slot count.
+        let struct_slots = self.vir_struct_field_count(vir_func.vir_return_type);
+        let abi = ReturnAbi::classify(
+            vir_func.vir_return_type,
+            self.vir_type_table(),
+            struct_slots,
+        );
         self.build_signature_from_vir_types(
             &param_vir_types,
             vir_func.vir_return_type,
             VirSelfParam::None,
-            vir_func.return_abi,
+            abi,
         )
     }
 

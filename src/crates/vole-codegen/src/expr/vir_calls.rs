@@ -331,8 +331,9 @@ impl Cg<'_, '_, '_> {
             sig.params.push(AbiParam::new(ty));
         }
 
-        let abi =
-            vole_vir::func::ReturnAbi::classify(self.vir_lookup(return_ty), self.vir_type_table());
+        let ret_vir = self.vir_lookup(return_ty);
+        let struct_slots = self.vir_struct_flat_slot_count(ret_vir);
+        let abi = vole_vir::func::ReturnAbi::classify(ret_vir, self.vir_type_table(), struct_slots);
         match abi {
             vole_vir::func::ReturnAbi::WideFallible => {
                 sig.returns.push(AbiParam::new(types::I64));

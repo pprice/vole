@@ -70,35 +70,40 @@ impl Cg<'_, '_, '_> {
         for &param_ty in param_types {
             sig.params.push(AbiParam::new(param_ty));
         }
-        // Dispatch on return ABI: fallible uses multi-value returns,
-        // wide fallible uses 3-register convention.
-        let abi = vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table());
-        if abi == vole_vir::func::ReturnAbi::WideFallible {
-            sig.returns.push(AbiParam::new(types::I64)); // tag
-            sig.returns.push(AbiParam::new(types::I64)); // low
-            sig.returns.push(AbiParam::new(types::I64)); // high
-        } else if abi == vole_vir::func::ReturnAbi::Fallible {
-            sig.returns.push(AbiParam::new(types::I64)); // tag
-            sig.returns.push(AbiParam::new(types::I64)); // payload
-        } else if let Some(flat_count) = self.vir_struct_flat_slot_count(return_vir_ty) {
-            // Struct returns: small structs use multi-value return in registers,
-            // large structs use sret convention (handled elsewhere).
-            if flat_count <= crate::MAX_SMALL_STRUCT_FIELDS {
-                for _ in 0..flat_count {
+        // Dispatch on return ABI to determine signature return layout.
+        let struct_slots = self.vir_struct_flat_slot_count(return_vir_ty);
+        let abi =
+            vole_vir::func::ReturnAbi::classify(return_vir_ty, self.vir_type_table(), struct_slots);
+        match abi {
+            vole_vir::func::ReturnAbi::WideFallible => {
+                sig.returns.push(AbiParam::new(types::I64)); // tag
+                sig.returns.push(AbiParam::new(types::I64)); // low
+                sig.returns.push(AbiParam::new(types::I64)); // high
+            }
+            vole_vir::func::ReturnAbi::Fallible => {
+                sig.returns.push(AbiParam::new(types::I64)); // tag
+                sig.returns.push(AbiParam::new(types::I64)); // payload
+            }
+            vole_vir::func::ReturnAbi::SmallStruct { field_count } => {
+                for _ in 0..field_count {
                     sig.returns.push(AbiParam::new(types::I64));
                 }
-                // Pad to MAX_SMALL_STRUCT_FIELDS for consistent calling convention
                 while sig.returns.len() < crate::MAX_SMALL_STRUCT_FIELDS {
                     sig.returns.push(AbiParam::new(types::I64));
                 }
-            } else {
-                // Large struct: sret convention - hidden first param for return buffer
-                // Insert sret pointer after the closure pointer (params[0])
+            }
+            vole_vir::func::ReturnAbi::SretStruct { .. } => {
                 sig.params.insert(1, AbiParam::new(self.ptr_type()));
                 sig.returns.push(AbiParam::new(self.ptr_type()));
             }
-        } else {
-            sig.returns.push(AbiParam::new(return_type));
+            vole_vir::func::ReturnAbi::Void
+            | vole_vir::func::ReturnAbi::Single
+            | vole_vir::func::ReturnAbi::Wide
+            | vole_vir::func::ReturnAbi::UnionPtr => {
+                // Lambdas always return a value (I64 placeholder for void) to
+                // maintain a consistent closure calling convention.
+                sig.returns.push(AbiParam::new(return_type));
+            }
         }
         sig
     }

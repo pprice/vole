@@ -667,80 +667,57 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(self.void_value());
         }
 
-        // Check for wide fallible multi-value return (3 results: tag, low, high)
-        // i128 success values are split across two i64 registers
-        let ret_abi = vole_vir::func::ReturnAbi::classify(
-            self.vir_lookup(return_type_id),
-            self.vir_type_table(),
-        );
-        if results.len() == 3 && ret_abi == vole_vir::func::ReturnAbi::WideFallible {
-            let tag = results[0];
-            let low = results[1];
-            let high = results[2];
-
-            // Allocate stack slot: 8 (tag) + 16 (i128 payload) = 24 bytes
-            let slot_size = 24u32;
-            let slot = self.alloc_stack(slot_size);
-
-            // Store tag at offset 0
-            self.builder.ins().stack_store(tag, slot, 0);
-            // Reconstruct i128 from low/high and store at offset 8
-            let i128_val = super::structs::reconstruct_i128(self.builder, low, high);
-            super::structs::helpers::store_i128_to_stack(
-                self.builder,
-                i128_val,
-                slot,
-                union_layout::PAYLOAD_OFFSET,
-            );
-
-            let ptr_type = self.ptr_type();
-            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-            return Ok(self.compiled_with_ty(ptr, ptr_type, return_type_id));
+        // Classify the return ABI to dispatch result reconstruction.
+        let ret_vir = self.vir_lookup(return_type_id);
+        let struct_slots = self.vir_struct_flat_slot_count(ret_vir);
+        let ret_abi =
+            vole_vir::func::ReturnAbi::classify(ret_vir, self.vir_type_table(), struct_slots);
+        match ret_abi {
+            vole_vir::func::ReturnAbi::WideFallible if results.len() == 3 => {
+                let tag = results[0];
+                let low = results[1];
+                let high = results[2];
+                let slot_size = 24u32;
+                let slot = self.alloc_stack(slot_size);
+                self.builder.ins().stack_store(tag, slot, 0);
+                let i128_val = super::structs::reconstruct_i128(self.builder, low, high);
+                super::structs::helpers::store_i128_to_stack(
+                    self.builder,
+                    i128_val,
+                    slot,
+                    union_layout::PAYLOAD_OFFSET,
+                );
+                let ptr_type = self.ptr_type();
+                let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+                Ok(self.compiled_with_ty(ptr, ptr_type, return_type_id))
+            }
+            vole_vir::func::ReturnAbi::Fallible if results.len() == 2 => {
+                let tag = results[0];
+                let payload = results[1];
+                let slot_size = union_layout::STANDARD_SIZE;
+                let slot = self.alloc_stack(slot_size);
+                self.builder.ins().stack_store(tag, slot, 0);
+                self.builder
+                    .ins()
+                    .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+                let ptr_type = self.ptr_type();
+                let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+                Ok(self.compiled_with_ty(ptr, ptr_type, return_type_id))
+            }
+            vole_vir::func::ReturnAbi::SmallStruct { .. } => {
+                let results_vec: Vec<Value> = results.to_vec();
+                self.reconstruct_struct_from_regs(&results_vec, return_type_id)
+            }
+            vole_vir::func::ReturnAbi::UnionPtr => {
+                let src_ptr = results[0];
+                Ok(self.copy_union_ptr_to_local(src_ptr, return_type_id))
+            }
+            _ => {
+                // SretStruct: result[0] is the sret pointer (handled by caller).
+                // Single/Wide/Void: direct value return.
+                Ok(self.compiled(results[0], return_type_id))
+            }
         }
-
-        // Check for fallible multi-value return (2 results: tag, payload)
-        if results.len() == 2 && self.vir_query_unwrap_fallible(return_type_id).is_some() {
-            let tag = results[0];
-            let payload = results[1];
-
-            // Allocate stack slot to store (tag, payload) for callers that expect a pointer
-            let slot_size = union_layout::STANDARD_SIZE;
-            let slot = self.alloc_stack(slot_size);
-
-            // Store tag at offset 0
-            self.builder.ins().stack_store(tag, slot, 0);
-            // Store payload at offset 8
-            self.builder
-                .ins()
-                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
-
-            // Get pointer to stack slot
-            let ptr_type = self.ptr_type();
-            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-            return Ok(self.compiled_with_ty(ptr, ptr_type, return_type_id));
-        }
-
-        // Check for small struct multi-value return (2 results: field0, field1)
-        if results.len() == 2 && self.is_small_struct_return(return_type_id) {
-            let results_vec: Vec<Value> = results.to_vec();
-            return self.reconstruct_struct_from_regs(&results_vec, return_type_id);
-        }
-
-        // Large struct sret return: the result is already a pointer to the buffer
-        // (handled by the caller passing the sret arg, result[0] is the sret pointer)
-        // No special handling needed here since result[0] is already the pointer.
-
-        // If the return type is a union, the returned value is a pointer to the callee's stack.
-        // We must copy the union data to our own stack immediately, before any subsequent
-        // calls (e.g. rc_dec for temporary args) can clobber the callee's stack frame.
-        if self.vir_query_is_union(return_type_id) {
-            let src_ptr = results[0];
-            return Ok(self.copy_union_ptr_to_local(src_ptr, return_type_id));
-        }
-
-        Ok(self.compiled(results[0], return_type_id))
     }
 
     /// Copy a union value from a pointer (typically callee's stack) to a local stack slot.

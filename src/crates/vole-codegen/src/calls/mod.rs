@@ -234,13 +234,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // For union returns, copy the value out of the callee's stack frame
         // before RC temp cleanup. rc_dec may clobber the callee return slot.
-        let union_copy = if sret_slot.is_none() && self.vir_query_is_union(callee_return_type_id) {
-            let results = self.builder.inst_results(call_inst);
-            let src_ptr = results[0];
-            Some(self.copy_union_ptr_to_local(src_ptr, callee_return_type_id))
-        } else {
-            None
-        };
+        let callee_ret_vir = self.vir_lookup(callee_return_type_id);
+        let callee_struct_slots = self.vir_struct_flat_slot_count(callee_ret_vir);
+        let callee_ret_abi = vole_vir::func::ReturnAbi::classify(
+            callee_ret_vir,
+            self.vir_type_table(),
+            callee_struct_slots,
+        );
+        let union_copy =
+            if sret_slot.is_none() && callee_ret_abi == vole_vir::func::ReturnAbi::UnionPtr {
+                let results = self.builder.inst_results(call_inst);
+                let src_ptr = results[0];
+                Some(self.copy_union_ptr_to_local(src_ptr, callee_return_type_id))
+            } else {
+                None
+            };
 
         // Dec RC temp args after the call has consumed them
         self.consume_rc_args(&mut rc_temp_args)?;

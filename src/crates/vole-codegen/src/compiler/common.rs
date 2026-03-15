@@ -223,34 +223,26 @@ fn emit_implicit_return(
             return Ok(());
         }
 
-        // Check if the return type is fallible - need multi-value return
-        let is_fallible_return = matches!(
-            cg.return_abi,
-            vole_vir::func::ReturnAbi::Fallible | vole_vir::func::ReturnAbi::WideFallible
-        );
-
-        // Check if the function has a void return type. Expression-bodied default methods
-        // like `=> self.iter().for_each(f)` produce a void value that must not be returned.
-        // The Cranelift signature for void functions has no return values.
-        let is_void_return = cg.return_abi == vole_vir::func::ReturnAbi::Void;
-
-        if is_void_return {
-            // Void-return expression body: discard the expression value and return nothing.
-            // This happens for Iterable default methods like `for_each` whose body is
-            // `=> self.iter().for_each(f)`, which evaluates to void but must not be returned.
-            cg.builder.ins().return_(&[]);
-        } else if is_fallible_return {
-            // Expression-bodied fallible function: the value is a pointer to (tag, payload)
-            // We need to load both and return them
-            let tag = cg
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), value.value, 0);
-
-            let is_wide = cg.return_abi == vole_vir::func::ReturnAbi::WideFallible;
-
-            if is_wide {
-                // Wide fallible (i128 success): load low/high from offset 8/16
+        // Dispatch on the pre-computed return ABI instead of querying type
+        // properties.  The return_abi is set during Cg construction from the
+        // VIR function's return type.
+        match cg.return_abi {
+            vole_vir::func::ReturnAbi::Void => {
+                cg.builder.ins().return_(&[]);
+            }
+            vole_vir::func::ReturnAbi::Fallible => {
+                let tag = cg
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value.value, 0);
+                let payload = cg.load_union_payload_v(value.value, value.type_id, types::I64);
+                cg.builder.ins().return_(&[tag, payload]);
+            }
+            vole_vir::func::ReturnAbi::WideFallible => {
+                let tag = cg
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value.value, 0);
                 let union_size = cg.type_size_v(value.type_id);
                 let (low, high) = if union_size > union_layout::TAG_ONLY_SIZE {
                     let low = cg.builder.ins().load(
@@ -269,31 +261,26 @@ fn emit_implicit_return(
                     (zero, zero)
                 };
                 cg.builder.ins().return_(&[tag, low, high]);
-            } else {
-                let payload = cg.load_union_payload_v(value.value, value.type_id, types::I64);
-                cg.builder.ins().return_(&[tag, payload]);
             }
-        } else if let Some(ret_vir_ty) = cg.return_type
-            && cg.is_small_struct_return_v(ret_vir_ty)
-        {
-            cg.emit_small_struct_return_v(value.value, ret_vir_ty)?;
-        } else if let Some(ret_vir_ty) = cg.return_type
-            && cg.is_sret_struct_return_v(ret_vir_ty)
-        {
-            cg.emit_sret_struct_return_v(value.value, ret_vir_ty)?;
-        } else if let Some(ret_vir_ty) = cg.return_type
-            && cg.vir_query_is_union_v(ret_vir_ty)
-        {
-            // For union return types, wrap the value in a union
-            let wrapped = cg.construct_union_id_v(value, ret_vir_ty)?;
-            cg.builder.ins().return_(&[wrapped.value]);
-        } else {
-            // Coerce the value to match the function return type if needed.
-            // This handles generic functions where sema may infer a specific
-            // type (e.g. i32, f64) for an expression, but the function signature
-            // uses i64 for the generic type parameter.
-            let ret_val = cg.coerce_return_value(value.value);
-            cg.builder.ins().return_(&[ret_val]);
+            vole_vir::func::ReturnAbi::SmallStruct { .. } => {
+                let ret_vir_ty = cg
+                    .return_type
+                    .expect("SmallStruct ABI requires return type");
+                cg.emit_small_struct_return_v(value.value, ret_vir_ty)?;
+            }
+            vole_vir::func::ReturnAbi::SretStruct { .. } => {
+                let ret_vir_ty = cg.return_type.expect("SretStruct ABI requires return type");
+                cg.emit_sret_struct_return_v(value.value, ret_vir_ty)?;
+            }
+            vole_vir::func::ReturnAbi::UnionPtr => {
+                let ret_vir_ty = cg.return_type.expect("UnionPtr ABI requires return type");
+                let wrapped = cg.construct_union_id_v(value, ret_vir_ty)?;
+                cg.builder.ins().return_(&[wrapped.value]);
+            }
+            vole_vir::func::ReturnAbi::Single | vole_vir::func::ReturnAbi::Wide => {
+                let ret_val = cg.coerce_return_value(value.value);
+                cg.builder.ins().return_(&[ret_val]);
+            }
         }
     } else if !terminated {
         match default_return {
@@ -506,19 +493,17 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
     module_id: Option<vole_identity::ModuleId>,
     substitutions: Option<&FxHashMap<vole_identity::NameId, VirTypeId>>,
 ) -> CodegenResult<()> {
-    // Auto-detect sret convention.
+    // Auto-detect sret convention from ReturnAbi.
     let config = if let Some(ret_vir_ty) = config.return_type_id {
         let vir_table = &env.analyzed.type_table;
-        if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+        let struct_slots = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             ret_vir_ty,
             vir_table,
             env.analyzed,
-        ) {
-            if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
-                config.with_sret()
-            } else {
-                config
-            }
+        );
+        let abi = vole_vir::func::ReturnAbi::classify(ret_vir_ty, vir_table, struct_slots);
+        if abi.is_sret() {
+            config.with_sret()
         } else {
             config
         }
@@ -571,21 +556,20 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
 ) -> CodegenResult<()> {
     let has_return = vir_func.return_type != VirTypeId::VOID;
 
-    // Auto-detect sret convention.
+    // Determine sret convention from the return type using codegen's full
+    // struct flat slot count (which handles union-payload fields etc.).
     let skip_block_params = if has_return {
-        if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+        let struct_slots = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             vir_func.return_type,
             &env.analyzed.type_table,
             env.analyzed,
-        ) {
-            if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
-                1
-            } else {
-                0
-            }
-        } else {
-            0
-        }
+        );
+        let abi = vole_vir::func::ReturnAbi::classify(
+            vir_func.return_type,
+            &env.analyzed.type_table,
+            struct_slots,
+        );
+        if abi.is_sret() { 1 } else { 0 }
     } else {
         0
     };
@@ -622,10 +606,16 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
         cg.vars.insert(*name, (*var, *vir_ty));
     }
 
-    // Set return type and ABI directly from VIR (already VirTypeId).
+    // Set return type and recompute ABI with codegen's full struct slot
+    // count (vir_func.return_abi may lack struct info if lowered by sema).
     if has_return {
         cg.return_type = Some(vir_func.return_type);
-        cg.return_abi = vir_func.return_abi;
+        let struct_slots = cg.vir_struct_flat_slot_count(vir_func.return_type);
+        cg.return_abi = vole_vir::func::ReturnAbi::classify(
+            vir_func.return_type,
+            cg.vir_type_table(),
+            struct_slots,
+        );
     }
 
     compile_vir_body_with_cg(&mut cg, &vir_func.body, DefaultReturn::Empty)?;

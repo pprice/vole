@@ -685,26 +685,33 @@ impl Cg<'_, '_, '_> {
         // that sema couldn't fully substitute during VIR lowering.
         let convention = if convention == ReturnConvention::Unresolved {
             if let Some(ret_vir_ty) = return_vir_ty {
-                if self.vir_query_is_interface_v(ret_vir_ty) {
-                    ReturnConvention::InterfaceBox
-                } else if self.vir_query_is_unknown_v(ret_vir_ty) {
-                    ReturnConvention::UnknownBox
-                } else if self.vir_query_is_fallible_v(ret_vir_ty) {
-                    let abi =
-                        vole_vir::func::ReturnAbi::classify(ret_vir_ty, self.vir_type_table());
-                    if abi == vole_vir::func::ReturnAbi::WideFallible {
-                        ReturnConvention::WideFallible
-                    } else {
-                        ReturnConvention::Fallible
+                // Use ReturnAbi to classify the return convention from the type.
+                let struct_slots = self.vir_struct_flat_slot_count(ret_vir_ty);
+                let abi = vole_vir::func::ReturnAbi::classify(
+                    ret_vir_ty,
+                    self.vir_type_table(),
+                    struct_slots,
+                );
+                // Map ReturnAbi to ReturnConvention, adding interface/unknown
+                // classification that ReturnAbi doesn't carry.
+                match abi {
+                    vole_vir::func::ReturnAbi::Void => ReturnConvention::Void,
+                    vole_vir::func::ReturnAbi::WideFallible => ReturnConvention::WideFallible,
+                    vole_vir::func::ReturnAbi::Fallible => ReturnConvention::Fallible,
+                    vole_vir::func::ReturnAbi::SmallStruct { .. }
+                    | vole_vir::func::ReturnAbi::SretStruct { .. } => ReturnConvention::Struct,
+                    vole_vir::func::ReturnAbi::UnionPtr => ReturnConvention::Union,
+                    vole_vir::func::ReturnAbi::Wide => ReturnConvention::Scalar,
+                    vole_vir::func::ReturnAbi::Single => {
+                        // Single covers interface, unknown, and plain scalars.
+                        if self.vir_query_is_interface_v(ret_vir_ty) {
+                            ReturnConvention::InterfaceBox
+                        } else if self.vir_query_is_unknown_v(ret_vir_ty) {
+                            ReturnConvention::UnknownBox
+                        } else {
+                            ReturnConvention::Scalar
+                        }
                     }
-                } else if self.vir_query_is_struct_v(ret_vir_ty) {
-                    ReturnConvention::Struct
-                } else if self.vir_query_is_union_v(ret_vir_ty) {
-                    ReturnConvention::Union
-                } else if self.vir_query_is_void_v(ret_vir_ty) {
-                    ReturnConvention::Void
-                } else {
-                    ReturnConvention::Scalar
                 }
             } else {
                 ReturnConvention::Void

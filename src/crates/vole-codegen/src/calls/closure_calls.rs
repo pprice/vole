@@ -64,7 +64,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     fn build_closure_call_signature(
         &mut self,
         func_vir_type_id: VirTypeId,
-    ) -> CodegenResult<(Signature, Vec<TypeId>, TypeId)> {
+    ) -> CodegenResult<(Signature, Vec<TypeId>, TypeId, vole_vir::func::ReturnAbi)> {
         // Get function components from VirTypeTable
         let (params, ret) = self
             .vir_query_unwrap_function_sema_v(func_vir_type_id)
@@ -84,38 +84,44 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .push(AbiParam::new(self.cranelift_type(param_type_id)));
         }
         // Dispatch on return ABI to determine signature return layout.
+        let ret_vir = self.vir_lookup(ret);
+        let struct_slots = self.vir_struct_flat_slot_count(ret_vir);
         let ret_abi =
-            vole_vir::func::ReturnAbi::classify(self.vir_lookup(ret), self.vir_type_table());
-        if ret_abi == vole_vir::func::ReturnAbi::WideFallible {
-            sig.returns.push(AbiParam::new(types::I64)); // tag
-            sig.returns.push(AbiParam::new(types::I64)); // low
-            sig.returns.push(AbiParam::new(types::I64)); // high
-        } else if ret_abi == vole_vir::func::ReturnAbi::Fallible {
-            sig.returns.push(AbiParam::new(types::I64)); // tag
-            sig.returns.push(AbiParam::new(types::I64)); // payload
-        } else if ret_abi != vole_vir::func::ReturnAbi::Void {
-            if let Some(flat_count) = self.struct_flat_slot_count(ret) {
-                // Struct returns: match the lambda definition's convention
-                if flat_count <= crate::MAX_SMALL_STRUCT_FIELDS {
-                    for _ in 0..flat_count {
-                        sig.returns.push(AbiParam::new(types::I64));
-                    }
-                    // Pad to MAX_SMALL_STRUCT_FIELDS for consistent calling convention
-                    while sig.returns.len() < crate::MAX_SMALL_STRUCT_FIELDS {
-                        sig.returns.push(AbiParam::new(types::I64));
-                    }
-                } else {
-                    // Large struct: sret convention - hidden param after closure pointer
-                    sig.params.insert(1, AbiParam::new(self.ptr_type()));
-                    sig.returns.push(AbiParam::new(self.ptr_type()));
+            vole_vir::func::ReturnAbi::classify(ret_vir, self.vir_type_table(), struct_slots);
+        match ret_abi {
+            vole_vir::func::ReturnAbi::WideFallible => {
+                sig.returns.push(AbiParam::new(types::I64)); // tag
+                sig.returns.push(AbiParam::new(types::I64)); // low
+                sig.returns.push(AbiParam::new(types::I64)); // high
+            }
+            vole_vir::func::ReturnAbi::Fallible => {
+                sig.returns.push(AbiParam::new(types::I64)); // tag
+                sig.returns.push(AbiParam::new(types::I64)); // payload
+            }
+            vole_vir::func::ReturnAbi::SmallStruct { field_count } => {
+                for _ in 0..field_count {
+                    sig.returns.push(AbiParam::new(types::I64));
                 }
-            } else {
+                while sig.returns.len() < crate::MAX_SMALL_STRUCT_FIELDS {
+                    sig.returns.push(AbiParam::new(types::I64));
+                }
+            }
+            vole_vir::func::ReturnAbi::SretStruct { .. } => {
+                sig.params.insert(1, AbiParam::new(self.ptr_type()));
+                sig.returns.push(AbiParam::new(self.ptr_type()));
+            }
+            vole_vir::func::ReturnAbi::Void
+            | vole_vir::func::ReturnAbi::Single
+            | vole_vir::func::ReturnAbi::Wide
+            | vole_vir::func::ReturnAbi::UnionPtr => {
+                // Closures always return a value (I64 placeholder for void)
+                // to maintain a consistent closure calling convention.
                 sig.returns
                     .push(AbiParam::new(self.vir_query_type_to_cranelift(ret)));
             }
         }
 
-        Ok((sig, params, ret))
+        Ok((sig, params, ret, ret_abi))
     }
 
     /// Call an actual closure (with closure pointer).
@@ -133,7 +139,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CodegenResult<CompiledValue> {
         let func_ptr = self.call_runtime(RuntimeKey::ClosureGetFunc, &[closure_ptr])?;
 
-        let (sig, params, ret) = self.build_closure_call_signature(func_vir_type_id)?;
+        let (sig, params, ret, ret_abi) = self.build_closure_call_signature(func_vir_type_id)?;
 
         let mut args: ArgVec = smallvec![closure_ptr];
 
@@ -186,19 +192,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // For large struct sret returns, allocate a return buffer and insert
         // the sret pointer as the second argument (after closure ptr).
-        let sret_ptr = if let Some(flat_count) = self.struct_flat_slot_count(ret)
-            && flat_count > crate::MAX_SMALL_STRUCT_FIELDS
-        {
-            let total_size = (flat_count as u32) * 8;
+        if let vole_vir::func::ReturnAbi::SretStruct { field_count } = ret_abi {
+            let total_size = (field_count as u32) * 8;
             let slot = self.alloc_stack(total_size);
             let pt = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(pt, slot, 0);
             args.insert(1, ptr);
-            Some(ptr)
-        } else {
-            None
-        };
-        let _ = sret_ptr; // used by result handling below
+        }
 
         let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
 
@@ -208,42 +208,52 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.consume_rc_args(&mut rc_temp_args)?;
         let results = self.builder.inst_results(call_inst);
 
-        if results.is_empty() {
-            Ok(self.void_value())
-        } else if results.len() == 2 && self.vir_query_unwrap_fallible(ret).is_some() {
-            // Fallible multi-value return: pack (tag, payload) into stack slot
-            let tag = results[0];
-            let payload = results[1];
-
-            let slot_size = union_layout::STANDARD_SIZE;
-            let slot = self.alloc_stack(slot_size);
-
-            self.builder.ins().stack_store(tag, slot, 0);
-            self.builder
-                .ins()
-                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
-
-            let ptr_type = self.ptr_type();
-            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-            Ok(self.compiled_with_ty(ptr, ptr_type, ret))
-        } else if let Some(flat_count) = self.struct_flat_slot_count(ret) {
-            if flat_count <= crate::MAX_SMALL_STRUCT_FIELDS {
-                // Small struct: reconstruct from register values
+        // Reconstruct the result based on the pre-computed return ABI.
+        match ret_abi {
+            vole_vir::func::ReturnAbi::Void => Ok(self.void_value()),
+            vole_vir::func::ReturnAbi::Fallible => {
+                let tag = results[0];
+                let payload = results[1];
+                let slot_size = union_layout::STANDARD_SIZE;
+                let slot = self.alloc_stack(slot_size);
+                self.builder.ins().stack_store(tag, slot, 0);
+                self.builder
+                    .ins()
+                    .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+                let ptr_type = self.ptr_type();
+                let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+                Ok(self.compiled_with_ty(ptr, ptr_type, ret))
+            }
+            vole_vir::func::ReturnAbi::WideFallible => {
+                let tag = results[0];
+                let low = results[1];
+                let high = results[2];
+                let slot_size = 24u32;
+                let slot = self.alloc_stack(slot_size);
+                self.builder.ins().stack_store(tag, slot, 0);
+                let i128_val = crate::structs::reconstruct_i128(self.builder, low, high);
+                crate::structs::helpers::store_i128_to_stack(
+                    self.builder,
+                    i128_val,
+                    slot,
+                    union_layout::PAYLOAD_OFFSET,
+                );
+                let ptr_type = self.ptr_type();
+                let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+                Ok(self.compiled_with_ty(ptr, ptr_type, ret))
+            }
+            vole_vir::func::ReturnAbi::SmallStruct { .. } => {
                 let results_vec: Vec<Value> = results.to_vec();
                 self.reconstruct_struct_from_regs(&results_vec, ret)
-            } else {
-                // Large struct (sret): result[0] is already the pointer to our buffer
+            }
+            vole_vir::func::ReturnAbi::SretStruct { .. } => {
                 Ok(self.compiled_with_ty(results[0], self.ptr_type(), ret))
             }
-        } else {
-            // If the return type is a union, the returned value is a pointer to callee's stack.
-            // We need to copy the union data to our own stack to prevent it from being
-            // overwritten on subsequent calls to the same closure.
-            if self.vir_query_is_union(ret) {
+            vole_vir::func::ReturnAbi::UnionPtr => {
                 let src_ptr = results[0];
                 Ok(self.copy_union_ptr_to_local(src_ptr, ret))
-            } else {
+            }
+            vole_vir::func::ReturnAbi::Single | vole_vir::func::ReturnAbi::Wide => {
                 Ok(self.compiled(results[0], ret))
             }
         }

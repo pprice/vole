@@ -202,7 +202,11 @@ fn rederive_decisions_inner(
     call_ctx: Option<&RederiveCallCtx<'_>>,
 ) {
     // Recompute return ABI from now-concrete return type.
-    func.return_abi = ReturnAbi::classify(func.vir_return_type, table);
+    // Struct flat slot count is not passed here because vole-vir's simplified
+    // helper does not handle all field-sizing cases (e.g. union-as-field
+    // payloads).  Codegen recomputes the full ReturnAbi via
+    // with_return_type_v() which uses vir_struct_flat_slot_count.
+    func.return_abi = ReturnAbi::classify(func.vir_return_type, table, None);
 
     let ret_ty = func.vir_return_type;
     rederive_body(&mut func.body, table, ret_ty, entities, call_ctx);

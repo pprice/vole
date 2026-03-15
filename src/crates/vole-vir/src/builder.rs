@@ -320,7 +320,7 @@ impl VirBuilder {
             params,
             return_type: return_ty,
             vir_return_type: return_ty,
-            return_abi: ReturnAbi::classify(return_ty, table),
+            return_abi: ReturnAbi::classify(return_ty, table, None),
             body,
             mangled_name_id: None,
             method_id: None,
