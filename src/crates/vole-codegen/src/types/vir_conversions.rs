@@ -181,7 +181,7 @@ pub(crate) fn vir_is_optional(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
 /// Returns `None` if the type is not optional.
 pub(crate) fn vir_unwrap_optional(vir_ty: VirTypeId, table: &VirTypeTable) -> Option<VirTypeId> {
     match table.get(vir_ty) {
-        VirType::Optional { inner } => Some(*inner),
+        VirType::Optional { inner, .. } => Some(*inner),
         _ => None,
     }
 }
@@ -553,7 +553,7 @@ pub(crate) fn vir_display_named(
                 .collect();
             format!("({})", parts.join(", "))
         }
-        VirType::Optional { inner } => {
+        VirType::Optional { inner, .. } => {
             format!("{}?", vir_display_named(*inner, table, entities, names))
         }
         VirType::Union { variants } => {
@@ -766,7 +766,7 @@ pub(crate) fn vir_contains_type_param(vir_ty: VirTypeId, table: &VirTypeTable) -
             vir_contains_type_param(*elem, table)
         }
         VirType::FixedArray { elem, .. } => vir_contains_type_param(*elem, table),
-        VirType::Optional { inner } => vir_contains_type_param(*inner, table),
+        VirType::Optional { inner, .. } => vir_contains_type_param(*inner, table),
         VirType::Function { params, ret } => {
             params.iter().any(|&p| vir_contains_type_param(p, table))
                 || vir_contains_type_param(*ret, table)
@@ -872,7 +872,7 @@ pub(crate) fn vir_type_id_size(
         }
 
         // Optional: treated like union with nil variant.
-        VirType::Optional { inner } => {
+        VirType::Optional { inner, .. } => {
             let inner_size = vir_type_id_size(*inner, pointer_type, entities, table);
             crate::union_layout::TAG_ONLY_SIZE + inner_size.div_ceil(8) * 8
         }
@@ -1334,11 +1334,12 @@ pub(crate) fn vir_compute_rc_state(
 
     // Check for union/optional types with RC variants
     match table.get(vir_ty) {
-        VirType::Optional { inner } => {
-            // Optional<T> is always a payload union; check if inner is RC
+        VirType::Optional { inner, variants } => {
+            // Optional<T>: check if inner is RC and use the canonical
+            // variant order to determine the correct tag index.
             let rc_variants = if vir_is_simple_rc_type(*inner, table) {
-                // Inner type is RC (tag 0 = inner, tag 1 = nil)
-                vec![(0u8, vir_is_interface(*inner, table))]
+                let inner_tag = variants.iter().position(|&v| v == *inner).unwrap_or(0) as u8;
+                vec![(inner_tag, vir_is_interface(*inner, table))]
             } else {
                 vec![]
             };
@@ -1435,11 +1436,12 @@ fn vir_compute_composite_rc_offsets(
                     union_fields.push((byte_offset, rc_tags));
                 }
             } else if matches!(table.get(field_vir), VirType::Optional { .. }) {
-                // Optional field: check inner type for RC
-                if let VirType::Optional { inner } = table.get(field_vir)
+                // Optional field: use canonical variant order for RC tag
+                if let VirType::Optional { inner, variants } = table.get(field_vir)
                     && vir_is_simple_rc_type(*inner, table)
                 {
-                    let rc_tags = vec![(0u8, vir_is_interface(*inner, table))];
+                    let inner_tag = variants.iter().position(|&v| v == *inner).unwrap_or(0) as u8;
+                    let rc_tags = vec![(inner_tag, vir_is_interface(*inner, table))];
                     union_fields.push((byte_offset, rc_tags));
                 }
             } else {
@@ -1586,7 +1588,7 @@ fn vir_compute_type_size_aligned(
         }
 
         // Optional: treated like union with nil variant
-        VirType::Optional { inner } => {
+        VirType::Optional { inner, .. } => {
             let inner_size = vir_compute_type_size_aligned(*inner, table, entities);
             crate::union_layout::TAG_ONLY_SIZE as i32 + inner_size
         }
@@ -2026,12 +2028,7 @@ mod tests {
     #[test]
     fn optional_predicate_and_unwrap() {
         let mut table = test_table();
-        let opt_ty = table.intern(
-            VirType::Optional {
-                inner: VirTypeId::STRING,
-            },
-            None,
-        );
+        let opt_ty = table.intern_optional(VirTypeId::STRING, None);
         assert!(vir_is_optional(opt_ty, &table));
         assert!(!vir_is_optional(VirTypeId::STRING, &table));
 

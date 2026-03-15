@@ -479,13 +479,13 @@ impl<'a> Compiler<'a> {
 
     /// Unwrap a union `VirTypeId` to its variant `VirTypeId`s via VirTypeTable.
     ///
-    /// Also handles `VirType::Optional { inner }`, expanding it to a two-element
-    /// vector matching the sema arena's sorted variant order.
+    /// Also handles `VirType::Optional`, reading the pre-computed canonical
+    /// variant order stored during VIR lowering.
     fn vir_query_unwrap_union_v(&self, vir_ty: VirTypeId) -> Option<Vec<VirTypeId>> {
         let table = self.vir_type_table();
         match table.get(vir_ty) {
             vole_vir::VirType::Union { variants } => Some(variants.to_vec()),
-            vole_vir::VirType::Optional { inner } => Some(table.expand_optional_variants(*inner)),
+            vole_vir::VirType::Optional { variants, .. } => Some(variants.to_vec()),
             _ => None,
         }
     }

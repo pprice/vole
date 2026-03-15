@@ -1157,12 +1157,7 @@ mod tests {
 
         let mut type_table = VirTypeTable::new();
         let param_vir_ty = type_table.intern(VirType::Param { name: t_name }, None);
-        let opt_of_param = type_table.intern(
-            VirType::Optional {
-                inner: param_vir_ty,
-            },
-            None,
-        );
+        let opt_of_param = type_table.intern_optional(param_vir_ty, None);
 
         // Generic: fn maybe<T>(x: T) -> T? { x }
         let template = VirFunction {
@@ -1200,11 +1195,9 @@ mod tests {
         let mono = &result.functions[0];
         let ret_ty = mono.vir_return_type;
         let ret_type = program.type_table.get(ret_ty);
-        assert_eq!(
-            *ret_type,
-            VirType::Optional {
-                inner: VirTypeId::STRING
-            }
+        assert!(
+            matches!(ret_type, VirType::Optional { inner, .. } if *inner == VirTypeId::STRING),
+            "expected Optional<String>, got {ret_type:?}"
         );
 
         let layout = program

@@ -69,7 +69,7 @@ pub fn compute_field_type_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> VirFie
             }
             VirFieldTypeTag::Value
         }
-        VirType::Optional { inner } => {
+        VirType::Optional { inner, .. } => {
             if compute_field_type_tag(*inner, table).needs_cleanup() {
                 VirFieldTypeTag::UnionHeap
             } else {

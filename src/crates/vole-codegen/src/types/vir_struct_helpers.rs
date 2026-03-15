@@ -78,7 +78,7 @@ fn vir_field_types_for(
 /// Payload unions need 16 bytes (2 flat slots) when stored inline in structs.
 /// Tag-only unions (all Nil/Done/Void/sentinel-struct variants) need 8 bytes.
 ///
-/// Also recognizes `VirType::Optional { inner }` (the `T?` sugar for `T | nil`),
+/// Also recognizes `VirType::Optional` (the `T?` sugar for `T | nil`),
 /// which always carries a payload when `inner` is non-sentinel and non-void.
 pub(crate) fn vir_is_payload_union(
     vir_ty: VirTypeId,
@@ -92,7 +92,7 @@ pub(crate) fn vir_is_payload_union(
             .any(|&v| !vir_is_sentinel_or_void(v, table, entities));
     }
     // Optional<T> is sugar for T | nil — payload if inner is non-sentinel, non-void.
-    if let VirType::Optional { inner } = table.get(vir_ty) {
+    if let VirType::Optional { inner, .. } = table.get(vir_ty) {
         return !vir_is_sentinel_or_void(*inner, table, entities);
     }
     false

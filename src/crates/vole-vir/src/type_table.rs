@@ -111,6 +111,20 @@ impl VirTypeTable {
         id
     }
 
+    /// Intern an `Optional` type, computing the canonical variant order
+    /// from the inner type automatically.
+    ///
+    /// Preferred over constructing `VirType::Optional { inner, variants }`
+    /// by hand, since the variant order must match the sema arena's sort.
+    pub fn intern_optional(
+        &mut self,
+        inner: VirTypeId,
+        layout: Option<VirTypeLayout>,
+    ) -> VirTypeId {
+        let variants = self.compute_optional_variants(inner);
+        self.intern(VirType::Optional { inner, variants }, layout)
+    }
+
     /// Get the `VirType` for a `VirTypeId`.
     ///
     /// # Panics
@@ -333,7 +347,7 @@ impl VirTypeTable {
     /// Extract the inner type from an `Optional` type.
     pub fn unwrap_optional(&self, id: VirTypeId) -> Option<VirTypeId> {
         match self.get(id) {
-            VirType::Optional { inner } => Some(*inner),
+            VirType::Optional { inner, .. } => Some(*inner),
             _ => None,
         }
     }
@@ -565,16 +579,26 @@ impl VirTypeTable {
 
     /// Expand an Optional type into its union variant order.
     ///
-    /// Returns the two-element variant list `[inner, NIL]` or `[NIL, inner]`
-    /// matching the sema arena's sort order.
+    /// If the Optional has pre-computed variants (the canonical form after
+    /// VIR lowering), returns those directly.  Falls back to computing
+    /// via sort keys for backwards compatibility with older interning paths.
     pub fn expand_optional_variants(&self, inner: VirTypeId) -> Vec<VirTypeId> {
+        self.compute_optional_variants(inner).to_vec()
+    }
+
+    /// Compute the canonical two-element variant order for an Optional type.
+    ///
+    /// Returns `[inner, NIL]` or `[NIL, inner]` matching the sema arena's
+    /// descending sort order.  Used both to populate the `variants` field
+    /// on `VirType::Optional` and as a fallback for expansion.
+    pub fn compute_optional_variants(&self, inner: VirTypeId) -> [VirTypeId; 2] {
         let inner_key = self.union_sort_key(inner);
         let nil_key = self.union_sort_key(VirTypeId::NIL);
         // Descending sort: higher key comes first.
         if inner_key >= nil_key {
-            vec![inner, VirTypeId::NIL]
+            [inner, VirTypeId::NIL]
         } else {
-            vec![VirTypeId::NIL, inner]
+            [VirTypeId::NIL, inner]
         }
     }
 }
@@ -628,8 +652,9 @@ fn remap_type_ids_in_type(ty: &VirType, mapping: &FxHashMap<VirTypeId, VirTypeId
         VirType::Union { variants } => VirType::Union {
             variants: remap_vec(variants),
         },
-        VirType::Optional { inner } => VirType::Optional {
+        VirType::Optional { inner, variants } => VirType::Optional {
             inner: remap(inner),
+            variants: [remap(&variants[0]), remap(&variants[1])],
         },
         VirType::Fallible { success, errors } => VirType::Fallible {
             success: remap(success),
@@ -695,7 +720,7 @@ fn merge_one(
                 merge_one(id, other, this, mapping, in_progress);
             }
         }
-        VirType::Optional { inner } | VirType::RuntimeIterator { elem: inner } => {
+        VirType::Optional { inner, .. } | VirType::RuntimeIterator { elem: inner } => {
             merge_one(*inner, other, this, mapping, in_progress);
         }
         VirType::Fallible { success, errors } => {
@@ -1127,12 +1152,16 @@ impl VirTypeTable {
     /// some paths intern optionals as explicit Optional while others use the
     /// general Union representation.
     pub fn lookup_optional_v(&self, inner: VirTypeId) -> Option<VirTypeId> {
-        self.lookup(&VirType::Optional { inner }).or_else(|| {
-            // Fall back to Union representation (sorted by raw ID)
-            let mut variants = vec![inner, VirTypeId::NIL];
-            variants.sort_by_key(|v| v.raw());
-            self.lookup(&VirType::Union { variants })
-        })
+        let variants = self.compute_optional_variants(inner);
+        self.lookup(&VirType::Optional { inner, variants })
+            .or_else(|| {
+                // Fall back to Union representation (sorted by raw ID)
+                let mut union_variants = vec![inner, VirTypeId::NIL];
+                union_variants.sort_by_key(|v| v.raw());
+                self.lookup(&VirType::Union {
+                    variants: union_variants,
+                })
+            })
     }
 
     /// Look up an optional type (`T?`) by its inner element `TypeId`.
@@ -1286,12 +1315,16 @@ impl VirTypeTable {
                     len: *len,
                 })
             }
-            VirType::Optional { inner } => {
+            VirType::Optional { inner, .. } => {
                 let new_inner = self.substitute_vir(*inner, subs)?;
                 if new_inner == *inner {
                     return Some(vir_id);
                 }
-                self.lookup(&VirType::Optional { inner: new_inner })
+                let new_variants = self.compute_optional_variants(new_inner);
+                self.lookup(&VirType::Optional {
+                    inner: new_inner,
+                    variants: new_variants,
+                })
             }
             VirType::RuntimeIterator { elem } => {
                 let new_elem = self.substitute_vir(*elem, subs)?;
@@ -1461,12 +1494,19 @@ impl VirTypeTable {
                     None,
                 ))
             }
-            VirType::Optional { inner } => {
+            VirType::Optional { inner, .. } => {
                 let new_inner = self.substitute_vir_or_intern(*inner, subs)?;
                 if new_inner == *inner {
                     return Some(vir_id);
                 }
-                Some(self.intern(VirType::Optional { inner: new_inner }, None))
+                let new_variants = self.compute_optional_variants(new_inner);
+                Some(self.intern(
+                    VirType::Optional {
+                        inner: new_inner,
+                        variants: new_variants,
+                    },
+                    None,
+                ))
             }
             VirType::RuntimeIterator { elem } => {
                 let new_elem = self.substitute_vir_or_intern(*elem, subs)?;
@@ -1633,12 +1673,16 @@ impl VirTypeTable {
                     len: *len,
                 })
             }
-            VirType::Optional { inner } => {
+            VirType::Optional { inner, .. } => {
                 let new_inner = self.substitute_native(*inner, subs)?;
                 if new_inner == *inner {
                     return Some(vir_id);
                 }
-                self.lookup(&VirType::Optional { inner: new_inner })
+                let new_variants = self.compute_optional_variants(new_inner);
+                self.lookup(&VirType::Optional {
+                    inner: new_inner,
+                    variants: new_variants,
+                })
             }
             VirType::RuntimeIterator { elem } => {
                 let new_elem = self.substitute_native(*elem, subs)?;
@@ -1959,12 +2003,7 @@ mod tests {
     #[test]
     fn unwrap_optional() {
         let mut table = VirTypeTable::new();
-        let id = table.intern(
-            VirType::Optional {
-                inner: VirTypeId::I64,
-            },
-            None,
-        );
+        let id = table.intern_optional(VirTypeId::I64, None);
         assert_eq!(table.unwrap_optional(id), Some(VirTypeId::I64));
         assert!(table.unwrap_optional(VirTypeId::I64).is_none());
     }
@@ -2137,12 +2176,7 @@ mod tests {
             },
             None,
         );
-        let opt_id = table.intern(
-            VirType::Optional {
-                inner: VirTypeId::I64,
-            },
-            None,
-        );
+        let opt_id = table.intern_optional(VirTypeId::I64, None);
         let arr_id = table.intern(
             VirType::Array {
                 elem: VirTypeId::I64,
@@ -2457,15 +2491,10 @@ mod tests {
         let mut table = VirTypeTable::new();
         let t_name = test_name(100);
         let param_vir = table.intern(VirType::Param { name: t_name }, None);
-        let opt_param = table.intern(VirType::Optional { inner: param_vir }, None);
+        let opt_param = table.intern_optional(param_vir, None);
         let arr_opt_param = table.intern(VirType::Array { elem: opt_param }, None);
 
-        let opt_i64 = table.intern(
-            VirType::Optional {
-                inner: VirTypeId::I64,
-            },
-            None,
-        );
+        let opt_i64 = table.intern_optional(VirTypeId::I64, None);
         let arr_opt_i64 = table.intern(VirType::Array { elem: opt_i64 }, None);
 
         let param_sema = TypeId::from_raw(500);

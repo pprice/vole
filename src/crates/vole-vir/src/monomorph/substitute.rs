@@ -105,9 +105,21 @@ fn substitute_one(
             let layout = compute_layout(&ty, target);
             target.intern(ty, layout)
         }
-        VirType::Optional { inner } => {
+        VirType::Optional { inner, .. } => {
             let new_inner = substitute_one(*inner, source, target, subs, memo);
-            let ty = VirType::Optional { inner: new_inner };
+            // Compute variant order using whichever table contains the
+            // concrete inner type.  After substitution, new_inner may be a
+            // source-table VirTypeId (direct Param substitution) or a
+            // target-table VirTypeId (recursively interned compound type).
+            let new_variants = if (new_inner.raw() as usize) < target.len() {
+                target.compute_optional_variants(new_inner)
+            } else {
+                source.compute_optional_variants(new_inner)
+            };
+            let ty = VirType::Optional {
+                inner: new_inner,
+                variants: new_variants,
+            };
             let layout = compute_layout(&ty, target);
             target.intern(ty, layout)
         }
@@ -455,7 +467,7 @@ mod tests {
         let mut source = VirTypeTable::new();
         let t_name = name(200);
         let param_id = source.intern(VirType::Param { name: t_name }, None);
-        let opt_id = source.intern(VirType::Optional { inner: param_id }, None);
+        let opt_id = source.intern_optional(param_id, None);
 
         let mut target = VirTypeTable::new();
         let mut subs = TypeSubstitution::default();
@@ -464,11 +476,9 @@ mod tests {
         let mapping = substitute_types(&source, &mut target, &subs);
 
         let new_opt = target.get(mapping[&opt_id]);
-        assert_eq!(
-            *new_opt,
-            VirType::Optional {
-                inner: VirTypeId::STRING
-            }
+        assert!(
+            matches!(new_opt, VirType::Optional { inner, .. } if *inner == VirTypeId::STRING),
+            "expected Optional<String>, got {new_opt:?}"
         );
     }
 
@@ -822,7 +832,7 @@ mod tests {
         let mut source = VirTypeTable::new();
         let t_name = name(100);
         let param_id = source.intern(VirType::Param { name: t_name }, None);
-        let opt_id = source.intern(VirType::Optional { inner: param_id }, None);
+        let opt_id = source.intern_optional(param_id, None);
         let array_id = source.intern(VirType::Array { elem: opt_id }, None);
 
         let mut target = VirTypeTable::new();
@@ -833,11 +843,9 @@ mod tests {
 
         // Check the inner optional.
         let new_opt = target.get(mapping[&opt_id]);
-        assert_eq!(
-            *new_opt,
-            VirType::Optional {
-                inner: VirTypeId::I64
-            }
+        assert!(
+            matches!(new_opt, VirType::Optional { inner, .. } if *inner == VirTypeId::I64),
+            "expected Optional<i64>, got {new_opt:?}"
         );
 
         // Check the outer array.
@@ -904,7 +912,7 @@ mod tests {
 
         // Build a variety of compound types containing the param.
         let array_id = source.intern(VirType::Array { elem: param_id }, None);
-        let opt_id = source.intern(VirType::Optional { inner: param_id }, None);
+        let opt_id = source.intern_optional(param_id, None);
         let tuple_id = source.intern(
             VirType::Tuple {
                 elems: vec![param_id, VirTypeId::I64],
@@ -1047,7 +1055,7 @@ mod tests {
         let mut source = VirTypeTable::new();
         let t_name = name(100);
         let param_id = source.intern(VirType::Param { name: t_name }, None);
-        let opt_of_param = source.intern(VirType::Optional { inner: param_id }, None);
+        let opt_of_param = source.intern_optional(param_id, None);
 
         // The concrete type is Array<String> (not a reserved VirTypeId).
         let concrete_arr = source.intern(

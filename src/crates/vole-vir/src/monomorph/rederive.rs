@@ -1025,17 +1025,13 @@ fn derive_is_check_result(
             .map(|idx| IsCheckResult::CheckTag(idx as u32))
             .unwrap_or(IsCheckResult::AlwaysFalse),
 
-        // Optional types expand to [inner, nil] or [nil, inner] depending on
-        // sort key order.  Use `expand_optional_variants` to compute the
-        // correct tag index, matching the layout codegen uses.
-        VirType::Optional { inner } => {
-            let expanded = table.expand_optional_variants(*inner);
-            expanded
-                .iter()
-                .position(|&variant| variant == tested_vir_ty)
-                .map(|idx| IsCheckResult::CheckTag(idx as u32))
-                .unwrap_or(IsCheckResult::AlwaysFalse)
-        }
+        // Optional types carry their canonical variant order in `variants`.
+        // Read it directly instead of recomputing via sort keys.
+        VirType::Optional { variants, .. } => variants
+            .iter()
+            .position(|&variant| variant == tested_vir_ty)
+            .map(|idx| IsCheckResult::CheckTag(idx as u32))
+            .unwrap_or(IsCheckResult::AlwaysFalse),
 
         _ => {
             if scrutinee_vir_ty == tested_vir_ty {
@@ -1196,9 +1192,8 @@ fn derive_union_storage_from_elem(
                 UnionStorageKind::Heap
             })
         }
-        VirType::Optional { inner } => {
-            let variants = [*inner, VirTypeId::NIL];
-            Some(if union_array_prefers_inline_storage(&variants, table) {
+        VirType::Optional { variants, .. } => {
+            Some(if union_array_prefers_inline_storage(variants, table) {
                 UnionStorageKind::Inline
             } else {
                 UnionStorageKind::Heap

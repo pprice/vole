@@ -277,7 +277,21 @@ fn translate_union(table: &mut VirTypeTable, variants: &[TypeId], arena: &TypeAr
 
     if has_nil && non_nil.len() == 1 {
         let inner = translate_type_id(table, non_nil[0], arena);
-        return VirType::Optional { inner };
+        // Preserve sema's canonical variant ordering directly rather than
+        // recomputing via VIR sort keys.  The `variants` parameter carries
+        // sema's authoritative order which may differ from the VIR-level
+        // sort after sentinel rebinding.
+        let vir_variants: [VirTypeId; 2] = {
+            let translated: Vec<VirTypeId> = variants
+                .iter()
+                .map(|&v| translate_type_id(table, v, arena))
+                .collect();
+            [translated[0], translated[1]]
+        };
+        return VirType::Optional {
+            inner,
+            variants: vir_variants,
+        };
     }
 
     let vir_variants: Vec<VirTypeId> = variants
@@ -794,7 +808,7 @@ mod tests {
         let mut table = VirTypeTable::new();
         let vir_id = translate_type_id(&mut table, union_id, &arena);
         match table.get(vir_id) {
-            VirType::Optional { inner } => {
+            VirType::Optional { inner, .. } => {
                 assert_eq!(*inner, VirTypeId::I64);
             }
             other => panic!("expected Optional, got {other:?}"),

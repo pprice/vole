@@ -775,15 +775,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Unwrap a union `VirTypeId` to its variant `VirTypeId`s via VirTypeTable.
     ///
-    /// Also handles `VirType::Optional { inner }`, expanding it to a two-element
-    /// vector matching the sema arena's sorted variant order.  The VirTypeTable's
-    /// `expand_optional_variants()` replicates the sema sort key logic so the
-    /// inner type and nil appear in the correct order.
+    /// Also handles `VirType::Optional`, reading the pre-computed canonical
+    /// variant order stored during VIR lowering.
     pub fn vir_query_unwrap_union_v(&self, vir_ty: VirTypeId) -> Option<Vec<VirTypeId>> {
         let table = self.vir_type_table();
         match table.get(vir_ty) {
             vole_vir::VirType::Union { variants } => Some(variants.to_vec()),
-            vole_vir::VirType::Optional { inner } => Some(table.expand_optional_variants(*inner)),
+            vole_vir::VirType::Optional { variants, .. } => Some(variants.to_vec()),
             _ => None,
         }
     }

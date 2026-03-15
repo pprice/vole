@@ -34,7 +34,15 @@ pub enum VirType {
     /// Tagged union of variant types.
     Union { variants: Vec<VirTypeId> },
     /// Optional type (`T?`).
-    Optional { inner: VirTypeId },
+    ///
+    /// `variants` stores the canonical two-element variant order
+    /// `[inner, NIL]` or `[NIL, inner]` matching the sema arena's sort
+    /// order.  This is computed once during VIR lowering so that codegen
+    /// and monomorphization never have to re-derive variant ordering.
+    Optional {
+        inner: VirTypeId,
+        variants: [VirTypeId; 2],
+    },
     /// Fallible return type (success or one of several error types).
     Fallible {
         success: VirTypeId,
