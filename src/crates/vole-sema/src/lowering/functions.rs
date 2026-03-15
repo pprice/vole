@@ -106,6 +106,8 @@ pub fn lower_top_level_functions(args: LowerTopLevelFunctionsArgs<'_>) -> Vec<Vi
             .map(|(p, &ty)| (p.name, ty))
             .collect();
         let display_name = interner.resolve(func.name).to_string();
+        let _timing =
+            vole_log::compile_timing!(TRACE, "lower_function", name = %display_name).entered();
         let vir = lower_function(
             func,
             func_id,

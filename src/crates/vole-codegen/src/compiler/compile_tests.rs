@@ -21,6 +21,7 @@ impl Compiler<'_> {
     fn compile_single_test(&mut self, vir_test: &VirTest, test_index: usize) -> CodegenResult<()> {
         let func_key = self.test_function_key(test_index);
         let func_name = self.test_display_name(func_key);
+        let _timing = vole_log::compile_timing!(TRACE, "compile_test", name = %func_name).entered();
         let func_id = self
             .func_registry
             .func_id(func_key)
