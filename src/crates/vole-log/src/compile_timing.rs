@@ -251,8 +251,10 @@ pub fn render_timing_spans(writer: &mut dyn Write, spans: &[TimingSpan]) {
 pub fn render_chrome_trace(spans: &[TimingSpan], writer: &mut dyn Write) -> std::io::Result<()> {
     writer.write_all(b"[\n")?;
     let mut first = true;
+    let mut global_offset: u64 = 0;
     for span in spans {
-        write_chrome_events(writer, span, 0, &mut first)?;
+        write_chrome_events(writer, span, global_offset, &mut first)?;
+        global_offset += span.duration_us;
     }
     writer.write_all(b"\n]\n")?;
     Ok(())
