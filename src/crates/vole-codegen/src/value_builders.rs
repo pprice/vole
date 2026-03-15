@@ -488,12 +488,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .is_some_and(|count| count <= crate::MAX_SMALL_STRUCT_FIELDS)
     }
 
-    /// Check if a VIR struct type uses sret convention (3+ flat slots).
-    pub fn is_sret_struct_return_v(&self, vir_ty: VirTypeId) -> bool {
-        self.vir_struct_flat_slot_count(vir_ty)
-            .is_some_and(|count| count > crate::MAX_SMALL_STRUCT_FIELDS)
-    }
-
     /// If the return type uses sret convention (large struct), allocate a stack
     /// buffer for the return value and return a pointer to it. The caller should
     /// prepend this pointer to the call arguments.

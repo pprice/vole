@@ -251,10 +251,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Classify a coercion from the VIR type table without any external hints.
     ///
-    /// This is a streamlined replacement for the old `classify_coercion_types`
-    /// + `coerce_to_type_detected` pair: instead of populating a 9-field
-    /// struct, it returns a single `InlineCoercion` that the caller dispatches
-    /// directly.
+    /// Streamlined replacement for the old `classify_coercion_types` +
+    /// `coerce_to_type_detected` pair: instead of populating a 9-field struct,
+    /// it returns a single `InlineCoercion` that the caller dispatches directly.
     fn classify_coercion_inline(
         &self,
         value_vir: VirTypeId,

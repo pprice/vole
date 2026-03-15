@@ -767,15 +767,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(success, errors)| (success, errors.to_vec()))
     }
 
-    /// Unwrap a fallible sema `TypeId` to `(success, errors)` via VirTypeTable.
-    #[inline]
-    pub fn vir_query_unwrap_fallible(
-        &self,
-        type_id: TypeId,
-    ) -> Option<(VirTypeId, Vec<VirTypeId>)> {
-        self.vir_query_unwrap_fallible_v(self.vir_lookup(type_id))
-    }
-
     /// Unwrap a union `VirTypeId` to its variant `VirTypeId`s via VirTypeTable.
     ///
     /// Also handles `VirType::Optional`, reading the pre-computed canonical
@@ -954,12 +945,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_contains_type_param_v(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_contains_type_param(vir_ty, self.vir_type_table())
-    }
-
-    /// Check if a `VirTypeId` is a numeric type (integer or float) via VirTypeTable.
-    #[inline]
-    pub fn vir_query_is_numeric_v(&self, vir_ty: VirTypeId) -> bool {
-        crate::types::vir_conversions::vir_is_numeric(vir_ty, self.vir_type_table())
     }
 
     // vir_query_primitives() deleted — use TypeId constants directly
