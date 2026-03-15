@@ -409,6 +409,7 @@ impl Cg<'_, '_, '_> {
                 op,
                 lhs,
                 rhs,
+                promoted_ty,
                 line,
                 lhs_is_optional,
                 rhs_is_optional,
@@ -418,6 +419,7 @@ impl Cg<'_, '_, '_> {
                 *op,
                 lhs,
                 rhs,
+                *promoted_ty,
                 *line,
                 *lhs_is_optional,
                 *rhs_is_optional,
@@ -743,13 +745,16 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR binary operation by delegating to `binary_op()`.
     ///
-    /// Delegates to `binary_op()` which handles type promotion and Cranelift emission.
+    /// Delegates to `binary_op()` which handles operand coercion and
+    /// Cranelift emission.  The promoted operand type is pre-resolved on
+    /// the VIR node so codegen reads it directly.
     #[expect(clippy::too_many_arguments)]
     fn compile_vir_binary_op(
         &mut self,
         op: VirBinOp,
         lhs: &VirExpr,
         rhs: &VirExpr,
+        promoted_ty: VirTypeId,
         line: u32,
         lhs_is_optional: bool,
         rhs_is_optional: bool,
@@ -764,6 +769,7 @@ impl Cg<'_, '_, '_> {
             left,
             right,
             op,
+            promoted_ty,
             line,
             lhs_is_optional,
             rhs_is_optional,

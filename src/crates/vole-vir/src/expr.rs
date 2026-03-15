@@ -142,6 +142,20 @@ pub enum VirExpr {
         rhs: VirRef,
         ty: VirTypeId,
         vir_ty: VirTypeId,
+        /// Pre-computed promoted operand type for numeric operations.
+        ///
+        /// For arithmetic/bitwise ops this equals `vir_ty` (the result IS the
+        /// promoted type).  For comparison ops the result type is always BOOL,
+        /// but operands must be coerced to a common numeric type first — this
+        /// field stores that promoted type so codegen can read it directly
+        /// instead of recomputing via `numeric_result_type_v`.
+        ///
+        /// For non-numeric binary ops (e.g. string equality) this is set to
+        /// the left operand's type (same fallback codegen used previously).
+        ///
+        /// Set during VIR lowering; remapped during monomorphization rewrite;
+        /// re-derived from concrete operand types after monomorphization.
+        promoted_ty: VirTypeId,
         /// Source line for panic messages (division by zero, overflow).
         line: u32,
         /// Pre-computed: the left operand's type is optional (`T?`).

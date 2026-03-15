@@ -299,6 +299,7 @@ fn rederive_expr(
             lhs,
             rhs,
             op,
+            promoted_ty,
             lhs_is_optional,
             rhs_is_optional,
             lhs_is_unsigned,
@@ -306,18 +307,28 @@ fn rederive_expr(
         } => {
             rederive_ref(lhs, table, ret_ty, entities, call_ctx);
             rederive_ref(rhs, table, ret_ty, entities, call_ctx);
+            let lhs_ty = extract_vir_ty(lhs);
+            let rhs_ty = extract_vir_ty(rhs);
             // Re-derive optional hints from now-concrete operand types.
             if matches!(op, crate::expr::VirBinOp::Eq | crate::expr::VirBinOp::Ne) {
-                if let Some(lhs_vir_ty) = extract_vir_ty(lhs) {
+                if let Some(lhs_vir_ty) = lhs_ty {
                     *lhs_is_optional = table.is_optional(lhs_vir_ty);
                 }
-                if let Some(rhs_vir_ty) = extract_vir_ty(rhs) {
+                if let Some(rhs_vir_ty) = rhs_ty {
                     *rhs_is_optional = table.is_optional(rhs_vir_ty);
                 }
             }
             // Re-derive signedness hint from now-concrete left operand type.
-            if let Some(lhs_vir_ty) = extract_vir_ty(lhs) {
+            if let Some(lhs_vir_ty) = lhs_ty {
                 *lhs_is_unsigned = lhs_vir_ty.is_unsigned_int();
+            }
+            // Re-derive promoted operand type from now-concrete operand types.
+            if let (Some(l), Some(r)) = (lhs_ty, rhs_ty) {
+                if l.is_numeric() && r.is_numeric() {
+                    *promoted_ty = crate::numeric_model::numeric_result_type_v(l, r);
+                } else {
+                    *promoted_ty = l;
+                }
             }
         }
         VirExpr::UnaryOp { operand, .. } => {

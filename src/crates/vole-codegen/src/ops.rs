@@ -9,7 +9,6 @@ use crate::RuntimeKey;
 use crate::context::ExternalMethodRef;
 use vole_identity::{TypeId, VirTypeId};
 use vole_vir::VirBinOp;
-use vole_vir::numeric_model::numeric_result_type_v;
 
 use super::context::Cg;
 use super::types::{CompiledValue, convert_to_type};
@@ -191,6 +190,11 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a binary operation on two values.
     ///
+    /// `promoted_ty` is the pre-resolved promoted operand type from the VIR
+    /// node.  For arithmetic/bitwise ops it equals the expression result type;
+    /// for comparisons it is the common numeric type that both operands are
+    /// coerced to before the comparison (the result type is always BOOL).
+    ///
     /// `lhs_is_optional` / `rhs_is_optional` are VIR-lowering hints that
     /// short-circuit the type-table lookup for optional nil-comparison
     /// dispatch.  When the hint is `false`, the fallback query is still
@@ -205,6 +209,7 @@ impl Cg<'_, '_, '_> {
         mut left: CompiledValue,
         mut right: CompiledValue,
         op: VirBinOp,
+        promoted_ty: VirTypeId,
         line: u32,
         lhs_is_optional: bool,
         rhs_is_optional: bool,
@@ -248,18 +253,15 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        let left_vir_ty = left.type_id;
-        let left_is_string = left_vir_ty == VirTypeId::STRING;
-        let is_unsigned = lhs_is_unsigned || left_vir_ty.is_unsigned_int();
+        let left_is_string = left.type_id == VirTypeId::STRING;
+        let is_unsigned = lhs_is_unsigned || left.type_id.is_unsigned_int();
 
-        // Determine result type using type promotion rules.
-        // For numeric types, delegate to the canonical VIR numeric_model function.
-        // For non-numeric types (like strings), use left's type directly.
-        let (result_vir_ty, result_ty) = if left_vir_ty.is_numeric() && right.type_id.is_numeric() {
-            let promoted = numeric_result_type_v(left_vir_ty, right.type_id);
-            (promoted, vir_type_id_to_cranelift_type(promoted))
+        // Use the pre-resolved promoted operand type from the VIR node.
+        let result_vir_ty = promoted_ty;
+        let result_ty = if promoted_ty.is_numeric() {
+            vir_type_id_to_cranelift_type(promoted_ty)
         } else {
-            (left_vir_ty, left.ty)
+            left.ty
         };
 
         let (left_val, right_val) = if result_ty == types::F128 {

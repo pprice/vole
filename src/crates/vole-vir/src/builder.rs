@@ -119,6 +119,7 @@ impl VirBuilder {
             rhs,
             ty,
             vir_ty: ty,
+            promoted_ty: ty,
             line,
             lhs_is_optional: false,
             rhs_is_optional: false,

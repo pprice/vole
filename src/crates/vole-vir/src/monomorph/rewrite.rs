@@ -239,6 +239,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             rhs,
             ty,
             vir_ty,
+            promoted_ty,
             line,
             ..
         } => VirExpr::BinaryOp {
@@ -247,6 +248,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             rhs: rewrite_ref(rhs, ctx),
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
+            promoted_ty: ctx.remap(*promoted_ty),
             line: *line,
             // Rederive will recompute from concrete types after monomorphization.
             lhs_is_optional: false,
@@ -1446,6 +1448,7 @@ mod tests {
                         }),
                         ty: type_id(10),
                         vir_ty: param_id,
+                        promoted_ty: param_id,
                         line: 1,
                         lhs_is_optional: false,
                         rhs_is_optional: false,

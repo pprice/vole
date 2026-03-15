@@ -18,6 +18,7 @@ use vole_vir::expr::{
     VirStaticMethodMonomorphKey, VirStringPart, VirUnOp,
 };
 use vole_vir::func::VirBody;
+use vole_vir::numeric_model::numeric_result_type_v;
 use vole_vir::refs::VirRef;
 use vole_vir::stmt::VirStmt;
 
@@ -253,12 +254,37 @@ fn lower_binary(
         false
     };
 
+    // Pre-compute the promoted operand type so codegen can read it
+    // directly instead of recomputing via numeric_result_type_v.
+    // For arithmetic/bitwise ops, vir_ty IS the promoted type.
+    // For comparisons (result is BOOL), derive from operand types.
+    let promoted_ty = if !ctx.generic && vir_ty == VirTypeId::BOOL {
+        match (
+            ctx.node_map.get_type(bin_expr.left.id),
+            ctx.node_map.get_type(bin_expr.right.id),
+        ) {
+            (Some(l), Some(r)) => {
+                let lv = ctx.translate(l);
+                let rv = ctx.translate(r);
+                if lv.is_numeric() && rv.is_numeric() {
+                    numeric_result_type_v(lv, rv)
+                } else {
+                    lv
+                }
+            }
+            _ => vir_ty,
+        }
+    } else {
+        vir_ty
+    };
+
     Box::new(VirExpr::BinaryOp {
         op: vir_op,
         lhs,
         rhs,
         ty: compat_ty,
         vir_ty,
+        promoted_ty,
         line: expr.span.line,
         lhs_is_optional,
         rhs_is_optional,
@@ -533,6 +559,7 @@ fn lower_compound_assign(
                 rhs,
                 ty: compat_ty,
                 vir_ty,
+                promoted_ty: vir_ty,
                 line: expr.span.line,
                 lhs_is_optional: false,
                 rhs_is_optional: false,
@@ -562,6 +589,7 @@ fn lower_compound_assign(
                 rhs,
                 ty: compat_ty,
                 vir_ty,
+                promoted_ty: vir_ty,
                 line: expr.span.line,
                 lhs_is_optional: false,
                 rhs_is_optional: false,
@@ -593,6 +621,7 @@ fn lower_compound_assign(
                 rhs,
                 ty: compat_ty,
                 vir_ty,
+                promoted_ty: vir_ty,
                 line: expr.span.line,
                 lhs_is_optional: false,
                 rhs_is_optional: false,
