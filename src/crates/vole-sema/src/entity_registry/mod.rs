@@ -96,7 +96,17 @@ pub struct EntityRegistry {
     ///
     /// Stores concrete instantiations of interface default methods for
     /// implement blocks (e.g., Iterable default methods for `[i64]`, `[string]`).
+    ///
+    /// Unlike other monomorph caches, this cache is NOT cleared between files
+    /// because its entries are determined by the type arena (which is shared and
+    /// monotonically grows), not by file-specific analysis. The `contains` check
+    /// in `register_implement_method_monomorphs` prevents duplicate entries.
     pub implement_method_monomorph_cache: ImplementMethodMonomorphCache,
+
+    /// Number of concrete RuntimeIterator element types at the time
+    /// `implement_method_monomorph_cache` was last populated. Used to skip
+    /// re-registration when the type arena hasn't grown.
+    pub(crate) last_implement_elem_type_count: usize,
 
     /// Cache of substituted field types for generic type instantiations
     pub field_substitution_cache: FieldSubstitutionCache,
@@ -130,6 +140,7 @@ impl EntityRegistry {
             class_method_monomorph_cache: ClassMethodMonomorphCache::new(),
             static_method_monomorph_cache: StaticMethodMonomorphCache::new(),
             implement_method_monomorph_cache: ImplementMethodMonomorphCache::new(),
+            last_implement_elem_type_count: 0,
             field_substitution_cache: FieldSubstitutionCache::new(),
             short_name_cache: std::cell::RefCell::new(ShortNameCache::default()),
         }
@@ -667,11 +678,15 @@ impl EntityRegistry {
     /// and these instances are specific to each program being analyzed.
     /// Prelude modules don't have generic classes that get monomorphized in the main
     /// program, so clearing these caches between test files is safe.
+    ///
+    /// Note: `implement_method_monomorph_cache` is intentionally NOT cleared here.
+    /// Its entries are derived from the shared type arena (which only grows) and
+    /// are not file-specific. Skipping its reset avoids redundant re-registration
+    /// of identical (elem_type x method) pairs across files.
     pub fn clear_monomorph_caches(&mut self) {
         self.monomorph_cache = MonomorphCache::new();
         self.class_method_monomorph_cache = ClassMethodMonomorphCache::new();
         self.static_method_monomorph_cache = StaticMethodMonomorphCache::new();
-        self.implement_method_monomorph_cache = ImplementMethodMonomorphCache::new();
         self.field_substitution_cache.clear();
     }
 }

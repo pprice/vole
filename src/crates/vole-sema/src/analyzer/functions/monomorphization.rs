@@ -582,6 +582,16 @@ impl Analyzer {
             arena.all_concrete_runtime_iterator_elem_types()
         };
 
+        // Skip re-registration if element types haven't grown since last time.
+        // The implement_method_monomorph_cache is not cleared between files (its
+        // entries are arena-derived and stable), so if no new element types appeared,
+        // the cache already contains all needed instances.
+        let current_count = elem_types.len();
+        let last_count = self.entity_registry().last_implement_elem_type_count;
+        if current_count == last_count {
+            return;
+        }
+
         let mut count = 0u32;
 
         for elem_type in &elem_types {
@@ -658,6 +668,10 @@ impl Analyzer {
                 count += 1;
             }
         }
+
+        // Record how many element types we've now covered so subsequent calls
+        // with the same count can skip the scan entirely.
+        self.entity_registry_mut().last_implement_elem_type_count = current_count;
 
         if count > 0 {
             tracing::debug!(
