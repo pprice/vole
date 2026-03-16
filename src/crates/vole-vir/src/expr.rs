@@ -1134,6 +1134,18 @@ pub struct VirMethodDispatchMeta {
     /// dispatch is wrong).  Set during VIR lowering; re-derived after
     /// monomorphization when type parameters become concrete.
     pub receiver_is_interface: bool,
+    /// Pre-computed: the resolved method returns a raw RuntimeIterator pointer
+    /// rather than a boxed Iterator<T> interface.
+    ///
+    /// Set during VIR lowering for:
+    /// - Implemented methods with external binding (runtime functions)
+    /// - DefaultMethod with external binding or on Iterable interface
+    /// - InterfaceMethod on Iterator interface (vtable thunks wrap to RuntimeIterator)
+    /// - IteratorWrap receiver coercion
+    ///
+    /// Codegen uses this to decide whether to apply
+    /// `convert_interface_iterator_return` normalization.
+    pub returns_raw_iterator: bool,
 }
 
 /// A single arm of a `Match` expression.

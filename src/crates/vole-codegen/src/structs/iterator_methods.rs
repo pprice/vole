@@ -31,6 +31,7 @@ impl Cg<'_, '_, '_> {
         expr_id: Option<NodeId>,
         fallback_elem_type: Option<TypeId>,
         return_type_hint: Option<TypeId>,
+        returns_raw_iterator: bool,
     ) -> CodegenResult<(ExternalMethodRef, TypeId)> {
         // Look up the Iterator interface via well-known type metadata
         let iter_type_id = self
@@ -80,7 +81,11 @@ impl Cg<'_, '_, '_> {
                 )
             })?;
 
-        let return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
+        let return_type_id = if returns_raw_iterator {
+            self.convert_interface_iterator_return_by_type(return_type_id)
+        } else {
+            return_type_id
+        };
 
         Ok((external_info, return_type_id))
     }
@@ -126,12 +131,14 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
         expr_id: Option<NodeId>,
         return_type_hint: Option<TypeId>,
+        returns_raw_iterator: bool,
     ) -> CodegenResult<CompiledValue> {
         let (external_info, return_type_id) = self.resolve_iterator_method(
             method_name,
             expr_id,
             Some(elem_type_id),
             return_type_hint,
+            returns_raw_iterator,
         )?;
 
         // When the iterator comes from a variable (borrowed), rc_inc it before

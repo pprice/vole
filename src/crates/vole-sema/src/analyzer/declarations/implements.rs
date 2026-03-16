@@ -28,7 +28,6 @@ impl Analyzer {
 
         // Validate trait exists if specified
         if let (Some(trait_type), None) = (&impl_block.trait_type, &resolved_interface) {
-
             // Provide more specific error for qualified paths
             if is_qualified_path(trait_type) {
                 if let TypeExprKind::QualifiedPath { segments, .. } = &trait_type.kind {

@@ -1265,6 +1265,43 @@ fn lower_method_dispatch_meta(
             .is_some_and(|ty| ctx.type_arena.is_interface(ty))
     };
 
+    // Pre-compute whether the resolved method returns a raw RuntimeIterator
+    // pointer (not a boxed Iterator<T> interface).  This is true for:
+    // 1. Implemented methods with external binding (runtime FFI)
+    // 2. DefaultMethod with external binding OR on Iterable interface
+    // 3. InterfaceMethod on Iterator interface (vtable thunks)
+    // 4. IteratorWrap receiver coercion
+    let returns_raw_iterator = {
+        let from_resolved = sema_method.is_some_and(|resolved| match resolved {
+            crate::resolution::ResolvedMethod::Implemented { external_info, .. } => {
+                external_info.is_some()
+            }
+            crate::resolution::ResolvedMethod::DefaultMethod {
+                external_info,
+                interface_type_def_id,
+                ..
+            } => {
+                external_info.is_some()
+                    || ctx
+                        .name_table
+                        .well_known
+                        .is_iterable_type_def(*interface_type_def_id)
+            }
+            crate::resolution::ResolvedMethod::InterfaceMethod {
+                interface_type_def_id,
+                ..
+            } => ctx
+                .name_table
+                .well_known
+                .is_iterator_type_def(*interface_type_def_id),
+            _ => false,
+        });
+        let from_coercion = receiver_coercion
+            .as_ref()
+            .is_some_and(|c| matches!(c, VirMethodReceiverCoercion::IteratorWrap { .. }));
+        from_resolved || from_coercion
+    };
+
     VirMethodDispatchMeta {
         dispatch_kind,
         receiver_coercion,
@@ -1277,6 +1314,7 @@ fn lower_method_dispatch_meta(
         static_method_generic,
         implement_method_monomorph,
         receiver_is_interface,
+        returns_raw_iterator,
     }
 }
 

@@ -477,6 +477,9 @@ impl Cg<'_, '_, '_> {
     /// This is the optimized path where sema has already computed the slot.
     /// `return_type_override` is the concrete return type from sema's
     /// concrete_return_hint (e.g. RuntimeIterator<T> for iterator methods).
+    /// `_returns_raw_iterator` is carried for documentation — the inner
+    /// function keeps unconditional Iterator→RuntimeIterator normalization
+    /// as a safety net for cross-module test blocks.
     pub(crate) fn interface_dispatch_call_args_by_slot(
         &mut self,
         obj: &CompiledValue,
@@ -484,6 +487,7 @@ impl Cg<'_, '_, '_> {
         slot: u32,
         func_type_id: TypeId,
         return_type_override: Option<TypeId>,
+        _returns_raw_iterator: bool,
     ) -> CodegenResult<CompiledValue> {
         self.interface_dispatch_call_args_inner(
             obj,

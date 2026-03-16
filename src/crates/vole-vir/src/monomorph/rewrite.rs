@@ -931,6 +931,10 @@ fn rewrite_method_dispatch_meta(
         // Copied as-is; rederive_decisions will update from the now-concrete
         // receiver type after substitution.
         receiver_is_interface: meta.receiver_is_interface,
+        // Copied as-is; the flag depends on the resolved method's properties
+        // (external binding, interface identity) which are stable across type
+        // substitution — no rederive needed.
+        returns_raw_iterator: meta.returns_raw_iterator,
     }
 }
 
@@ -2271,6 +2275,7 @@ mod tests {
                             },
                         ),
                         receiver_is_interface: false,
+                        returns_raw_iterator: false,
                     },
                     node_id: NodeId::new_for_test(7),
                     ty: type_id(20),

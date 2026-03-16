@@ -550,6 +550,7 @@ impl Cg<'_, '_, '_> {
                 elem_type_id,
                 None,
                 return_type_hint,
+                dispatch.returns_raw_iterator,
             );
         }
 
@@ -597,6 +598,7 @@ impl Cg<'_, '_, '_> {
                 elem_type,
                 None,
                 return_type_hint,
+                dispatch.returns_raw_iterator,
             );
         }
 
@@ -646,6 +648,7 @@ impl Cg<'_, '_, '_> {
                     method_index,
                     self.resolved_dispatch_func_type_id(resolved),
                     return_type_override,
+                    dispatch.returns_raw_iterator,
                 )?;
                 // Consume the owned RC receiver after the call. For temporaries
                 // (e.g. make_nums().collect()), this rc_dec's the interface's
@@ -1071,10 +1074,14 @@ impl Cg<'_, '_, '_> {
         // returns a raw RuntimeIterator pointer. Convert Iterator<T> → RuntimeIterator<T>
         // so subsequent method calls use direct dispatch instead of vtable dispatch.
         //
+        // The VIR flag `returns_raw_iterator` captures this from sema analysis;
+        // `used_iterable_default_path` is the codegen-derived fallback for
+        // cross-module test blocks where VIR metadata may be absent.
+        //
         // NOTE: Do NOT apply this in all monomorphized contexts — user-defined
         // .iter() methods return boxed Iterator<T> interfaces, not raw pointers.
         // Converting those to RuntimeIterator causes segfaults.
-        if used_iterable_default_path {
+        if dispatch.returns_raw_iterator || used_iterable_default_path {
             return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
         }
         // In monomorphized contexts, the return type may still contain an unsubstituted
