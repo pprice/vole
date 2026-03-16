@@ -280,6 +280,36 @@ impl TypeArena {
         matches!(self.get(id), SemaType::RuntimeIterator(_))
     }
 
+    /// Check if a type is an `Iterator<T>` interface type (using well-known TypeDefId).
+    ///
+    /// Returns `true` if the well-known Iterator TypeDefId has been populated and the
+    /// type at `id` is `SemaType::Interface { type_def_id, .. }` where `type_def_id`
+    /// matches the well-known Iterator TypeDefId.
+    pub fn is_iterator_interface(&self, id: TypeId) -> bool {
+        let Some(well_known_id) = self.well_known_iterator_type_def_id else {
+            return false;
+        };
+        matches!(
+            self.get(id),
+            SemaType::Interface { type_def_id, .. } if *type_def_id == well_known_id
+        )
+    }
+
+    /// Extract the element type `T` from an `Iterator<T>` interface type.
+    ///
+    /// Returns `Some(T)` if the type is `SemaType::Interface` matching the well-known
+    /// Iterator TypeDefId and has exactly one type argument. Returns `None` otherwise.
+    pub fn unwrap_iterator_interface_elem(&self, id: TypeId) -> Option<TypeId> {
+        let well_known_id = self.well_known_iterator_type_def_id?;
+        match self.get(id) {
+            SemaType::Interface {
+                type_def_id,
+                type_args,
+            } if *type_def_id == well_known_id && type_args.len() == 1 => Some(type_args[0]),
+            _ => None,
+        }
+    }
+
     /// Check if an integer literal value fits within a type (handles unions)
     pub fn literal_fits_id(&self, value: i64, id: TypeId) -> bool {
         // Unknown type accepts any value

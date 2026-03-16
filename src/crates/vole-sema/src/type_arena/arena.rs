@@ -106,6 +106,11 @@ pub struct TypeArena {
     /// Populated during `module()` to avoid full arena scans in
     /// `all_module_types()`.
     module_type_ids: Vec<TypeId>,
+    /// Well-known Iterator interface TypeDefId, populated during prelude loading.
+    ///
+    /// Used by `is_iterator_interface()` and `unwrap_iterator_interface_elem()`
+    /// to identify `Iterator<T>` interface types without string-based name checks.
+    pub(super) well_known_iterator_type_def_id: Option<TypeDefId>,
 }
 
 impl std::fmt::Debug for TypeArena {
@@ -125,6 +130,7 @@ impl TypeArena {
             module_metadata: FxHashMap::default(),
             sentinel_ids: FxHashSet::default(),
             module_type_ids: Vec::new(),
+            well_known_iterator_type_def_id: None,
             // Temporary placeholders - will be filled in below
             primitives: PrimitiveTypes::placeholder(),
         };
@@ -577,6 +583,13 @@ impl TypeArena {
     /// Create a placeholder type (for inference)
     pub fn placeholder(&mut self, kind: PlaceholderKind) -> TypeId {
         self.intern(SemaType::Placeholder(kind))
+    }
+
+    /// Set the well-known Iterator interface TypeDefId.
+    ///
+    /// Called during prelude loading once the Iterator interface is registered.
+    pub fn set_well_known_iterator_type_def_id(&mut self, id: TypeDefId) {
+        self.well_known_iterator_type_def_id = Some(id);
     }
 }
 

@@ -515,6 +515,12 @@ impl Analyzer {
             crate::well_known::populate_type_def_ids(&mut names, &entities);
         }
 
+        // Mirror the Iterator TypeDefId into TypeArena for type-level queries
+        if let Some(iter_def) = self.name_table().well_known.iterator_type_def {
+            self.type_arena_mut()
+                .set_well_known_iterator_type_def_id(iter_def);
+        }
+
         // Cache well-known interface TypeDefIds for fast lookup during body checking.
         // Uses the resolver (which includes short_name fallback) to get the exact same
         // TypeDefIds that resolve_type_str_or_interface would return.
