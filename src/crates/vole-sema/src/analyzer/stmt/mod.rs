@@ -7,7 +7,7 @@ mod destructuring;
 mod error_handling;
 
 use super::*;
-use crate::node_map::IterableKind;
+use crate::node_map::{IterableKind, IteratorSource};
 use crate::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
@@ -553,25 +553,44 @@ impl Analyzer {
     }
 
     /// Classify the iterable type for a for-loop, returning the element type
-    /// and the `IterableKind` annotation for codegen dispatch.
+    /// and the `IterableKind` annotation for VIR lowering dispatch.
+    ///
+    /// Range and Array are fast-path variants.  Everything else (string,
+    /// RuntimeIterator, Iterator interface, custom Iterator/Iterable) is
+    /// unified under `IterableKind::Iterator` with an [`IteratorSource`] tag
+    /// so VIR lowering can emit the correct `VirIterKind` without re-detecting
+    /// types.
     fn classify_iterable(
         &mut self,
         iterable_ty_id: ArenaTypeId,
         for_stmt: &ForStmt,
     ) -> (ArenaTypeId, Option<IterableKind>) {
+        // Fast path: range
         if self.is_range_id(iterable_ty_id) {
             return (self.ty_i64_id(), Some(IterableKind::Range));
         }
+        // Fast path: array
         if let Some(elem_id) = self.unwrap_array_id(iterable_ty_id) {
             return (elem_id, Some(IterableKind::Array { elem_type: elem_id }));
         }
+        // String — conceptually calls .iter(), yields string chars
         if self.is_string_id(iterable_ty_id) {
-            return (self.ty_string_id(), Some(IterableKind::String));
+            return (
+                self.ty_string_id(),
+                Some(IterableKind::Iterator {
+                    elem_type: self.ty_string_id(),
+                    source: IteratorSource::String,
+                }),
+            );
         }
+        // Direct RuntimeIterator<T> — pass through
         if let Some(elem_id) = self.unwrap_runtime_iterator_id(iterable_ty_id) {
             return (
                 elem_id,
-                Some(IterableKind::IteratorInterface { elem_type: elem_id }),
+                Some(IterableKind::Iterator {
+                    elem_type: elem_id,
+                    source: IteratorSource::RuntimeIterator,
+                }),
             );
         }
         // Direct Iterator<T> interface (e.g. from arr.iter(), or a function returning Iterator<T>)
@@ -579,23 +598,32 @@ impl Analyzer {
             self.type_arena_mut().runtime_iterator(elem_id);
             return (
                 elem_id,
-                Some(IterableKind::IteratorInterface { elem_type: elem_id }),
+                Some(IterableKind::Iterator {
+                    elem_type: elem_id,
+                    source: IteratorSource::IteratorInterface,
+                }),
             );
         }
-        // Class/struct implementing Iterator<T> via extend
+        // Class/struct implementing Iterator<T> via extend — box to interface, then wrap
         if let Some(elem_id) = self.extract_custom_iterator_element_type_id(iterable_ty_id) {
             self.type_arena_mut().runtime_iterator(elem_id);
             return (
                 elem_id,
-                Some(IterableKind::CustomIterator { elem_type: elem_id }),
+                Some(IterableKind::Iterator {
+                    elem_type: elem_id,
+                    source: IteratorSource::CustomIterator,
+                }),
             );
         }
-        // Class/struct implementing Iterable<T> — codegen calls .iter() first
+        // Class/struct implementing Iterable<T> — call .iter() to get Iterator<T>, then wrap
         if let Some(elem_id) = self.extract_iterable_element_type_id(iterable_ty_id) {
             self.type_arena_mut().runtime_iterator(elem_id);
             return (
                 elem_id,
-                Some(IterableKind::CustomIterable { elem_type: elem_id }),
+                Some(IterableKind::Iterator {
+                    elem_type: elem_id,
+                    source: IteratorSource::CustomIterable,
+                }),
             );
         }
 

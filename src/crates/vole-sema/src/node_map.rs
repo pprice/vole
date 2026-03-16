@@ -33,28 +33,51 @@ pub use vole_identity::{StringConversion, UnionStorageKind};
 
 /// Classification of a for-loop's iterable, annotated by sema.
 ///
-/// Codegen uses this to dispatch to the correct loop compilation strategy
-/// without re-detecting types.
+/// Sema resolves every for-loop iterable to one of four cases:
+/// - Range: `0..10` — fast counter loop
+/// - Array: `[1, 2, 3]` — indexed element access
+/// - Iterator: anything that produces an `Iterator<T>` — sema records the
+///   [`IteratorSource`] so VIR lowering can emit the correct wrapping/boxing
+///   without re-detecting types.
+/// - Generic: bare type parameter (`T`) — resolved after monomorphization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IterableKind {
     /// `0..10` or `0..=10` — range iteration (i64 loop var)
     Range,
     /// `[1, 2, 3]` — dynamic array iteration
     Array { elem_type: TypeId },
-    /// `"hello"` — string character iteration (yields string)
-    String,
-    /// Direct `Iterator<T>` interface value (e.g. from a function returning Iterator<T>)
-    IteratorInterface { elem_type: TypeId },
-    /// Class/struct implementing `Iterator<T>` via extend
-    CustomIterator { elem_type: TypeId },
-    /// Class/struct implementing `Iterable<T>` — codegen calls `.iter()` first
-    CustomIterable { elem_type: TypeId },
+    /// Any iterator-producing expression.  The `source` field tells VIR
+    /// lowering what conversion is needed to reach a `RuntimeIterator`.
+    Iterator {
+        elem_type: TypeId,
+        source: IteratorSource,
+    },
     /// Placeholder for generic lowering mode.
     ///
     /// Used when the iterable expression has a bare type-parameter type (`T`)
     /// and sema cannot classify the iteration strategy.  The concrete kind is
     /// resolved during VIR monomorphization.
     Generic { elem_type: TypeId },
+}
+
+/// How the iterable expression produces an `Iterator<T>`.
+///
+/// Stored alongside `IterableKind::Iterator` so that VIR lowering can emit
+/// the correct `VirIterKind` variant without re-detecting the iterable type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IteratorSource {
+    /// Already a `RuntimeIterator<T>` — pass through directly.
+    RuntimeIterator,
+    /// Already an `Iterator<T>` interface value — wrap via `InterfaceIter`.
+    IteratorInterface,
+    /// String — call `StringCharsIter` runtime function.
+    String,
+    /// Custom class/struct implementing `Iterator<T>` — box to interface,
+    /// then wrap via `InterfaceIter`.
+    CustomIterator,
+    /// Custom class/struct implementing `Iterable<T>` — call `.iter()` to
+    /// get `Iterator<T>`, then wrap via `InterfaceIter`.
+    CustomIterable,
 }
 
 /// Interface coercion annotation, stored by sema at sites where a value
@@ -975,8 +998,20 @@ mod tests {
         );
 
         // iterable_kind
-        map.set_iterable_kind(node, IterableKind::String);
-        assert_eq!(map.get_iterable_kind(node), Some(IterableKind::String));
+        map.set_iterable_kind(
+            node,
+            IterableKind::Iterator {
+                elem_type: TypeId::STRING,
+                source: IteratorSource::String,
+            },
+        );
+        assert_eq!(
+            map.get_iterable_kind(node),
+            Some(IterableKind::Iterator {
+                elem_type: TypeId::STRING,
+                source: IteratorSource::String,
+            })
+        );
 
         // coercion_kind
         let ck = CoercionKind::IteratorWrap {
