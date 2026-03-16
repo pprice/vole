@@ -1501,10 +1501,10 @@ fn lower_struct_literal(
 
 /// Pre-compute per-field coercion hints for a class instance literal.
 ///
-/// For each field in the literal, determines whether the field's declared type
-/// is an interface and whether the init expression's type is already an
-/// interface, producing a `FieldCoercionHint` that codegen reads instead of
-/// calling `vir_query_is_interface_v()` at compile time.
+/// For each field in the literal, determines the exact coercion needed to
+/// store the init value into the field (unknown boxing/copy, union
+/// boxing/copy, interface boxing/copy, or none).  Codegen reads the
+/// resulting `FieldCoercionHint` with no type queries.
 ///
 /// Returns an empty vec in generic mode (codegen falls back to type queries).
 fn classify_class_field_coercions(
@@ -1512,48 +1512,81 @@ fn classify_class_field_coercions(
     type_def_id: TypeDefId,
     ctx: &LoweringCtx<'_>,
 ) -> Vec<vole_vir::FieldCoercionHint> {
+    use vole_vir::FieldCoercionHint;
+
     if ctx.generic {
         return Vec::new();
     }
 
+    let type_def = ctx.entities.get_type(type_def_id);
+    let generic_info = match type_def.generic_info.as_ref() {
+        Some(gi) => gi,
+        None => return vec![FieldCoercionHint::Unresolved; sl.fields.len()],
+    };
+
     sl.fields
         .iter()
-        .map(|f| classify_single_field_coercion(f, type_def_id, ctx))
+        .map(|f| classify_single_field_coercion(f, generic_info, ctx))
         .collect()
 }
 
 /// Classify a single field's coercion hint.
+///
+/// Determines the exact coercion needed to store the init value into
+/// the field: unknown boxing/copy, union boxing/copy, interface
+/// boxing/copy, or no coercion.
 fn classify_single_field_coercion(
     f: &vole_frontend::ast::StructFieldInit,
-    type_def_id: TypeDefId,
+    generic_info: &crate::entity_defs::GenericTypeInfo,
     ctx: &LoweringCtx<'_>,
 ) -> vole_vir::FieldCoercionHint {
     use vole_vir::FieldCoercionHint;
 
-    // Look up the field's declared type from the entity registry.
     let field_name_str = ctx.interner.resolve(f.name);
-    let type_def = ctx.entities.get_type(type_def_id);
-    let generic_info = match type_def.generic_info.as_ref() {
-        Some(gi) => gi,
-        None => return FieldCoercionHint::Unresolved,
-    };
     let field_idx = match generic_info.field_index_by_name(field_name_str, ctx.name_table) {
         Some(idx) => idx,
         None => return FieldCoercionHint::Unresolved,
     };
     let field_ty = generic_info.field_types[field_idx];
-
-    if !ctx.type_arena.is_interface(field_ty) {
-        return FieldCoercionHint::None;
-    }
-
-    // Field is interface-typed. Check if the init value is already an interface.
     let init_ty = ctx.node_map.get_type(f.value.id).unwrap_or(TypeId::UNKNOWN);
-    if ctx.type_arena.is_interface(init_ty) {
-        FieldCoercionHint::InterfaceCopy
-    } else {
-        FieldCoercionHint::InterfaceBox
+
+    // When the field or init type contains unsubstituted type parameters
+    // (e.g. from `lower_monomorphized_function` which re-lowers generic
+    // methods with concrete codegen types but still sees generic sema
+    // field types), we cannot classify reliably — fall back to codegen
+    // type queries.
+    if ctx.type_arena.contains_type_param(field_ty) || ctx.type_arena.contains_type_param(init_ty) {
+        return FieldCoercionHint::Unresolved;
     }
+
+    // Unknown field: box concrete values, copy existing unknowns.
+    if ctx.type_arena.is_unknown(field_ty) {
+        return if ctx.type_arena.is_unknown(init_ty) {
+            FieldCoercionHint::UnknownCopy
+        } else {
+            FieldCoercionHint::UnknownBox
+        };
+    }
+
+    // Union field: wrap concrete values, copy existing unions.
+    if ctx.type_arena.is_union(field_ty) {
+        return if ctx.type_arena.is_union(init_ty) {
+            FieldCoercionHint::UnionCopy
+        } else {
+            FieldCoercionHint::UnionBox
+        };
+    }
+
+    // Interface field: box concrete values, copy existing interfaces.
+    if ctx.type_arena.is_interface(field_ty) {
+        return if ctx.type_arena.is_interface(init_ty) {
+            FieldCoercionHint::InterfaceCopy
+        } else {
+            FieldCoercionHint::InterfaceBox
+        };
+    }
+
+    FieldCoercionHint::None
 }
 
 /// Lower a call expression to `VirExpr::Call`.

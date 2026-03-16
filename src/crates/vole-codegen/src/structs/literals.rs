@@ -44,12 +44,9 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Coerce a value to match a field's declared type, using a pre-computed
-    /// coercion hint for the interface boxing decision when available.
+    /// coercion hint.
     ///
-    /// When `hint` is `Some`, the interface boxing path is determined by the
-    /// hint without querying `vir_query_is_interface_v()`.  Unknown and union
-    /// coercions still use type queries (those are handled by other tickets).
-    ///
+    /// The hint fully determines the coercion path with no type queries.
     /// When `hint` is `None` or `Unresolved`, falls back to the full
     /// `coerce_field_value_v()` path.
     pub(crate) fn coerce_field_value_with_hint(
@@ -62,32 +59,16 @@ impl Cg<'_, '_, '_> {
 
         match hint {
             Some(FieldCoercionHint::InterfaceBox) => {
-                // Hint says field is interface-typed and value is concrete.
                 self.box_interface_value_v(value, field_vir_ty)
             }
-            Some(FieldCoercionHint::InterfaceCopy) => {
-                // Both field and value are interface-typed.
-                self.copy_interface_fat_ptr(value)
+            Some(FieldCoercionHint::InterfaceCopy) => self.copy_interface_fat_ptr(value),
+            Some(FieldCoercionHint::UnknownBox) => self.box_to_unknown_no_inc(value),
+            Some(FieldCoercionHint::UnknownCopy) => self.copy_tagged_value_to_heap(value),
+            Some(FieldCoercionHint::UnionBox) => {
+                self.construct_union_heap_id_v(value, field_vir_ty)
             }
-            Some(FieldCoercionHint::None) => {
-                // Interface boxing is not needed per the hint. Still check
-                // unknown and union coercions (separate annotation tickets).
-                let field_is_unknown = self.vir_query_is_unknown_v(field_vir_ty);
-                let field_is_union = self.vir_query_is_union_v(field_vir_ty);
-                let value_is_unknown = self.vir_query_is_unknown_v(value.type_id);
-                let value_is_union = self.vir_query_is_union_v(value.type_id);
-                if field_is_unknown && !value_is_unknown {
-                    self.box_to_unknown_no_inc(value)
-                } else if field_is_unknown && value_is_unknown {
-                    self.copy_tagged_value_to_heap(value)
-                } else if field_is_union && !value_is_union {
-                    self.construct_union_heap_id_v(value, field_vir_ty)
-                } else if field_is_union && value_is_union {
-                    self.copy_union_to_heap(value)
-                } else {
-                    Ok(value)
-                }
-            }
+            Some(FieldCoercionHint::UnionCopy) => self.copy_union_to_heap(value),
+            Some(FieldCoercionHint::None) => Ok(value),
             Some(FieldCoercionHint::Unresolved) => {
                 tracing::warn!(
                     "FieldCoercionHint::Unresolved reached codegen — \

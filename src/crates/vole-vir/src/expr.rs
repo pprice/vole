@@ -769,6 +769,14 @@ pub enum FieldCoercionHint {
     InterfaceBox,
     /// Copy existing interface fat pointer (value is already an interface).
     InterfaceCopy,
+    /// Box concrete value to unknown (TaggedValue on heap).
+    UnknownBox,
+    /// Copy existing unknown (TaggedValue) to a new heap allocation.
+    UnknownCopy,
+    /// Wrap concrete value into a heap-allocated union buffer.
+    UnionBox,
+    /// Copy existing union buffer to a new heap allocation.
+    UnionCopy,
     /// Unresolved — used in generic templates where the field or value
     /// type contains type parameters.  Codegen falls back to type queries.
     Unresolved,

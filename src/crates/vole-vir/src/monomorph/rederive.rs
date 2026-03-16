@@ -1517,10 +1517,8 @@ fn compute_class_physical_slot_and_type(
 /// monomorphization.
 ///
 /// For each `Unresolved` hint, looks up the field's concrete VIR type via
-/// type parameter substitution, then classifies:
-/// - Field is interface, value is interface → `InterfaceCopy`
-/// - Field is interface, value is concrete → `InterfaceBox`
-/// - Otherwise → `None`
+/// type parameter substitution, then classifies into the full coercion kind
+/// (unknown boxing/copy, union boxing/copy, interface boxing/copy, or none).
 fn rederive_field_coercions(
     fields: &[(Symbol, VirRef)],
     coercions: &mut [FieldCoercionHint],
@@ -1566,6 +1564,9 @@ fn build_type_param_subs(
 }
 
 /// Resolve a single field's coercion hint using the now-concrete types.
+///
+/// Classifies the coercion needed: unknown boxing/copy, union
+/// boxing/copy, interface boxing/copy, or none.
 fn resolve_single_field_coercion(
     field_sym: Symbol,
     val_ref: &VirRef,
@@ -1586,16 +1587,38 @@ fn resolve_single_field_coercion(
             None => return FieldCoercionHint::Unresolved,
         }
     };
-    if !table.is_interface(concrete_field_ty) {
-        return FieldCoercionHint::None;
+
+    // Unknown field: box concrete values, copy existing unknowns.
+    if table.is_unknown(concrete_field_ty) {
+        let val_is_unknown = extract_vir_ty(val_ref).is_some_and(|vt| table.is_unknown(vt));
+        return if val_is_unknown {
+            FieldCoercionHint::UnknownCopy
+        } else {
+            FieldCoercionHint::UnknownBox
+        };
     }
-    // Field is interface-typed. Check if the init value is already an interface.
-    let val_is_iface = extract_vir_ty(val_ref).is_some_and(|vt| table.is_interface(vt));
-    if val_is_iface {
-        FieldCoercionHint::InterfaceCopy
-    } else {
-        FieldCoercionHint::InterfaceBox
+
+    // Union field: wrap concrete values, copy existing unions.
+    if table.is_union(concrete_field_ty) {
+        let val_is_union = extract_vir_ty(val_ref).is_some_and(|vt| table.is_union(vt));
+        return if val_is_union {
+            FieldCoercionHint::UnionCopy
+        } else {
+            FieldCoercionHint::UnionBox
+        };
     }
+
+    // Interface field: box concrete values, copy existing interfaces.
+    if table.is_interface(concrete_field_ty) {
+        let val_is_iface = extract_vir_ty(val_ref).is_some_and(|vt| table.is_interface(vt));
+        return if val_is_iface {
+            FieldCoercionHint::InterfaceCopy
+        } else {
+            FieldCoercionHint::InterfaceBox
+        };
+    }
+
+    FieldCoercionHint::None
 }
 
 /// Re-derive `FieldStorage` on destructure pattern fields after monomorphization.

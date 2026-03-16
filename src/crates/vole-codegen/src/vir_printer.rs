@@ -1129,6 +1129,10 @@ fn format_field_coercion(hint: &vole_vir::FieldCoercionHint) -> &'static str {
         FieldCoercionHint::None => "none",
         FieldCoercionHint::InterfaceBox => "iface_box",
         FieldCoercionHint::InterfaceCopy => "iface_copy",
+        FieldCoercionHint::UnknownBox => "unknown_box",
+        FieldCoercionHint::UnknownCopy => "unknown_copy",
+        FieldCoercionHint::UnionBox => "union_box",
+        FieldCoercionHint::UnionCopy => "union_copy",
         FieldCoercionHint::Unresolved => "unresolved",
     }
 }
