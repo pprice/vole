@@ -270,14 +270,8 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
-        VirExpr::StringConcat {
-            lhs,
-            rhs,
-            rhs_conversion,
-        } => VirExpr::StringConcat {
-            lhs: rewrite_ref(lhs, ctx),
-            rhs: rewrite_ref(rhs, ctx),
-            rhs_conversion: rhs_conversion.clone(),
+        VirExpr::StringConcat { parts } => VirExpr::StringConcat {
+            parts: parts.iter().map(|p| rewrite_ref(p, ctx)).collect(),
         },
         VirExpr::InterpolatedString { parts } => VirExpr::InterpolatedString {
             parts: parts.iter().map(|p| rewrite_string_part(p, ctx)).collect(),

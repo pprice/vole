@@ -351,17 +351,9 @@ fn rederive_expr(
             rederive_ref(operand, table, ret_ty, entities, call_ctx);
         }
 
-        // Strings — re-derive StringConversion::Generic
-        VirExpr::StringConcat {
-            lhs,
-            rhs,
-            rhs_conversion,
-        } => {
-            rederive_ref(lhs, table, ret_ty, entities, call_ctx);
-            rederive_ref(rhs, table, ret_ty, entities, call_ctx);
-            // Re-derive rhs_conversion from now-concrete rhs type.
-            if let Some(rhs_vir_ty) = extract_vir_ty(rhs) {
-                rederive_string_conversion(rhs_conversion, rhs_vir_ty, table);
+        VirExpr::StringConcat { parts } => {
+            for part in parts.iter_mut() {
+                rederive_ref(part, table, ret_ty, entities, call_ctx);
             }
         }
         VirExpr::InterpolatedString { parts } => {
