@@ -209,7 +209,12 @@ impl Cg<'_, '_, '_> {
         lhs_is_unsigned: bool,
         comparison_hint: ComparisonHint,
     ) -> CodegenResult<CompiledValue> {
-        // Dispatch Eq/Ne special cases via pre-resolved comparison hint.
+        // Guard: monomorphized generics may have stale ComparisonHint (e.g.
+        // IntCmp for strings) because FieldLoad vir_ty isn't rederived from
+        // Param to concrete type. Use codegen's compiled types as truth.
+        if matches!(op, VirBinOp::Eq | VirBinOp::Ne) && self.vir_query_is_string_v(left.type_id) {
+            return self.dispatch_string_eq(left, right, op);
+        }
         if matches!(op, VirBinOp::Eq | VirBinOp::Ne) {
             match comparison_hint {
                 ComparisonHint::OptionalNilEq => {
