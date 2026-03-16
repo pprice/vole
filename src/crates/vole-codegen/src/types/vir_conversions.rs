@@ -16,7 +16,7 @@ use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::{sextend_const, uextend_const};
-use vole_identity::{Interner, NameId, NameTable, Symbol, TypeDefId, VirTypeId};
+use vole_identity::{BoxingStrategy, Interner, NameId, NameTable, Symbol, TypeDefId, VirTypeId};
 use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};
@@ -1092,79 +1092,57 @@ pub(crate) fn vir_convert_to_type(
 
 /// Convert a value to a uniform word representation for interface dispatch.
 ///
-/// VIR equivalent of `value_to_word()` in conversions.rs.
+/// Dispatches on [`BoxingStrategy`] pre-computed by VirTypeTable, so codegen
+/// doesn't re-query VirType structure.
 pub(crate) fn vir_value_to_word(
     builder: &mut FunctionBuilder,
     value: &super::CompiledValue,
     pointer_type: Type,
     heap_alloc_ref: Option<FuncRef>,
-    entities: &impl VirStructEntityLookup,
+    _entities: &impl VirStructEntityLookup,
     table: &VirTypeTable,
 ) -> CodegenResult<Value> {
     let word_type = pointer_type;
-    let word_bytes = word_type.bytes();
+    let strategy = table.boxing_strategy(value.type_id);
 
-    let vir_ty = value.type_id;
-    let value_size = vir_type_id_size(vir_ty, pointer_type, entities, table);
-    let needs_box = value_size > word_bytes;
+    let word = match strategy {
+        BoxingStrategy::Identity => value.value,
 
-    if needs_box {
-        // If the Cranelift type is already a pointer and the Vole type needs boxing,
-        // then the value is already a pointer to boxed data. Just return it directly.
-        if value.ty == pointer_type {
-            return Ok(value.value);
-        }
-        let Some(heap_alloc_ref) = heap_alloc_ref else {
-            return Err(CodegenError::missing_resource(
-                "heap allocator for interface boxing",
-            ));
-        };
-        let size_val = builder.ins().iconst(pointer_type, value_size as i64);
-        let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
-        let alloc_ptr = builder.inst_results(alloc_call)[0];
-        builder
-            .ins()
-            .store(MemFlags::new(), value.value, alloc_ptr, 0);
-        return Ok(alloc_ptr);
-    }
-
-    let word = match table.get(vir_ty) {
-        VirType::Primitive(VirPrimitiveKind::F64) => {
-            builder
-                .ins()
-                .bitcast(types::I64, MemFlags::new(), value.value)
-        }
-        VirType::Primitive(VirPrimitiveKind::F32) => {
-            let i32_val = builder
-                .ins()
-                .bitcast(types::I32, MemFlags::new(), value.value);
-            uextend_const(builder, word_type, i32_val)
-        }
-        VirType::Primitive(
-            VirPrimitiveKind::Bool
-            | VirPrimitiveKind::I8
-            | VirPrimitiveKind::U8
-            | VirPrimitiveKind::I16
-            | VirPrimitiveKind::U16
-            | VirPrimitiveKind::I32
-            | VirPrimitiveKind::U32,
-        ) => {
+        BoxingStrategy::Uextend { .. } => {
             if value.ty == word_type {
                 value.value
             } else {
                 uextend_const(builder, word_type, value.value)
             }
         }
-        VirType::Primitive(VirPrimitiveKind::I64 | VirPrimitiveKind::U64) => value.value,
-        VirType::Primitive(VirPrimitiveKind::I128) => {
-            let low = builder.ins().ireduce(types::I64, value.value);
-            if word_type == types::I64 {
-                low
-            } else {
-                uextend_const(builder, word_type, low)
-            }
+
+        BoxingStrategy::BitcastF64 => {
+            builder
+                .ins()
+                .bitcast(types::I64, MemFlags::new(), value.value)
         }
-        _ => value.value,
+
+        BoxingStrategy::BitcastF32Extend => {
+            let i32_val = builder
+                .ins()
+                .bitcast(types::I32, MemFlags::new(), value.value);
+            uextend_const(builder, word_type, i32_val)
+        }
+
+        BoxingStrategy::HeapBox { size } => {
+            let Some(heap_alloc_ref) = heap_alloc_ref else {
+                return Err(CodegenError::missing_resource(
+                    "heap allocator for interface boxing",
+                ));
+            };
+            let size_val = builder.ins().iconst(pointer_type, size as i64);
+            let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
+            let alloc_ptr = builder.inst_results(alloc_call)[0];
+            builder
+                .ins()
+                .store(MemFlags::new(), value.value, alloc_ptr, 0);
+            alloc_ptr
+        }
     };
 
     Ok(word)
@@ -1172,54 +1150,42 @@ pub(crate) fn vir_value_to_word(
 
 /// Convert a uniform word representation back into a typed value.
 ///
-/// VIR equivalent of `word_to_value_type_id()` in conversions.rs.
+/// Dispatches on [`BoxingStrategy`] pre-computed by VirTypeTable, so codegen
+/// doesn't re-query VirType structure.
 pub(crate) fn vir_word_to_value(
     builder: &mut FunctionBuilder,
     word: Value,
     vir_ty: VirTypeId,
     pointer_type: Type,
-    entities: &impl VirStructEntityLookup,
+    _entities: &impl VirStructEntityLookup,
     table: &VirTypeTable,
 ) -> Value {
-    let word_type = pointer_type;
-    let word_bytes = word_type.bytes();
-    let needs_unbox = vir_type_id_size(vir_ty, pointer_type, entities, table) > word_bytes;
+    let strategy = table.boxing_strategy(vir_ty);
 
-    if needs_unbox {
-        let target_type = vir_type_to_cranelift(vir_ty, table, pointer_type);
-        if target_type == pointer_type {
-            return word;
-        }
-        return builder.ins().load(target_type, MemFlags::new(), word, 0);
-    }
+    match strategy {
+        BoxingStrategy::Identity => word,
 
-    match table.get(vir_ty) {
-        VirType::Primitive(VirPrimitiveKind::F64) => {
-            builder.ins().bitcast(types::F64, MemFlags::new(), word)
+        BoxingStrategy::Uextend { from_bits } => {
+            let target = match from_bits {
+                8 => types::I8,
+                16 => types::I16,
+                32 => types::I32,
+                _ => unreachable!("invalid from_bits: {from_bits}"),
+            };
+            builder.ins().ireduce(target, word)
         }
-        VirType::Primitive(VirPrimitiveKind::F32) => {
+
+        BoxingStrategy::BitcastF64 => builder.ins().bitcast(types::F64, MemFlags::new(), word),
+
+        BoxingStrategy::BitcastF32Extend => {
             let i32_val = builder.ins().ireduce(types::I32, word);
             builder.ins().bitcast(types::F32, MemFlags::new(), i32_val)
         }
-        VirType::Primitive(
-            VirPrimitiveKind::Bool | VirPrimitiveKind::I8 | VirPrimitiveKind::U8,
-        ) => builder.ins().ireduce(types::I8, word),
-        VirType::Primitive(VirPrimitiveKind::I16 | VirPrimitiveKind::U16) => {
-            builder.ins().ireduce(types::I16, word)
+
+        BoxingStrategy::HeapBox { .. } => {
+            let target_type = vir_type_to_cranelift(vir_ty, table, pointer_type);
+            builder.ins().load(target_type, MemFlags::new(), word, 0)
         }
-        VirType::Primitive(VirPrimitiveKind::I32 | VirPrimitiveKind::U32) => {
-            builder.ins().ireduce(types::I32, word)
-        }
-        VirType::Primitive(VirPrimitiveKind::I64 | VirPrimitiveKind::U64) => word,
-        VirType::Primitive(VirPrimitiveKind::I128) => {
-            let low = if word_type == types::I64 {
-                word
-            } else {
-                builder.ins().ireduce(types::I64, word)
-            };
-            uextend_const(builder, types::I128, low)
-        }
-        _ => word,
     }
 }
 

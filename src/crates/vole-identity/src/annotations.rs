@@ -137,6 +137,45 @@ pub enum StringConversion {
     Generic { type_id: TypeId },
 }
 
+/// Word-encoding strategy for value-to-word / word-to-value conversions.
+///
+/// Pre-computed from the VIR type so that codegen can dispatch mechanically
+/// without re-querying type structure.  Used for interface dispatch boxing
+/// (packing a typed value into a uniform pointer-width word and back).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BoxingStrategy {
+    /// Value is already word-sized or pointer-typed — no conversion.
+    ///
+    /// Applies to: i64, u64, string, handle, class, array, interface,
+    /// function, struct (pointer-passed), union, optional, fallible, tuple,
+    /// fixed array, range, unknown, error, runtime iterator, meta type,
+    /// void, never.
+    Identity,
+
+    /// Zero-extend a smaller integer to word width; ireduce back.
+    ///
+    /// `from_bits` is the source width (8, 16, or 32).
+    /// Applies to: bool, i8, u8, i16, u16, i32, u32.
+    Uextend { from_bits: u8 },
+
+    /// Bitcast f64 to i64 (to-word) / i64 to f64 (from-word).
+    BitcastF64,
+
+    /// Bitcast f32 to i32 then uextend to word (to-word);
+    /// ireduce word to i32 then bitcast to f32 (from-word).
+    BitcastF32Extend,
+
+    /// Value is oversized (> word bytes) and its Cranelift type is NOT
+    /// pointer_type, so it must be heap-allocated for boxing.
+    ///
+    /// `size` is the byte count to allocate.
+    /// to-word: heap-alloc `size` bytes, store value, return pointer.
+    /// from-word: load value from pointer.
+    ///
+    /// Applies to: i128, f128.
+    HeapBox { size: u32 },
+}
+
 /// A constant value that can be stored in a module.
 ///
 /// This is the public-facing constant type used by the module system and codegen.

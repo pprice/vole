@@ -6,7 +6,7 @@
 // only (`VirTypeId`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::{ArrayStoreStrategy, NameId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, BoxingStrategy, NameId, TypeDefId, TypeId, VirTypeId};
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -650,6 +650,76 @@ impl VirTypeTable {
             }
             _ if self.is_wide(elem) => ArrayStoreStrategy::WideBox,
             _ => ArrayStoreStrategy::DirectScalar,
+        }
+    }
+
+    // -- Boxing strategy (value-to-word / word-to-value) ----------------------
+
+    /// Compute the word-encoding strategy for boxing a value of type `id`.
+    ///
+    /// This classification tells codegen how to pack a typed value into a
+    /// uniform pointer-width word (for interface dispatch) and how to unpack
+    /// it back, without re-querying VirType structure.
+    pub fn boxing_strategy(&self, id: VirTypeId) -> BoxingStrategy {
+        // Sentinel types are zero-sized; their placeholder I8 value passes
+        // through unchanged (no meaningful payload).
+        if self.is_sentinel(id) {
+            return BoxingStrategy::Identity;
+        }
+
+        match self.get(id) {
+            VirType::Primitive(kind) => Self::primitive_boxing_strategy(*kind),
+
+            // All compound and heap types are represented as pointer_type
+            // in Cranelift, so they're already word-sized — identity.
+            VirType::Class { .. }
+            | VirType::Array { .. }
+            | VirType::RuntimeIterator { .. }
+            | VirType::Interface { .. }
+            | VirType::Struct { .. }
+            | VirType::Function { .. }
+            | VirType::Error { .. }
+            | VirType::Union { .. }
+            | VirType::Optional { .. }
+            | VirType::Fallible { .. }
+            | VirType::Tuple { .. }
+            | VirType::FixedArray { .. }
+            | VirType::Range
+            | VirType::MetaType
+            | VirType::Unknown
+            | VirType::Void
+            | VirType::Never
+            | VirType::Param { .. } => BoxingStrategy::Identity,
+        }
+    }
+
+    /// Boxing strategy for a primitive kind.
+    fn primitive_boxing_strategy(kind: VirPrimitiveKind) -> BoxingStrategy {
+        match kind {
+            // Word-sized integers: already fit in a word.
+            VirPrimitiveKind::I64 | VirPrimitiveKind::U64 => BoxingStrategy::Identity,
+
+            // Pointer-sized RC types: already fit in a word.
+            VirPrimitiveKind::String | VirPrimitiveKind::Handle => BoxingStrategy::Identity,
+
+            // Sub-word integers: zero-extend to word, ireduce back.
+            VirPrimitiveKind::Bool | VirPrimitiveKind::I8 | VirPrimitiveKind::U8 => {
+                BoxingStrategy::Uextend { from_bits: 8 }
+            }
+            VirPrimitiveKind::I16 | VirPrimitiveKind::U16 => {
+                BoxingStrategy::Uextend { from_bits: 16 }
+            }
+            VirPrimitiveKind::I32 | VirPrimitiveKind::U32 => {
+                BoxingStrategy::Uextend { from_bits: 32 }
+            }
+
+            // Floats: bitcast to integer representation.
+            VirPrimitiveKind::F64 => BoxingStrategy::BitcastF64,
+            VirPrimitiveKind::F32 => BoxingStrategy::BitcastF32Extend,
+
+            // Wide types: oversized, must heap-box.
+            VirPrimitiveKind::I128 => BoxingStrategy::HeapBox { size: 16 },
+            VirPrimitiveKind::F128 => BoxingStrategy::HeapBox { size: 16 },
         }
     }
 }
@@ -2819,6 +2889,182 @@ mod tests {
         assert_eq!(
             table.substitute_vir_ids(generic_struct, &subs),
             Some(concrete_struct)
+        );
+    }
+
+    // -- BoxingStrategy tests ------------------------------------------------
+
+    #[test]
+    fn boxing_strategy_identity_for_word_sized_integers() {
+        let table = VirTypeTable::new();
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::I64),
+            BoxingStrategy::Identity
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::U64),
+            BoxingStrategy::Identity
+        );
+    }
+
+    #[test]
+    fn boxing_strategy_identity_for_pointer_types() {
+        let table = VirTypeTable::new();
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::STRING),
+            BoxingStrategy::Identity
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::HANDLE),
+            BoxingStrategy::Identity
+        );
+    }
+
+    #[test]
+    fn boxing_strategy_uextend_for_small_integers() {
+        let table = VirTypeTable::new();
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::BOOL),
+            BoxingStrategy::Uextend { from_bits: 8 }
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::I8),
+            BoxingStrategy::Uextend { from_bits: 8 }
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::U8),
+            BoxingStrategy::Uextend { from_bits: 8 }
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::I16),
+            BoxingStrategy::Uextend { from_bits: 16 }
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::U16),
+            BoxingStrategy::Uextend { from_bits: 16 }
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::I32),
+            BoxingStrategy::Uextend { from_bits: 32 }
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::U32),
+            BoxingStrategy::Uextend { from_bits: 32 }
+        );
+    }
+
+    #[test]
+    fn boxing_strategy_bitcast_for_floats() {
+        let table = VirTypeTable::new();
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::F64),
+            BoxingStrategy::BitcastF64
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::F32),
+            BoxingStrategy::BitcastF32Extend
+        );
+    }
+
+    #[test]
+    fn boxing_strategy_heap_box_for_wide_types() {
+        let table = VirTypeTable::new();
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::I128),
+            BoxingStrategy::HeapBox { size: 16 }
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::F128),
+            BoxingStrategy::HeapBox { size: 16 }
+        );
+    }
+
+    #[test]
+    fn boxing_strategy_identity_for_compound_types() {
+        let mut table = VirTypeTable::new();
+
+        // Array
+        let arr = table.intern(
+            VirType::Array {
+                elem: VirTypeId::I64,
+            },
+            None,
+        );
+        assert_eq!(table.boxing_strategy(arr), BoxingStrategy::Identity);
+
+        // Class
+        let cls = table.intern(
+            VirType::Class {
+                def: TypeDefId::new(1),
+                type_args: vec![],
+            },
+            None,
+        );
+        assert_eq!(table.boxing_strategy(cls), BoxingStrategy::Identity);
+
+        // Struct (pointer-passed, identity in boxing)
+        let st = table.intern(
+            VirType::Struct {
+                def: TypeDefId::new(2),
+                type_args: vec![],
+            },
+            None,
+        );
+        assert_eq!(table.boxing_strategy(st), BoxingStrategy::Identity);
+
+        // Union
+        let union_ty = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::I64, VirTypeId::STRING],
+            },
+            None,
+        );
+        assert_eq!(table.boxing_strategy(union_ty), BoxingStrategy::Identity);
+
+        // Optional
+        let opt = table.intern(
+            VirType::Optional {
+                inner: VirTypeId::I64,
+                variants: [VirTypeId::I64, VirTypeId::NIL],
+            },
+            None,
+        );
+        assert_eq!(table.boxing_strategy(opt), BoxingStrategy::Identity);
+
+        // Void, Never, Range, Unknown, MetaType
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::VOID),
+            BoxingStrategy::Identity
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::NEVER),
+            BoxingStrategy::Identity
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::RANGE),
+            BoxingStrategy::Identity
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::UNKNOWN),
+            BoxingStrategy::Identity
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::METATYPE),
+            BoxingStrategy::Identity
+        );
+    }
+
+    #[test]
+    fn boxing_strategy_identity_for_sentinels() {
+        let table = VirTypeTable::new();
+        // NIL and DONE are sentinels
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::NIL),
+            BoxingStrategy::Identity
+        );
+        assert_eq!(
+            table.boxing_strategy(VirTypeId::DONE),
+            BoxingStrategy::Identity
         );
     }
 }
