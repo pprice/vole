@@ -27,11 +27,7 @@ impl Analyzer {
             .and_then(|trait_type| self.resolve_interface_path(trait_type, interner));
 
         // Validate trait exists if specified
-        if impl_block.trait_type.is_some() && resolved_interface.is_none() {
-            let trait_type = impl_block
-                .trait_type
-                .as_ref()
-                .expect("trait_type checked is_some above");
+        if let (Some(trait_type), None) = (&impl_block.trait_type, &resolved_interface) {
 
             // Provide more specific error for qualified paths
             if is_qualified_path(trait_type) {

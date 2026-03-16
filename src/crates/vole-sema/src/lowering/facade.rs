@@ -692,6 +692,7 @@ fn clone_cached(cached: &CachedModuleVir) -> CachedModuleVir {
 /// Appends a new entry to the multi-entry cache.  Each entry is keyed by
 /// its sorted `module_paths`, so different import combinations coexist
 /// without thrashing.
+#[expect(clippy::too_many_arguments)]
 fn store_cache(
     cache_cell: &Option<Rc<RefCell<Vec<CachedModuleVir>>>>,
     module_vir_functions: &[VirFunction],

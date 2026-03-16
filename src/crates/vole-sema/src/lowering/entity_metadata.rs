@@ -718,7 +718,6 @@ pub fn populate_implement_block_entries_file(
 /// Populate implement block entries from imported module programs.
 ///
 /// Iterates each module's implement blocks, skipping modules with errors.
-#[expect(clippy::too_many_arguments)]
 pub fn populate_implement_block_entries_modules(
     meta: &mut VirEntityMetadata,
     module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,

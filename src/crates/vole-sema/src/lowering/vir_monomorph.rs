@@ -45,7 +45,6 @@ pub fn build_generic_vir_storage(
 /// index -- used later by `resolve_all_calls` to resolve `Unresolved`
 /// calls to `VirDirect`.
 #[compile_timed(DEBUG)]
-#[expect(clippy::too_many_arguments)]
 pub fn run_early_vir_monomorphize(
     vir_functions: &mut Vec<VirFunction>,
     generic_vir_functions: &[VirFunction],

@@ -116,6 +116,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn runtime_iterator_method(
         &mut self,
         obj: &CompiledValue,
