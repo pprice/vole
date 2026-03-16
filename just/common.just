@@ -51,19 +51,22 @@ unit:
         echo "${FILES[$i]}" >> "$WORK/shard_$((i % NCPU)).txt"
     done
 
-    # Launch shards in background
+    # Launch shards in background (5 min timeout per shard)
     PIDS=()
     for ((i=0; i<NCPU; i++)); do
         [[ -s "$WORK/shard_$i.txt" ]] || continue
         mapfile -t SHARD_FILES < "$WORK/shard_$i.txt"
         (
-            "$VOLE" test -q --color=never "${SHARD_FILES[@]}" 2>&1 | sed "s/^/[test:$i] /"  > "$WORK/out_$i.txt"
-            echo $? > "$WORK/exit_$i.txt"
+            timeout 300 "$VOLE" test -q --color=never "${SHARD_FILES[@]}" 2>&1 | sed "s/^/[test:$i] /"  > "$WORK/out_$i.txt"
+            STATUS=${PIPESTATUS[0]}
+            if [[ $STATUS -eq 124 ]]; then
+                echo "[test:$i] error: shard timed out after 300s" >> "$WORK/out_$i.txt"
+            fi
+            echo $STATUS > "$WORK/exit_$i.txt"
         ) &
         PIDS+=($!)
     done
 
-    # Wait for all, then print output atomically per shard
     ANY_FAIL=0
     for pid in "${PIDS[@]}"; do wait "$pid" || true; done
     for ((i=0; i<NCPU; i++)); do
