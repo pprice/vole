@@ -24,9 +24,10 @@ use super::super::context::Cg;
 impl Cg<'_, '_, '_> {
     /// Compile a VIR `FieldLoad` expression.
     ///
-    /// When `storage` is resolved (`Direct` or `Heap`), dispatches directly
-    /// to the struct or class field-load path using the pre-resolved slot
-    /// from sema/VIR lowering — no `vir_query_is_struct_v()` needed.
+    /// When `storage` is resolved (`Direct` or `Heap`), uses the
+    /// pre-resolved slot from VIR lowering.  The field type is read from
+    /// the pre-computed `field_ty` on the storage variant, avoiding the
+    /// `vir_field_slot_and_type()` lookup.
     /// Falls back to `extract_field` (with arena lookup) for `ByName`.
     pub(crate) fn compile_vir_field_load(
         &mut self,
@@ -37,12 +38,12 @@ impl Cg<'_, '_, '_> {
         let obj = self.compile_vir_expr(object)?;
 
         match storage {
-            FieldStorage::Direct { slot } => {
+            FieldStorage::Direct { slot, .. } => {
                 let field_name = self.interner().resolve(field);
                 let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
                 self.struct_field_load(obj.value, slot as usize, field_type_id, obj.type_id)
             }
-            FieldStorage::Heap { slot } => {
+            FieldStorage::Heap { slot, .. } => {
                 let field_name = self.interner().resolve(field);
                 let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
                 self.heap_field_load(obj, slot as usize, field_type_id)
@@ -62,7 +63,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR `FieldStore` expression.
     ///
     /// When `storage` is resolved (`Direct` or `Heap`), uses the
-    /// pre-resolved slot and dispatch kind from sema lowering.
+    /// pre-resolved slot from VIR lowering.
     /// Falls back to the full arena lookup when `storage` is `ByName`.
     pub(crate) fn compile_vir_field_store(
         &mut self,
@@ -75,12 +76,12 @@ impl Cg<'_, '_, '_> {
         let value = self.compile_vir_expr(value_expr)?;
 
         match storage {
-            FieldStorage::Direct { slot } => {
+            FieldStorage::Direct { slot, .. } => {
                 let field_name = self.interner().resolve(field);
                 let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
                 self.vir_struct_field_store(obj, slot as usize, field_type_id, value)
             }
-            FieldStorage::Heap { slot } => {
+            FieldStorage::Heap { slot, .. } => {
                 let field_name = self.interner().resolve(field);
                 let (_, field_type_id) = self.vir_field_slot_and_type(obj.type_id, field_name)?;
                 self.vir_class_field_store(obj, slot as usize, field_type_id, value)

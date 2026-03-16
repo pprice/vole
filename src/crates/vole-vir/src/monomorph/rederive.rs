@@ -21,8 +21,8 @@ use crate::BuiltinMethod;
 use crate::calls::{CallTarget, NativeAbi};
 use crate::entity_metadata::VirEntityMetadata;
 use crate::expr::{
-    FieldCoercionHint, FieldStorage, IsCheckResult, VirExpr, VirMetaKind, VirMethodDispatchKind,
-    VirPattern, VirStringPart, classify_comparison,
+    FieldCoercionHint, FieldKind, FieldStorage, IsCheckResult, VirExpr, VirMetaKind,
+    VirMethodDispatchKind, VirPattern, VirStringPart, classify_comparison,
 };
 use crate::func::{ReturnAbi, VirBody, VirFunction};
 use crate::implement_dispatch::VirImplementDispatch;
@@ -1491,34 +1491,105 @@ fn resolve_field_storage(
     match table.get(obj_vir_ty) {
         VirType::Struct { def, .. } => {
             let fd = entities.find_field_by_symbol(*def, field)?;
+            let kind = classify_vir_field_kind(fd.vir_ty, table, entities, true);
             Some(FieldStorage::Direct {
                 slot: fd.slot as u32,
+                field_ty: fd.vir_ty,
+                kind,
             })
         }
         VirType::Class { def, .. } => {
-            let slot = compute_class_physical_slot(*def, field, table, entities)?;
-            Some(FieldStorage::Heap { slot })
+            let (slot, field_vir_ty) =
+                compute_class_physical_slot_and_type(*def, field, table, entities)?;
+            let kind = classify_vir_field_kind(field_vir_ty, table, entities, false);
+            Some(FieldStorage::Heap {
+                slot,
+                field_ty: field_vir_ty,
+                kind,
+            })
         }
         _ => None,
     }
 }
 
-/// Compute the physical slot for a class field, accounting for wide types.
+/// Classify a field's physical storage shape from its `VirTypeId`.
+///
+/// When `is_direct` is true (struct field), nested structs and payload
+/// unions are stored inline.  When false (class/heap field), they are
+/// stored as scalar pointers.
+fn classify_vir_field_kind(
+    field_vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+    is_direct: bool,
+) -> FieldKind {
+    if table.is_wide(field_vir_ty) {
+        return FieldKind::Wide;
+    }
+    if is_direct {
+        if table.is_struct(field_vir_ty) {
+            return FieldKind::NestedStruct;
+        }
+        if is_payload_union_vir(field_vir_ty, table, entities) {
+            return FieldKind::PayloadUnion;
+        }
+    }
+    FieldKind::Scalar
+}
+
+/// Check if a VIR type is a payload-carrying union (has at least one
+/// non-sentinel, non-void variant).
+fn is_payload_union_vir(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) -> bool {
+    match table.get(vir_ty) {
+        VirType::Optional { inner, .. } => {
+            !table.is_sentinel(*inner) && !matches!(table.get(*inner), VirType::Void)
+        }
+        VirType::Union { variants } => variants.iter().any(|&v| {
+            !table.is_sentinel(v)
+                && !matches!(table.get(v), VirType::Void)
+                && !is_vir_sentinel_struct(v, table, entities)
+        }),
+        _ => false,
+    }
+}
+
+/// Check if a VIR type is a sentinel struct (zero-field struct used as
+/// an enum tag).
+fn is_vir_sentinel_struct(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) -> bool {
+    if let VirType::Struct { def, .. } = table.get(vir_ty) {
+        entities
+            .get_type_def(*def)
+            .is_some_and(|td| td.kind.is_sentinel())
+    } else {
+        false
+    }
+}
+
+/// Compute the physical slot and field VirTypeId for a class field,
+/// accounting for wide types.
 ///
 /// Iterates fields in declaration order, accumulating physical slots.
 /// Wide types (i128) occupy 2 consecutive slots; all others use 1.
-fn compute_class_physical_slot(
+fn compute_class_physical_slot_and_type(
     type_def_id: vole_identity::TypeDefId,
     target: Symbol,
     table: &VirTypeTable,
     entities: &VirEntityMetadata,
-) -> Option<u32> {
+) -> Option<(u32, VirTypeId)> {
     let td = entities.get_type_def(type_def_id)?;
     let mut physical_slot: u32 = 0;
     for &field_id in &td.fields {
         let fd = entities.get_field_def(field_id)?;
         if fd.symbol == Some(target) {
-            return Some(physical_slot);
+            return Some((physical_slot, fd.vir_ty));
         }
         physical_slot += if table.is_wide(fd.vir_ty) { 2 } else { 1 };
     }

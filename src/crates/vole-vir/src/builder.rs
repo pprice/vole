@@ -534,11 +534,16 @@ mod tests {
         }
 
         let obj = b.build_local_load(dummy_symbol(), ty);
-        let field = b.build_field_load(obj, dummy_symbol(), FieldStorage::Direct { slot: 1 }, ty);
+        let storage = FieldStorage::Direct {
+            slot: 1,
+            field_ty: ty,
+            kind: crate::expr::FieldKind::Scalar,
+        };
+        let field = b.build_field_load(obj, dummy_symbol(), storage, ty);
 
         match field.as_ref() {
             VirExpr::FieldLoad {
-                storage: FieldStorage::Direct { slot: 1 },
+                storage: FieldStorage::Direct { slot: 1, .. },
                 ..
             } => {}
             other => panic!("expected FieldLoad Direct@s1, got {other:?}"),

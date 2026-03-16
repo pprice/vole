@@ -41,12 +41,13 @@ pub use entity_metadata::{
     VirTypeDefKind, compute_field_type_tag,
 };
 pub use expr::{
-    AsCastKind, CoerceKind, ComparisonHint, FieldCoercionHint, FieldStorage, IsCheckResult,
-    VirBinOp, VirCapture, VirCaptureRcKind, VirClassMethodMonomorphKey, VirErrorFieldBinding,
-    VirErrorPatternKind, VirExpr, VirExternalMethodInfo, VirFunctionMonomorphKey, VirMatchArm,
-    VirMetaKind, VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion,
-    VirPattern, VirRcCleanup, VirRecordFieldBinding, VirResolvedMethod,
-    VirStaticMethodMonomorphKey, VirStringPart, VirTupleBinding, VirUnOp, classify_comparison,
+    AsCastKind, CoerceKind, ComparisonHint, FieldCoercionHint, FieldKind, FieldStorage,
+    IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind, VirClassMethodMonomorphKey,
+    VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirExternalMethodInfo,
+    VirFunctionMonomorphKey, VirMatchArm, VirMetaKind, VirMethodDispatchKind,
+    VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern, VirRcCleanup,
+    VirRecordFieldBinding, VirResolvedMethod, VirStaticMethodMonomorphKey, VirStringPart,
+    VirTupleBinding, VirUnOp, classify_comparison,
 };
 pub use func::{ReturnAbi, VirBody, VirFunction, VirTest};
 pub use implement_dispatch::{

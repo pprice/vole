@@ -629,25 +629,19 @@ impl LoweringCtx<'_> {
         if let Some((type_def_id, type_args)) = self.type_arena.unwrap_struct(object_type) {
             if narrowed_from_unknown {
                 return self
-                    .resolve_class_field_slot(type_def_id, type_args, field_name)
-                    .map_or(FieldStorage::ByName, |slot| FieldStorage::Heap {
-                        slot: slot as u32,
-                    });
+                    .resolve_heap_field(type_def_id, type_args, field_name)
+                    .unwrap_or(FieldStorage::ByName);
             }
             return self
-                .resolve_struct_field_slot(type_def_id, type_args, field_name)
-                .map_or(FieldStorage::ByName, |slot| FieldStorage::Direct {
-                    slot: slot as u32,
-                });
+                .resolve_direct_field(type_def_id, type_args, field_name)
+                .unwrap_or(FieldStorage::ByName);
         }
 
         // Try class (reference-counted, heap-allocated).
         if let Some((type_def_id, type_args)) = self.type_arena.unwrap_class(object_type) {
             return self
-                .resolve_class_field_slot(type_def_id, type_args, field_name)
-                .map_or(FieldStorage::ByName, |slot| FieldStorage::Heap {
-                    slot: slot as u32,
-                });
+                .resolve_heap_field(type_def_id, type_args, field_name)
+                .unwrap_or(FieldStorage::ByName);
         }
 
         // Module types carry the ModuleId for codegen dispatch.
@@ -661,32 +655,56 @@ impl LoweringCtx<'_> {
         FieldStorage::ByName
     }
 
-    /// Resolve the logical field slot for a struct field.
-    ///
-    /// Returns the field's index in the struct's field list (0-based).
-    fn resolve_struct_field_slot(
-        &self,
-        type_def_id: TypeDefId,
-        _type_args: &crate::type_arena::TypeIdVec,
-        field_name: &str,
-    ) -> Option<usize> {
-        let type_def = self.entities.get_type(type_def_id);
-        let generic_info = type_def.generic_info.as_ref()?;
-        generic_info.field_index_by_name(field_name, self.name_table)
-    }
-
-    /// Resolve the physical slot for a class field, accounting for wide
-    /// types (i128/f128) that occupy 2 consecutive slots.
-    fn resolve_class_field_slot(
+    /// Resolve a struct field to `Direct` storage with pre-computed
+    /// `field_ty` and `kind`.
+    fn resolve_direct_field(
         &self,
         type_def_id: TypeDefId,
         type_args: &crate::type_arena::TypeIdVec,
         field_name: &str,
-    ) -> Option<usize> {
+    ) -> Option<vole_vir::expr::FieldStorage> {
         let type_def = self.entities.get_type(type_def_id);
         let generic_info = type_def.generic_info.as_ref()?;
 
-        // Build substitution map for generic classes.
+        let subs: FxHashMap<NameId, TypeId> = type_def
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(&param, &arg)| (param, arg))
+            .collect();
+
+        let idx = generic_info.field_index_by_name(field_name, self.name_table)?;
+        let ft = generic_info.field_types[idx];
+        let resolved_ft = if !subs.is_empty() {
+            self.type_arena.lookup_substitute(ft, &subs).unwrap_or(ft)
+        } else {
+            ft
+        };
+
+        let field_ty = self
+            .type_table
+            .lookup_type_id(resolved_ft)
+            .unwrap_or(VirTypeId::UNKNOWN);
+        let kind = classify_sema_field_kind(resolved_ft, self.type_arena, true);
+
+        Some(vole_vir::expr::FieldStorage::Direct {
+            slot: idx as u32,
+            field_ty,
+            kind,
+        })
+    }
+
+    /// Resolve a class/heap field to `Heap` storage with pre-computed
+    /// `field_ty` and `kind`, accounting for wide types in slot layout.
+    fn resolve_heap_field(
+        &self,
+        type_def_id: TypeDefId,
+        type_args: &crate::type_arena::TypeIdVec,
+        field_name: &str,
+    ) -> Option<vole_vir::expr::FieldStorage> {
+        let type_def = self.entities.get_type(type_def_id);
+        let generic_info = type_def.generic_info.as_ref()?;
+
         let subs: FxHashMap<NameId, TypeId> = type_def
             .type_params
             .iter()
@@ -696,17 +714,27 @@ impl LoweringCtx<'_> {
 
         let mut physical_slot = 0usize;
         for (idx, field_name_id) in generic_info.field_names.iter().enumerate() {
-            let name = self.name_table.last_segment_str(*field_name_id);
-            if name.as_deref() == Some(field_name) {
-                return Some(physical_slot);
-            }
-            // Advance physical slot: wide types use 2 slots.
             let ft = generic_info.field_types[idx];
             let resolved_ft = if !subs.is_empty() {
                 self.type_arena.lookup_substitute(ft, &subs).unwrap_or(ft)
             } else {
                 ft
             };
+
+            let name = self.name_table.last_segment_str(*field_name_id);
+            if name.as_deref() == Some(field_name) {
+                let field_ty = self
+                    .type_table
+                    .lookup_type_id(resolved_ft)
+                    .unwrap_or(VirTypeId::UNKNOWN);
+                let kind = classify_sema_field_kind(resolved_ft, self.type_arena, false);
+                return Some(vole_vir::expr::FieldStorage::Heap {
+                    slot: physical_slot as u32,
+                    field_ty,
+                    kind,
+                });
+            }
+
             physical_slot += if is_wide_sema_type(resolved_ft) { 2 } else { 1 };
         }
         None
@@ -1154,6 +1182,52 @@ pub fn lower_stmts(stmts: &[vole_frontend::ast::Stmt], ctx: &mut LoweringCtx<'_>
 /// occupies 2 consecutive slots in class instance storage.
 fn is_wide_sema_type(type_id: TypeId) -> bool {
     matches!(type_id, TypeId::I128 | TypeId::F128)
+}
+
+/// Classify a field's physical storage shape from its sema `TypeId`.
+///
+/// When `is_direct` is true (struct field), nested structs and payload
+/// unions are stored inline and need special codegen paths.  When false
+/// (class/heap field), they are stored as scalar pointers.
+fn classify_sema_field_kind(
+    field_type: TypeId,
+    type_arena: &TypeArena,
+    is_direct: bool,
+) -> vole_vir::expr::FieldKind {
+    use vole_vir::expr::FieldKind;
+
+    if is_wide_sema_type(field_type) {
+        return FieldKind::Wide;
+    }
+
+    if is_direct {
+        if type_arena.unwrap_struct(field_type).is_some() {
+            return FieldKind::NestedStruct;
+        }
+        if is_payload_union_sema(field_type, type_arena) {
+            return FieldKind::PayloadUnion;
+        }
+    }
+
+    FieldKind::Scalar
+}
+
+/// Check whether a sema type is a payload-carrying union (has at least
+/// one non-nil, non-void variant).  Mirrors the VIR-level
+/// `vir_is_payload_union` check using sema types.
+///
+/// Conservatively returns `true` for unions containing struct variants
+/// (sentinel structs are hard to detect without entity metadata).  This
+/// is safe: codegen treats payload unions as 16-byte inline buffers,
+/// which works correctly for tag-only unions too (just slightly less
+/// optimal).
+fn is_payload_union_sema(type_id: TypeId, type_arena: &TypeArena) -> bool {
+    if let Some(variants) = type_arena.unwrap_union(type_id) {
+        let nil = TypeId::NIL;
+        let void = TypeId::VOID;
+        return variants.iter().any(|&v| v != nil && v != void);
+    }
+    false
 }
 
 /// Error from where-clause type mapping resolution.

@@ -1249,10 +1249,10 @@ impl Cg<'_, '_, '_> {
         for field in fields {
             let field_vir_ty = self.try_substitute_type_v(field.ty);
             let converted = match field.storage {
-                FieldStorage::Direct { slot } => {
+                FieldStorage::Direct { slot, .. } => {
                     self.struct_field_load_v(value, slot as usize, field_vir_ty, source_ty)?
                 }
-                FieldStorage::Heap { slot } => {
+                FieldStorage::Heap { slot, .. } => {
                     self.get_instance_field_v(value, slot as usize, field_vir_ty)?
                 }
                 FieldStorage::ByName | FieldStorage::Module { .. } => {

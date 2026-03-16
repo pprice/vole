@@ -1056,8 +1056,8 @@ impl<'a> VirPrinter<'a> {
 
     fn fmt_storage_suffix(&self, storage: FieldStorage, out: &mut String) {
         match storage {
-            FieldStorage::Direct { slot } => w!(out, "@s{}", slot),
-            FieldStorage::Heap { slot } => w!(out, "#h{}", slot),
+            FieldStorage::Direct { slot, .. } => w!(out, "@s{}", slot),
+            FieldStorage::Heap { slot, .. } => w!(out, "#h{}", slot),
             FieldStorage::Module { module_id } => w!(out, "@mod{}", module_id.index()),
             FieldStorage::ByName => {} // no suffix
         }

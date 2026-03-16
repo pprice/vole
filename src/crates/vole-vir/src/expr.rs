@@ -281,10 +281,8 @@ pub enum VirExpr {
     // -- Indexing -----------------------------------------------------------
     /// Index read: `obj[idx]` for tuple, fixed array, or dynamic array.
     ///
-    /// Codegen dispatches on the object type (tuple, fixed array, dynamic
-    /// array) to select the right read strategy.  `union_storage` carries
-    /// the sema-annotated `UnionStorageKind` for dynamic arrays whose
-    /// element type is a union.
+    /// `union_storage` carries the sema-annotated `UnionStorageKind` for
+    /// dynamic arrays whose element type is a union.
     Index {
         object: VirRef,
         index: VirRef,
@@ -294,9 +292,6 @@ pub enum VirExpr {
     },
 
     /// Index write: `obj[idx] = val` for fixed or dynamic array.
-    ///
-    /// Codegen dispatches on the object type to select fixed-array (bounds
-    /// check + direct store) or dynamic-array (runtime `ArraySet` call).
     IndexStore {
         object: VirRef,
         index: VirRef,
@@ -700,13 +695,27 @@ pub enum FieldStorage {
     ///
     /// `slot` is the logical field index in the struct's field list.
     /// Codegen converts to byte offset via `struct_field_byte_offset`.
-    Direct { slot: u32 },
+    /// `field_ty` is the pre-resolved VirTypeId of the field so codegen
+    /// does not re-derive it from the type arena.
+    /// `kind` classifies the physical storage shape so codegen reads
+    /// a decision instead of cascading through type queries.
+    Direct {
+        slot: u32,
+        field_ty: VirTypeId,
+        kind: FieldKind,
+    },
     /// Field stored on the heap, accessed through a runtime call
     /// (reference-counted class instance).
     ///
     /// `slot` is the physical slot index accounting for wide types
     /// (i128/f128 fields occupy 2 consecutive slots).
-    Heap { slot: u32 },
+    /// `field_ty` is the pre-resolved VirTypeId of the field.
+    /// `kind` classifies the physical storage shape.
+    Heap {
+        slot: u32,
+        field_ty: VirTypeId,
+        kind: FieldKind,
+    },
     /// Module field access — resolved to a module constant or export.
     ///
     /// Carries the `ModuleId` so codegen can dispatch module field access
@@ -716,6 +725,29 @@ pub enum FieldStorage {
     /// the object type contains type parameters.  Must be resolved before
     /// codegen via the monomorph rederive pass.
     ByName,
+}
+
+/// Physical storage classification for a struct/class field value.
+///
+/// Pre-computed during VIR lowering (or monomorph rederive) so codegen
+/// dispatches directly without cascading through `vir_query_is_struct`,
+/// `vir_query_is_payload_union`, `vir_query_wide_type`, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FieldKind {
+    /// Scalar value (integers, floats, bools, strings, pointers).
+    /// Stored as a single slot; codegen loads/stores via type conversion.
+    Scalar,
+    /// Nested value-type struct — stored inline in the parent struct.
+    /// For `Direct` storage: codegen returns a pointer into the parent.
+    /// For `Heap` storage: this variant is not used (nested structs in
+    /// classes are stored as scalar pointers).
+    NestedStruct,
+    /// Payload-carrying union — stored inline (16 bytes: tag + payload).
+    /// Codegen returns a pointer into the parent struct's inline buffer.
+    PayloadUnion,
+    /// Wide type (i128, f128) — occupies 2 consecutive 8-byte slots.
+    /// Codegen loads both halves and reconstructs the full value.
+    Wide,
 }
 
 /// Per-field coercion hint for struct/class construction, pre-computed
@@ -1315,6 +1347,26 @@ pub enum AsCastKind {
     Checked,
     /// Unchecked cast (undefined behavior on failure).
     Unchecked,
+}
+
+/// Classification of an index operation's target type.
+///
+/// Pre-resolved during VIR lowering so codegen dispatches directly without
+/// querying the VIR type table to determine tuple vs fixed array vs dynamic
+/// array.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexKind {
+    /// Tuple index: element types are heterogeneous.
+    Tuple { elem_types: Vec<VirTypeId> },
+    /// Fixed-size array index: homogeneous elements with a known length.
+    FixedArray { elem_type: VirTypeId, size: usize },
+    /// Dynamic (heap) array index: homogeneous elements, length unknown at
+    /// compile time.
+    DynamicArray { elem_type: VirTypeId },
+    /// Unresolved — emitted for generic function templates where the object
+    /// type contains type parameters.  Must be resolved before codegen via
+    /// the monomorph rederive pass.
+    Unresolved,
 }
 
 /// The kind of `.@meta` access.
