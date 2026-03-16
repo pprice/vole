@@ -1445,10 +1445,16 @@ fn lower_array_literal(elements: &[Expr], ty: TypeId, ctx: &mut LoweringCtx<'_>)
     let lowered: Vec<VirRef> = elements.iter().map(|e| lower_expr(e, ctx)).collect();
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
+    // Compute store strategy for dynamic arrays (not tuples).
+    let store_strategy = ctx.type_arena.unwrap_array(ty).map(|elem_ty| {
+        let vir_elem = ctx.translate(elem_ty);
+        ctx.type_table.array_store_strategy(vir_elem)
+    });
     Box::new(VirExpr::ArrayLiteral {
         elements: lowered,
         ty: compat_ty,
         vir_ty,
+        store_strategy,
     })
 }
 

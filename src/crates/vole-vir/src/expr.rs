@@ -3,8 +3,8 @@
 // VIR expression nodes and their supporting types.
 
 use vole_identity::{
-    ImplementMethodMonomorphKey, MethodId, ModuleId, NameId, NodeId, StringConversion, Symbol,
-    TypeDefId, UnionStorageKind, VirTypeId,
+    ArrayStoreStrategy, ImplementMethodMonomorphKey, MethodId, ModuleId, NameId, NodeId,
+    StringConversion, Symbol, TypeDefId, UnionStorageKind, VirTypeId,
 };
 
 use crate::calls::CallTarget;
@@ -84,10 +84,15 @@ pub enum VirExpr {
     /// `ty` is the overall inferred type (array or tuple) from sema.
     /// Codegen uses `unwrap_array(ty)` / `unwrap_tuple(ty)` to dispatch
     /// between dynamic array (heap) and tuple (stack) construction paths.
+    ///
+    /// `store_strategy` tells codegen how to encode each element for storage
+    /// without type-branching.  `None` when the literal is a tuple (no
+    /// dynamic storage needed) or in generic templates before monomorphization.
     ArrayLiteral {
         elements: Vec<VirRef>,
         ty: VirTypeId,
         vir_ty: VirTypeId,
+        store_strategy: Option<ArrayStoreStrategy>,
     },
 
     /// Repeat literal `[value; count]` — fixed-size array with repeated value.

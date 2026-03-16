@@ -19,7 +19,8 @@ use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_identity::Symbol;
 use vole_identity::{
-    FieldId, FunctionId, MethodId, ModuleId, NameId, TypeId, UnionStorageKind, VirTypeId,
+    ArrayStoreStrategy, FieldId, FunctionId, MethodId, ModuleId, NameId, TypeId, UnionStorageKind,
+    VirTypeId,
 };
 
 use super::lambda::CaptureBinding;
@@ -972,11 +973,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // vir_query_primitives() deleted — use TypeId constants directly
     // (e.g. TypeId::STRING, TypeId::I64)
 
-    /// Check if a `VirTypeId` is a class type via VirTypeTable.
-    pub fn vir_query_is_class_v(&self, vir_ty: VirTypeId) -> bool {
-        crate::types::vir_conversions::vir_is_class(vir_ty, self.vir_type_table())
-    }
-
     /// Unwrap a class `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
     #[inline]
     pub fn vir_query_unwrap_class_v(
@@ -1424,10 +1420,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Convert a value to dynamic array storage representation for a known element type.
     ///
     /// Returns `(tag, payload_bits, stored_value_for_lifecycle)`.
-    ///
-    /// When `union_storage_hint` is provided (from sema annotation), the union
-    /// storage decision is used directly. Otherwise falls back to runtime
-    /// re-detection via `union_array_prefers_inline_storage`.
     pub fn prepare_dynamic_array_store(
         &mut self,
         value: CompiledValue,
@@ -1445,20 +1437,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         value: CompiledValue,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
-        let value = if self.vir_query_is_struct_v(value.type_id) {
-            self.copy_struct_to_heap(value)?
-        } else {
-            value
-        };
-        let tag = self.vir_query_array_element_tag_id_v(value.type_id);
-        let tag_val = self.iconst_cached(types::I64, tag);
-        if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
-            let i128_bits = wide.to_i128_bits(self.builder, value.value);
-            let boxed = self.call_runtime(RuntimeKey::Wide128Box, &[i128_bits])?;
-            return Ok((tag_val, boxed, value));
-        }
-        let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
-        Ok((tag_val, payload_bits, value))
+        let strategy = self.array_store_strategy_v(value.type_id);
+        let resolved_vir = self.try_substitute_type_v(value.type_id);
+        self.prepare_array_store_by_strategy(value, resolved_vir, strategy)
     }
 
     /// VirTypeId-native variant of
@@ -1478,90 +1459,134 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a value to dynamic array storage representation, with an
     /// optional sema-provided union storage hint.
+    ///
+    /// Computes the [`ArrayStoreStrategy`] and delegates to
+    /// [`prepare_array_store_by_strategy`](Self::prepare_array_store_by_strategy).
     pub fn prepare_dynamic_array_store_with_hint(
         &mut self,
         value: CompiledValue,
         elem_type_id: TypeId,
         union_storage_hint: Option<UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
-        let mut value = if self.vir_query_is_struct_v(value.type_id) {
+        let resolved_elem_type = self.try_substitute_type(elem_type_id);
+        let resolved_elem_vir = self.vir_lookup_or_compat(resolved_elem_type);
+
+        // Derive the strategy, using the union hint when available.
+        let strategy = match union_storage_hint {
+            Some(UnionStorageKind::Inline) => ArrayStoreStrategy::UnionInline,
+            Some(UnionStorageKind::Heap) => ArrayStoreStrategy::UnionBoxed,
+            None => self.array_store_strategy_v(resolved_elem_vir),
+        };
+
+        self.prepare_array_store_by_strategy(value, resolved_elem_vir, strategy)
+    }
+
+    /// Convert a value to dynamic array storage representation, dispatching
+    /// on a pre-computed [`ArrayStoreStrategy`].
+    ///
+    /// Returns `(tag, payload_bits, stored_value_for_lifecycle)`.
+    pub fn prepare_array_store_by_strategy(
+        &mut self,
+        value: CompiledValue,
+        resolved_elem_vir: VirTypeId,
+        strategy: ArrayStoreStrategy,
+    ) -> CodegenResult<(Value, Value, CompiledValue)> {
+        use vole_identity::ArrayStoreStrategy::*;
+        // Struct values need heap copy regardless of strategy.
+        let value = if self.vir_query_is_struct_v(value.type_id) {
             self.copy_struct_to_heap(value)?
         } else {
             value
         };
 
-        let resolved_elem_type = self.try_substitute_type(elem_type_id);
-        let resolved_elem_vir = self.vir_lookup_or_compat(resolved_elem_type);
-        // Fast path: sema told us whether this is a union element or not.
-        // If no hint, fall back to arena check.
-        let is_union_elem =
-            union_storage_hint.is_some() || self.vir_query_is_union(resolved_elem_type);
-        if !is_union_elem {
-            // Track whether the value was already unknown before coercion.
-            // If so, the value is a heap TaggedValue pointer potentially owned
-            // by a scope-cleanup binding. We must clone it so the array gets
-            // an independent copy (avoiding use-after-free when the binding's
-            // scope cleanup frees the original).
-            let was_already_unknown = value.type_id.is_unknown();
-
-            value = self.coerce_to_type(value, resolved_elem_vir)?;
-
-            if was_already_unknown && value.type_id.is_unknown() {
-                let cloned = self.call_runtime(RuntimeKey::TaggedValueClone, &[value.value])?;
-                value = CompiledValue::new(cloned, self.ptr_type(), value.type_id);
+        match strategy {
+            DirectScalar | HeapCopyStruct | WideBox | Unknown | Unresolved => {
+                self.encode_scalar_array_element(value, resolved_elem_vir)
             }
+            UnionInline => self.encode_union_inline_array_element(value, resolved_elem_vir),
+            UnionBoxed => self.encode_union_boxed_array_element(value, resolved_elem_vir),
+        }
+    }
 
-            if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
-                let i128_bits = wide.to_i128_bits(self.builder, value.value);
-                let boxed = self.call_runtime(RuntimeKey::Wide128Box, &[i128_bits])?;
-                let tag = self.vir_query_array_element_tag_id_v(value.type_id);
-                let tag_val = self.iconst_cached(types::I64, tag);
-                return Ok((tag_val, boxed, value));
-            }
+    /// Encode a scalar (non-union) value into array storage.
+    ///
+    /// Handles `Unknown` clone-for-scope, wide-type boxing, and
+    /// `convert_to_i64_for_storage` for all other scalar types.
+    fn encode_scalar_array_element(
+        &mut self,
+        mut value: CompiledValue,
+        resolved_elem_vir: VirTypeId,
+    ) -> CodegenResult<(Value, Value, CompiledValue)> {
+        let was_already_unknown = value.type_id.is_unknown();
+        value = self.coerce_to_type(value, resolved_elem_vir)?;
+        if was_already_unknown && value.type_id.is_unknown() {
+            let cloned = self.call_runtime(RuntimeKey::TaggedValueClone, &[value.value])?;
+            value = CompiledValue::new(cloned, self.ptr_type(), value.type_id);
+        }
+        if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
+            let i128_bits = wide.to_i128_bits(self.builder, value.value);
+            let boxed = self.call_runtime(RuntimeKey::Wide128Box, &[i128_bits])?;
             let tag = self.vir_query_array_element_tag_id_v(value.type_id);
             let tag_val = self.iconst_cached(types::I64, tag);
-            let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
-            return Ok((tag_val, payload_bits, value));
+            return Ok((tag_val, boxed, value));
         }
+        let tag = self.vir_query_array_element_tag_id_v(value.type_id);
+        let tag_val = self.iconst_cached(types::I64, tag);
+        let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
+        Ok((tag_val, payload_bits, value))
+    }
 
-        // Union array element type: use sema hint or compute storage strategy.
-        let prefers_inline = match union_storage_hint {
-            Some(UnionStorageKind::Inline) => true,
-            Some(UnionStorageKind::Heap) => false,
-            None => self.union_array_prefers_inline_storage(resolved_elem_type),
+    /// Encode a union value with unique runtime tags into inline array storage.
+    fn encode_union_inline_array_element(
+        &mut self,
+        mut value: CompiledValue,
+        resolved_elem_vir: VirTypeId,
+    ) -> CodegenResult<(Value, Value, CompiledValue)> {
+        let resolved_elem_type = self
+            .env
+            .analyzed
+            .type_table
+            .vir_to_type_id(resolved_elem_vir);
+        value = self.coerce_to_type(value, resolved_elem_vir)?;
+        if !self.vir_query_is_union_v(value.type_id) {
+            return Err(CodegenError::type_mismatch(
+                "array union inline coercion",
+                self.vir_query_display_basic(resolved_elem_type),
+                self.vir_query_display_basic_v(value.type_id),
+            ));
+        }
+        let vir_variants: Vec<VirTypeId> = self
+            .vir_query_unwrap_union(resolved_elem_type)
+            .expect("INTERNAL: expected union element type");
+        let variant_idx = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), value.value, 0);
+        let runtime_tag = self.union_variant_index_to_array_tag_v(variant_idx, &vir_variants);
+        let payload_bits = if self.type_size(resolved_elem_type) > union_layout::TAG_ONLY_SIZE {
+            self.builder.ins().load(
+                types::I64,
+                MemFlags::new(),
+                value.value,
+                union_layout::PAYLOAD_OFFSET,
+            )
+        } else {
+            self.iconst_cached(types::I64, 0)
         };
-        if prefers_inline {
-            value = self.coerce_to_type(value, resolved_elem_vir)?;
-            if !self.vir_query_is_union_v(value.type_id) {
-                return Err(CodegenError::type_mismatch(
-                    "array union inline coercion",
-                    self.vir_query_display_basic(resolved_elem_type),
-                    self.vir_query_display_basic_v(value.type_id),
-                ));
-            }
-            let vir_variants: Vec<VirTypeId> = self
-                .vir_query_unwrap_union(resolved_elem_type)
-                .expect("INTERNAL: expected union element type");
+        Ok((runtime_tag, payload_bits, value))
+    }
 
-            let variant_idx = self
-                .builder
-                .ins()
-                .load(types::I8, MemFlags::new(), value.value, 0);
-            let runtime_tag = self.union_variant_index_to_array_tag_v(variant_idx, &vir_variants);
-            let payload_bits = if self.type_size(resolved_elem_type) > union_layout::TAG_ONLY_SIZE {
-                self.builder.ins().load(
-                    types::I64,
-                    MemFlags::new(),
-                    value.value,
-                    union_layout::PAYLOAD_OFFSET,
-                )
-            } else {
-                self.iconst_cached(types::I64, 0)
-            };
-            return Ok((runtime_tag, payload_bits, value));
-        }
-
-        // Boxed union storage for ambiguous runtime tags.
+    /// Encode a union value with tag collisions into heap-boxed array storage.
+    fn encode_union_boxed_array_element(
+        &mut self,
+        mut value: CompiledValue,
+        resolved_elem_vir: VirTypeId,
+    ) -> CodegenResult<(Value, Value, CompiledValue)> {
+        let resolved_elem_type = self
+            .env
+            .analyzed
+            .type_table
+            .vir_to_type_id(resolved_elem_vir);
         if self.vir_query_is_union_v(value.type_id) {
             value = self.coerce_to_type(value, resolved_elem_vir)?;
             if !self.vir_query_is_union_v(value.type_id) {
@@ -1582,7 +1607,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             value = self.construct_union_heap_id(value, resolved_elem_type)?;
         }
-
         let tag = self.vir_query_array_element_tag_id_v(value.type_id);
         let tag_val = self.iconst_cached(types::I64, tag);
         let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
@@ -1609,7 +1633,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         raw_value: Value,
         union_vir_ty: VirTypeId,
     ) -> CompiledValue {
-        if !self.union_array_prefers_inline_storage_v(union_vir_ty) {
+        let strategy = self.array_store_strategy_v(union_vir_ty);
+        if strategy == ArrayStoreStrategy::UnionBoxed {
             return self.copy_union_heap_to_stack_v(raw_value, union_vir_ty);
         }
 

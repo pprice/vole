@@ -486,8 +486,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // Reuse array tagged-value lowering for union payloads so channel
             // send/recv use the same runtime representation policy (inline tags
             // when unambiguous, heap-boxed union when needed).
-            let prefers_inline = self
-                .union_array_prefers_inline_storage_v(self.try_substitute_type_v(payload.type_id));
+            let resolved_payload = self.try_substitute_type_v(payload.type_id);
+            let strategy = self.array_store_strategy_v(resolved_payload);
+            let prefers_inline = strategy == vole_identity::ArrayStoreStrategy::UnionInline;
             if can_classify_rc
                 && prefers_inline
                 && self.cached_rc_state_v(payload.type_id).needs_cleanup()

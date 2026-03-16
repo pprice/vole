@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_identity::{NameId, TypeId, UnionStorageKind, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, NameId, TypeId, UnionStorageKind, VirTypeId};
 use vole_vir::stmt::{VirFor, VirIterKind};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
@@ -218,6 +218,7 @@ impl Cg<'_, '_, '_> {
         let VirIterKind::Array {
             elem_type,
             union_storage,
+            store_strategy,
             ..
         } = &vir_for.kind
         else {
@@ -225,6 +226,7 @@ impl Cg<'_, '_, '_> {
         };
         let mut elem_vir = self.try_substitute_type_v(*elem_type);
         let mut union_storage = *union_storage;
+        let mut store_strategy = *store_strategy;
 
         let arr = self.compile_vir_expr(&vir_for.iterable)?;
 
@@ -232,11 +234,12 @@ impl Cg<'_, '_, '_> {
         // element typing/storage from the compiled iterable value.
         if let Some(arr_elem_vir) = self.vir_query_unwrap_array_v(arr.type_id) {
             elem_vir = arr_elem_vir;
+            let derived = self.array_store_strategy_v(arr_elem_vir);
+            store_strategy = Some(derived);
             if union_storage.is_none() && self.vir_query_is_union_v(arr_elem_vir) {
-                union_storage = Some(if self.union_array_prefers_inline_storage_v(arr_elem_vir) {
-                    UnionStorageKind::Inline
-                } else {
-                    UnionStorageKind::Heap
+                union_storage = Some(match derived {
+                    ArrayStoreStrategy::UnionInline => UnionStorageKind::Inline,
+                    _ => UnionStorageKind::Heap,
                 });
             }
         }
@@ -293,7 +296,11 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), elem_ptr, value_offset);
-        let elem_val = self.decode_array_elem_v(elem_val, elem_ptr, elem_vir, union_storage)?;
+        let elem_val = if let Some(strategy) = store_strategy {
+            self.decode_array_elem_by_strategy(elem_val, elem_ptr, elem_vir, strategy)?
+        } else {
+            self.decode_array_elem_v(elem_val, elem_ptr, elem_vir, union_storage)?
+        };
         self.builder.def_var(elem_var, elem_val);
 
         self.compile_vir_loop_body(&vir_for.body, exit_block, continue_block)?;
@@ -605,8 +612,8 @@ impl Cg<'_, '_, '_> {
 
     /// Decode a raw array element value to the correct Cranelift type (VirTypeId-native).
     ///
-    /// Handles union storage (inline/heap), wide types (i128), narrow
-    /// integers, and float reinterpretation.
+    /// Dispatches on the pre-computed [`ArrayStoreStrategy`] when available,
+    /// falling back to the `union_storage` hint and type queries.
     pub(crate) fn decode_array_elem_v(
         &mut self,
         elem_val: Value,
@@ -614,50 +621,84 @@ impl Cg<'_, '_, '_> {
         elem_vir: VirTypeId,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<Value> {
-        if self.vir_query_is_unknown_v(elem_vir) {
-            let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
-            let elem_tag =
-                self.builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
-            let unknown_heap_tag = self.iconst_cached(
-                types::I64,
-                vole_runtime::value::RuntimeTypeId::UnknownHeap as i64,
-            );
-            let is_unknown_heap = self
-                .builder
-                .ins()
-                .icmp(IntCC::Equal, elem_tag, unknown_heap_tag);
-            return Ok(self
-                .builder
-                .ins()
-                .select(is_unknown_heap, elem_val, elem_ptr));
-        }
+        // Compute the strategy from the existing annotations.
+        let strategy = match union_storage {
+            Some(UnionStorageKind::Inline) => ArrayStoreStrategy::UnionInline,
+            Some(UnionStorageKind::Heap) => ArrayStoreStrategy::UnionBoxed,
+            None => self.array_store_strategy_v(elem_vir),
+        };
+        self.decode_array_elem_by_strategy(elem_val, elem_ptr, elem_vir, strategy)
+    }
 
-        let elem_cr_type = self.cranelift_type_v(elem_vir);
-        let elem_wide = self.vir_query_wide_type_v(elem_vir);
-        if let Some(storage) = union_storage {
-            use vole_identity::UnionStorageKind;
-            match storage {
-                UnionStorageKind::Inline => {
-                    let tag_offset =
-                        std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
-                    let elem_tag =
-                        self.builder
-                            .ins()
-                            .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
-                    Ok(self
-                        .decode_dynamic_array_union_element_v(elem_tag, elem_val, elem_vir)
-                        .value)
-                }
-                UnionStorageKind::Heap => {
-                    Ok(self.copy_union_heap_to_stack_v(elem_val, elem_vir).value)
-                }
+    /// Decode a raw array element dispatching on an [`ArrayStoreStrategy`].
+    pub(crate) fn decode_array_elem_by_strategy(
+        &mut self,
+        elem_val: Value,
+        elem_ptr: Value,
+        elem_vir: VirTypeId,
+        strategy: ArrayStoreStrategy,
+    ) -> CodegenResult<Value> {
+        match strategy {
+            ArrayStoreStrategy::Unknown => self.decode_unknown_array_elem(elem_val, elem_ptr),
+            ArrayStoreStrategy::UnionInline => {
+                let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
+                let elem_tag =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
+                Ok(self
+                    .decode_dynamic_array_union_element_v(elem_tag, elem_val, elem_vir)
+                    .value)
             }
-        } else if let Some(wide) = elem_wide {
-            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[elem_val])?;
-            Ok(wide.reinterpret_i128(self.builder, wide_bits))
-        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            ArrayStoreStrategy::UnionBoxed => {
+                Ok(self.copy_union_heap_to_stack_v(elem_val, elem_vir).value)
+            }
+            ArrayStoreStrategy::WideBox => {
+                let wide = self
+                    .vir_query_wide_type_v(elem_vir)
+                    .expect("INTERNAL: WideBox strategy but no wide type");
+                let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[elem_val])?;
+                Ok(wide.reinterpret_i128(self.builder, wide_bits))
+            }
+            ArrayStoreStrategy::DirectScalar
+            | ArrayStoreStrategy::HeapCopyStruct
+            | ArrayStoreStrategy::Unresolved => self.decode_scalar_array_elem(elem_val, elem_vir),
+        }
+    }
+
+    /// Decode an array element stored as `unknown` (tagged value pointer).
+    fn decode_unknown_array_elem(
+        &mut self,
+        elem_val: Value,
+        elem_ptr: Value,
+    ) -> CodegenResult<Value> {
+        let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
+        let elem_tag = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
+        let unknown_heap_tag = self.iconst_cached(
+            types::I64,
+            vole_runtime::value::RuntimeTypeId::UnknownHeap as i64,
+        );
+        let is_unknown_heap = self
+            .builder
+            .ins()
+            .icmp(IntCC::Equal, elem_tag, unknown_heap_tag);
+        Ok(self
+            .builder
+            .ins()
+            .select(is_unknown_heap, elem_val, elem_ptr))
+    }
+
+    /// Decode a scalar array element (int, float, bool, nil, string, etc.).
+    fn decode_scalar_array_elem(
+        &mut self,
+        elem_val: Value,
+        elem_vir: VirTypeId,
+    ) -> CodegenResult<Value> {
+        let elem_cr_type = self.cranelift_type_v(elem_vir);
+        if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
             Ok(self.builder.ins().ireduce(elem_cr_type, elem_val))
         } else if elem_cr_type == types::F64 {
             Ok(self

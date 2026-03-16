@@ -8,7 +8,7 @@ use crate::RuntimeKey;
 use crate::errors::CodegenResult;
 use crate::types::CompiledValue;
 
-use vole_identity::VirTypeId;
+use vole_identity::{ArrayStoreStrategy, VirTypeId};
 
 use super::super::context::Cg;
 use super::super::structs::split_i128_for_storage;
@@ -56,6 +56,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         elements: &[vole_vir::VirRef],
         vir_array_type_id: VirTypeId,
+        store_strategy: Option<ArrayStoreStrategy>,
     ) -> CodegenResult<CompiledValue> {
         // If sema inferred a tuple type, use stack allocation.
         if let Some(vir_elems) = self.vir_query_unwrap_tuple_v(vir_array_type_id) {
@@ -98,7 +99,11 @@ impl Cg<'_, '_, '_> {
             } else {
                 self.compile_vir_expr(elem_expr)?
             };
-            let (tag_val, value_bits, mut compiled) = if let Some(ev) = elem_vir {
+            let (tag_val, value_bits, mut compiled) = if let Some(strategy) = store_strategy {
+                let resolved =
+                    elem_vir.unwrap_or_else(|| self.try_substitute_type_v(compiled.type_id));
+                self.prepare_array_store_by_strategy(compiled, resolved, strategy)?
+            } else if let Some(ev) = elem_vir {
                 self.prepare_dynamic_array_store_with_hint_v(compiled, ev, None)?
             } else {
                 self.prepare_dynamic_array_store_untyped(compiled)?

@@ -59,6 +59,37 @@ pub enum UnionStorageKind {
     Heap,
 }
 
+/// Array element storage strategy, pre-computed from the element type.
+///
+/// Tells codegen how to encode/decode array elements without re-detecting
+/// struct, wide, or union types at compile time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArrayStoreStrategy {
+    /// Scalar (i8..i64, u8..u64, f32, f64, bool, nil, string, class ptr, etc.).
+    /// Store via `convert_to_i64_for_storage`, decode via type-appropriate
+    /// ireduce / bitcast.
+    DirectScalar,
+
+    /// Value-type struct — must be copied to heap before storing the pointer.
+    HeapCopyStruct,
+
+    /// Wide type (i128) — box via `Wide128Box`, unbox via `Wide128Unbox`.
+    WideBox,
+
+    /// Union with unique runtime tags — store inline as (variant_tag, payload).
+    UnionInline,
+
+    /// Union with tag collisions — store as heap-boxed union buffer pointer.
+    UnionBoxed,
+
+    /// The element type is `unknown` — the dynamic tagged-value path.
+    Unknown,
+
+    /// Unresolved — used in generic templates before monomorphization.
+    /// Codegen falls back to type-based detection.
+    Unresolved,
+}
+
 /// String interpolation conversion strategy.
 ///
 /// Sema computes the conversion needed for each sub-expression in an

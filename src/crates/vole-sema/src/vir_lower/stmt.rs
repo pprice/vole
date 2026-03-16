@@ -5,7 +5,7 @@
 use crate::IterableKind;
 use vole_frontend::PatternKind;
 use vole_frontend::ast::{ExprKind, LetInit, LetStmt, Stmt};
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, TypeId, VirTypeId};
 
 use vole_vir::expr::{CoerceKind, VirExpr};
 use vole_vir::stmt::{
@@ -481,10 +481,13 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
         Some(IterableKind::Range) => VirIterKind::Range,
         Some(IterableKind::Array { elem_type }) => {
             let union_storage = ctx.node_map.get_union_storage_kind(for_stmt.iterable.id);
+            let vir_elem = ctx.translate(elem_type);
+            let store_strategy = Some(ctx.type_table.array_store_strategy(vir_elem));
             VirIterKind::Array {
-                elem_type: ctx.translate(elem_type),
-                vir_elem_type: ctx.translate(elem_type),
+                elem_type: vir_elem,
+                vir_elem_type: vir_elem,
                 union_storage,
+                store_strategy,
             }
         }
         Some(IterableKind::String) => VirIterKind::String,
@@ -589,6 +592,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 elem_type: ctx.translate(TypeId::I64),
                 vir_elem_type: ctx.translate(TypeId::I64),
                 union_storage: None,
+                store_strategy: Some(ArrayStoreStrategy::DirectScalar),
             }
         }
     };

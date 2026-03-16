@@ -10,7 +10,7 @@
 
 use std::cell::RefCell;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use vole_identity::{
     Interner, ModuleId, NameTable, StringConversion, Symbol, UnionStorageKind, VirTypeId,
 };
@@ -268,9 +268,18 @@ fn rederive_expr(
             rederive_ref(start, table, ret_ty, entities, call_ctx);
             rederive_ref(end, table, ret_ty, entities, call_ctx);
         }
-        VirExpr::ArrayLiteral { elements, .. } => {
+        VirExpr::ArrayLiteral {
+            elements,
+            vir_ty,
+            store_strategy,
+            ..
+        } => {
             for elem in elements {
                 rederive_ref(elem, table, ret_ty, entities, call_ctx);
+            }
+            // Recompute store strategy from the (possibly substituted) element type.
+            if let VirType::Array { elem } = table.get(*vir_ty) {
+                *store_strategy = Some(table.array_store_strategy(*elem));
             }
         }
         VirExpr::RepeatLiteral { element, .. } => {
@@ -1132,9 +1141,11 @@ fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
         VirIterKind::Array {
             vir_elem_type,
             union_storage,
+            store_strategy,
             ..
         } => {
             *union_storage = derive_union_storage_from_elem(*vir_elem_type, table);
+            *store_strategy = Some(table.array_store_strategy(*vir_elem_type));
         }
         VirIterKind::Generic { .. }
         | VirIterKind::Range
@@ -1207,116 +1218,22 @@ fn derive_union_storage_from_elem(
     table: &VirTypeTable,
 ) -> Option<UnionStorageKind> {
     match table.get(elem_vir_ty) {
-        VirType::Union { variants } => {
-            Some(if union_array_prefers_inline_storage(variants, table) {
+        VirType::Union { variants } => Some(
+            if crate::type_table::union_array_prefers_inline(variants, table) {
                 UnionStorageKind::Inline
             } else {
                 UnionStorageKind::Heap
-            })
-        }
-        VirType::Optional { variants, .. } => {
-            Some(if union_array_prefers_inline_storage(variants, table) {
+            },
+        ),
+        VirType::Optional { variants, .. } => Some(
+            if crate::type_table::union_array_prefers_inline(variants.as_slice(), table) {
                 UnionStorageKind::Inline
             } else {
                 UnionStorageKind::Heap
-            })
-        }
+            },
+        ),
         _ => None,
     }
-}
-
-fn union_array_prefers_inline_storage(variants: &[VirTypeId], table: &VirTypeTable) -> bool {
-    let mut seen_tags: FxHashSet<RuntimeTagCategory> = FxHashSet::default();
-
-    for &variant in variants {
-        if !supports_inline_union_array_variant(variant, table) {
-            return false;
-        }
-
-        let tag = runtime_tag_category(variant, table);
-        if tag == RuntimeTagCategory::I64
-            && !is_integer(variant, table)
-            && !is_sentinel(variant, table)
-        {
-            return false;
-        }
-
-        if !seen_tags.insert(tag) {
-            return false;
-        }
-    }
-
-    true
-}
-
-fn supports_inline_union_array_variant(variant: VirTypeId, table: &VirTypeTable) -> bool {
-    !matches!(
-        table.get(variant),
-        VirType::Union { .. }
-            | VirType::Optional { .. }
-            | VirType::Interface { .. }
-            | VirType::Class { .. }
-            | VirType::Struct { .. }
-            | VirType::Unknown
-            | VirType::Tuple { .. }
-            | VirType::Fallible { .. }
-            | VirType::Param { .. }
-    )
-}
-
-fn runtime_tag_category(ty: VirTypeId, table: &VirTypeTable) -> RuntimeTagCategory {
-    match table.get(ty) {
-        VirType::Primitive(VirPrimitiveKind::String) => RuntimeTagCategory::String,
-        VirType::Primitive(
-            VirPrimitiveKind::I8
-            | VirPrimitiveKind::I16
-            | VirPrimitiveKind::I32
-            | VirPrimitiveKind::I64
-            | VirPrimitiveKind::U8
-            | VirPrimitiveKind::U16
-            | VirPrimitiveKind::U32
-            | VirPrimitiveKind::U64,
-        ) => RuntimeTagCategory::I64,
-        VirType::Primitive(VirPrimitiveKind::F32 | VirPrimitiveKind::F64) => {
-            RuntimeTagCategory::F64
-        }
-        VirType::Primitive(VirPrimitiveKind::Bool) => RuntimeTagCategory::Bool,
-        VirType::Array { .. } | VirType::FixedArray { .. } => RuntimeTagCategory::Array,
-        VirType::Function { .. } => RuntimeTagCategory::Closure,
-        VirType::Class { .. } => RuntimeTagCategory::Instance,
-        _ => RuntimeTagCategory::I64,
-    }
-}
-
-fn is_integer(ty: VirTypeId, table: &VirTypeTable) -> bool {
-    matches!(
-        table.get(ty),
-        VirType::Primitive(
-            VirPrimitiveKind::I8
-                | VirPrimitiveKind::I16
-                | VirPrimitiveKind::I32
-                | VirPrimitiveKind::I64
-                | VirPrimitiveKind::U8
-                | VirPrimitiveKind::U16
-                | VirPrimitiveKind::U32
-                | VirPrimitiveKind::U64
-        )
-    )
-}
-
-fn is_sentinel(ty: VirTypeId, table: &VirTypeTable) -> bool {
-    table.is_sentinel(ty)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum RuntimeTagCategory {
-    String,
-    I64,
-    F64,
-    Bool,
-    Array,
-    Closure,
-    Instance,
 }
 
 fn rederive_string_parts(
@@ -1944,7 +1861,9 @@ mod tests {
     use super::*;
     use crate::func::VirBody;
     use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
-    use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeDefId, TypeId};
+    use vole_identity::{
+        ArrayStoreStrategy, FunctionId, MethodId, NameId, Symbol, TypeDefId, TypeId,
+    };
 
     /// Helper: create a NameId for testing.
     fn name(n: u32) -> NameId {
@@ -2611,15 +2530,21 @@ mod tests {
                 elem_type: type_id(10),
                 vir_elem_type: elem_union,
                 union_storage: None,
+                store_strategy: None,
             },
         })]);
 
         rederive_decisions(&mut func, &table, &empty_entities());
 
         match &func.body.stmts[0] {
-            VirStmt::For(vir_for) => match vir_for.kind {
-                VirIterKind::Array { union_storage, .. } => {
-                    assert_eq!(union_storage, Some(UnionStorageKind::Inline));
+            VirStmt::For(vir_for) => match &vir_for.kind {
+                VirIterKind::Array {
+                    union_storage,
+                    store_strategy,
+                    ..
+                } => {
+                    assert_eq!(*union_storage, Some(UnionStorageKind::Inline));
+                    assert_eq!(*store_strategy, Some(ArrayStoreStrategy::UnionInline));
                 }
                 _ => panic!("expected array iter kind"),
             },

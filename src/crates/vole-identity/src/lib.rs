@@ -16,7 +16,8 @@ mod symbol;
 mod type_layout;
 
 pub use annotations::{
-    ConstantValue, IsCheckResult, StringConversion, UnionStorageKind, VirIsCheckResult,
+    ArrayStoreStrategy, ConstantValue, IsCheckResult, StringConversion, UnionStorageKind,
+    VirIsCheckResult,
 };
 pub use intern::Interner;
 pub use primitive_type::PrimitiveType;

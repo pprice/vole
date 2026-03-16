@@ -2,7 +2,7 @@
 //
 // VIR statement nodes.
 
-use vole_identity::{ModuleId, NameId, Symbol, UnionStorageKind, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, ModuleId, NameId, Symbol, UnionStorageKind, VirTypeId};
 
 use crate::expr::{CoerceKind, FieldStorage};
 use crate::func::VirBody;
@@ -309,6 +309,9 @@ pub enum VirIterKind {
         /// Union storage annotation for arrays of union-typed elements.
         /// Codegen needs this to decode element values correctly.
         union_storage: Option<UnionStorageKind>,
+        /// Pre-computed element storage strategy.  Codegen reads this to
+        /// decode array elements without type-branching.
+        store_strategy: Option<ArrayStoreStrategy>,
     },
 
     /// Iterate over the characters of a string.

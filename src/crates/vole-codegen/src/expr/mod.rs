@@ -345,9 +345,13 @@ impl Cg<'_, '_, '_> {
         if (self.vir_query_is_array_v(expected_vir)
             || self.vir_query_unwrap_tuple_v(expected_vir).is_some()
             || self.vir_query_unwrap_fixed_array_v(expected_vir).is_some())
-            && let VirExpr::ArrayLiteral { elements, .. } = expr
+            && let VirExpr::ArrayLiteral {
+                elements,
+                store_strategy,
+                ..
+            } = expr
         {
-            let result = self.compile_vir_array_literal(elements, expected_vir)?;
+            let result = self.compile_vir_array_literal(elements, expected_vir, *store_strategy)?;
             return Ok(self.mark_rc_owned(result));
         }
         if self.vir_query_unwrap_fixed_array_v(expected_vir).is_some()
@@ -527,9 +531,17 @@ impl Cg<'_, '_, '_> {
             ),
 
             // -- Construction -------------------------------------------------
-            VirExpr::ArrayLiteral { elements, ty, .. } => {
-                let result =
-                    self.compile_vir_array_literal(elements, self.try_substitute_type_v(*ty))?;
+            VirExpr::ArrayLiteral {
+                elements,
+                ty,
+                store_strategy,
+                ..
+            } => {
+                let result = self.compile_vir_array_literal(
+                    elements,
+                    self.try_substitute_type_v(*ty),
+                    *store_strategy,
+                )?;
                 Ok(self.mark_rc_owned(result))
             }
             VirExpr::RepeatLiteral {

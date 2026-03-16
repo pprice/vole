@@ -187,10 +187,12 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             elements,
             ty,
             vir_ty,
+            store_strategy,
         } => VirExpr::ArrayLiteral {
             elements: elements.iter().map(|e| rewrite_ref(e, ctx)).collect(),
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
+            store_strategy: *store_strategy,
         },
         VirExpr::RepeatLiteral {
             element,
@@ -1143,10 +1145,12 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
             elem_type,
             vir_elem_type,
             union_storage,
+            store_strategy,
         } => VirIterKind::Array {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
             union_storage: *union_storage,
+            store_strategy: *store_strategy,
         },
         VirIterKind::String => VirIterKind::String,
         VirIterKind::RuntimeIterator {
@@ -1345,7 +1349,9 @@ mod tests {
     use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
     use crate::type_table::VirTypeTable;
     use crate::types::VirType;
-    use vole_identity::{FunctionId, NameId, NodeId, UnionStorageKind, VirTypeId};
+    use vole_identity::{
+        ArrayStoreStrategy, FunctionId, NameId, NodeId, UnionStorageKind, VirTypeId,
+    };
 
     /// Helper: create a NameId for testing.
     fn name(n: u32) -> NameId {
@@ -1809,6 +1815,7 @@ mod tests {
                         elem_type: type_id(10),
                         vir_elem_type: param_id,
                         union_storage: Some(UnionStorageKind::Inline),
+                        store_strategy: Some(ArrayStoreStrategy::UnionInline),
                     },
                 })],
                 trailing: None,

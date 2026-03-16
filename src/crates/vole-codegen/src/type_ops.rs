@@ -9,7 +9,7 @@
 use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
 use cranelift_codegen::ir::FuncRef;
 
-use vole_identity::{TypeDefId, TypeId, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, TypeDefId, TypeId, VirTypeId};
 
 use super::context::Cg;
 use super::types::CompiledValue;
@@ -244,61 +244,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_query_unwrap_interface_v(vir_ty).map(|(id, _)| id)
     }
 
-    // ========== Union array storage policy ==========
+    // ========== Array element storage strategy ==========
 
-    /// Returns true when a union array can be stored inline as (runtime_tag, payload)
-    /// without losing variant identity.
+    /// Compute the array element storage strategy from a VIR element type.
     ///
-    /// If two variants map to the same runtime tag (e.g. `i64 | nil` -> RuntimeTypeId::I64),
-    /// inline storage cannot recover the original union variant on read, so we must
-    /// fall back to heap-boxed union buffers.
-    pub fn union_array_prefers_inline_storage(&self, union_type_id: TypeId) -> bool {
-        let resolved_union_id = self.try_substitute_type(union_type_id);
-        let vir_ty = self.vir_lookup(resolved_union_id);
-        self.union_array_prefers_inline_storage_v(vir_ty)
-    }
-
-    /// Returns true when a union array can be stored inline as (runtime_tag, payload)
-    /// without losing variant identity.
-    ///
-    /// VirTypeId types are post-monomorphization, so no substitution is needed.
-    pub fn union_array_prefers_inline_storage_v(&self, vir_ty: VirTypeId) -> bool {
-        use rustc_hash::FxHashSet;
-        use vole_runtime::value::RuntimeTypeId;
-
-        let Some(variants) = self.vir_query_unwrap_union_v(vir_ty) else {
-            return false;
-        };
-
-        let mut seen_tags: FxHashSet<u64> = FxHashSet::default();
-        for &variant in &variants {
-            if !self.supports_inline_union_array_variant_v(variant) {
-                return false;
-            }
-
-            let tag = self.vir_query_unknown_type_tag_v(variant);
-            if tag == RuntimeTypeId::I64 as u64
-                && !self.vir_query_is_integer_v(variant)
-                && !self.vir_query_is_sentinel_v(variant)
-            {
-                return false;
-            }
-            if !seen_tags.insert(tag) {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn supports_inline_union_array_variant_v(&self, variant: VirTypeId) -> bool {
-        !(self.vir_query_is_union_v(variant)
-            || self.vir_query_is_interface_v(variant)
-            || self.vir_query_is_class_v(variant)
-            || self.vir_query_is_struct_v(variant)
-            || self.vir_query_is_unknown_v(variant)
-            || self.vir_query_unwrap_tuple_v(variant).is_some()
-            || self.vir_query_unwrap_fallible_v(variant).is_some()
-            || self.vir_query_unwrap_type_param_v(variant).is_some())
+    /// Delegates to `VirTypeTable::array_store_strategy()`.  Codegen call
+    /// sites should prefer reading a pre-computed `ArrayStoreStrategy`
+    /// annotation when available, falling back to this method only when
+    /// the VIR node does not carry one.
+    pub fn array_store_strategy_v(&self, elem_vir: VirTypeId) -> ArrayStoreStrategy {
+        self.vir_type_table().array_store_strategy(elem_vir)
     }
 
     pub(crate) fn union_variant_index_to_array_tag_v(

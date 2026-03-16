@@ -534,7 +534,7 @@ mod tests {
     use crate::func::VirBody;
     use crate::type_table::VirTypeTable;
     use crate::types::VirType;
-    use vole_identity::{FunctionId, NameId, Symbol, VirTypeId};
+    use vole_identity::{ArrayStoreStrategy, FunctionId, NameId, Symbol, VirTypeId};
 
     fn name(n: u32) -> NameId {
         NameId::new_for_test(n)
@@ -1068,6 +1068,7 @@ mod tests {
                     })],
                     ty: type_id(20),
                     vir_ty: array_of_param,
+                    store_strategy: Some(ArrayStoreStrategy::Unresolved),
                 })),
             },
             mangled_name_id: None,

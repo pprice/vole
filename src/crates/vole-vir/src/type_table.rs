@@ -6,7 +6,7 @@
 // only (`VirTypeId`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::{NameId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, NameId, TypeDefId, TypeId, VirTypeId};
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -621,6 +621,131 @@ impl VirTypeTable {
         } else {
             [VirTypeId::NIL, inner]
         }
+    }
+
+    // -- Array element storage strategy --------------------------------------
+
+    /// Compute the array element storage strategy for a given element type.
+    ///
+    /// Classifies the element into one of the [`ArrayStoreStrategy`] variants
+    /// so codegen can dispatch on the enum without type-branching.
+    pub fn array_store_strategy(&self, elem: VirTypeId) -> ArrayStoreStrategy {
+        match self.get(elem) {
+            VirType::Unknown => ArrayStoreStrategy::Unknown,
+            VirType::Param { .. } => ArrayStoreStrategy::Unresolved,
+            VirType::Struct { .. } => ArrayStoreStrategy::HeapCopyStruct,
+            VirType::Union { variants } => {
+                if union_array_prefers_inline(variants, self) {
+                    ArrayStoreStrategy::UnionInline
+                } else {
+                    ArrayStoreStrategy::UnionBoxed
+                }
+            }
+            VirType::Optional { variants, .. } => {
+                if union_array_prefers_inline(variants.as_slice(), self) {
+                    ArrayStoreStrategy::UnionInline
+                } else {
+                    ArrayStoreStrategy::UnionBoxed
+                }
+            }
+            _ if self.is_wide(elem) => ArrayStoreStrategy::WideBox,
+            _ => ArrayStoreStrategy::DirectScalar,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Union array inline storage classification
+// ---------------------------------------------------------------------------
+
+/// Whether a union's variants all have unique runtime tags, allowing inline
+/// `(tag, payload)` array storage.
+///
+/// Shared between `VirTypeTable::array_store_strategy()` and
+/// `rederive::derive_union_storage_from_elem()`.
+pub(crate) fn union_array_prefers_inline(variants: &[VirTypeId], table: &VirTypeTable) -> bool {
+    let mut seen_tags: FxHashSet<RuntimeTagCategory> = FxHashSet::default();
+    for &variant in variants {
+        if !supports_inline_union_array_variant(variant, table) {
+            return false;
+        }
+        let tag = runtime_tag_category(variant, table);
+        if tag == RuntimeTagCategory::I64
+            && !is_integer_variant(variant, table)
+            && !table.is_sentinel(variant)
+        {
+            return false;
+        }
+        if !seen_tags.insert(tag) {
+            return false;
+        }
+    }
+    true
+}
+
+fn supports_inline_union_array_variant(variant: VirTypeId, table: &VirTypeTable) -> bool {
+    !matches!(
+        table.get(variant),
+        VirType::Union { .. }
+            | VirType::Optional { .. }
+            | VirType::Interface { .. }
+            | VirType::Class { .. }
+            | VirType::Struct { .. }
+            | VirType::Unknown
+            | VirType::Tuple { .. }
+            | VirType::Fallible { .. }
+            | VirType::Param { .. }
+    )
+}
+
+fn is_integer_variant(ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(
+        table.get(ty),
+        VirType::Primitive(
+            VirPrimitiveKind::I8
+                | VirPrimitiveKind::I16
+                | VirPrimitiveKind::I32
+                | VirPrimitiveKind::I64
+                | VirPrimitiveKind::U8
+                | VirPrimitiveKind::U16
+                | VirPrimitiveKind::U32
+                | VirPrimitiveKind::U64
+        )
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum RuntimeTagCategory {
+    String,
+    I64,
+    F64,
+    Bool,
+    Array,
+    Closure,
+    Instance,
+}
+
+fn runtime_tag_category(ty: VirTypeId, table: &VirTypeTable) -> RuntimeTagCategory {
+    match table.get(ty) {
+        VirType::Primitive(VirPrimitiveKind::String) => RuntimeTagCategory::String,
+        VirType::Primitive(
+            VirPrimitiveKind::I8
+            | VirPrimitiveKind::I16
+            | VirPrimitiveKind::I32
+            | VirPrimitiveKind::I64
+            | VirPrimitiveKind::U8
+            | VirPrimitiveKind::U16
+            | VirPrimitiveKind::U32
+            | VirPrimitiveKind::U64,
+        ) => RuntimeTagCategory::I64,
+        VirType::Primitive(VirPrimitiveKind::F32 | VirPrimitiveKind::F64) => {
+            RuntimeTagCategory::F64
+        }
+        VirType::Primitive(VirPrimitiveKind::Bool) => RuntimeTagCategory::Bool,
+        VirType::Array { .. } | VirType::FixedArray { .. } => RuntimeTagCategory::Array,
+        VirType::Function { .. } => RuntimeTagCategory::Closure,
+        VirType::Class { .. } => RuntimeTagCategory::Instance,
+        _ => RuntimeTagCategory::I64,
     }
 }
 
