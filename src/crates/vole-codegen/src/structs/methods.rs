@@ -930,12 +930,7 @@ impl Cg<'_, '_, '_> {
                 table.vir_to_type_id(resolved_obj_vir)
             };
             let vir_obj = self.vir_lookup(resolved_obj_type_id);
-            let type_def_id = crate::method_resolution::get_type_def_id_from_vir_type_id(
-                vir_obj,
-                self.vir_type_table(),
-                self.analyzed(),
-            )
-            .ok_or_else(|| {
+            let type_def_id = self.vir_type_table().type_def_id(vir_obj).ok_or_else(|| {
                 CodegenError::not_found(
                     "TypeDefId",
                     format!("{method_name_str} (receiver_type={resolved_obj_type_id:?})"),

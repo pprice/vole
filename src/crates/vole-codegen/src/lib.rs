@@ -14,7 +14,6 @@ mod intrinsic_compiler;
 mod intrinsics;
 pub mod jit;
 mod lambda;
-mod method_resolution;
 mod ops;
 mod rc_cleanup;
 mod rc_ops;

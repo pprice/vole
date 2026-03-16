@@ -654,6 +654,24 @@ impl VirProgram {
         self.entity_metadata.type_by_name(name_id)
     }
 
+    /// Pre-populate `TypeDefId` entries for all primitive and array types in
+    /// the type table.
+    ///
+    /// Must be called after `name_table` and `entity_metadata` are finalized.
+    /// After this call, `type_table.type_def_id()` returns `Some` for every
+    /// primitive `VirTypeId` (I8..Handle) and all `Array` types, so codegen's
+    /// method resolution can use the fast cached lookup instead of the 14-arm
+    /// match cascade through NameTable.
+    pub fn populate_primitive_type_def_ids(&mut self) {
+        let primitives = &self.name_table.primitives;
+        let array_name_id = self.entity_metadata.array_name_id();
+        let entity_metadata = &self.entity_metadata;
+        self.type_table
+            .populate_primitive_type_def_ids(primitives, array_name_id, |name_id| {
+                entity_metadata.type_by_name(name_id)
+            });
+    }
+
     /// Resolve semantic FunctionId by NameId.
     pub fn function_id_by_name_id(&self, name_id: NameId) -> Option<FunctionId> {
         self.entity_metadata.function_by_name(name_id)

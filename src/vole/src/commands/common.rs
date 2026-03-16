@@ -392,6 +392,10 @@ pub fn build_analyzed_program(
     vir_program.interner = Rc::new(interner);
     vir_program.name_table = Rc::clone(&db.names);
 
+    // Pre-populate TypeDefId entries for primitives and arrays so that
+    // codegen's method resolution can use the fast cached lookup.
+    vir_program.populate_primitive_type_def_ids();
+
     // Now that the real interner/name_table are set, re-rederive call targets
     // on VIR-monomorphized functions and test bodies (the early monomorph pass
     // ran with an empty interner, so call reclassification was a no-op).

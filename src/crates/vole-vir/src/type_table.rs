@@ -320,10 +320,71 @@ impl VirTypeTable {
     /// Return the `TypeDefId` embedded in this type, if any.
     ///
     /// Cached at interning time for `Class`, `Struct`, `Interface`, and
-    /// `Error` variants.  Returns `None` for all other type kinds.
+    /// `Error` variants.  Also cached for `Primitive` and `Array` types
+    /// after `populate_primitive_type_def_ids()` is called.
     #[inline]
     pub fn type_def_id(&self, id: VirTypeId) -> Option<TypeDefId> {
         self.type_def_ids[id.raw() as usize]
+    }
+
+    /// Set the cached `TypeDefId` for a `VirTypeId`.
+    ///
+    /// Used by `populate_primitive_type_def_ids` to backfill the cache for
+    /// types whose `TypeDefId` is not embedded in the `VirType` variant
+    /// (primitives, arrays).
+    pub fn set_type_def_id(&mut self, id: VirTypeId, def: TypeDefId) {
+        self.type_def_ids[id.raw() as usize] = Some(def);
+    }
+
+    /// Pre-populate `TypeDefId` entries for all reserved primitive types.
+    ///
+    /// Resolves each `VirPrimitiveKind` to its `TypeDefId` via the
+    /// `NameTable` primitives and the provided resolver closure.  After
+    /// this call, `type_def_id()` returns `Some` for every primitive
+    /// `VirTypeId`, eliminating the need for the 14-arm match cascade in
+    /// codegen's method resolution.
+    ///
+    /// Also resolves the Array type when `array_name_id` is provided.
+    pub fn populate_primitive_type_def_ids(
+        &mut self,
+        primitives: &vole_identity::Primitives,
+        array_name_id: Option<NameId>,
+        resolve: impl Fn(NameId) -> Option<TypeDefId>,
+    ) {
+        let mapping: &[(VirTypeId, NameId)] = &[
+            (VirTypeId::I8, primitives.i8),
+            (VirTypeId::I16, primitives.i16),
+            (VirTypeId::I32, primitives.i32),
+            (VirTypeId::I64, primitives.i64),
+            (VirTypeId::I128, primitives.i128),
+            (VirTypeId::U8, primitives.u8),
+            (VirTypeId::U16, primitives.u16),
+            (VirTypeId::U32, primitives.u32),
+            (VirTypeId::U64, primitives.u64),
+            (VirTypeId::F32, primitives.f32),
+            (VirTypeId::F64, primitives.f64),
+            (VirTypeId::F128, primitives.f128),
+            (VirTypeId::BOOL, primitives.bool),
+            (VirTypeId::STRING, primitives.string),
+            (VirTypeId::HANDLE, primitives.handle),
+        ];
+        for &(vir_id, name_id) in mapping {
+            if let Some(def) = resolve(name_id) {
+                self.set_type_def_id(vir_id, def);
+            }
+        }
+        // Array: resolve if the array NameId is known.
+        if let Some(name_id) = array_name_id
+            && let Some(def) = resolve(name_id)
+        {
+            // Cache on all interned Array types.
+            for i in 0..self.types.len() {
+                let id = VirTypeId::from_raw(i as u32);
+                if matches!(self.get(id), VirType::Array { .. }) && self.type_def_ids[i].is_none() {
+                    self.type_def_ids[i] = Some(def);
+                }
+            }
+        }
     }
 
     // -- Unwrap methods (extract structural data from compound types) --------
