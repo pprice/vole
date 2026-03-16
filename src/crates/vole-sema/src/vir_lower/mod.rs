@@ -1157,6 +1157,7 @@ pub fn lower_func_body(body: &FuncBody, ctx: &mut LoweringCtx<'_>) -> VirBody {
         FuncBody::Block(block) => lower_stmts(&block.stmts, ctx),
         FuncBody::Expr(expr) => {
             let trailing = lower_expr(expr, ctx);
+            let trailing = stmt::maybe_coerce_trailing_expr(trailing, expr, ctx);
             VirBody {
                 stmts: Vec::new(),
                 trailing: Some(trailing),

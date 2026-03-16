@@ -264,6 +264,34 @@ fn classify_return_coercion(
     None
 }
 
+/// Wrap an expression-body trailing expression in a `Coerce` node when the
+/// expression type doesn't match the function return type (e.g. `=> nil`
+/// returning `i32?`).
+pub(crate) fn maybe_coerce_trailing_expr(
+    trailing: Box<VirExpr>,
+    ast_expr: &vole_frontend::ast::Expr,
+    ctx: &mut LoweringCtx<'_>,
+) -> Box<VirExpr> {
+    if let Some(kind) = classify_return_coercion(ctx.func_return_type, ast_expr, ctx) {
+        let value_ty = ctx
+            .node_map
+            .get_type(ast_expr.id)
+            .unwrap_or(TypeId::UNKNOWN);
+        let from = ctx.translate(value_ty);
+        let to = ctx.translate(ctx.func_return_type);
+        Box::new(VirExpr::Coerce {
+            value: trailing,
+            from,
+            to,
+            vir_from: from,
+            vir_to: to,
+            kind,
+        })
+    } else {
+        trailing
+    }
+}
+
 /// Determine the numeric `CoerceKind` for a source→target conversion.
 ///
 /// Returns `None` when both types are equal or when the combination
