@@ -517,6 +517,18 @@ impl VirTypeTable {
         matches!(self.get(id), VirType::Optional { .. })
     }
 
+    /// Whether this is a `Union` or `Optional` type.
+    ///
+    /// Both share the same calling convention (tag + payload returned via
+    /// stack pointer) and runtime layout, so callers that need to handle
+    /// "any tagged union" should use this instead of `is_union()` alone.
+    pub fn is_union_or_optional(&self, id: VirTypeId) -> bool {
+        matches!(
+            self.get(id),
+            VirType::Union { .. } | VirType::Optional { .. }
+        )
+    }
+
     /// Whether this is a `Fallible` type.
     pub fn is_fallible(&self, id: VirTypeId) -> bool {
         matches!(self.get(id), VirType::Fallible { .. })

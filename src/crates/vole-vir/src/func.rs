@@ -107,8 +107,8 @@ impl ReturnAbi {
         // Struct but no field count available (generic mode) — fall
         // through to Single.  Will be recomputed after monomorphization.
 
-        // Union → pointer to stack-allocated buffer
-        if table.is_union(vir_return_type) {
+        // Union / Optional → pointer to stack-allocated buffer
+        if table.is_union_or_optional(vir_return_type) {
             return Self::UnionPtr;
         }
 
@@ -357,6 +357,16 @@ mod tests {
         );
         assert_eq!(
             ReturnAbi::classify(union_ty, &table, None),
+            ReturnAbi::UnionPtr
+        );
+    }
+
+    #[test]
+    fn classify_optional() {
+        let mut table = VirTypeTable::new();
+        let optional_ty = table.intern_optional(VirTypeId::STRING, None);
+        assert_eq!(
+            ReturnAbi::classify(optional_ty, &table, None),
             ReturnAbi::UnionPtr
         );
     }

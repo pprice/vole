@@ -488,7 +488,7 @@ fn rederive_expr(
             ..
         } => {
             rederive_ref(scrutinee, table, ret_ty, entities, call_ctx);
-            *result_is_union = table.is_union(*vir_ty);
+            *result_is_union = table.is_union_or_optional(*vir_ty);
             let scrutinee_vir_ty = extract_vir_ty(scrutinee);
             for arm in arms {
                 rederive_pattern(&mut arm.pattern, scrutinee_vir_ty, table, ret_ty, entities);
@@ -1615,9 +1615,9 @@ fn resolve_single_field_coercion(
         };
     }
 
-    // Union field: wrap concrete values, copy existing unions.
-    if table.is_union(concrete_field_ty) {
-        let val_is_union = extract_vir_ty(val_ref).is_some_and(|vt| table.is_union(vt));
+    // Union/Optional field: wrap concrete values, copy existing unions.
+    if table.is_union_or_optional(concrete_field_ty) {
+        let val_is_union = extract_vir_ty(val_ref).is_some_and(|vt| table.is_union_or_optional(vt));
         return if val_is_union {
             FieldCoercionHint::UnionCopy
         } else {
@@ -1861,7 +1861,7 @@ fn rederive_let_storage(
             // Re-derive init_is_union from the init expression's now-concrete
             // VIR type.  If the init type cannot be extracted, preserve the
             // existing annotation.
-            let init_is_union = init_vir_ty.is_some_and(|t| table.is_union(t));
+            let init_is_union = init_vir_ty.is_some_and(|t| table.is_union_or_optional(t));
             // If the existing storage is already Union with a pre-computed
             // tag hint, preserve it — the rewrite pass has already remapped
             // the VirTypeIds inside the hint.  Otherwise (e.g. the storage
