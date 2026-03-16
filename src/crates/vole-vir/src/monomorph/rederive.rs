@@ -352,9 +352,16 @@ fn rederive_expr(
         }
 
         // Strings — re-derive StringConversion::Generic
-        VirExpr::StringConcat { parts } => {
-            for part in parts {
-                rederive_ref(part, table, ret_ty, entities, call_ctx);
+        VirExpr::StringConcat {
+            lhs,
+            rhs,
+            rhs_conversion,
+        } => {
+            rederive_ref(lhs, table, ret_ty, entities, call_ctx);
+            rederive_ref(rhs, table, ret_ty, entities, call_ctx);
+            // Re-derive rhs_conversion from now-concrete rhs type.
+            if let Some(rhs_vir_ty) = extract_vir_ty(rhs) {
+                rederive_string_conversion(rhs_conversion, rhs_vir_ty, table);
             }
         }
         VirExpr::InterpolatedString { parts } => {
@@ -1142,18 +1149,36 @@ fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
             vir_elem_type,
             union_storage,
             store_strategy,
+            elem_conversion,
             ..
         } => {
             *union_storage = derive_union_storage_from_elem(*vir_elem_type, table);
             *store_strategy = Some(table.array_store_strategy(*vir_elem_type));
+            *elem_conversion = Some(table.elem_conversion(*vir_elem_type));
         }
-        VirIterKind::Generic { .. }
-        | VirIterKind::Range
-        | VirIterKind::String
-        | VirIterKind::RuntimeIterator { .. }
-        | VirIterKind::IteratorInterface { .. }
-        | VirIterKind::CustomIterator { .. }
-        | VirIterKind::CustomIterable { .. } => {
+        VirIterKind::RuntimeIterator {
+            vir_elem_type,
+            elem_conversion,
+            ..
+        }
+        | VirIterKind::IteratorInterface {
+            vir_elem_type,
+            elem_conversion,
+            ..
+        }
+        | VirIterKind::CustomIterator {
+            vir_elem_type,
+            elem_conversion,
+            ..
+        }
+        | VirIterKind::CustomIterable {
+            vir_elem_type,
+            elem_conversion,
+            ..
+        } => {
+            *elem_conversion = table.elem_conversion(*vir_elem_type);
+        }
+        VirIterKind::Generic { .. } | VirIterKind::Range | VirIterKind::String => {
             // Re-deriving Generic -> concrete iteration strategy still needs
             // iterable-type metadata not carried by VirIterKind::Generic.
         }
@@ -1886,6 +1911,7 @@ mod tests {
     use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
     use vole_identity::{
         ArrayStoreStrategy, FunctionId, MethodId, NameId, Symbol, TypeDefId, TypeId,
+        VirElemConversion,
     };
 
     /// Helper: create a NameId for testing.
@@ -2554,6 +2580,7 @@ mod tests {
                 vir_elem_type: elem_union,
                 union_storage: None,
                 store_strategy: None,
+                elem_conversion: None,
             },
         })]);
 
@@ -2564,10 +2591,13 @@ mod tests {
                 VirIterKind::Array {
                     union_storage,
                     store_strategy,
+                    elem_conversion,
                     ..
                 } => {
                     assert_eq!(*union_storage, Some(UnionStorageKind::Inline));
                     assert_eq!(*store_strategy, Some(ArrayStoreStrategy::UnionInline));
+                    // Union types map to Identity (pointer-width i64).
+                    assert_eq!(*elem_conversion, Some(VirElemConversion::Identity));
                 }
                 _ => panic!("expected array iter kind"),
             },

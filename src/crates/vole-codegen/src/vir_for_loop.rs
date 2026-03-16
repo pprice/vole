@@ -7,7 +7,9 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_identity::{ArrayStoreStrategy, NameId, TypeId, UnionStorageKind, VirTypeId};
+use vole_identity::{
+    ArrayStoreStrategy, NameId, TypeId, UnionStorageKind, VirElemConversion, VirTypeId,
+};
 use vole_vir::stmt::{VirFor, VirIterKind};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
@@ -57,6 +59,35 @@ fn vir_expr_contains_continue(expr: &VirExpr) -> bool {
         }
         VirExpr::Block { stmts, .. } => stmts.iter().any(vir_stmt_contains_continue),
         _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Annotation extraction helpers
+// ---------------------------------------------------------------------------
+
+/// Extract the `VirElemConversion` from an iterator-based `VirIterKind`.
+///
+/// Returns `Identity` for String (string iteration always yields strings)
+/// and `Unresolved` for kinds that don't carry the annotation (Range, Array,
+/// Generic).
+fn iter_elem_conversion(kind: &VirIterKind) -> VirElemConversion {
+    match kind {
+        VirIterKind::String => VirElemConversion::Identity,
+        VirIterKind::RuntimeIterator {
+            elem_conversion, ..
+        }
+        | VirIterKind::IteratorInterface {
+            elem_conversion, ..
+        }
+        | VirIterKind::CustomIterator {
+            elem_conversion, ..
+        }
+        | VirIterKind::CustomIterable {
+            elem_conversion, ..
+        } => *elem_conversion,
+        // Range / Array / Generic don't use the iter_next path.
+        _ => VirElemConversion::Unresolved,
     }
 }
 
@@ -219,6 +250,7 @@ impl Cg<'_, '_, '_> {
             elem_type,
             union_storage,
             store_strategy,
+            elem_conversion,
             ..
         } = &vir_for.kind
         else {
@@ -227,6 +259,7 @@ impl Cg<'_, '_, '_> {
         let mut elem_vir = self.try_substitute_type_v(*elem_type);
         let mut union_storage = *union_storage;
         let mut store_strategy = *store_strategy;
+        let mut elem_conversion = *elem_conversion;
 
         let arr = self.compile_vir_expr(&vir_for.iterable)?;
 
@@ -236,6 +269,7 @@ impl Cg<'_, '_, '_> {
             elem_vir = arr_elem_vir;
             let derived = self.array_store_strategy_v(arr_elem_vir);
             store_strategy = Some(derived);
+            elem_conversion = Some(self.elem_conversion_v(arr_elem_vir));
             if union_storage.is_none() && self.vir_query_is_union_v(arr_elem_vir) {
                 union_storage = Some(match derived {
                     ArrayStoreStrategy::UnionInline => UnionStorageKind::Inline,
@@ -297,7 +331,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .load(types::I64, MemFlags::new(), elem_ptr, value_offset);
         let elem_val = if let Some(strategy) = store_strategy {
-            self.decode_array_elem_by_strategy(elem_val, elem_ptr, elem_vir, strategy)?
+            self.decode_array_elem_hinted(elem_val, elem_ptr, elem_vir, strategy, elem_conversion)?
         } else {
             self.decode_array_elem_v(elem_val, elem_ptr, elem_vir, union_storage)?
         };
@@ -323,6 +357,7 @@ impl Cg<'_, '_, '_> {
     /// custom iterator, or custom iterable).
     fn compile_vir_for_runtime_iter(&mut self, vir_for: &VirFor) -> CodegenResult<bool> {
         let (iter_val, elem_vir, needs_elem_rc_dec) = self.setup_vir_runtime_iter(vir_for)?;
+        let elem_conversion = iter_elem_conversion(&vir_for.kind);
 
         let slot_data = self.alloc_stack(8);
         let ptr_type = self.ptr_type();
@@ -350,7 +385,7 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), slot_addr, 0);
-        let elem_val = self.convert_iter_elem_v(raw_val, elem_vir, elem_cr_type)?;
+        let elem_val = self.convert_elem_by_hint(raw_val, elem_vir, elem_conversion)?;
         self.builder.def_var(elem_var, elem_val);
 
         self.compile_vir_loop_body(&vir_for.body, exit_block, continue_block)?;
@@ -435,19 +470,15 @@ impl Cg<'_, '_, '_> {
     /// Set up a for-loop over an `Iterator<T>` interface value.
     ///
     /// Wraps the interface via `InterfaceIter` into a `RuntimeIterator`.
+    /// Trusts the VIR-annotated elem_type rather than re-extracting from
+    /// the compiled iterable's type args.
     fn setup_iterator_interface_iter(
         &mut self,
         vir_for: &VirFor,
         hint_elem_type: VirTypeId,
     ) -> CodegenResult<(Value, VirTypeId, bool)> {
-        let hint = self.try_substitute_type_v(hint_elem_type);
+        let elem_vir = self.try_substitute_type_v(hint_elem_type);
         let iface = self.compile_vir_expr(&vir_for.iterable)?;
-        let elem_vir =
-            if let Some((_, type_args)) = self.vir_query_unwrap_interface_v(iface.type_id) {
-                type_args.first().copied().unwrap_or(hint)
-            } else {
-                hint
-            };
         let iter = self.wrap_interface_iter_v(iface, elem_vir)?;
         self.enter_iter_rc_scope(&iter, None);
         Ok((iter.value, elem_vir, false))
@@ -610,6 +641,58 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Convert a raw i64 value using a pre-computed [`VirElemConversion`].
+    ///
+    /// This is the annotation-driven path that replaces type-based branching
+    /// in `convert_iter_elem_v` and `decode_scalar_array_elem`.  Falls back
+    /// to `convert_iter_elem_v` for `Unresolved` (generic templates).
+    pub(crate) fn convert_elem_by_hint(
+        &mut self,
+        raw_val: Value,
+        elem_vir: VirTypeId,
+        hint: VirElemConversion,
+    ) -> CodegenResult<Value> {
+        match hint {
+            VirElemConversion::Identity => Ok(raw_val),
+            VirElemConversion::BitcastF64 => {
+                Ok(self
+                    .builder
+                    .ins()
+                    .bitcast(types::F64, MemFlags::new(), raw_val))
+            }
+            VirElemConversion::BitcastF32 => {
+                let i32_val = self.builder.ins().ireduce(types::I32, raw_val);
+                Ok(self
+                    .builder
+                    .ins()
+                    .bitcast(types::F32, MemFlags::new(), i32_val))
+            }
+            VirElemConversion::ReduceInt { bits } => {
+                let target = match bits {
+                    8 => types::I8,
+                    16 => types::I16,
+                    32 => types::I32,
+                    _ => return Ok(raw_val),
+                };
+                Ok(self.builder.ins().ireduce(target, raw_val))
+            }
+            VirElemConversion::WideUnbox => {
+                let wide = self
+                    .vir_query_wide_type_v(elem_vir)
+                    .expect("INTERNAL: WideUnbox hint but no wide type");
+                let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
+                Ok(wide.reinterpret_i128(self.builder, wide_bits))
+            }
+            VirElemConversion::Unresolved => {
+                // Resolve dynamically; the type should be concrete
+                // post-monomorphization.  Delegate to the old type-branch
+                // method as a safety net for any still-unresolved params.
+                let elem_cr_type = self.cranelift_type_v(elem_vir);
+                self.convert_iter_elem_v(raw_val, elem_vir, elem_cr_type)
+            }
+        }
+    }
+
     /// Decode a raw array element value to the correct Cranelift type (VirTypeId-native).
     ///
     /// Dispatches on the pre-computed [`ArrayStoreStrategy`] when available,
@@ -628,6 +711,31 @@ impl Cg<'_, '_, '_> {
             None => self.array_store_strategy_v(elem_vir),
         };
         self.decode_array_elem_by_strategy(elem_val, elem_ptr, elem_vir, strategy)
+    }
+
+    /// Decode a raw array element using both [`ArrayStoreStrategy`] and an
+    /// optional [`VirElemConversion`] hint.
+    ///
+    /// For scalar strategies (`DirectScalar`, `HeapCopyStruct`, `Unresolved`),
+    /// uses the hint to avoid type-branching.  Falls back to
+    /// `decode_array_elem_by_strategy` when no hint is available.
+    pub(crate) fn decode_array_elem_hinted(
+        &mut self,
+        elem_val: Value,
+        elem_ptr: Value,
+        elem_vir: VirTypeId,
+        strategy: ArrayStoreStrategy,
+        elem_conversion: Option<VirElemConversion>,
+    ) -> CodegenResult<Value> {
+        match strategy {
+            ArrayStoreStrategy::DirectScalar
+            | ArrayStoreStrategy::HeapCopyStruct
+            | ArrayStoreStrategy::Unresolved => {
+                let hint = elem_conversion.unwrap_or(VirElemConversion::Unresolved);
+                self.convert_elem_by_hint(elem_val, elem_vir, hint)
+            }
+            _ => self.decode_array_elem_by_strategy(elem_val, elem_ptr, elem_vir, strategy),
+        }
     }
 
     /// Decode a raw array element dispatching on an [`ArrayStoreStrategy`].
@@ -692,27 +800,16 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Decode a scalar array element (int, float, bool, nil, string, etc.).
+    ///
+    /// Delegates to `convert_elem_by_hint` with a dynamically computed hint.
+    /// Prefer calling `convert_elem_by_hint` directly with a pre-computed
+    /// `VirElemConversion` when available.
     fn decode_scalar_array_elem(
         &mut self,
         elem_val: Value,
         elem_vir: VirTypeId,
     ) -> CodegenResult<Value> {
-        let elem_cr_type = self.cranelift_type_v(elem_vir);
-        if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
-            Ok(self.builder.ins().ireduce(elem_cr_type, elem_val))
-        } else if elem_cr_type == types::F64 {
-            Ok(self
-                .builder
-                .ins()
-                .bitcast(types::F64, MemFlags::new(), elem_val))
-        } else if elem_cr_type == types::F32 {
-            let i32_val = self.builder.ins().ireduce(types::I32, elem_val);
-            Ok(self
-                .builder
-                .ins()
-                .bitcast(types::F32, MemFlags::new(), i32_val))
-        } else {
-            Ok(elem_val)
-        }
+        let hint = self.elem_conversion_v(elem_vir);
+        self.convert_elem_by_hint(elem_val, elem_vir, hint)
     }
 }

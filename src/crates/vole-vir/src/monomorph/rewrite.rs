@@ -270,8 +270,14 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
-        VirExpr::StringConcat { parts } => VirExpr::StringConcat {
-            parts: parts.iter().map(|p| rewrite_ref(p, ctx)).collect(),
+        VirExpr::StringConcat {
+            lhs,
+            rhs,
+            rhs_conversion,
+        } => VirExpr::StringConcat {
+            lhs: rewrite_ref(lhs, ctx),
+            rhs: rewrite_ref(rhs, ctx),
+            rhs_conversion: rhs_conversion.clone(),
         },
         VirExpr::InterpolatedString { parts } => VirExpr::InterpolatedString {
             parts: parts.iter().map(|p| rewrite_string_part(p, ctx)).collect(),
@@ -1146,35 +1152,43 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
             vir_elem_type,
             union_storage,
             store_strategy,
+            elem_conversion,
         } => VirIterKind::Array {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
             union_storage: *union_storage,
             store_strategy: *store_strategy,
+            elem_conversion: *elem_conversion,
         },
         VirIterKind::String => VirIterKind::String,
         VirIterKind::RuntimeIterator {
             elem_type,
             vir_elem_type,
+            elem_conversion,
         } => VirIterKind::RuntimeIterator {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
+            elem_conversion: *elem_conversion,
         },
         VirIterKind::IteratorInterface {
             elem_type,
             vir_elem_type,
+            elem_conversion,
         } => VirIterKind::IteratorInterface {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
+            elem_conversion: *elem_conversion,
         },
         VirIterKind::CustomIterator {
             elem_type,
             vir_elem_type,
             iterator_interface_type,
+            elem_conversion,
         } => VirIterKind::CustomIterator {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
             iterator_interface_type: ctx.remap(*iterator_interface_type),
+            elem_conversion: *elem_conversion,
         },
         VirIterKind::CustomIterable {
             elem_type,
@@ -1182,12 +1196,14 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
             iterator_interface_type,
             iter_type_name_id,
             iter_method_name_id,
+            elem_conversion,
         } => VirIterKind::CustomIterable {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
             iterator_interface_type: ctx.remap(*iterator_interface_type),
             iter_type_name_id: *iter_type_name_id,
             iter_method_name_id: *iter_method_name_id,
+            elem_conversion: *elem_conversion,
         },
         VirIterKind::Generic {
             elem_type,
@@ -1350,7 +1366,8 @@ mod tests {
     use crate::type_table::VirTypeTable;
     use crate::types::VirType;
     use vole_identity::{
-        ArrayStoreStrategy, FunctionId, NameId, NodeId, UnionStorageKind, VirTypeId,
+        ArrayStoreStrategy, FunctionId, NameId, NodeId, UnionStorageKind, VirElemConversion,
+        VirTypeId,
     };
 
     /// Helper: create a NameId for testing.
@@ -1816,6 +1833,7 @@ mod tests {
                         vir_elem_type: param_id,
                         union_storage: Some(UnionStorageKind::Inline),
                         store_strategy: Some(ArrayStoreStrategy::UnionInline),
+                        elem_conversion: Some(VirElemConversion::Identity),
                     },
                 })],
                 trailing: None,

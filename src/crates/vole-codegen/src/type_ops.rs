@@ -9,7 +9,7 @@
 use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
 use cranelift_codegen::ir::FuncRef;
 
-use vole_identity::{ArrayStoreStrategy, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, TypeDefId, TypeId, VirElemConversion, VirTypeId};
 
 use super::context::Cg;
 use super::types::CompiledValue;
@@ -254,6 +254,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// the VIR node does not carry one.
     pub fn array_store_strategy_v(&self, elem_vir: VirTypeId) -> ArrayStoreStrategy {
         self.vir_type_table().array_store_strategy(elem_vir)
+    }
+
+    /// Compute the element value conversion from a VIR element type.
+    ///
+    /// Delegates to `VirTypeTable::elem_conversion()`.  Codegen call sites
+    /// should prefer reading a pre-computed `VirElemConversion` annotation
+    /// when available, falling back to this method only when the VIR node
+    /// does not carry one.
+    pub fn elem_conversion_v(&self, elem_vir: VirTypeId) -> VirElemConversion {
+        self.vir_type_table().elem_conversion(elem_vir)
     }
 
     pub(crate) fn union_variant_index_to_array_tag_v(

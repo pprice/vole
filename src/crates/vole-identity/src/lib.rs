@@ -17,7 +17,7 @@ mod type_layout;
 
 pub use annotations::{
     ArrayStoreStrategy, BoxingStrategy, ConstantValue, IsCheckResult, StringConversion,
-    UnionStorageKind, VirIsCheckResult,
+    UnionStorageKind, VirElemConversion, VirIsCheckResult,
 };
 pub use intern::Interner;
 pub use primitive_type::PrimitiveType;

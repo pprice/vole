@@ -6,7 +6,9 @@
 // only (`VirTypeId`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::{ArrayStoreStrategy, BoxingStrategy, NameId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{
+    ArrayStoreStrategy, BoxingStrategy, NameId, TypeDefId, TypeId, VirElemConversion, VirTypeId,
+};
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -711,6 +713,38 @@ impl VirTypeTable {
             }
             _ if self.is_wide(elem) => ArrayStoreStrategy::WideBox,
             _ => ArrayStoreStrategy::DirectScalar,
+        }
+    }
+
+    // -- Element value conversion (raw i64 → typed value) ---------------------
+
+    /// Compute the element value conversion for a given element type.
+    ///
+    /// Classifies how to convert a raw i64 value (from array storage or
+    /// `iter_next`) back to the element's Cranelift type.  Codegen reads
+    /// this to emit the correct instruction sequence without type-branching.
+    pub fn elem_conversion(&self, elem: VirTypeId) -> VirElemConversion {
+        match self.get(elem) {
+            VirType::Primitive(kind) => match kind {
+                VirPrimitiveKind::I8 | VirPrimitiveKind::U8 | VirPrimitiveKind::Bool => {
+                    VirElemConversion::ReduceInt { bits: 8 }
+                }
+                VirPrimitiveKind::I16 | VirPrimitiveKind::U16 => {
+                    VirElemConversion::ReduceInt { bits: 16 }
+                }
+                VirPrimitiveKind::I32 | VirPrimitiveKind::U32 => {
+                    VirElemConversion::ReduceInt { bits: 32 }
+                }
+                VirPrimitiveKind::I64 | VirPrimitiveKind::U64 => VirElemConversion::Identity,
+                VirPrimitiveKind::I128 | VirPrimitiveKind::F128 => VirElemConversion::WideUnbox,
+                VirPrimitiveKind::F64 => VirElemConversion::BitcastF64,
+                VirPrimitiveKind::F32 => VirElemConversion::BitcastF32,
+                VirPrimitiveKind::String | VirPrimitiveKind::Handle => VirElemConversion::Identity,
+            },
+            VirType::Param { .. } => VirElemConversion::Unresolved,
+            // All other types (class, struct, array, interface, function,
+            // union, optional, fallible, tuple, etc.) are pointer-width i64.
+            _ => VirElemConversion::Identity,
         }
     }
 

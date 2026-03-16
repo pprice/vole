@@ -90,6 +90,44 @@ pub enum ArrayStoreStrategy {
     Unresolved,
 }
 
+/// Element value conversion strategy for decoding iterator/array elements.
+///
+/// Pre-computed from the element's VIR type so codegen can convert raw i64
+/// values (from array storage or `iter_next`) to the correct Cranelift type
+/// without type-branching.
+///
+/// Shared between `VirIterKind` variants and `ArrayStoreStrategy::DirectScalar`
+/// decode paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VirElemConversion {
+    /// Value is already i64 / pointer-width — no conversion needed.
+    ///
+    /// Applies to: i64, u64, string, class, array, interface, function,
+    /// struct (pointer), nil (i8 but stored as i64), unknown, handle, etc.
+    Identity,
+
+    /// Bitcast i64 to f64.
+    BitcastF64,
+
+    /// Ireduce i64 to i32, then bitcast to f32.
+    BitcastF32,
+
+    /// Ireduce i64 to a narrower integer type.
+    ///
+    /// `bits` is the target width (8, 16, or 32).
+    /// Applies to: i8, u8, bool (8), i16, u16 (16), i32, u32 (32).
+    ReduceInt { bits: u8 },
+
+    /// Wide type (i128 or f128) — call `Wide128Unbox`, then reinterpret.
+    ///
+    /// Codegen derives the specific `WideType` from the element's VirTypeId.
+    WideUnbox,
+
+    /// Unresolved — used in generic templates before monomorphization.
+    /// Codegen falls back to type-based detection.
+    Unresolved,
+}
+
 /// String interpolation conversion strategy.
 ///
 /// Sema computes the conversion needed for each sub-expression in an

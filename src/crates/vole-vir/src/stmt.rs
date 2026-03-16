@@ -2,7 +2,9 @@
 //
 // VIR statement nodes.
 
-use vole_identity::{ArrayStoreStrategy, ModuleId, NameId, Symbol, UnionStorageKind, VirTypeId};
+use vole_identity::{
+    ArrayStoreStrategy, ModuleId, NameId, Symbol, UnionStorageKind, VirElemConversion, VirTypeId,
+};
 
 use crate::expr::{CoerceKind, FieldStorage};
 use crate::func::VirBody;
@@ -312,9 +314,16 @@ pub enum VirIterKind {
         /// Pre-computed element storage strategy.  Codegen reads this to
         /// decode array elements without type-branching.
         store_strategy: Option<ArrayStoreStrategy>,
+        /// Pre-computed scalar element conversion for `DirectScalar` /
+        /// `HeapCopyStruct` / `Unresolved` strategies.  Codegen reads this
+        /// to decode array elements without type-branching.
+        elem_conversion: Option<VirElemConversion>,
     },
 
     /// Iterate over the characters of a string.
+    ///
+    /// String iteration always yields string elements, so no element
+    /// conversion annotation is needed (identity conversion).
     String,
 
     /// Iterate via a direct `RuntimeIterator` value (pass-through).
@@ -324,6 +333,8 @@ pub enum VirIterKind {
     RuntimeIterator {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
+        /// Pre-computed element conversion for the raw i64 from iter_next.
+        elem_conversion: VirElemConversion,
     },
 
     /// Iterate via an `Iterator<T>` interface value.
@@ -334,6 +345,8 @@ pub enum VirIterKind {
     IteratorInterface {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
+        /// Pre-computed element conversion for the raw i64 from iter_next.
+        elem_conversion: VirElemConversion,
     },
 
     /// Iterate via a concrete class implementing `Iterator<T>`.
@@ -347,6 +360,8 @@ pub enum VirIterKind {
         /// Eliminates codegen's need to reconstruct `Iterator<elem_type>`
         /// via `vir_query_lookup_interface_v()`.
         iterator_interface_type: VirTypeId,
+        /// Pre-computed element conversion for the raw i64 from iter_next.
+        elem_conversion: VirElemConversion,
     },
 
     /// Iterate via a concrete class implementing `Iterable<T>`.
@@ -368,6 +383,8 @@ pub enum VirIterKind {
         iter_type_name_id: NameId,
         /// The `iter` method's NameId, pre-resolved by sema.
         iter_method_name_id: NameId,
+        /// Pre-computed element conversion for the raw i64 from iter_next.
+        elem_conversion: VirElemConversion,
     },
 
     /// Placeholder for generic lowering mode.

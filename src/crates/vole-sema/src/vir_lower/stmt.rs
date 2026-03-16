@@ -5,7 +5,7 @@
 use crate::IterableKind;
 use vole_frontend::PatternKind;
 use vole_frontend::ast::{ExprKind, LetInit, LetStmt, Stmt};
-use vole_identity::{ArrayStoreStrategy, TypeId, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, TypeId, VirElemConversion, VirTypeId};
 
 use vole_vir::expr::{CoerceKind, VirExpr};
 use vole_vir::stmt::{
@@ -483,11 +483,13 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
             let union_storage = ctx.node_map.get_union_storage_kind(for_stmt.iterable.id);
             let vir_elem = ctx.translate(elem_type);
             let store_strategy = Some(ctx.type_table.array_store_strategy(vir_elem));
+            let elem_conversion = Some(ctx.type_table.elem_conversion(vir_elem));
             VirIterKind::Array {
                 elem_type: vir_elem,
                 vir_elem_type: vir_elem,
                 union_storage,
                 store_strategy,
+                elem_conversion,
             }
         }
         Some(IterableKind::String) => VirIterKind::String,
@@ -500,14 +502,18 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 .get_type(for_stmt.iterable.id)
                 .unwrap_or(TypeId::UNKNOWN);
             if !ctx.generic && ctx.type_arena.is_runtime_iterator(iter_ty) {
+                let vir_elem = ctx.translate(elem_type);
                 VirIterKind::RuntimeIterator {
-                    elem_type: ctx.translate(elem_type),
-                    vir_elem_type: ctx.translate(elem_type),
+                    elem_type: vir_elem,
+                    vir_elem_type: vir_elem,
+                    elem_conversion: ctx.type_table.elem_conversion(vir_elem),
                 }
             } else {
+                let vir_elem = ctx.translate(elem_type);
                 VirIterKind::IteratorInterface {
-                    elem_type: ctx.translate(elem_type),
-                    vir_elem_type: ctx.translate(elem_type),
+                    elem_type: vir_elem,
+                    vir_elem_type: vir_elem,
+                    elem_conversion: ctx.type_table.elem_conversion(vir_elem),
                 }
             }
         }
@@ -529,6 +535,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 elem_type: vir_elem,
                 vir_elem_type: vir_elem,
                 iterator_interface_type,
+                elem_conversion: ctx.type_table.elem_conversion(vir_elem),
             }
         }
         Some(IterableKind::CustomIterable { elem_type }) => {
@@ -567,6 +574,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 iterator_interface_type,
                 iter_type_name_id,
                 iter_method_name_id,
+                elem_conversion: ctx.type_table.elem_conversion(vir_elem),
             }
         }
         Some(IterableKind::Generic { elem_type }) => VirIterKind::Generic {
@@ -593,6 +601,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 vir_elem_type: ctx.translate(TypeId::I64),
                 union_storage: None,
                 store_strategy: Some(ArrayStoreStrategy::DirectScalar),
+                elem_conversion: Some(VirElemConversion::Identity),
             }
         }
     };
