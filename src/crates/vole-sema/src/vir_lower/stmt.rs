@@ -2,17 +2,16 @@
 //
 // Statement lowering: AST `Stmt` -> VIR `VirStmt`.
 
-use crate::{IterableKind, IteratorSource};
+use crate::IterableKind;
 use vole_frontend::PatternKind;
 use vole_frontend::ast::{ExprKind, LetInit, LetStmt, Stmt};
-use vole_identity::{ArrayStoreStrategy, TypeId, VirElemConversion, VirTypeId};
+use vole_identity::{ArrayStoreStrategy, TypeId, VirElemConversion};
 
 use vole_vir::expr::{CoerceKind, VirExpr};
 use vole_vir::stmt::{
     DestructureTupleKind, LetStorageHint, ReturnConvention, UnionTagHint, VirDestructureElement,
     VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
-use vole_vir::types::VirType;
 
 use super::LoweringCtx;
 use super::expr::lower_expr;
@@ -520,13 +519,26 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 elem_conversion,
             }
         }
-        Some(IterableKind::Iterator { elem_type, source }) => {
-            lower_iterator_kind(elem_type, source, for_stmt, ctx)
+        Some(IterableKind::Iterator { elem_type, .. }) => {
+            let vir_elem = ctx.translate(elem_type);
+            VirIterKind::Iterator {
+                elem_type: vir_elem,
+                vir_elem_type: vir_elem,
+                elem_conversion: ctx.type_table.elem_conversion(vir_elem),
+            }
         }
-        Some(IterableKind::Generic { elem_type }) => VirIterKind::Generic {
-            elem_type: ctx.translate(elem_type),
-            vir_elem_type: ctx.translate(elem_type),
-        },
+        Some(IterableKind::Generic { elem_type }) => {
+            // Generic iterable: sema couldn't classify the iteration
+            // strategy.  Lower as Iterator with Unresolved conversion;
+            // monomorphization will substitute the concrete type and
+            // rederive will resolve the conversion.
+            let vir_elem = ctx.translate(elem_type);
+            VirIterKind::Iterator {
+                elem_type: vir_elem,
+                vir_elem_type: vir_elem,
+                elem_conversion: VirElemConversion::Unresolved,
+            }
+        }
         None if ctx.generic => {
             // Generic mode: missing iterable kind is expected when the
             // iterable type is a bare type parameter.  Use the iterable
@@ -535,9 +547,11 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 .node_map
                 .get_type(for_stmt.iterable.id)
                 .unwrap_or(TypeId::UNKNOWN);
-            VirIterKind::Generic {
-                elem_type: ctx.translate(iter_ty),
-                vir_elem_type: ctx.translate(iter_ty),
+            let vir_elem = ctx.translate(iter_ty);
+            VirIterKind::Iterator {
+                elem_type: vir_elem,
+                vir_elem_type: vir_elem,
+                elem_conversion: VirElemConversion::Unresolved,
             }
         }
         None => {
@@ -555,13 +569,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
     // Determine the element type for the loop variable.
     let var_type = match kind {
         VirIterKind::Range => ctx.translate(TypeId::I64),
-        VirIterKind::Array { elem_type, .. } => elem_type,
-        VirIterKind::String => ctx.translate(TypeId::STRING),
-        VirIterKind::RuntimeIterator { elem_type, .. }
-        | VirIterKind::IteratorInterface { elem_type, .. }
-        | VirIterKind::CustomIterator { elem_type, .. }
-        | VirIterKind::CustomIterable { elem_type, .. }
-        | VirIterKind::Generic { elem_type, .. } => elem_type,
+        VirIterKind::Array { elem_type, .. } | VirIterKind::Iterator { elem_type, .. } => elem_type,
     };
 
     let vir_var_type = var_type;
@@ -573,89 +581,6 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
         body,
         kind,
     })
-}
-
-/// Map an `IterableKind::Iterator { source, elem_type }` to the correct
-/// `VirIterKind` variant.
-///
-/// Sema unifies all iterator-producing iterables under a single
-/// `IterableKind::Iterator` with an [`IteratorSource`] tag.  This function
-/// converts that tag back into the specific `VirIterKind` variant that
-/// codegen expects, pre-resolving any type or method metadata needed.
-fn lower_iterator_kind(
-    elem_type: TypeId,
-    source: IteratorSource,
-    for_stmt: &vole_frontend::ast::ForStmt,
-    ctx: &mut LoweringCtx<'_>,
-) -> VirIterKind {
-    let vir_elem = ctx.translate(elem_type);
-    match source {
-        IteratorSource::String => VirIterKind::String,
-        IteratorSource::RuntimeIterator => VirIterKind::RuntimeIterator {
-            elem_type: vir_elem,
-            vir_elem_type: vir_elem,
-            elem_conversion: ctx.type_table.elem_conversion(vir_elem),
-        },
-        IteratorSource::IteratorInterface => VirIterKind::IteratorInterface {
-            elem_type: vir_elem,
-            vir_elem_type: vir_elem,
-            elem_conversion: ctx.type_table.elem_conversion(vir_elem),
-        },
-        IteratorSource::CustomIterator => {
-            let iterator_interface_type = resolve_iterator_interface_type(vir_elem, ctx);
-            VirIterKind::CustomIterator {
-                elem_type: vir_elem,
-                vir_elem_type: vir_elem,
-                iterator_interface_type,
-                elem_conversion: ctx.type_table.elem_conversion(vir_elem),
-            }
-        }
-        IteratorSource::CustomIterable => {
-            let iterator_interface_type = resolve_iterator_interface_type(vir_elem, ctx);
-
-            // Resolve the iterable class's type name and the "iter" method name
-            // so codegen can look up the FunctionKey directly without string search.
-            let iterable_ty = ctx
-                .node_map
-                .get_type(for_stmt.iterable.id)
-                .unwrap_or(TypeId::UNKNOWN);
-            let (type_def_id, _, _) = ctx
-                .type_arena
-                .unwrap_nominal(iterable_ty)
-                .expect("CustomIterable: iterable must be a nominal type");
-            let iter_type_name_id = ctx.entities.get_type(type_def_id).name_id;
-            let iter_method_name_id =
-                vole_identity::method_name_id_by_str(ctx.name_table, ctx.interner, "iter")
-                    .expect("CustomIterable: 'iter' method must exist in name table");
-
-            VirIterKind::CustomIterable {
-                elem_type: vir_elem,
-                vir_elem_type: vir_elem,
-                iterator_interface_type,
-                iter_type_name_id,
-                iter_method_name_id,
-                elem_conversion: ctx.type_table.elem_conversion(vir_elem),
-            }
-        }
-    }
-}
-
-/// Resolve the `Iterator<T>` interface VirTypeId for a given element type.
-///
-/// Used by both `CustomIterator` and `CustomIterable` lowering to pre-resolve
-/// the interface type so codegen doesn't need to reconstruct it.
-fn resolve_iterator_interface_type(vir_elem: VirTypeId, ctx: &mut LoweringCtx<'_>) -> VirTypeId {
-    ctx.name_table
-        .well_known
-        .iterator_type_def
-        .map(|def| {
-            let iface = VirType::Interface {
-                def,
-                type_args: vec![vir_elem],
-            };
-            ctx.type_table.intern(iface, None)
-        })
-        .unwrap_or(VirTypeId::UNKNOWN)
 }
 
 /// Lower an if statement to `VirStmt::Expr { VirExpr::If { ... } }`.

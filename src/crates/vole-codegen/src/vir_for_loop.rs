@@ -7,9 +7,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_identity::{
-    ArrayStoreStrategy, NameId, TypeId, UnionStorageKind, VirElemConversion, VirTypeId,
-};
+use vole_identity::{ArrayStoreStrategy, TypeId, UnionStorageKind, VirElemConversion, VirTypeId};
 use vole_vir::stmt::{VirFor, VirIterKind};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
@@ -66,27 +64,15 @@ fn vir_expr_contains_continue(expr: &VirExpr) -> bool {
 // Annotation extraction helpers
 // ---------------------------------------------------------------------------
 
-/// Extract the `VirElemConversion` from an iterator-based `VirIterKind`.
+/// Extract the `VirElemConversion` from a `VirIterKind::Iterator`.
 ///
-/// Returns `Identity` for String (string iteration always yields strings)
-/// and `Unresolved` for kinds that don't carry the annotation (Range, Array,
-/// Generic).
+/// Returns `Unresolved` for non-Iterator kinds (Range, Array).
 fn iter_elem_conversion(kind: &VirIterKind) -> VirElemConversion {
     match kind {
-        VirIterKind::String => VirElemConversion::Identity,
-        VirIterKind::RuntimeIterator {
-            elem_conversion, ..
-        }
-        | VirIterKind::IteratorInterface {
-            elem_conversion, ..
-        }
-        | VirIterKind::CustomIterator {
-            elem_conversion, ..
-        }
-        | VirIterKind::CustomIterable {
+        VirIterKind::Iterator {
             elem_conversion, ..
         } => *elem_conversion,
-        // Range / Array / Generic don't use the iter_next path.
+        // Range / Array don't use the iter_next path.
         _ => VirElemConversion::Unresolved,
     }
 }
@@ -101,14 +87,7 @@ impl Cg<'_, '_, '_> {
         match &vir_for.kind {
             VirIterKind::Range => self.compile_vir_for_range(vir_for),
             VirIterKind::Array { .. } => self.compile_vir_for_array(vir_for),
-            VirIterKind::String
-            | VirIterKind::RuntimeIterator { .. }
-            | VirIterKind::IteratorInterface { .. }
-            | VirIterKind::CustomIterator { .. }
-            | VirIterKind::CustomIterable { .. } => self.compile_vir_for_runtime_iter(vir_for),
-            VirIterKind::Generic { .. } => {
-                unreachable!("VirIterKind::Generic should be resolved before codegen")
-            }
+            VirIterKind::Iterator { .. } => self.compile_vir_for_runtime_iter(vir_for),
         }
     }
 
@@ -406,133 +385,91 @@ impl Cg<'_, '_, '_> {
     /// Evaluate the VIR iterable and convert it to a RuntimeIterator.
     ///
     /// Returns `(iter_value, elem_vir_type, needs_elem_rc_dec)`.
+    ///
+    /// Determines the setup strategy from the compiled iterable's type:
+    /// - String → call `StringCharsIter`
+    /// - RuntimeIterator → pass through directly
+    /// - Iterator interface → wrap via `InterfaceIter`
+    /// - Custom iterator/iterable → box + wrap (with optional `.iter()` call)
     fn setup_vir_runtime_iter(
         &mut self,
         vir_for: &VirFor,
     ) -> CodegenResult<(Value, VirTypeId, bool)> {
-        match &vir_for.kind {
-            VirIterKind::String => {
-                let string_val = self.compile_vir_expr(&vir_for.iterable)?;
-                let iter_val =
-                    self.call_runtime(RuntimeKey::StringCharsIter, &[string_val.value])?;
-                let iter = self.make_runtime_iter_value_v(iter_val, VirTypeId::STRING);
-                self.enter_iter_rc_scope(&iter, Some(&string_val));
-                Ok((iter_val, VirTypeId::STRING, true))
-            }
-            VirIterKind::RuntimeIterator { elem_type, .. } => {
-                self.setup_runtime_iterator_iter(vir_for, *elem_type)
-            }
-            VirIterKind::IteratorInterface { elem_type, .. } => {
-                self.setup_iterator_interface_iter(vir_for, *elem_type)
-            }
-            VirIterKind::CustomIterator {
-                elem_type,
-                iterator_interface_type,
-                ..
-            } => self.setup_custom_iterator_iter(vir_for, *elem_type, *iterator_interface_type),
-            VirIterKind::CustomIterable {
-                elem_type,
-                iterator_interface_type,
-                iter_type_name_id,
-                iter_method_name_id,
-                ..
-            } => self.setup_custom_iterable_iter(
-                vir_for,
-                *elem_type,
-                *iterator_interface_type,
-                *iter_type_name_id,
-                *iter_method_name_id,
-            ),
-            VirIterKind::Range | VirIterKind::Array { .. } => {
-                unreachable!("Range/Array handled before setup_vir_runtime_iter")
-            }
-            VirIterKind::Generic { .. } => {
-                unreachable!("VirIterKind::Generic should be resolved before codegen")
-            }
+        let VirIterKind::Iterator { elem_type, .. } = &vir_for.kind else {
+            unreachable!("setup_vir_runtime_iter called with non-Iterator kind");
+        };
+        let elem_vir = self.try_substitute_type_v(*elem_type);
+        let iterable = self.compile_vir_expr(&vir_for.iterable)?;
+        let iterable_vir = iterable.type_id;
+
+        // String → StringCharsIter
+        if self.vir_query_is_string_v(iterable_vir) {
+            let iter_val = self.call_runtime(RuntimeKey::StringCharsIter, &[iterable.value])?;
+            let iter = self.make_runtime_iter_value_v(iter_val, VirTypeId::STRING);
+            self.enter_iter_rc_scope(&iter, Some(&iterable));
+            return Ok((iter_val, elem_vir, true));
         }
-    }
 
-    /// Set up a for-loop over a direct `RuntimeIterator` value.
-    ///
-    /// The iterable is already a `RuntimeIterator<T>` — pass it through
-    /// without any wrapping or boxing.
-    fn setup_runtime_iterator_iter(
-        &mut self,
-        vir_for: &VirFor,
-        elem_type: VirTypeId,
-    ) -> CodegenResult<(Value, VirTypeId, bool)> {
-        let elem_vir = self.try_substitute_type_v(elem_type);
-        let iter = self.compile_vir_expr(&vir_for.iterable)?;
-        self.enter_iter_rc_scope(&iter, None);
-        Ok((iter.value, elem_vir, false))
-    }
+        // RuntimeIterator → pass through
+        if self.vir_query_is_runtime_iterator_v(iterable_vir) {
+            self.enter_iter_rc_scope(&iterable, None);
+            return Ok((iterable.value, elem_vir, false));
+        }
 
-    /// Set up a for-loop over an `Iterator<T>` interface value.
-    ///
-    /// Wraps the interface via `InterfaceIter` into a `RuntimeIterator`.
-    /// Trusts the VIR-annotated elem_type rather than re-extracting from
-    /// the compiled iterable's type args.
-    fn setup_iterator_interface_iter(
-        &mut self,
-        vir_for: &VirFor,
-        hint_elem_type: VirTypeId,
-    ) -> CodegenResult<(Value, VirTypeId, bool)> {
-        let elem_vir = self.try_substitute_type_v(hint_elem_type);
-        let iface = self.compile_vir_expr(&vir_for.iterable)?;
-        let iter = self.wrap_interface_iter_v(iface, elem_vir)?;
-        self.enter_iter_rc_scope(&iter, None);
-        Ok((iter.value, elem_vir, false))
-    }
+        // Interface → wrap via InterfaceIter.
+        // This covers both Iterator<T> interface values and any interface
+        // that the runtime treats as an iterator.
+        if self.vir_query_is_interface_v(iterable_vir) {
+            let iter = self.wrap_interface_iter_v(iterable, elem_vir)?;
+            self.enter_iter_rc_scope(&iter, None);
+            return Ok((iter.value, elem_vir, false));
+        }
 
-    /// Set up a for-loop over a custom Iterator implementor.
-    fn setup_custom_iterator_iter(
-        &mut self,
-        vir_for: &VirFor,
-        elem_type: VirTypeId,
-        iterator_interface_type: VirTypeId,
-    ) -> CodegenResult<(Value, VirTypeId, bool)> {
-        let elem_vir = self.try_substitute_type_v(elem_type);
-        let iterable = self.compile_vir_expr(&vir_for.iterable)?;
+        // Custom iterator or iterable class/struct.
+        // Determine whether this type has an `.iter()` method (Iterable) or
+        // directly implements Iterator<T> (custom iterator).
+        let iterator_interface_type = self.resolve_iterator_interface_for_elem(elem_vir);
+
+        // Try custom iterable first: look up `.iter()` method on this type.
+        if let Some(type_name_id) = self
+            .analyzed()
+            .impl_type_name_id_from_vir_type_id(iterable_vir)
+            && let Some(iter_method_name_id) = self.analyzed().try_method_name_id_by_str("iter")
+            && let Some(&func_key) = self
+                .method_func_keys()
+                .get(&(type_name_id, iter_method_name_id))
+        {
+            // This is a CustomIterable: call .iter() then wrap
+            let interface_vir = self.try_substitute_type_v(iterator_interface_type);
+            let return_type_id = self.vir_type_table().vir_to_type_id(interface_vir);
+            let func_ref = self.func_ref(func_key)?;
+            let call_inst = self.emit_call(func_ref, &[iterable.value]);
+            let iter_value = self.call_result(call_inst, return_type_id)?;
+            let iter = self.wrap_interface_iter_v(iter_value, elem_vir)?;
+            self.enter_iter_rc_scope(&iter, None);
+            return Ok((iter.value, elem_vir, false));
+        }
+
+        // Custom iterator: box directly as Iterator<T> interface, then wrap
         let iter =
-            self.box_and_wrap_as_runtime_iterator(iterable, iterator_interface_type, elem_type)?;
+            self.box_and_wrap_as_runtime_iterator(iterable, iterator_interface_type, elem_vir)?;
         self.enter_iter_rc_scope(&iter, None);
         Ok((iter.value, elem_vir, false))
     }
 
-    /// Set up a for-loop over a custom Iterable implementor.
+    /// Resolve the `Iterator<T>` interface VirTypeId for a given element type.
     ///
-    /// Uses pre-resolved method dispatch info from VIR to call `.iter()`
-    /// without string-based method lookup.
-    fn setup_custom_iterable_iter(
-        &mut self,
-        vir_for: &VirFor,
-        elem_type: VirTypeId,
-        iterator_interface_type: VirTypeId,
-        iter_type_name_id: NameId,
-        iter_method_name_id: NameId,
-    ) -> CodegenResult<(Value, VirTypeId, bool)> {
-        let elem_vir = self.try_substitute_type_v(elem_type);
-        let iterable = self.compile_vir_expr(&vir_for.iterable)?;
-        let interface_vir = self.try_substitute_type_v(iterator_interface_type);
-        let return_type_id = self.vir_type_table().vir_to_type_id(interface_vir);
-
-        let func_key = self
-            .method_func_keys()
-            .get(&(iter_type_name_id, iter_method_name_id))
-            .copied()
-            .ok_or_else(|| {
-                CodegenError::not_found(
-                    "iter method func_key",
-                    format!("{iter_type_name_id:?}::iter"),
-                )
-            })?;
-        let func_ref = self.func_ref(func_key)?;
-        let call_inst = self.emit_call(func_ref, &[iterable.value]);
-        let iter_value = self.call_result(call_inst, return_type_id)?;
-
-        let iter = self.wrap_interface_iter_v(iter_value, elem_vir)?;
-        self.enter_iter_rc_scope(&iter, None);
-        Ok((iter.value, elem_vir, false))
+    /// Used by the for-loop setup to construct the target interface type when
+    /// boxing custom iterators/iterables.
+    fn resolve_iterator_interface_for_elem(&self, elem_vir: VirTypeId) -> VirTypeId {
+        self.name_table()
+            .well_known
+            .iterator_type_def
+            .and_then(|def| {
+                self.vir_type_table()
+                    .lookup_interface_v(def, vec![elem_vir])
+            })
+            .unwrap_or(VirTypeId::UNKNOWN)
     }
 
     // =========================================================================

@@ -1158,57 +1158,14 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
             store_strategy: *store_strategy,
             elem_conversion: *elem_conversion,
         },
-        VirIterKind::String => VirIterKind::String,
-        VirIterKind::RuntimeIterator {
+        VirIterKind::Iterator {
             elem_type,
             vir_elem_type,
             elem_conversion,
-        } => VirIterKind::RuntimeIterator {
+        } => VirIterKind::Iterator {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
             elem_conversion: *elem_conversion,
-        },
-        VirIterKind::IteratorInterface {
-            elem_type,
-            vir_elem_type,
-            elem_conversion,
-        } => VirIterKind::IteratorInterface {
-            elem_type: ctx.remap(*elem_type),
-            vir_elem_type: ctx.remap(*vir_elem_type),
-            elem_conversion: *elem_conversion,
-        },
-        VirIterKind::CustomIterator {
-            elem_type,
-            vir_elem_type,
-            iterator_interface_type,
-            elem_conversion,
-        } => VirIterKind::CustomIterator {
-            elem_type: ctx.remap(*elem_type),
-            vir_elem_type: ctx.remap(*vir_elem_type),
-            iterator_interface_type: ctx.remap(*iterator_interface_type),
-            elem_conversion: *elem_conversion,
-        },
-        VirIterKind::CustomIterable {
-            elem_type,
-            vir_elem_type,
-            iterator_interface_type,
-            iter_type_name_id,
-            iter_method_name_id,
-            elem_conversion,
-        } => VirIterKind::CustomIterable {
-            elem_type: ctx.remap(*elem_type),
-            vir_elem_type: ctx.remap(*vir_elem_type),
-            iterator_interface_type: ctx.remap(*iterator_interface_type),
-            iter_type_name_id: *iter_type_name_id,
-            iter_method_name_id: *iter_method_name_id,
-            elem_conversion: *elem_conversion,
-        },
-        VirIterKind::Generic {
-            elem_type,
-            vir_elem_type,
-        } => VirIterKind::Generic {
-            elem_type: ctx.remap(*elem_type),
-            vir_elem_type: ctx.remap(*vir_elem_type),
         },
     }
 }
@@ -1769,9 +1726,10 @@ mod tests {
                         stmts: vec![],
                         trailing: None,
                     },
-                    kind: VirIterKind::Generic {
+                    kind: VirIterKind::Iterator {
                         elem_type: type_id(10),
                         vir_elem_type: param_id,
+                        elem_conversion: VirElemConversion::Unresolved,
                     },
                 })],
                 trailing: None,
@@ -1788,10 +1746,10 @@ mod tests {
             VirStmt::For(vir_for) => {
                 assert_eq!(vir_for.vir_var_type, VirTypeId::STRING);
                 match &vir_for.kind {
-                    VirIterKind::Generic { vir_elem_type, .. } => {
+                    VirIterKind::Iterator { vir_elem_type, .. } => {
                         assert_eq!(*vir_elem_type, VirTypeId::STRING)
                     }
-                    other => panic!("expected Generic, got {other:?}"),
+                    other => panic!("expected Iterator, got {other:?}"),
                 }
             }
             other => panic!("expected For, got {other:?}"),

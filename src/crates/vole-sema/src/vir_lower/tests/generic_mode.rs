@@ -341,8 +341,8 @@ fn generic_mode_for_loop_missing_iterable_kind_uses_generic() {
     match &vir_stmt {
         VirStmt::For(vir_for) => {
             assert!(
-                matches!(vir_for.kind, VirIterKind::Generic { .. }),
-                "expected VirIterKind::Generic in generic mode, got {:?}",
+                matches!(vir_for.kind, VirIterKind::Iterator { .. }),
+                "expected VirIterKind::Iterator in generic mode, got {:?}",
                 vir_for.kind
             );
         }

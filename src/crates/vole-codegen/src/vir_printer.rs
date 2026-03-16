@@ -195,21 +195,8 @@ impl<'a> VirPrinter<'a> {
         let kind_label = match &vir_for.kind {
             VirIterKind::Range => "range".to_string(),
             VirIterKind::Array { elem_type, .. } => format!("array<{}>", self.ty(*elem_type)),
-            VirIterKind::String => "string".to_string(),
-            VirIterKind::RuntimeIterator { elem_type, .. } => {
-                format!("runtime_iterator<{}>", self.ty(*elem_type))
-            }
-            VirIterKind::IteratorInterface { elem_type, .. } => {
+            VirIterKind::Iterator { elem_type, .. } => {
                 format!("iterator<{}>", self.ty(*elem_type))
-            }
-            VirIterKind::CustomIterator { elem_type, .. } => {
-                format!("custom_iterator<{}>", self.ty(*elem_type))
-            }
-            VirIterKind::CustomIterable { elem_type, .. } => {
-                format!("custom_iterable<{}>", self.ty(*elem_type))
-            }
-            VirIterKind::Generic { elem_type, .. } => {
-                format!("generic<{}>", self.ty(*elem_type))
             }
         };
         w!(

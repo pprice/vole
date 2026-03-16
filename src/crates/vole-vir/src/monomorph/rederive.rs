@@ -1129,12 +1129,10 @@ fn derive_string_conversion_from_vir_type(
     }
 }
 
-/// Re-derive VirIterKind::Generic to a concrete iteration kind.
+/// Re-derive VirIterKind element conversions after type substitution.
 ///
-/// Inspects the iterable expression's type to determine the correct iteration
-/// strategy.  Only handles cases derivable from VirTypeTable alone: Range,
-/// Array, String.  Complex cases (CustomIterator, CustomIterable,
-/// IteratorInterface) require EntityRegistry.
+/// Array: re-derives union_storage, store_strategy, and elem_conversion.
+/// Iterator: re-derives elem_conversion.
 fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
     match kind {
         VirIterKind::Array {
@@ -1148,32 +1146,14 @@ fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
             *store_strategy = Some(table.array_store_strategy(*vir_elem_type));
             *elem_conversion = Some(table.elem_conversion(*vir_elem_type));
         }
-        VirIterKind::RuntimeIterator {
-            vir_elem_type,
-            elem_conversion,
-            ..
-        }
-        | VirIterKind::IteratorInterface {
-            vir_elem_type,
-            elem_conversion,
-            ..
-        }
-        | VirIterKind::CustomIterator {
-            vir_elem_type,
-            elem_conversion,
-            ..
-        }
-        | VirIterKind::CustomIterable {
+        VirIterKind::Iterator {
             vir_elem_type,
             elem_conversion,
             ..
         } => {
             *elem_conversion = table.elem_conversion(*vir_elem_type);
         }
-        VirIterKind::Generic { .. } | VirIterKind::Range | VirIterKind::String => {
-            // Re-deriving Generic -> concrete iteration strategy still needs
-            // iterable-type metadata not carried by VirIterKind::Generic.
-        }
+        VirIterKind::Range => {}
     }
 }
 
@@ -2476,9 +2456,9 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn iter_kind_generic_stays_generic_without_iterable_type() {
-        // VirIterKind::Generic cannot be resolved without the iterable's
-        // VirTypeId.  It stays Generic, which codegen handles at runtime.
+    fn iter_kind_iterator_rederives_elem_conversion() {
+        // VirIterKind::Iterator with Unresolved elem_conversion gets
+        // rederived to the correct conversion based on the element type.
         let table = VirTypeTable::new();
         let mut func = func_with_stmts(vec![VirStmt::For(crate::stmt::VirFor {
             var_name: sym(1),
@@ -2493,9 +2473,10 @@ mod tests {
                 stmts: vec![],
                 trailing: None,
             },
-            kind: VirIterKind::Generic {
+            kind: VirIterKind::Iterator {
                 elem_type: type_id(10),
                 vir_elem_type: VirTypeId::I64,
+                elem_conversion: VirElemConversion::Unresolved,
             },
         })]);
 
@@ -2503,10 +2484,15 @@ mod tests {
 
         match &func.body.stmts[0] {
             VirStmt::For(vir_for) => match &vir_for.kind {
-                VirIterKind::Generic { vir_elem_type, .. } => {
+                VirIterKind::Iterator {
+                    vir_elem_type,
+                    elem_conversion,
+                    ..
+                } => {
                     assert_eq!(*vir_elem_type, VirTypeId::I64);
+                    assert_eq!(*elem_conversion, VirElemConversion::Identity);
                 }
-                other => panic!("expected Generic, got {other:?}"),
+                other => panic!("expected Iterator, got {other:?}"),
             },
             other => panic!("expected For, got {other:?}"),
         }

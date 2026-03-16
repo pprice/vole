@@ -3,7 +3,7 @@
 // VIR statement nodes.
 
 use vole_identity::{
-    ArrayStoreStrategy, ModuleId, NameId, Symbol, UnionStorageKind, VirElemConversion, VirTypeId,
+    ArrayStoreStrategy, ModuleId, Symbol, UnionStorageKind, VirElemConversion, VirTypeId,
 };
 
 use crate::expr::{CoerceKind, FieldStorage};
@@ -80,7 +80,7 @@ pub enum VirStmt {
     /// While loop.
     While { cond: VirRef, body: VirBody },
 
-    /// For loop (iterating over a range, array, string, or runtime iterator).
+    /// For loop (iterating over a range, array, or iterator).
     For(VirFor),
 
     // -- Control flow -------------------------------------------------------
@@ -272,10 +272,10 @@ pub enum AssignTarget {
 
 /// A for-loop in VIR.
 ///
-/// VIR collapses sema's six `IterableKind` variants down to five
-/// [`VirIterKind`] variants.  The loop body for all RuntimeIterator-based
-/// kinds shares the same `iter_next` protocol; they differ only in how
-/// the RuntimeIterator value is obtained (setup phase).
+/// VIR collapses sema's four `IterableKind` variants down to three
+/// [`VirIterKind`] variants: Range, Array, and Iterator.  The loop body
+/// for Iterator-based kinds shares the same `iter_next` protocol; they
+/// differ only in setup (which codegen determines from the iterable's type).
 #[derive(Debug, Clone)]
 pub struct VirFor {
     /// The loop variable name.
@@ -294,11 +294,14 @@ pub struct VirFor {
 
 /// The iteration strategy for a `VirFor` loop.
 ///
-/// Sema distinguishes six `IterableKind` variants; VIR maps them to seven
-/// `VirIterKind` variants.  The sema `IteratorInterface` kind is split
-/// into `RuntimeIterator` (direct pass-through) and `IteratorInterface`
-/// (needs `InterfaceIter` wrapping) so codegen reads the decision rather
-/// than re-detecting the iterator type.
+/// Sema classifies every for-loop iterable into one of four `IterableKind`
+/// variants; VIR collapses them into three `VirIterKind` variants.
+///
+/// All iterator-producing iterables (strings, RuntimeIterators,
+/// Iterator<T> interfaces, custom iterators, custom iterables) are unified
+/// under `Iterator`.  The setup-phase differences are handled by codegen
+/// using the iterable expression's compiled type — VIR only records the
+/// element type and conversion hint.
 #[derive(Debug, Clone)]
 pub enum VirIterKind {
     /// Iterate over a numeric range.
@@ -320,81 +323,17 @@ pub enum VirIterKind {
         elem_conversion: Option<VirElemConversion>,
     },
 
-    /// Iterate over the characters of a string.
+    /// Iterate via a `RuntimeIterator` (the unified iterator protocol).
     ///
-    /// String iteration always yields string elements, so no element
-    /// conversion annotation is needed (identity conversion).
-    String,
-
-    /// Iterate via a direct `RuntimeIterator` value (pass-through).
-    ///
-    /// The iterable is already a `RuntimeIterator<T>` — codegen enters the
-    /// iter-next loop directly without any wrapping or boxing.
-    RuntimeIterator {
+    /// Covers all non-range, non-array iterables: strings, RuntimeIterator
+    /// values, Iterator<T> interfaces, custom iterators, and custom
+    /// iterables.  Codegen determines the setup phase (wrapping, boxing,
+    /// `.iter()` call) from the compiled iterable's type.
+    Iterator {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
         /// Pre-computed element conversion for the raw i64 from iter_next.
         elem_conversion: VirElemConversion,
-    },
-
-    /// Iterate via an `Iterator<T>` interface value.
-    ///
-    /// The iterable is a boxed `Iterator<T>` interface pointer.  Codegen
-    /// wraps it via `InterfaceIter` into a `RuntimeIterator` before entering
-    /// the iter-next loop.
-    IteratorInterface {
-        elem_type: VirTypeId,
-        vir_elem_type: VirTypeId,
-        /// Pre-computed element conversion for the raw i64 from iter_next.
-        elem_conversion: VirElemConversion,
-    },
-
-    /// Iterate via a concrete class implementing `Iterator<T>`.
-    ///
-    /// Codegen boxes to `Iterator<T>` interface, then wraps via `InterfaceIter`.
-    CustomIterator {
-        elem_type: VirTypeId,
-        vir_elem_type: VirTypeId,
-        /// The `Iterator<T>` interface type, pre-resolved by sema.
-        ///
-        /// Eliminates codegen's need to reconstruct `Iterator<elem_type>`
-        /// via `vir_query_lookup_interface_v()`.
-        iterator_interface_type: VirTypeId,
-        /// Pre-computed element conversion for the raw i64 from iter_next.
-        elem_conversion: VirElemConversion,
-    },
-
-    /// Iterate via a concrete class implementing `Iterable<T>`.
-    ///
-    /// Codegen calls `.iter()` to get `Iterator<T>`, then wraps via
-    /// `InterfaceIter`.
-    CustomIterable {
-        elem_type: VirTypeId,
-        vir_elem_type: VirTypeId,
-        /// The `Iterator<T>` interface type, pre-resolved by sema.
-        ///
-        /// Used as the return type of the `.iter()` call and eliminates
-        /// codegen's need to reconstruct `Iterator<elem_type>`.
-        iterator_interface_type: VirTypeId,
-        /// The iterable class's type name, pre-resolved by sema.
-        ///
-        /// Together with `iter_method_name_id`, eliminates codegen's
-        /// string-based lookup of the `.iter()` method.
-        iter_type_name_id: NameId,
-        /// The `iter` method's NameId, pre-resolved by sema.
-        iter_method_name_id: NameId,
-        /// Pre-computed element conversion for the raw i64 from iter_next.
-        elem_conversion: VirElemConversion,
-    },
-
-    /// Placeholder for generic lowering mode.
-    ///
-    /// Used when the iterable expression has a bare type-parameter type and
-    /// sema cannot determine the iteration strategy.  Resolved to a concrete
-    /// variant during VIR monomorphization.
-    Generic {
-        elem_type: VirTypeId,
-        vir_elem_type: VirTypeId,
     },
 }
 
