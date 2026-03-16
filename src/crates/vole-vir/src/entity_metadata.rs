@@ -893,6 +893,53 @@ impl VirEntityMetadata {
         }
         None
     }
+
+    /// Build the pre-resolved reflection layout for TypeMeta/FieldMeta.
+    ///
+    /// Looks up the TypeMeta and FieldMeta class definitions by short name,
+    /// then reads each field's slot index from the declaration-order field list.
+    /// Returns `None` if either type is missing (e.g. in minimal test programs
+    /// without the prelude) or if the field count is unexpected.
+    ///
+    /// This method does not need the interner because it uses the known
+    /// declaration order from `stdlib/prelude/reflection.vole`:
+    /// - TypeMeta: `name` (0), `fields` (1), `construct` (2)
+    /// - FieldMeta: `name` (0), `type_name` (1), `annotations` (2), `get` (3), `set` (4)
+    pub fn build_reflection_layout(&self) -> Option<crate::program::ReflectionLayout> {
+        use crate::program::{FieldMetaSlots, ReflectionLayout, TypeMetaSlots};
+
+        let type_meta_def_id = self.type_by_short_name("TypeMeta")?;
+        let field_meta_def_id = self.type_by_short_name("FieldMeta")?;
+
+        // Read slots from declaration-order field list.
+        let tm_fields = self.fields_on_type(type_meta_def_id)?;
+        if tm_fields.len() != 3 {
+            return None;
+        }
+        let fm_fields = self.fields_on_type(field_meta_def_id)?;
+        if fm_fields.len() != 5 {
+            return None;
+        }
+
+        let field_slot = |field_id| self.field_defs.get(&field_id).map(|fd| fd.slot);
+
+        Some(ReflectionLayout {
+            type_meta_def_id,
+            field_meta_def_id,
+            type_meta_slots: TypeMetaSlots {
+                name: field_slot(tm_fields[0])?,
+                fields: field_slot(tm_fields[1])?,
+                construct: field_slot(tm_fields[2])?,
+            },
+            field_meta_slots: FieldMetaSlots {
+                name: field_slot(fm_fields[0])?,
+                type_name: field_slot(fm_fields[1])?,
+                annotations: field_slot(fm_fields[2])?,
+                get: field_slot(fm_fields[3])?,
+                set: field_slot(fm_fields[4])?,
+            },
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------

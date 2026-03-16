@@ -39,6 +39,58 @@ use crate::types::VirAnnotation;
 /// Arguments: (type_id, substitution_map) -> Option<TypeId>
 pub type SubstituteFallbackFn = dyn Fn(TypeId, &FxHashMap<NameId, TypeId>) -> Option<TypeId>;
 
+// ---------------------------------------------------------------------------
+// ReflectionLayout — pre-resolved TypeMeta/FieldMeta metadata
+// ---------------------------------------------------------------------------
+
+/// Pre-resolved reflection metadata layout for `TypeMeta` and `FieldMeta`.
+///
+/// Populated during VIR lowering from sema entity metadata so that codegen
+/// can build reflection instances without string-based type or field lookups.
+/// Both `TypeMeta` and `FieldMeta` are Vole classes defined in
+/// `stdlib/prelude/reflection.vole`.
+#[derive(Debug, Clone)]
+pub struct ReflectionLayout {
+    /// `TypeDefId` for the `TypeMeta` class.
+    pub type_meta_def_id: TypeDefId,
+    /// `TypeDefId` for the `FieldMeta` class.
+    pub field_meta_def_id: TypeDefId,
+    /// Pre-resolved slot indices for `TypeMeta` fields.
+    pub type_meta_slots: TypeMetaSlots,
+    /// Pre-resolved slot indices for `FieldMeta` fields.
+    pub field_meta_slots: FieldMetaSlots,
+}
+
+/// Named slot indices for the `TypeMeta` class fields.
+///
+/// Replaces `HashMap<String, usize>` lookups with direct field access.
+#[derive(Debug, Clone, Copy)]
+pub struct TypeMetaSlots {
+    /// Slot index for `TypeMeta.name: string`.
+    pub name: usize,
+    /// Slot index for `TypeMeta.fields: [FieldMeta]`.
+    pub fields: usize,
+    /// Slot index for `TypeMeta.construct: ([unknown]) -> unknown`.
+    pub construct: usize,
+}
+
+/// Named slot indices for the `FieldMeta` class fields.
+///
+/// Replaces `HashMap<String, usize>` lookups with direct field access.
+#[derive(Debug, Clone, Copy)]
+pub struct FieldMetaSlots {
+    /// Slot index for `FieldMeta.name: string`.
+    pub name: usize,
+    /// Slot index for `FieldMeta.type_name: string`.
+    pub type_name: usize,
+    /// Slot index for `FieldMeta.annotations: [unknown]`.
+    pub annotations: usize,
+    /// Slot index for `FieldMeta.get: (unknown) -> unknown`.
+    pub get: usize,
+    /// Slot index for `FieldMeta.set: (unknown, unknown) -> void`.
+    pub set: usize,
+}
+
 /// The complete VIR output: all lowered functions, tests, global inits, and
 /// type metadata bundled into a single struct.
 ///
@@ -245,6 +297,13 @@ pub struct VirProgram {
     /// Injected by the CLI crate (wraps sema TypeArena::lookup_substitute).
     /// Will be removed once VirTypeTable supports intern-on-substitute.
     pub substitute_fallback: Option<Box<SubstituteFallbackFn>>,
+
+    /// Pre-resolved reflection layout for `TypeMeta` and `FieldMeta`.
+    ///
+    /// Populated during VIR lowering so codegen can build reflection instances
+    /// without string-based type or field slot lookups.  `None` if the prelude
+    /// types are not registered (e.g. in minimal test programs).
+    pub reflection_layout: Option<ReflectionLayout>,
 }
 
 impl VirProgram {

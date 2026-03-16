@@ -660,6 +660,7 @@ mod tests {
             module_id: vole_identity::ModuleId::new(0),
             modules_with_errors: std::collections::HashSet::new(),
             substitute_fallback: None,
+            reflection_layout: None,
         }
     }
 

@@ -20,8 +20,8 @@ mod trampolines;
 
 use cranelift::prelude::*;
 use cranelift_module::Module;
-use rustc_hash::FxHashMap;
 use vole_identity::{TypeDefId, TypeId};
+use vole_vir::program::{FieldMetaSlots, TypeMetaSlots};
 
 use crate::RuntimeKey;
 use crate::context::Cg;
@@ -133,17 +133,14 @@ fn build_type_meta_instance(cg: &mut Cg, type_def_id: TypeDefId) -> CodegenResul
     let instance_ptr = allocate_class_instance(cg, info.type_meta_def_id)?;
     let set_func_ref = cg.runtime_func_ref(RuntimeKey::InstanceSetField)?;
 
-    let name_slot = lookup_slot(&info.type_meta_slots, "name", "TypeMeta")?;
-    let fields_slot = lookup_slot(&info.type_meta_slots, "fields", "TypeMeta")?;
-    let construct_slot = lookup_slot(&info.type_meta_slots, "construct", "TypeMeta")?;
-
-    store_field_value(cg, set_func_ref, instance_ptr, name_slot, &name_cv);
-    store_field_value(cg, set_func_ref, instance_ptr, fields_slot, &fields_cv);
+    let slots = &info.type_meta_slots;
+    store_field_value(cg, set_func_ref, instance_ptr, slots.name, &name_cv);
+    store_field_value(cg, set_func_ref, instance_ptr, slots.fields, &fields_cv);
     store_field_value(
         cg,
         set_func_ref,
         instance_ptr,
-        construct_slot,
+        slots.construct,
         &construct_cv,
     );
 
@@ -190,20 +187,6 @@ pub(crate) fn compile_dynamic_meta_from_value(
     Ok(cg.mark_rc_owned(cv))
 }
 
-/// Look up a field's physical slot index from a field_slots map.
-fn lookup_slot(
-    slots: &FxHashMap<String, usize>,
-    field_name: &str,
-    type_name: &str,
-) -> CodegenResult<usize> {
-    slots.get(field_name).copied().ok_or_else(|| {
-        CodegenError::not_found(
-            "reflection field slot",
-            format!("{}.{}", type_name, field_name),
-        )
-    })
-}
-
 /// Allocate a class instance using type_metadata for the given TypeDefId.
 pub(crate) fn allocate_class_instance(cg: &mut Cg, type_def_id: TypeDefId) -> CodegenResult<Value> {
     use vole_runtime::value::RuntimeTypeId;
@@ -223,51 +206,50 @@ pub(crate) fn allocate_class_instance(cg: &mut Cg, type_def_id: TypeDefId) -> Co
     )
 }
 
-/// Cached IDs for TypeMeta and FieldMeta from the entity registry.
+/// Resolved IDs and slot indices for TypeMeta and FieldMeta.
+///
+/// Built from the pre-computed `ReflectionLayout` (sema-side) combined with
+/// codegen-time `TypeMetadata` (for runtime type_id and sema TypeId).
+/// No string-based lookups are used.
 pub(crate) struct ReflectionTypeInfo {
     pub type_meta_def_id: TypeDefId,
     pub type_meta_type_id: TypeId,
     pub field_meta_def_id: TypeDefId,
     pub field_meta_type_id: TypeId,
-    /// Physical slot indices for TypeMeta fields (name, fields, construct).
-    pub type_meta_slots: FxHashMap<String, usize>,
-    /// Physical slot indices for FieldMeta fields (name, type_name, annotations, get, set).
-    pub field_meta_slots: FxHashMap<String, usize>,
+    /// Pre-resolved slot indices for TypeMeta fields.
+    pub type_meta_slots: TypeMetaSlots,
+    /// Pre-resolved slot indices for FieldMeta fields.
+    pub field_meta_slots: FieldMetaSlots,
 }
 
-/// Resolve TypeMeta and FieldMeta TypeDefIds from the entity registry.
+/// Resolve TypeMeta and FieldMeta from the pre-computed reflection layout.
+///
+/// Uses `VirProgram.reflection_layout` (populated during VIR lowering) for
+/// TypeDefIds and field slot indices.  Reads `TypeMetadata` (codegen-time)
+/// only for the runtime `type_id` and sema `TypeId`.
 pub(crate) fn resolve_reflection_types(cg: &Cg) -> CodegenResult<ReflectionTypeInfo> {
-    let type_meta_def_id = cg
+    let layout = cg
         .analyzed()
-        .type_by_short_name("TypeMeta")
-        .ok_or_else(|| CodegenError::not_found("TypeMeta class", "entity registry"))?;
+        .reflection_layout
+        .as_ref()
+        .ok_or_else(|| CodegenError::not_found("ReflectionLayout", "VirProgram"))?;
 
-    let field_meta_def_id = cg
-        .analyzed()
-        .type_by_short_name("FieldMeta")
-        .ok_or_else(|| CodegenError::not_found("FieldMeta class", "entity registry"))?;
-
-    // Look up the type_ids and field_slots from type_metadata.
     let type_meta_meta = cg
         .type_metadata()
-        .get(&type_meta_def_id)
+        .get(&layout.type_meta_def_id)
         .ok_or_else(|| CodegenError::not_found("TypeMeta", "type_metadata"))?;
-    let type_meta_type_id = type_meta_meta.vole_type;
-    let type_meta_slots = type_meta_meta.field_slots.clone();
 
     let field_meta_meta = cg
         .type_metadata()
-        .get(&field_meta_def_id)
+        .get(&layout.field_meta_def_id)
         .ok_or_else(|| CodegenError::not_found("FieldMeta", "type_metadata"))?;
-    let field_meta_type_id = field_meta_meta.vole_type;
-    let field_meta_slots = field_meta_meta.field_slots.clone();
 
     Ok(ReflectionTypeInfo {
-        type_meta_def_id,
-        type_meta_type_id,
-        field_meta_def_id,
-        field_meta_type_id,
-        type_meta_slots,
-        field_meta_slots,
+        type_meta_def_id: layout.type_meta_def_id,
+        type_meta_type_id: type_meta_meta.vole_type,
+        field_meta_def_id: layout.field_meta_def_id,
+        field_meta_type_id: field_meta_meta.vole_type,
+        type_meta_slots: layout.type_meta_slots,
+        field_meta_slots: layout.field_meta_slots,
     })
 }

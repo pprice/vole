@@ -252,5 +252,6 @@ fn build_empty_vir_program(
         module_id: vole_identity::ModuleId::new(0),
         modules_with_errors: HashSet::new(),
         substitute_fallback: None,
+        reflection_layout: None,
     }
 }

@@ -1306,6 +1306,10 @@ where
     // Assemble the final VirProgram
     // -----------------------------------------------------------------------
 
+    // Pre-resolve reflection layout (TypeMeta/FieldMeta slots) from entity
+    // metadata so codegen doesn't need string-based type or field lookups.
+    let reflection_layout = entity_metadata.build_reflection_layout();
+
     let _timing = compile_timing!(DEBUG, "assemble_vir_program").entered();
     assemble_vir_program(AssembleVirProgramArgs {
         vir_functions,
@@ -1334,6 +1338,7 @@ where
         early_instance_index,
         type_table,
         type_arena,
+        reflection_layout,
     })
 }
 
@@ -1379,6 +1384,7 @@ struct AssembleVirProgramArgs<'a> {
     early_instance_index: vole_vir::InstanceIndex,
     type_table: &'a mut VirTypeTable,
     type_arena: &'a TypeArena,
+    reflection_layout: Option<vole_vir::program::ReflectionLayout>,
 }
 
 fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutput {
@@ -1409,6 +1415,7 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         early_instance_index,
         type_table,
         type_arena,
+        reflection_layout,
     } = args;
 
     let mut vir_program = VirProgram {
@@ -1452,6 +1459,7 @@ fn assemble_vir_program(args: AssembleVirProgramArgs<'_>) -> LowerVirProgramOutp
         module_id: ModuleId::new(0),
         modules_with_errors: HashSet::new(),
         substitute_fallback: None,
+        reflection_layout,
     };
     run_vir_monomorphize(&mut vir_program);
 

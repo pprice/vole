@@ -939,45 +939,41 @@ fn resolve_concrete_type_name_vir<C: VtableCtx>(
     Ok((type_def_id, type_name))
 }
 
-/// Resolve TypeMeta and FieldMeta class metadata from type_metadata.
+/// Resolve TypeMeta and FieldMeta class metadata from the pre-computed
+/// reflection layout and codegen-time type metadata.
+///
+/// Uses `VirProgram.reflection_layout` (populated during VIR lowering) for
+/// TypeDefIds and field slot indices.  Reads `TypeMetadata` (codegen-time)
+/// only for the runtime `type_id` and `physical_slot_count`.
 fn resolve_reflection_meta<C: VtableCtx>(ctx: &C) -> CodegenResult<ReflectionMetaInfo> {
-    let type_meta_def_id = ctx
+    let layout = ctx
         .analyzed()
-        .type_by_short_name("TypeMeta")
-        .ok_or_else(|| CodegenError::not_found("TypeMeta class", "entity registry"))?;
-    let field_meta_def_id = ctx
-        .analyzed()
-        .type_by_short_name("FieldMeta")
-        .ok_or_else(|| CodegenError::not_found("FieldMeta class", "entity registry"))?;
+        .reflection_layout
+        .as_ref()
+        .ok_or_else(|| CodegenError::not_found("ReflectionLayout", "VirProgram"))?;
 
     let tm_meta = ctx
         .type_metadata()
-        .get(&type_meta_def_id)
+        .get(&layout.type_meta_def_id)
         .ok_or_else(|| CodegenError::not_found("TypeMeta", "type_metadata"))?;
     let fm_meta = ctx
         .type_metadata()
-        .get(&field_meta_def_id)
+        .get(&layout.field_meta_def_id)
         .ok_or_else(|| CodegenError::not_found("FieldMeta", "type_metadata"))?;
-
-    let lookup = |slots: &FxHashMap<String, usize>, name: &str, ty: &str| -> CodegenResult<usize> {
-        slots.get(name).copied().ok_or_else(|| {
-            CodegenError::not_found("reflection field slot", format!("{}.{}", ty, name))
-        })
-    };
 
     Ok(ReflectionMetaInfo {
         type_meta_type_id_val: tm_meta.type_id,
         type_meta_field_count: tm_meta.physical_slot_count as u32,
-        name_slot: lookup(&tm_meta.field_slots, "name", "TypeMeta")?,
-        fields_slot: lookup(&tm_meta.field_slots, "fields", "TypeMeta")?,
-        construct_slot: lookup(&tm_meta.field_slots, "construct", "TypeMeta")?,
+        name_slot: layout.type_meta_slots.name,
+        fields_slot: layout.type_meta_slots.fields,
+        construct_slot: layout.type_meta_slots.construct,
         field_meta_type_id_val: fm_meta.type_id,
         field_meta_field_count: fm_meta.physical_slot_count as u32,
-        fm_name_slot: lookup(&fm_meta.field_slots, "name", "FieldMeta")?,
-        fm_type_name_slot: lookup(&fm_meta.field_slots, "type_name", "FieldMeta")?,
-        fm_annotations_slot: lookup(&fm_meta.field_slots, "annotations", "FieldMeta")?,
-        fm_get_slot: lookup(&fm_meta.field_slots, "get", "FieldMeta")?,
-        fm_set_slot: lookup(&fm_meta.field_slots, "set", "FieldMeta")?,
+        fm_name_slot: layout.field_meta_slots.name,
+        fm_type_name_slot: layout.field_meta_slots.type_name,
+        fm_annotations_slot: layout.field_meta_slots.annotations,
+        fm_get_slot: layout.field_meta_slots.get,
+        fm_set_slot: layout.field_meta_slots.set,
     })
 }
 

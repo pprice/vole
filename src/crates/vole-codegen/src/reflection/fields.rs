@@ -134,16 +134,11 @@ fn build_single_field_meta(
 
     let instance_ptr = super::allocate_class_instance(cg, info.field_meta_def_id)?;
     let set_func_ref = cg.runtime_func_ref(RuntimeKey::InstanceSetField)?;
-
-    let name_slot = super::lookup_slot(&info.field_meta_slots, "name", "FieldMeta")?;
-    let type_name_slot = super::lookup_slot(&info.field_meta_slots, "type_name", "FieldMeta")?;
-    let annotations_slot = super::lookup_slot(&info.field_meta_slots, "annotations", "FieldMeta")?;
-    let get_slot = super::lookup_slot(&info.field_meta_slots, "get", "FieldMeta")?;
-    let set_slot = super::lookup_slot(&info.field_meta_slots, "set", "FieldMeta")?;
+    let slots = &info.field_meta_slots;
 
     // name (string)
     let name_cv = cg.string_literal(field_name)?;
-    store_field_value(cg, set_func_ref, instance_ptr, name_slot, &name_cv);
+    store_field_value(cg, set_func_ref, instance_ptr, slots.name, &name_cv);
 
     // type_name (string)
     let type_name_cv = cg.string_literal(type_name)?;
@@ -151,7 +146,7 @@ fn build_single_field_meta(
         cg,
         set_func_ref,
         instance_ptr,
-        type_name_slot,
+        slots.type_name,
         &type_name_cv,
     );
 
@@ -161,17 +156,17 @@ fn build_single_field_meta(
         cg,
         set_func_ref,
         instance_ptr,
-        annotations_slot,
+        slots.annotations,
         &annotations_cv,
     );
 
     // getter trampoline (uses correct RuntimeTypeId tag for boxing)
     let getter_cv = trampolines::build_getter(cg, target_type_def_id, field_slot, runtime_tag)?;
-    store_field_value(cg, set_func_ref, instance_ptr, get_slot, &getter_cv);
+    store_field_value(cg, set_func_ref, instance_ptr, slots.get, &getter_cv);
 
     // setter trampoline
     let setter_cv = trampolines::build_setter(cg, target_type_def_id, field_slot)?;
-    store_field_value(cg, set_func_ref, instance_ptr, set_slot, &setter_cv);
+    store_field_value(cg, set_func_ref, instance_ptr, slots.set, &setter_cv);
 
     Ok(instance_ptr)
 }
