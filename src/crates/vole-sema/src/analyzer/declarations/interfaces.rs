@@ -83,11 +83,13 @@ impl Analyzer {
         // We resolve types once to TypeId and reuse the data
         // Get void type before the loop to avoid borrowing db while type_ctx is borrowed
         let void_type = self.type_arena().void();
+        // (name, name_str, params_id, return_type_id, has_default, declaration_is_default, param_names)
         type MethodCollected = (
             Symbol,
             String,
             Vec<ArenaTypeId>,
             ArenaTypeId,
+            bool,
             bool,
             Vec<String>,
         );
@@ -107,8 +109,11 @@ impl Analyzer {
                     .as_ref()
                     .map(|t| resolve_type_to_id(t, &mut type_ctx))
                     .unwrap_or(void_type);
+                // declaration_is_default: true if the declaration says `default` or has a body
+                let declaration_is_default = m.is_default || m.body.is_some();
+                // has_default: true if the method has any default (declaration or external runtime)
                 let has_default =
-                    m.is_default || m.body.is_some() || default_external_methods.contains(&m.name);
+                    declaration_is_default || default_external_methods.contains(&m.name);
                 let param_names: Vec<String> = m
                     .params
                     .iter()
@@ -120,6 +125,7 @@ impl Analyzer {
                     params_id,
                     return_type_id,
                     has_default,
+                    declaration_is_default,
                     param_names,
                 )
             })
@@ -127,17 +133,15 @@ impl Analyzer {
 
         let _interface_methods: Vec<crate::types::InterfaceMethodType> = method_data
             .iter()
-            .map(
-                |(name, _, params_id, return_type_id, has_default, _pnames)| {
-                    let method_name_id = self.method_name_id(*name, interner);
-                    crate::types::InterfaceMethodType {
-                        name: method_name_id,
-                        has_default: *has_default,
-                        params_id: params_id.iter().copied().collect(),
-                        return_type_id: *return_type_id,
-                    }
-                },
-            )
+            .map(|(name, _, params_id, return_type_id, has_default, _, _)| {
+                let method_name_id = self.method_name_id(*name, interner);
+                crate::types::InterfaceMethodType {
+                    name: method_name_id,
+                    has_default: *has_default,
+                    params_id: params_id.iter().copied().collect(),
+                    return_type_id: *return_type_id,
+                }
+            })
             .collect();
 
         // Emit errors for methods with bodies that aren't marked as default
@@ -233,8 +237,15 @@ impl Analyzer {
             .collect();
 
         // Register methods in EntityRegistry (with external bindings)
-        for (_, method_name_str, params_id, return_type_id, has_default, param_names) in
-            &method_data
+        for (
+            _,
+            method_name_str,
+            params_id,
+            return_type_id,
+            has_default,
+            declaration_is_default,
+            param_names,
+        ) in &method_data
         {
             let builtin_mod = self.name_table_mut().builtin_module();
             let method_name_id = self
@@ -253,6 +264,7 @@ impl Analyzer {
                 full_method_name_id,
                 signature_id,
                 *has_default,
+                *declaration_is_default,
                 external_binding,
                 param_names.clone(),
             );
@@ -362,9 +374,9 @@ impl Analyzer {
                 .as_ref()
                 .map(|t| resolve_type_to_id(t, &mut static_type_ctx))
                 .unwrap_or_else(|| self.type_arena().void());
-            let has_default = method.is_default
-                || method.body.is_some()
-                || default_static_external_methods.contains(&method.name);
+            let declaration_is_default = method.is_default || method.body.is_some();
+            let has_default =
+                declaration_is_default || default_static_external_methods.contains(&method.name);
 
             let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                 .intern(&mut self.type_arena_mut());
@@ -378,6 +390,7 @@ impl Analyzer {
             )
             .is_static(true)
             .has_default(has_default)
+            .declaration_is_default(declaration_is_default)
             .external_binding(external_binding)
             .register(&mut self.entity_registry_mut());
         }

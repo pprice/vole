@@ -33,6 +33,7 @@ pub struct MethodDefBuilder {
     signature_id: TypeId,
     is_static: bool,
     has_default: bool,
+    declaration_is_default: bool,
     external_binding: Option<ExternalMethodInfo>,
     method_type_params: Vec<TypeParamInfo>,
     required_params: usize,
@@ -58,6 +59,7 @@ impl MethodDefBuilder {
             signature_id,
             is_static: false,
             has_default: false,
+            declaration_is_default: false,
             external_binding: None,
             method_type_params: Vec::new(),
             required_params: 0,
@@ -76,6 +78,13 @@ impl MethodDefBuilder {
     /// Set whether this method has a default implementation.
     pub fn has_default(mut self, has_default: bool) -> Self {
         self.has_default = has_default;
+        self
+    }
+
+    /// Set whether the declaration itself uses the `default` keyword or has a body.
+    /// This is separate from `has_default` which also includes external runtime defaults.
+    pub fn declaration_is_default(mut self, declaration_is_default: bool) -> Self {
+        self.declaration_is_default = declaration_is_default;
         self
     }
 
@@ -129,6 +138,7 @@ impl MethodDefBuilder {
             defining_type: self.defining_type,
             signature_id: self.signature_id,
             has_default: self.has_default,
+            declaration_is_default: self.declaration_is_default,
             is_static: self.is_static,
             external_binding: self.external_binding,
             method_type_params: self.method_type_params,

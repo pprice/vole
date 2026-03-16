@@ -137,6 +137,12 @@ pub struct MethodDef {
     /// Interned TypeId for the signature. Use TypeArena::unwrap_function() to get params/return.
     pub signature_id: TypeId,
     pub has_default: bool,
+    /// Whether the declaration itself uses the `default` keyword or has a body.
+    /// True for `default func map(...)` or `func map(...) { ... }`.
+    /// False for methods that only have an external runtime default (via `default external`).
+    /// Used for structural interface checking: declaration-defaults are optional,
+    /// external-only defaults are still structurally required.
+    pub declaration_is_default: bool,
     /// Whether this is a static method (called on type, not instance)
     pub is_static: bool,
     /// External binding for this method (if any)

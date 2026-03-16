@@ -1,0 +1,16 @@
+// Error: struct with random methods should NOT satisfy Iterator<T>
+// Regression test for vol-r8cr: structural check skipped all default methods
+
+class Fake {
+    value: i64
+}
+
+// Fake has no next() method, so it cannot satisfy Iterator<i64>
+func consume_iter<T: Iterator<i64>>(iter: T) -> i64 {
+    return 0
+}
+
+func main() {
+    let f = Fake { value: 42 }
+    consume_iter(f)
+}

@@ -124,6 +124,18 @@ impl EntityRegistry {
         (md.has_default, md.name_id, md.signature_id)
     }
 
+    /// Get declaration_is_default, name_id, and signature_id for a method.
+    ///
+    /// Like `method_default_name_sig` but returns `declaration_is_default` instead of `has_default`.
+    /// `declaration_is_default` is true only when the declaration itself uses the `default` keyword
+    /// or has a body — not when it only has an external runtime default.
+    /// Used for structural interface checking where external-only defaults are still required.
+    #[inline]
+    pub fn method_decl_default_name_sig(&self, id: MethodId) -> (bool, NameId, ArenaTypeId) {
+        let md = self.get_method(id);
+        (md.declaration_is_default, md.name_id, md.signature_id)
+    }
+
     /// Get full method info needed for generic method calls.
     ///
     /// Returns: (is_static, method_type_params, signature_id, required_params, full_name_id)

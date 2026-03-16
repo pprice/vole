@@ -55,11 +55,13 @@ impl EntityRegistry {
         full_name_id: NameId,
         signature_id: TypeId,
         has_default: bool,
+        declaration_is_default: bool,
         external_binding: Option<ExternalMethodInfo>,
         param_names: Vec<String>,
     ) -> MethodId {
         MethodDefBuilder::new(defining_type, name_id, full_name_id, signature_id)
             .has_default(has_default)
+            .declaration_is_default(declaration_is_default)
             .external_binding(external_binding)
             .param_names(param_names)
             .register(self)

@@ -1,0 +1,16 @@
+// Error: type without iter() should NOT satisfy Iterable<T>
+// The 'default func' methods on Iterable are correctly skipped,
+// but iter() is required and must be present.
+
+class NotIterable {
+    value: i64
+}
+
+func consume_iterable<T: Iterable<i64>>(x: T) -> i64 {
+    return 0
+}
+
+func main() {
+    let n = NotIterable { value: 42 }
+    consume_iterable(n)
+}

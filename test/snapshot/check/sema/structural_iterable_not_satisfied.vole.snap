@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2074]: type argument for 'T' does not satisfy constraint 'Iterable'
+    ╭─[<path>/structural_iterable_not_satisfied.vole:15:5]
+ 14 │     let n = NotIterable { value: 42 }
+ 15 │     consume_iterable(n)
+    ·     ─────────┬─────────
+    ·              ╰── found 'main::NotIterable'
+ 16 │ }
+    ╰────

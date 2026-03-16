@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2074]: type argument for 'T' does not satisfy constraint 'Iterator'
+    ╭─[<path>/structural_iterator_not_satisfied.vole:15:5]
+ 14 │     let f = Fake { value: 42 }
+ 15 │     consume_iter(f)
+    ·     ───────┬───────
+    ·            ╰── found 'main::Fake'
+ 16 │ }
+    ╰────

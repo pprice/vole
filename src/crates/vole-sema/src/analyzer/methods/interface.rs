@@ -47,11 +47,12 @@ impl Analyzer {
             }
         }
 
-        // Check required methods (skip those with defaults)
+        // Check required methods (skip those with declaration-level defaults)
         for method_id in method_ids {
-            let (has_default, name_id, signature_id) =
-                self.entity_registry().method_default_name_sig(method_id);
-            if has_default {
+            let (declaration_is_default, name_id, signature_id) = self
+                .entity_registry()
+                .method_decl_default_name_sig(method_id);
+            if declaration_is_default {
                 continue;
             }
             // Step 2: Get signature from arena
@@ -418,9 +419,10 @@ impl Analyzer {
 
         // Check required methods with substituted signatures
         for method_id in method_ids {
-            let (has_default, name_id, signature_id) =
-                self.entity_registry().method_default_name_sig(method_id);
-            if has_default {
+            let (declaration_is_default, name_id, signature_id) = self
+                .entity_registry()
+                .method_decl_default_name_sig(method_id);
+            if declaration_is_default {
                 continue;
             }
             let signature = {
@@ -478,6 +480,9 @@ impl Analyzer {
 
     /// Collect interface method info with type parameter substitutions applied.
     /// Returns (method_name, has_default, substituted_signature) for each valid method.
+    /// Uses `has_default` (not `declaration_is_default`) because this is used for
+    /// nominal validation (`implements Interface`), where any default (including external)
+    /// means the method doesn't need to be provided by the implementor.
     fn collect_substituted_method_infos(
         &mut self,
         method_ids: &[MethodId],
