@@ -398,7 +398,10 @@ impl Cg<'_, '_, '_> {
             let count = self.builder.use_var(guard);
             let next = self.builder.ins().iadd_imm(count, 1);
             self.builder.def_var(guard, next);
-            let limit = self.builder.ins().iconst(types::I64, DEV_ITERATOR_GUARD_LIMIT);
+            let limit = self
+                .builder
+                .ins()
+                .iconst(types::I64, DEV_ITERATOR_GUARD_LIMIT);
             let over = self
                 .builder
                 .ins()

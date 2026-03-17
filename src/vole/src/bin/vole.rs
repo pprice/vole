@@ -54,7 +54,9 @@ fn main() -> ExitCode {
 
     // Apply memory limit (--mem-limit or default 4gb)
     if let Some(limit) = cli.mem_limit {
-        ALLOCATOR.set_limit(limit).expect("failed to set memory limit");
+        ALLOCATOR
+            .set_limit(limit)
+            .expect("failed to set memory limit");
     }
 
     // Initialize tracing: --timing enables CompileTimingLayer,

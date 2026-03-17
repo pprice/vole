@@ -329,7 +329,16 @@ impl TypeArena {
             SemaType::Fallible { .. } => (75, type_id.raw() as u64),
             SemaType::RuntimeIterator(_) => (70, type_id.raw() as u64),
             SemaType::Structural(_) => (65, type_id.raw() as u64),
-            // Nominal types sorted by TypeDefId (descending) within category
+            // Nominal types sorted by TypeDefId (descending) within category.
+            // Iterator<T> interface gets priority 70 (same as RuntimeIterator)
+            // to maintain union sorting stability during the iter-2 migration.
+            SemaType::Interface { type_def_id, .. }
+                if self
+                    .well_known_iterator_type_def_id
+                    .is_some_and(|id| id == *type_def_id) =>
+            {
+                (70, type_id.raw() as u64)
+            }
             SemaType::Class { type_def_id, .. }
             | SemaType::Struct { type_def_id, .. }
             | SemaType::Interface { type_def_id, .. }
@@ -435,7 +444,7 @@ impl TypeArena {
         self.intern(SemaType::FixedArray { element, size })
     }
 
-    /// Create a runtime iterator type
+    /// Create a runtime iterator type.
     pub fn runtime_iterator(&mut self, element: TypeId) -> TypeId {
         if self.is_invalid(element) {
             return self.invalid();

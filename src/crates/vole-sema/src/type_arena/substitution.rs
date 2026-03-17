@@ -421,8 +421,9 @@ impl TypeArena {
                 if new_elem == *elem {
                     return Some(ty);
                 }
-                let result_ty = SemaType::RuntimeIterator(new_elem);
-                self.intern_map.get(&result_ty).copied()
+                // Delegate to lookup_runtime_iterator which already does dual-probe
+                // (tries legacy SemaType::RuntimeIterator, then Iterator<T> interface).
+                self.lookup_runtime_iterator(new_elem)
             }
 
             SemaType::FixedArray { element, size } => {
