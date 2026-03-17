@@ -257,6 +257,20 @@ pub(crate) fn vir_is_interface(vir_ty: VirTypeId, table: &VirTypeTable) -> bool 
     matches!(table.get(vir_ty), VirType::Interface { .. })
 }
 
+/// Check if a `VirTypeId` is a fat-pointer interface (excludes Iterator<T>).
+///
+/// Iterator<T> is a thin pointer (same layout as RuntimeIterator). All other
+/// interfaces are fat pointers ([data_ptr, vtable_ptr]). This distinction
+/// matters for RC operations: fat-pointer interfaces need a deref to reach
+/// the data_ptr before rc_inc/rc_dec, while thin-pointer iterators do not.
+pub(crate) fn vir_is_fat_interface(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    iterator_type_def: Option<TypeDefId>,
+) -> bool {
+    vir_is_interface(vir_ty, table) && !vir_is_runtime_iterator(vir_ty, table, iterator_type_def)
+}
+
 /// Unwrap an interface type, returning its `TypeDefId` and type arguments.
 ///
 /// Returns `None` if the type is not an interface.
@@ -304,8 +318,20 @@ pub(crate) fn vir_is_error(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
 }
 
 /// Check if a `VirTypeId` is a runtime iterator type.
-pub(crate) fn vir_is_runtime_iterator(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    matches!(table.get(vir_ty), VirType::RuntimeIterator { .. })
+///
+/// With dual-path support: also matches `VirType::Interface` whose `TypeDefId`
+/// is the well-known `Iterator` interface, since both `RuntimeIterator` and
+/// `Iterator<T>` are thin pointers (i64) at the layout level.
+pub(crate) fn vir_is_runtime_iterator(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    iterator_type_def: Option<TypeDefId>,
+) -> bool {
+    match table.get(vir_ty) {
+        VirType::RuntimeIterator { .. } => true,
+        VirType::Interface { def, .. } => iterator_type_def == Some(*def),
+        _ => false,
+    }
 }
 
 /// Check if a `VirTypeId` is the unknown (boxed TaggedValue) type.
@@ -363,12 +389,20 @@ pub(crate) fn vir_unwrap_nominal(vir_ty: VirTypeId, table: &VirTypeTable) -> Opt
 /// Unwrap a runtime iterator type, returning the element `VirTypeId`.
 ///
 /// Returns `None` if the type is not a runtime iterator.
+///
+/// With dual-path support: also matches `VirType::Interface` whose `TypeDefId`
+/// is the well-known `Iterator` interface, extracting the first type argument
+/// as the element type.
 pub(crate) fn vir_unwrap_runtime_iterator(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
+    iterator_type_def: Option<TypeDefId>,
 ) -> Option<VirTypeId> {
     match table.get(vir_ty) {
         VirType::RuntimeIterator { elem } => Some(*elem),
+        VirType::Interface { def, type_args } if iterator_type_def == Some(*def) => {
+            type_args.first().copied()
+        }
         _ => None,
     }
 }
@@ -1256,7 +1290,7 @@ fn vir_is_simple_rc_type(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
         || vir_is_class(vir_ty, table)
         || vir_is_handle(vir_ty, table)
         || vir_is_interface(vir_ty, table)
-        || vir_is_runtime_iterator(vir_ty, table)
+        || vir_is_runtime_iterator(vir_ty, table, None)
 }
 
 /// Check if a VIR type qualifies for capture RC management in closures.
@@ -1274,11 +1308,28 @@ pub(crate) fn vir_compute_union_rc_variants(
     variants: &[VirTypeId],
     table: &VirTypeTable,
 ) -> Vec<(u8, bool)> {
+    vir_compute_union_rc_variants_with_iter_def(variants, table, None)
+}
+
+/// Compute union RC variant tags with Iterator<T> dual-path awareness.
+///
+/// When `iterator_type_def` is provided, `Iterator<T>` interface variants
+/// are treated as thin pointers (not fat-pointer interfaces) for RC ops.
+pub(crate) fn vir_compute_union_rc_variants_with_iter_def(
+    variants: &[VirTypeId],
+    table: &VirTypeTable,
+    iterator_type_def: Option<TypeDefId>,
+) -> Vec<(u8, bool)> {
     variants
         .iter()
         .enumerate()
         .filter(|(_, variant_ty)| vir_is_simple_rc_type(**variant_ty, table))
-        .map(|(i, variant_ty)| (i as u8, vir_is_interface(*variant_ty, table)))
+        .map(|(i, variant_ty)| {
+            // Iterator<T> interface is a thin pointer, not a fat-pointer interface.
+            let is_fat_interface = vir_is_interface(*variant_ty, table)
+                && !vir_is_runtime_iterator(*variant_ty, table, iterator_type_def);
+            (i as u8, is_fat_interface)
+        })
         .collect()
 }
 
@@ -2151,8 +2202,30 @@ mod tests {
             },
             None,
         );
-        assert!(vir_is_runtime_iterator(iter_ty, &table));
-        assert!(!vir_is_runtime_iterator(VirTypeId::I64, &table));
+        assert!(vir_is_runtime_iterator(iter_ty, &table, None));
+        assert!(!vir_is_runtime_iterator(VirTypeId::I64, &table, None));
+    }
+
+    #[test]
+    fn runtime_iterator_dual_path_matches_iterator_interface() {
+        let mut table = test_table();
+        let iter_def = TypeDefId::new(99);
+        let iface_ty = table.intern(
+            VirType::Interface {
+                def: iter_def,
+                type_args: vec![VirTypeId::STRING],
+            },
+            None,
+        );
+        // With matching iterator_type_def, Interface is treated as runtime iterator.
+        assert!(vir_is_runtime_iterator(iface_ty, &table, Some(iter_def)));
+        // Without it (None or different TypeDefId), it is not.
+        assert!(!vir_is_runtime_iterator(iface_ty, &table, None));
+        assert!(!vir_is_runtime_iterator(
+            iface_ty,
+            &table,
+            Some(TypeDefId::new(100))
+        ));
     }
 
     #[test]
@@ -2319,10 +2392,30 @@ mod tests {
             None,
         );
         assert_eq!(
-            vir_unwrap_runtime_iterator(iter_ty, &table),
+            vir_unwrap_runtime_iterator(iter_ty, &table, None),
             Some(VirTypeId::STRING)
         );
-        assert!(vir_unwrap_runtime_iterator(VirTypeId::I64, &table).is_none());
+        assert!(vir_unwrap_runtime_iterator(VirTypeId::I64, &table, None).is_none());
+    }
+
+    #[test]
+    fn unwrap_runtime_iterator_dual_path() {
+        let mut table = test_table();
+        let iter_def = TypeDefId::new(99);
+        let iface_ty = table.intern(
+            VirType::Interface {
+                def: iter_def,
+                type_args: vec![VirTypeId::I64],
+            },
+            None,
+        );
+        // With matching iterator_type_def, extracts elem from Interface type_args.
+        assert_eq!(
+            vir_unwrap_runtime_iterator(iface_ty, &table, Some(iter_def)),
+            Some(VirTypeId::I64)
+        );
+        // Without it, returns None.
+        assert!(vir_unwrap_runtime_iterator(iface_ty, &table, None).is_none());
     }
 
     // -----------------------------------------------------------------------

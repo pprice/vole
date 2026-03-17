@@ -275,9 +275,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Interface boxing: non-interface → interface (skip RuntimeIterator).
         // `is_interface` and `unwrap_interface` match the same VirType::Interface
         // pattern, so unwrap_interface always succeeds when is_interface is true.
+        let iter_def = table.iterator_type_def();
         if table.is_interface(target_vir)
             && !table.is_interface(value_vir)
-            && !vir_is_runtime_iterator(value_vir, table)
+            && !vir_is_runtime_iterator(value_vir, table, iter_def)
         {
             let (type_def_id, type_args) = table
                 .unwrap_interface(target_vir)

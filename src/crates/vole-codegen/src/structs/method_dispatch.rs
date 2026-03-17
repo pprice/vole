@@ -610,9 +610,13 @@ impl Cg<'_, '_, '_> {
         Ok(self.compiled(value, return_type_id))
     }
 
-    /// Fallback: convert an Iterator<T> VirTypeId return to RuntimeIterator<T>.
+    /// Convert an Iterator<T> VirTypeId return to RuntimeIterator<T>.
     ///
-    /// Used by interface dispatch callers without a concrete_return_hint.
+    /// Both Iterator<T> and RuntimeIterator are thin pointers (i64) at layout
+    /// level. This conversion is retained as a bridge so that downstream code
+    /// (RC ops, method dispatch) uses the RuntimeIterator type tag. The
+    /// dual-path predicates (vir_is_runtime_iterator, etc.) provide fallback
+    /// matching when conversion doesn't fire. Will be removed in iter-10.
     fn convert_interface_iterator_return(&self, vir_ty: VirTypeId, fallback: TypeId) -> TypeId {
         if let Some(iterator_type_id) = self.name_table().well_known.iterator_type_def
             && let Some((type_def_id, vir_type_args)) = self.vir_query_unwrap_interface_v(vir_ty)
@@ -628,10 +632,11 @@ impl Cg<'_, '_, '_> {
         fallback
     }
 
-    /// Fallback: convert an Iterator<T> sema TypeId return to RuntimeIterator<T>.
+    /// Convert an Iterator<T> sema TypeId return to RuntimeIterator<T>.
     ///
     /// Resolves the TypeId to VirTypeId and delegates to the VIR-native check.
-    /// Used by method dispatch callers without a concrete_return_hint.
+    /// Both types are thin pointers — this is a type-tag bridge only.
+    /// Will be removed in iter-10.
     pub(crate) fn convert_interface_iterator_return_by_type(&self, ty: TypeId) -> TypeId {
         let vir_ty = self.vir_lookup(ty);
         self.convert_interface_iterator_return(vir_ty, ty)

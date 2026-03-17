@@ -629,6 +629,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_query_is_interface_v(self.vir_lookup(type_id))
     }
 
+    /// Check if a `VirTypeId` is a fat-pointer interface (excludes Iterator<T>).
+    ///
+    /// Iterator<T> is a thin pointer (same layout as RuntimeIterator).
+    /// All other interfaces are fat pointers needing deref for RC ops.
+    /// Not yet active — will replace `vir_query_is_interface_v` for RC ops
+    /// when iter-3 enables dual-path activation.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn vir_query_is_fat_interface_v(&self, vir_ty: VirTypeId) -> bool {
+        let table = self.vir_type_table();
+        crate::types::vir_conversions::vir_is_fat_interface(
+            vir_ty,
+            table,
+            table.iterator_type_def(),
+        )
+    }
+
     /// Unwrap a nominal `VirTypeId` to its TypeDefId via VirTypeTable.
     #[inline]
     pub fn vir_query_unwrap_nominal_v(
@@ -775,9 +792,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a `VirTypeId` is a runtime iterator type via VirTypeTable.
+    ///
+    /// Dual-path: matches both `VirType::RuntimeIterator` and
+    /// `VirType::Interface` whose `TypeDefId` is the well-known Iterator.
     #[inline]
     pub fn vir_query_is_runtime_iterator_v(&self, vir_ty: VirTypeId) -> bool {
-        crate::types::vir_conversions::vir_is_runtime_iterator(vir_ty, self.vir_type_table())
+        let table = self.vir_type_table();
+        crate::types::vir_conversions::vir_is_runtime_iterator(
+            vir_ty,
+            table,
+            table.iterator_type_def(),
+        )
     }
 
     /// Unwrap a fallible `VirTypeId` to `(success, errors)` via VirTypeTable.
@@ -868,9 +893,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap a runtime iterator `VirTypeId` to its element `VirTypeId` via VirTypeTable.
+    ///
+    /// Dual-path: matches both `VirType::RuntimeIterator` and
+    /// `VirType::Interface` whose `TypeDefId` is the well-known Iterator.
     #[inline]
     pub fn vir_query_unwrap_runtime_iterator_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
-        crate::types::vir_conversions::vir_unwrap_runtime_iterator(vir_ty, self.vir_type_table())
+        let table = self.vir_type_table();
+        crate::types::vir_conversions::vir_unwrap_runtime_iterator(
+            vir_ty,
+            table,
+            table.iterator_type_def(),
+        )
     }
 
     /// Unwrap an interface `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.

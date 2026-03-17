@@ -728,7 +728,11 @@ impl Cg<'_, '_, '_> {
                 // NOTE: box_interface_value requires sema TypeId for vtable generation.
                 let ret_vir_ty =
                     return_vir_ty.expect("InterfaceBox convention requires return type");
-                if !self.vir_query_is_interface_v(compiled.type_id)
+                if self.vir_query_is_runtime_iterator_v(ret_vir_ty) {
+                    // Iterator<T> is a thin pointer — never fat-pointer box.
+                    // The value is already a RuntimeIterator (via IteratorWrap coercion).
+                    self.builder.ins().return_(&[compiled.value]);
+                } else if !self.vir_query_is_interface_v(compiled.type_id)
                     && !self.vir_query_is_runtime_iterator_v(compiled.type_id)
                 {
                     let boxed = self.box_interface_value_v(compiled, ret_vir_ty)?;

@@ -445,15 +445,14 @@ impl Cg<'_, '_, '_> {
             return Ok((iter_val, elem_vir, true));
         }
 
-        // RuntimeIterator → pass through
+        // RuntimeIterator or Iterator<T> interface → pass through.
+        // Both are thin pointers (i64) to the same runtime representation.
         if self.vir_query_is_runtime_iterator_v(iterable_vir) {
             self.enter_iter_rc_scope(&iterable, None);
             return Ok((iterable.value, elem_vir, false));
         }
 
-        // Interface → wrap via InterfaceIter.
-        // This covers both Iterator<T> interface values and any interface
-        // that the runtime treats as an iterator.
+        // Non-Iterator interface → wrap via InterfaceIter.
         if self.vir_query_is_interface_v(iterable_vir) {
             let iter = self.wrap_interface_iter_v(iterable, elem_vir)?;
             self.enter_iter_rc_scope(&iter, None);

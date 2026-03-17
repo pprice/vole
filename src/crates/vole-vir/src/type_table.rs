@@ -62,6 +62,12 @@ pub struct VirTypeTable {
     /// `TypeDefId` directly (Class, Struct, Interface, Error).  `None` for
     /// types without an inherent `TypeDefId` (primitives, arrays, etc.).
     type_def_ids: Vec<Option<TypeDefId>>,
+    /// Well-known Iterator interface `TypeDefId`, if registered.
+    ///
+    /// Used by codegen to distinguish Iterator<T> (thin pointer) from other
+    /// interfaces (fat pointers) without needing a NameTable reference.
+    /// Set via `set_iterator_type_def()` during VIR lowering.
+    iterator_type_def: Option<TypeDefId>,
 }
 
 impl VirTypeTable {
@@ -80,10 +86,25 @@ impl VirTypeTable {
             sentinel_ids: FxHashSet::default(),
             closure_ids: FxHashSet::default(),
             type_def_ids: Vec::new(),
+            iterator_type_def: None,
         };
         table.populate_reserved();
         table.populate_reserved_type_id_map();
         table
+    }
+
+    /// Set the well-known Iterator interface `TypeDefId`.
+    ///
+    /// Called during VIR lowering after the Iterator interface is registered.
+    /// Enables dual-path treatment: Iterator<T> interface values are thin
+    /// pointers (same layout as RuntimeIterator), not fat-pointer interfaces.
+    pub fn set_iterator_type_def(&mut self, type_def_id: TypeDefId) {
+        self.iterator_type_def = Some(type_def_id);
+    }
+
+    /// Get the well-known Iterator interface `TypeDefId`, if set.
+    pub fn iterator_type_def(&self) -> Option<TypeDefId> {
+        self.iterator_type_def
     }
 
     /// Look up an existing `VirTypeId` for a `VirType` without interning.
