@@ -633,10 +633,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Iterator<T> is a thin pointer (same layout as RuntimeIterator).
     /// All other interfaces are fat pointers needing deref for RC ops.
-    /// Not yet active — will replace `vir_query_is_interface_v` for RC ops
-    /// when iter-3 enables dual-path activation.
     #[inline]
-    #[allow(dead_code)]
     pub fn vir_query_is_fat_interface_v(&self, vir_ty: VirTypeId) -> bool {
         let table = self.vir_type_table();
         crate::types::vir_conversions::vir_is_fat_interface(

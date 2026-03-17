@@ -269,7 +269,6 @@ impl Analyzer {
 
     /// Get the VIR type table (write access).
     #[inline]
-    #[allow(dead_code)] // Will be used when iter-3 enables dual-path activation.
     fn vir_type_table_mut(&self) -> std::cell::RefMut<'_, vole_vir::type_table::VirTypeTable> {
         self.ctx.vir_type_table.borrow_mut()
     }
@@ -527,17 +526,12 @@ impl Analyzer {
             crate::well_known::populate_type_def_ids(&mut names, &entities);
         }
 
-        // Mirror the Iterator TypeDefId into TypeArena for type-level queries
+        // Mirror the Iterator TypeDefId into TypeArena (for type-level queries)
+        // and VirTypeTable (for codegen dual-path: Iterator<T> as thin pointer).
         if let Some(iter_def) = self.name_table().well_known.iterator_type_def {
             self.type_arena_mut()
                 .set_well_known_iterator_type_def_id(iter_def);
-            // VirTypeTable.iterator_type_def enables codegen dual-path treatment
-            // (Iterator<T> interface as thin pointer). Not yet activated: some
-            // codegen paths still produce fat-pointer Iterator<T> values (e.g.
-            // inside compiled Iterable default bodies). Will be enabled in
-            // iter-3 after SemaType::RuntimeIterator is deleted and all
-            // Iterator<T> values are guaranteed thin.
-            // self.vir_type_table_mut().set_iterator_type_def(iter_def);
+            self.vir_type_table_mut().set_iterator_type_def(iter_def);
         }
 
         // Cache well-known interface TypeDefIds for fast lookup during body checking.

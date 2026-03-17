@@ -479,12 +479,19 @@ impl Cg<'_, '_, '_> {
             let func_ref = self.func_ref(func_key)?;
             let call_inst = self.emit_call(func_ref, &[iterable.value]);
             let iter_value = self.call_result(call_inst, return_type_id)?;
+            // .iter() may already return a thin RuntimeIterator (when its
+            // return site used box_and_wrap for Iterator<T>).  Only wrap
+            // if the result is still a fat interface.
+            if self.vir_query_is_runtime_iterator_v(iter_value.type_id) {
+                self.enter_iter_rc_scope(&iter_value, None);
+                return Ok((iter_value.value, elem_vir, false));
+            }
             let iter = self.wrap_interface_iter_v(iter_value, elem_vir)?;
             self.enter_iter_rc_scope(&iter, None);
             return Ok((iter.value, elem_vir, false));
         }
 
-        // Custom iterator: box directly as Iterator<T> interface, then wrap
+        // Custom iterator: box directly as Iterator<T> interface, then wrap.
         let iter =
             self.box_and_wrap_as_runtime_iterator(iterable, iterator_interface_type, elem_vir)?;
         self.enter_iter_rc_scope(&iter, None);
@@ -554,15 +561,30 @@ impl Cg<'_, '_, '_> {
         self.track_iter_in_rc_scope(iter);
     }
 
-    /// Wrap an interface value via `InterfaceIter`, consuming the old value and
-    /// returning a `RuntimeIterator` `CompiledValue` (VirTypeId-native).
+    /// Wrap a boxed interface value via `InterfaceIter`, consuming the old
+    /// value and returning a `RuntimeIterator` `CompiledValue` (VirTypeId-native).
+    ///
+    /// The input is always a fat-pointer interface `[data_ptr, vtable_ptr]`
+    /// from `box_interface_value_v`. RC cleanup explicitly loads `data_ptr`
+    /// at offset 0 and rc_dec's it, because the VirTypeId may be
+    /// Iterator<T> (classified as thin by dual-path) while the value is
+    /// still physically a fat pointer at this intermediate stage.
     pub(crate) fn wrap_interface_iter_v(
         &mut self,
         mut iface: super::types::CompiledValue,
         elem_vir: VirTypeId,
     ) -> CodegenResult<super::types::CompiledValue> {
         let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iface.value])?;
-        self.consume_rc_value(&mut iface)?;
+        // The boxed interface is a raw heap alloc [data_ptr, vtable_ptr].
+        // InterfaceIter unconditionally rc_inc's data_ptr; always rc_dec
+        // to balance, regardless of ownership (the fat pointer from
+        // box_interface_value_v is always Untracked).
+        let data_word = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), iface.value, 0);
+        self.emit_rc_dec(data_word)?;
+        iface.mark_consumed();
         Ok(self.make_runtime_iter_value_v(wrapped, elem_vir))
     }
 
@@ -572,12 +594,19 @@ impl Cg<'_, '_, '_> {
     /// This is the unified path for creating `RuntimeIterator` values from
     /// custom iterators and coercion sites. Handles interface boxing, wrapping,
     /// and RC cleanup of the intermediate boxed interface.
+    ///
+    /// For borrowed values (local variable references), rc_inc's the data
+    /// before boxing so that `wrap_interface_iter_v`'s rc_dec doesn't steal
+    /// the original variable's reference.
     pub(crate) fn box_and_wrap_as_runtime_iterator(
         &mut self,
         obj: super::types::CompiledValue,
         interface_vir_ty: VirTypeId,
         elem_vir_ty: VirTypeId,
     ) -> CodegenResult<super::types::CompiledValue> {
+        if obj.is_borrowed() {
+            self.emit_rc_inc(obj.value)?;
+        }
         let resolved_interface = self.try_substitute_type_v(interface_vir_ty);
         let boxed = self.box_interface_value_v(obj, resolved_interface)?;
         let elem_vir = self.try_substitute_type_v(elem_vir_ty);

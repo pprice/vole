@@ -365,15 +365,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Shared VirTypeId-native implementation for RC inc/dec operations.
     ///
-    /// For interface types, loads the data word at offset 0 before applying
-    /// the given `rc_fn`. For other types, applies `rc_fn` directly.
+    /// For fat-pointer interface types (excludes Iterator<T> thin pointers),
+    /// loads the data word at offset 0 before applying the given `rc_fn`.
+    /// For other types (including thin-pointer Iterator<T>), applies `rc_fn`
+    /// directly.
     fn emit_rc_op_for_type_v(
         &mut self,
         value: Value,
         vir_ty: VirTypeId,
         rc_fn: RuntimeKey,
     ) -> CodegenResult<()> {
-        if self.vir_query_is_interface_v(vir_ty) {
+        if self.vir_query_is_fat_interface_v(vir_ty) {
             let data_word = self
                 .builder
                 .ins()
@@ -490,7 +492,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Returns the drop flag Variable so the caller can set it to 1 after assignment.
     pub fn register_rc_local(&mut self, variable: Variable, vir_ty: VirTypeId) -> Variable {
         let drop_flag = super::rc_cleanup::alloc_drop_flag(self);
-        let is_interface = self.vir_query_is_interface_v(vir_ty);
+        let is_interface = self.vir_query_is_fat_interface_v(vir_ty);
         let is_unknown = self.vir_query_is_unknown_v(vir_ty);
         self.rc_scopes
             .register_rc_local(variable, drop_flag, vir_ty, is_interface, is_unknown);
