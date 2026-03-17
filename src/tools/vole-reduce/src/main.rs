@@ -1,6 +1,11 @@
 // main.rs
 //! vole-reduce: Test case minimizer for Vole compiler bugs.
 
+/// 4 GB process memory limit — catches runaway allocations during development.
+#[global_allocator]
+static ALLOCATOR: cap::Cap<std::alloc::System> =
+    cap::Cap::new(std::alloc::System, 4 * 1024 * 1024 * 1024);
+
 mod cli;
 mod oracle;
 mod passes;

@@ -46,8 +46,46 @@ pub struct Cli {
     #[arg(long, global = true, num_args = 0..=1, default_missing_value = "", require_equals = true)]
     pub timing: Option<String>,
 
+    /// Process memory limit. Bare number = MB, or use suffix: 512mb, 4gb, etc.
+    /// Default: 4gb.
+    #[arg(long, global = true, value_name = "SIZE", value_parser = parse_mem_limit)]
+    pub mem_limit: Option<usize>,
+
     #[command(subcommand)]
     pub command: Commands,
+}
+
+/// Parse a memory limit string into bytes.
+///
+/// Accepts:
+/// - Bare number: treated as MB (e.g. "512" = 512 MB)
+/// - With suffix: "512mb", "4gb", "4096kb" (case-insensitive)
+fn parse_mem_limit(s: &str) -> Result<usize, String> {
+    let s = s.trim().to_lowercase();
+
+    let (num_str, multiplier) = if let Some(n) = s.strip_suffix("gb") {
+        (n.trim(), 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix("mb") {
+        (n.trim(), 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix("kb") {
+        (n.trim(), 1024)
+    } else if let Some(n) = s.strip_suffix('g') {
+        (n.trim(), 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n.trim(), 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('k') {
+        (n.trim(), 1024)
+    } else {
+        // Bare number = MB
+        (s.as_str(), 1024 * 1024)
+    };
+
+    let num: usize = num_str
+        .parse()
+        .map_err(|_| format!("invalid memory limit: '{s}'"))?;
+
+    num.checked_mul(multiplier)
+        .ok_or_else(|| format!("memory limit too large: '{s}'"))
 }
 
 #[derive(Subcommand)]

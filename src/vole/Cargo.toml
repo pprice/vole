@@ -29,6 +29,9 @@ vole-sema = { path = "../crates/vole-sema" }
 vole-codegen = { path = "../crates/vole-codegen" }
 vole-vir = { path = "../crates/vole-vir" }
 
+# Memory limit
+cap = { workspace = true }
+
 # Error handling
 miette = { version = "7.4", features = ["fancy"] }
 thiserror = "2.0"

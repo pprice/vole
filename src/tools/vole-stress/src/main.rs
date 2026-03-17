@@ -1,3 +1,8 @@
+/// 4 GB process memory limit — catches runaway allocations during development.
+#[global_allocator]
+static ALLOCATOR: cap::Cap<std::alloc::System> =
+    cap::Cap::new(std::alloc::System, 4 * 1024 * 1024 * 1024);
+
 #[allow(dead_code)]
 mod emit;
 mod emitter;

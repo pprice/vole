@@ -5,6 +5,7 @@ edition = "2024"
 description = "Generate synthetic Vole codebases for benchmarking"
 
 [dependencies]
+cap = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }

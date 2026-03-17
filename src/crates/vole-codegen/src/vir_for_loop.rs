@@ -14,6 +14,14 @@ use vole_vir::{VirBody, VirExpr, VirStmt};
 use super::context::Cg;
 
 // ---------------------------------------------------------------------------
+// Development safety guard: abort after too many iterator loop iterations.
+// Prevents infinite loops from hanging the machine during compiler development.
+// Set to `false` to disable once the iterator pipeline is stable.
+// ---------------------------------------------------------------------------
+const DEV_ITERATOR_GUARD_ENABLED: bool = true;
+const DEV_ITERATOR_GUARD_LIMIT: i64 = u32::MAX as i64;
+
+// ---------------------------------------------------------------------------
 // Continue-detection helpers
 // ---------------------------------------------------------------------------
 
@@ -348,6 +356,16 @@ impl Cg<'_, '_, '_> {
         self.builder.def_var(elem_var, elem_zero);
         self.bind_var_v(vir_for.var_name, elem_var, elem_vir);
 
+        // DEV GUARD: iteration counter to catch infinite loops during development
+        let guard_var = if DEV_ITERATOR_GUARD_ENABLED {
+            let v = self.builder.declare_var(types::I64);
+            let zero = self.iconst_cached(types::I64, 0);
+            self.builder.def_var(v, zero);
+            Some(v)
+        } else {
+            None
+        };
+
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
         let continue_block = self.builder.create_block();
@@ -374,6 +392,20 @@ impl Cg<'_, '_, '_> {
             let cur_elem = self.builder.use_var(elem_var);
             self.call_runtime_void(RuntimeKey::RcDec, &[cur_elem])?;
         }
+
+        // DEV GUARD: increment counter and trap if over limit
+        if let Some(guard) = guard_var {
+            let count = self.builder.use_var(guard);
+            let next = self.builder.ins().iadd_imm(count, 1);
+            self.builder.def_var(guard, next);
+            let limit = self.builder.ins().iconst(types::I64, DEV_ITERATOR_GUARD_LIMIT);
+            let over = self
+                .builder
+                .ins()
+                .icmp(IntCC::SignedGreaterThan, next, limit);
+            self.builder.ins().trapnz(over, TrapCode::user(1).unwrap());
+        }
+
         self.builder.ins().jump(header, &[]);
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);

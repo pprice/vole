@@ -203,10 +203,23 @@ impl TypeArena {
         arena
     }
 
+    /// Maximum number of types the arena will hold before panicking.
+    ///
+    /// Normal programs peak around 2,000–3,000 types. This cap catches
+    /// exponential type creation bugs (e.g. monomorphization feedback loops
+    /// that tripled the arena per iteration) before they OOM the machine.
+    /// Set conservatively high so real programs never hit it.
+    const MAX_TYPES: usize = 256 * 1024;
+
     /// Intern a type, returning existing TypeId if already interned
     pub(super) fn intern(&mut self, ty: SemaType) -> TypeId {
         let next_id = TypeId::from_raw(self.types.len() as u32);
         *self.intern_map.entry(ty.clone()).or_insert_with(|| {
+            assert!(
+                self.types.len() < Self::MAX_TYPES,
+                "INTERNAL: type arena exceeded {} types (likely exponential type creation bug)",
+                Self::MAX_TYPES,
+            );
             self.types.push(ty);
             next_id
         })

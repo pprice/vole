@@ -1,5 +1,6 @@
 // src/bin/vole.rs
 
+use cap::Cap;
 use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{ColorChoice, CommandFactory, FromArgMatches};
 use std::ffi::OsString;
@@ -18,6 +19,11 @@ use vole::commands::run::run_file;
 use vole::commands::test::{TestRunOptions, run_tests};
 use vole::commands::version::print_version;
 use vole::install_segfault_handler;
+
+/// Default 4 GB process memory limit — catches runaway allocations during development.
+/// Overridable via `--mem-limit`.
+#[global_allocator]
+static ALLOCATOR: Cap<std::alloc::System> = Cap::new(std::alloc::System, 4 * 1024 * 1024 * 1024);
 
 fn main() -> ExitCode {
     // Install signal handler early for segfault debugging
@@ -45,6 +51,11 @@ fn main() -> ExitCode {
             .get_matches(),
     )
     .expect("failed to parse arguments");
+
+    // Apply memory limit (--mem-limit or default 4gb)
+    if let Some(limit) = cli.mem_limit {
+        ALLOCATOR.set_limit(limit).expect("failed to set memory limit");
+    }
 
     // Initialize tracing: --timing enables CompileTimingLayer,
     // VOLE_LOG enables fmt layer. Both can be active simultaneously.

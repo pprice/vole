@@ -38,6 +38,9 @@ flat_map_option = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_qualifications = "warn"
 
+[workspace.dependencies]
+cap = "0.1"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

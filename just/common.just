@@ -51,20 +51,19 @@ unit:
         echo "${FILES[$i]}" >> "$WORK/shard_$((i % NCPU)).txt"
     done
 
-    # Launch shards in background (30s timeout per shard, SIGKILL after 10s grace)
+    # Launch shards in background (30s timeout per shard, SIGKILL after 10s grace, 256 MB memory limit)
     PIDS=()
     for ((i=0; i<NCPU; i++)); do
         [[ -s "$WORK/shard_$i.txt" ]] || continue
         mapfile -t SHARD_FILES < "$WORK/shard_$i.txt"
         (
-            ulimit -v $((1024 * 1024)) 2>/dev/null || true  # 1 GB virtual memory limit
-            timeout -k 10 30 "$VOLE" test -q --color=never "${SHARD_FILES[@]}" > "$WORK/raw_$i.txt" 2>&1 || true
+            timeout -k 10 30 "$VOLE" --mem-limit 256mb test -q --color=never "${SHARD_FILES[@]}" > "$WORK/raw_$i.txt" 2>&1 || true
             STATUS=${PIPESTATUS[0]:-$?}
             sed "s/^/[test:$i] /" "$WORK/raw_$i.txt" > "$WORK/out_$i.txt" 2>/dev/null
             if [[ $STATUS -eq 124 || $STATUS -eq 137 ]]; then
                 echo "[test:$i] error: shard timed out (30s limit)" >> "$WORK/out_$i.txt"
             elif [[ $STATUS -ne 0 ]]; then
-                echo "[test:$i] error: process killed (exit $STATUS) — possible causes: memory limit (1 GB), segfault, assertion failure" >> "$WORK/out_$i.txt"
+                echo "[test:$i] error: process killed (exit $STATUS) — possible causes: memory limit (256 MB), segfault, assertion failure" >> "$WORK/out_$i.txt"
             fi
             echo $STATUS > "$WORK/exit_$i.txt"
         ) 2>/dev/null &

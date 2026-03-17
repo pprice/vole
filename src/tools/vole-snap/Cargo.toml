@@ -5,6 +5,9 @@ edition = "2024"
 description = "Snapshot testing for Vole"
 
 [dependencies]
+# Memory limit
+cap = { workspace = true }
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 
