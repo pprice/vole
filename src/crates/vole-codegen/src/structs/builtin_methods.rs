@@ -92,7 +92,15 @@ impl Cg<'_, '_, '_> {
             let table = self.vir_type_table();
             let elem_sema = table.vir_to_type_id(elem_vir_type_id);
             self.vir_query_lookup_runtime_iterator(elem_sema)
-                .expect("INTERNAL: array iterator: RuntimeIterator type not pre-created")
+                .unwrap_or_else(|| {
+                    // After iter-3, RuntimeIterator and Iterator<T> are unified.
+                    // Fall back to make_runtime_iter_value_v's VirTypeId and
+                    // convert back to sema TypeId.
+                    let iter_vir = self
+                        .vir_query_lookup_runtime_iterator_v(elem_vir_type_id)
+                        .unwrap_or(elem_vir_type_id);
+                    table.vir_to_type_id(iter_vir)
+                })
         });
         let tag = self.vir_query_unknown_type_tag_v(elem_vir_type_id);
         if tag != 0 {

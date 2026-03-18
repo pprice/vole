@@ -39,9 +39,8 @@ impl TypeArena {
             Unchanged,
             /// Direct type-param substitution
             TypeParam(NameId),
-            /// Single child: Array, RuntimeIterator, Optional(Array)
+            /// Single child: Array, Optional(Array)
             Array(TypeId),
-            RuntimeIterator(TypeId),
             FixedArray {
                 element: TypeId,
                 size: usize,
@@ -79,7 +78,6 @@ impl TypeArena {
             SemaType::TypeParam(name_id) => SubstAction::TypeParam(*name_id),
             SemaType::TypeParamRef(_) => SubstAction::Unchanged,
             SemaType::Array(elem) => SubstAction::Array(*elem),
-            SemaType::RuntimeIterator(elem) => SubstAction::RuntimeIterator(*elem),
             SemaType::FixedArray { element, size } => SubstAction::FixedArray {
                 element: *element,
                 size: *size,
@@ -146,14 +144,6 @@ impl TypeArena {
                     return ty;
                 }
                 self.array(new_elem)
-            }
-
-            SubstAction::RuntimeIterator(elem) => {
-                let new_elem = self.substitute(elem, subs);
-                if new_elem == elem {
-                    return ty;
-                }
-                self.runtime_iterator(new_elem)
             }
 
             SubstAction::FixedArray { element, size } => {
@@ -416,16 +406,6 @@ impl TypeArena {
                 self.intern_map.get(&result_ty).copied()
             }
 
-            SemaType::RuntimeIterator(elem) => {
-                let new_elem = self.lookup_substitute(*elem, subs)?;
-                if new_elem == *elem {
-                    return Some(ty);
-                }
-                // Delegate to lookup_runtime_iterator which already does dual-probe
-                // (tries legacy SemaType::RuntimeIterator, then Iterator<T> interface).
-                self.lookup_runtime_iterator(new_elem)
-            }
-
             SemaType::FixedArray { element, size } => {
                 let new_elem = self.lookup_substitute(*element, subs)?;
                 if new_elem == *element {
@@ -624,14 +604,6 @@ impl TypeArena {
                 self.interface(type_def_id, new_args)
             }
 
-            SemaType::RuntimeIterator(elem) => {
-                let new_elem = self.substitute_self(elem, self_type);
-                if new_elem == elem {
-                    return ty;
-                }
-                self.runtime_iterator(new_elem)
-            }
-
             SemaType::FixedArray { element, size } => {
                 let new_elem = self.substitute_self(element, self_type);
                 if new_elem == element {
@@ -763,14 +735,6 @@ impl TypeArena {
                     return ty;
                 }
                 self.interface(type_def_id, new_args)
-            }
-
-            SemaType::RuntimeIterator(elem) => {
-                let new_elem = self.substitute_inference(elem, concrete);
-                if new_elem == elem {
-                    return ty;
-                }
-                self.runtime_iterator(new_elem)
             }
 
             SemaType::FixedArray { element, size } => {

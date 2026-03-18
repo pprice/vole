@@ -288,6 +288,8 @@ mod tests {
         assert!(implemented.concrete_return_hint().is_none());
 
         // Test with concrete_return_hint set
+        let fake_iterator_tdef = TypeDefId::new(999);
+        arena.set_well_known_iterator_type_def_id(fake_iterator_tdef);
         let iter_elem = arena.i64();
         let runtime_iter = arena.runtime_iterator(iter_elem);
         let with_hint = ResolvedMethod::Implemented {

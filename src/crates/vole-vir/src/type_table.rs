@@ -1307,6 +1307,16 @@ impl VirTypeTable {
 // ---------------------------------------------------------------------------
 
 impl VirTypeTable {
+    /// Record only the reverse `VirTypeId → TypeId` mapping.
+    ///
+    /// Unlike `record_type_id`, this does NOT update the forward
+    /// `TypeId → VirTypeId` mapping. Used when a single sema TypeId
+    /// maps to multiple VIR representations (e.g., Iterator<T> maps
+    /// to both VirType::Interface and VirType::RuntimeIterator).
+    pub fn record_reverse_type_id(&mut self, vir_type_id: VirTypeId, type_id: TypeId) {
+        self.vir_to_type_id.entry(vir_type_id).or_insert(type_id);
+    }
+
     /// Record a `TypeId → VirTypeId` mapping.
     ///
     /// Called by `translate_type_id()` during VIR lowering so that codegen can

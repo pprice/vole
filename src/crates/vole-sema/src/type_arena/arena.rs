@@ -327,11 +327,9 @@ impl TypeArena {
             SemaType::Tuple(_) => (85, type_id.raw() as u64),
             SemaType::Function { .. } => (80, type_id.raw() as u64),
             SemaType::Fallible { .. } => (75, type_id.raw() as u64),
-            SemaType::RuntimeIterator(_) => (70, type_id.raw() as u64),
             SemaType::Structural(_) => (65, type_id.raw() as u64),
-            // Nominal types sorted by TypeDefId (descending) within category.
-            // Iterator<T> interface gets priority 70 (same as RuntimeIterator)
-            // to maintain union sorting stability during the iter-2 migration.
+            // Iterator<T> interface gets priority 70 (above other nominals)
+            // to maintain union sorting stability.
             SemaType::Interface { type_def_id, .. }
                 if self
                     .well_known_iterator_type_def_id
@@ -444,12 +442,27 @@ impl TypeArena {
         self.intern(SemaType::FixedArray { element, size })
     }
 
-    /// Create a runtime iterator type.
+    /// Create a runtime iterator type as `Iterator<T>` interface.
+    ///
+    /// Requires the well-known Iterator TypeDefId to be set (i.e., prelude loaded).
+    /// Creates `SemaType::Interface { type_def_id: Iterator, type_args: [element] }`
+    /// so that Iterator<T> is "just another interface" in sema.
+    ///
+    /// Panics if the well-known Iterator TypeDefId is not set. This should only
+    /// happen in test arenas without prelude — those tests should use
+    /// `set_well_known_iterator_type_def_id()` before calling this.
     pub fn runtime_iterator(&mut self, element: TypeId) -> TypeId {
         if self.is_invalid(element) {
             return self.invalid();
         }
-        self.intern(SemaType::RuntimeIterator(element))
+        let iterator_tdef = self.well_known_iterator_type_def_id.expect(
+            "runtime_iterator() called without well_known_iterator_type_def_id set; \
+             call set_well_known_iterator_type_def_id() first",
+        );
+        self.intern(SemaType::Interface {
+            type_def_id: iterator_tdef,
+            type_args: smallvec::smallvec![element],
+        })
     }
 
     /// Create a function type.
@@ -605,6 +618,11 @@ impl TypeArena {
     /// Create a placeholder type (for inference)
     pub fn placeholder(&mut self, kind: PlaceholderKind) -> TypeId {
         self.intern(SemaType::Placeholder(kind))
+    }
+
+    /// Get the well-known Iterator interface TypeDefId, if set.
+    pub fn well_known_iterator_type_def_id(&self) -> Option<TypeDefId> {
+        self.well_known_iterator_type_def_id
     }
 
     /// Set the well-known Iterator interface TypeDefId.

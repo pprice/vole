@@ -66,6 +66,27 @@ pub fn translate_type_id(
         table.mark_closure(vir_id);
     }
 
+    // For Iterator<T> interface types, also pre-intern the VirType::RuntimeIterator
+    // entry so codegen can find it via lookup_runtime_iterator_v(). The primary
+    // VirTypeId remains Interface (needed for vtable generation during boxing);
+    // RuntimeIterator is a secondary entry for the runtime dispatch path.
+    if let Some(elem_sema) = arena.unwrap_iterator_interface_elem(type_id) {
+        let elem_vir = translate_type_id(table, elem_sema, arena);
+        let rt_layout = Some(VirTypeLayout {
+            is_rc: true,
+            is_heap: true,
+            is_wide: false,
+            slot_count: 1,
+            storage: StorageClass::Pointer,
+        });
+        let rt_vir = table.intern(VirType::RuntimeIterator { elem: elem_vir }, rt_layout);
+        // Record reverse mapping only (VirTypeId → sema TypeId) so that
+        // lookup_runtime_iterator_sema returns the Iterator<T> sema TypeId.
+        // We must NOT overwrite the forward mapping (sema TypeId → VirTypeId)
+        // which should remain Interface (needed for vtable generation).
+        table.record_reverse_type_id(rt_vir, type_id);
+    }
+
     vir_id
 }
 
@@ -146,11 +167,6 @@ fn translate_sema_type(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeAr
                 elem: elem_vir,
                 len: *size as u32,
             }
-        }
-
-        SemaType::RuntimeIterator(elem) => {
-            let elem_vir = translate_type_id(table, *elem, arena);
-            VirType::RuntimeIterator { elem: elem_vir }
         }
 
         SemaType::Union(variants) => translate_union(table, variants, arena),
@@ -390,16 +406,14 @@ pub fn translate_layout(type_id: TypeId, arena: &TypeArena) -> Option<VirTypeLay
             storage: StorageClass::Pointer,
         },
 
-        // RC heap types: class, string (handled by primitive), array, iterator, function
-        SemaType::Class { .. } | SemaType::Array(_) | SemaType::RuntimeIterator(_) => {
-            VirTypeLayout {
-                is_rc: true,
-                is_heap: true,
-                is_wide: false,
-                slot_count: 1,
-                storage: StorageClass::Pointer,
-            }
-        }
+        // RC heap types: class, string (handled by primitive), array, function
+        SemaType::Class { .. } | SemaType::Array(_) => VirTypeLayout {
+            is_rc: true,
+            is_heap: true,
+            is_wide: false,
+            slot_count: 1,
+            storage: StorageClass::Pointer,
+        },
 
         // Functions/closures are RC heap objects
         SemaType::Function { .. } => VirTypeLayout {
@@ -850,15 +864,23 @@ mod tests {
     #[test]
     fn translate_runtime_iterator() {
         let mut arena = test_arena();
+        // Set up a fake Iterator TypeDefId so runtime_iterator() works.
+        let fake_iterator_tdef = vole_identity::TypeDefId::new(999);
+        arena.set_well_known_iterator_type_def_id(fake_iterator_tdef);
         let iter_id = arena.runtime_iterator(TypeId::STRING);
 
+        // After iter-3, runtime_iterator() creates SemaType::Interface { Iterator, [STRING] },
+        // which translates to VirType::Interface (not VirType::RuntimeIterator).
+        // The normalize_iterator_return pass converts it to RuntimeIterator where needed.
         let mut table = VirTypeTable::new();
         let vir_id = translate_type_id(&mut table, iter_id, &arena);
         match table.get(vir_id) {
-            VirType::RuntimeIterator { elem } => {
-                assert_eq!(*elem, VirTypeId::STRING);
+            VirType::Interface { def, type_args } => {
+                assert_eq!(*def, fake_iterator_tdef);
+                assert_eq!(type_args.len(), 1);
+                assert_eq!(type_args[0], VirTypeId::STRING);
             }
-            other => panic!("expected RuntimeIterator, got {other:?}"),
+            other => panic!("expected Interface (Iterator<string>), got {other:?}"),
         }
         let layout = table
             .get_layout(vir_id)

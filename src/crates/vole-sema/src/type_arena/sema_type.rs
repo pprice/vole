@@ -95,8 +95,6 @@ pub enum SemaType {
         element: TypeId,
         size: usize,
     },
-    RuntimeIterator(TypeId),
-
     // Function type
     Function {
         params: TypeIdVec,

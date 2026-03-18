@@ -212,14 +212,11 @@ impl Analyzer {
         }
     }
 
-    /// If the given type is Iterator<T>, ensure RuntimeIterator(T) exists in the arena.
-    /// This allows codegen to convert Iterator return types to RuntimeIterator without
-    /// needing mutable arena access.
+    /// If the given type is Iterator<T>, ensure the type exists in the arena.
     ///
-    /// NOTE: This must remain active until all codegen consumers are migrated to
-    /// use the dual-path query functions. The no-op conversion was attempted in
-    /// iter-2 but caused a segfault in cross-module iterator tests because some
-    /// codegen paths still require the legacy SemaType::RuntimeIterator representation.
+    /// After iter-3, `runtime_iterator(elem)` creates the same `Iterator<T>` interface type,
+    /// so this is effectively a no-op. Kept for now as it's harmless and will be
+    /// cleaned up in a future iteration.
     fn ensure_runtime_iterator_for_iterator(&mut self, type_id: ArenaTypeId) {
         // Primitive/reserved types (id < FIRST_DYNAMIC) are never interfaces,
         // so skip the arena lookup and RefCell borrow for the common case.
@@ -247,7 +244,8 @@ impl Analyzer {
             }
         };
 
-        // Create the RuntimeIterator type if needed
+        // Create the Iterator<T> type if needed (no-op after iter-3 since
+        // runtime_iterator() now creates Iterator<T> interface directly).
         if let Some(elem) = elem_type_id {
             self.type_arena_mut().runtime_iterator(elem);
         }

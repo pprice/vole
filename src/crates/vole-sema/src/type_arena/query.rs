@@ -275,12 +275,9 @@ impl TypeArena {
         id.is_unknown()
     }
 
-    /// Check if this is a runtime iterator type.
-    ///
-    /// Matches both the legacy `SemaType::RuntimeIterator` representation and the
-    /// new `Iterator<T>` interface representation (dual-path for iter-2 migration).
+    /// Check if this is a runtime iterator type (`Iterator<T>` interface).
     pub fn is_runtime_iterator(&self, id: TypeId) -> bool {
-        matches!(self.get(id), SemaType::RuntimeIterator(_)) || self.is_iterator_interface(id)
+        self.is_iterator_interface(id)
     }
 
     /// Check if a type is an `Iterator<T>` interface type (using well-known TypeDefId).
@@ -435,39 +432,21 @@ impl TypeArena {
         }
     }
 
-    /// Unwrap a runtime iterator type, returning the element type.
-    ///
-    /// Matches both the legacy `SemaType::RuntimeIterator` representation and the
-    /// new `Iterator<T>` interface representation (dual-path for iter-2 migration).
+    /// Unwrap a runtime iterator type, returning the element type `T`
+    /// from `Iterator<T>`.
     pub fn unwrap_runtime_iterator(&self, id: TypeId) -> Option<TypeId> {
-        match self.get(id) {
-            SemaType::RuntimeIterator(elem) => Some(*elem),
-            _ => self.unwrap_iterator_interface_elem(id),
-        }
+        self.unwrap_iterator_interface_elem(id)
     }
 
-    /// Look up an existing RuntimeIterator type by element type (read-only).
+    /// Look up an existing `Iterator<T>` type by element type (read-only).
     /// Returns None if the type doesn't exist in the arena.
-    ///
-    /// Probes both the legacy `SemaType::RuntimeIterator` and the new `Iterator<T>`
-    /// interface representation (dual-path for iter-2 migration).
     pub fn lookup_runtime_iterator(&self, element: TypeId) -> Option<TypeId> {
-        // Try legacy representation first
-        let ty = SemaType::RuntimeIterator(element);
-        if let Some(id) = self.intern_map.get(&ty).copied() {
-            return Some(id);
-        }
-        // Try Iterator<T> interface representation
-        if let Some(iterator_tdef) = self.well_known_iterator_type_def_id {
-            let interface_ty = SemaType::Interface {
-                type_def_id: iterator_tdef,
-                type_args: smallvec::smallvec![element],
-            };
-            if let Some(id) = self.intern_map.get(&interface_ty).copied() {
-                return Some(id);
-            }
-        }
-        None
+        let iterator_tdef = self.well_known_iterator_type_def_id?;
+        let interface_ty = SemaType::Interface {
+            type_def_id: iterator_tdef,
+            type_args: smallvec::smallvec![element],
+        };
+        self.intern_map.get(&interface_ty).copied()
     }
 
     /// Look up an existing Array type by element type (read-only).
@@ -586,26 +565,29 @@ impl TypeArena {
         self.intern_map.get(&ty).copied()
     }
 
-    /// Return all concrete (non-TypeParam) element types for which a RuntimeIterator exists.
+    /// Return all concrete element types that need Iterable default methods
+    /// (count, map, filter, etc.) registered for them.
     ///
-    /// Used by sema to find the concrete array element types that need array Iterable
-    /// default methods (count, map, filter, etc.) registered for them.
-    ///
-    /// NOTE: Only scans `SemaType::RuntimeIterator`, NOT `Iterator<T>` interface types.
-    /// Scanning interfaces here causes exponential type explosion because
-    /// `register_implement_method_monomorphs` creates new types via `substitute()`,
-    /// which can create new `Iterator<T>` interfaces, which would then appear in
-    /// the next scan — tripling the count each iteration.
+    /// Scans for `Array<T>` types where a corresponding `Iterator<T>` interface
+    /// also exists in the arena. This matches the original behavior of scanning
+    /// RuntimeIterator types: only element types that had both an Array and an
+    /// Iterator representation are returned. Filtering by Iterator<T> existence
+    /// prevents registering monomorphs for element types that never appear in
+    /// an iterator context (e.g., arrays of unions, structs, etc.).
     pub fn all_concrete_runtime_iterator_elem_types(&self) -> Vec<TypeId> {
         self.types
             .iter()
             .filter_map(|ty| {
-                if let SemaType::RuntimeIterator(elem) = ty {
+                if let SemaType::Array(elem) = ty {
                     // Skip abstract TypeParam elements
                     if matches!(self.get(*elem), SemaType::TypeParam(_)) {
-                        None
-                    } else {
+                        return None;
+                    }
+                    // Only include if an Iterator<elem> type exists in the arena
+                    if self.lookup_runtime_iterator(*elem).is_some() {
                         Some(*elem)
+                    } else {
+                        None
                     }
                 } else {
                     None
@@ -695,9 +677,7 @@ impl TypeArena {
             SemaType::Union(types) | SemaType::Tuple(types) => {
                 types.iter().any(|&t| self.contains_type_param(t))
             }
-            SemaType::Array(elem) | SemaType::RuntimeIterator(elem) => {
-                self.contains_type_param(*elem)
-            }
+            SemaType::Array(elem) => self.contains_type_param(*elem),
             SemaType::FixedArray { element, .. } => self.contains_type_param(*element),
             SemaType::Function { params, ret, .. } => {
                 params.iter().any(|&p| self.contains_type_param(p))
@@ -755,9 +735,6 @@ impl TypeArena {
             SemaType::Array(elem) => format!("[{}]", self.display_basic(*elem)),
             SemaType::FixedArray { element, size } => {
                 format!("[{}; {}]", self.display_basic(*element), size)
-            }
-            SemaType::RuntimeIterator(elem) => {
-                format!("Iterator<{}>", self.display_basic(*elem))
             }
             SemaType::Function {
                 params,

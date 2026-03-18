@@ -150,13 +150,6 @@ fn display_sema_type(
             format!("({})", elem_list)
         }
 
-        SemaType::RuntimeIterator(elem) => {
-            format!(
-                "Iterator<{}>",
-                display_sema_type(*elem, arena, names, provider, short)
-            )
-        }
-
         SemaType::Class {
             type_def_id,
             type_args,

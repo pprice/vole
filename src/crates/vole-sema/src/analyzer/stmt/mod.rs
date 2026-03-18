@@ -583,18 +583,13 @@ impl Analyzer {
                 }),
             );
         }
-        // Direct RuntimeIterator<T> — pass through
+        // Iterator<T> interface — wrap via InterfaceIter.
+        // After iter-3, all Iterator<T> types are SemaType::Interface (no legacy
+        // SemaType::RuntimeIterator). The runtime's vole_interface_iter has a fast
+        // path that detects thin RcIterator pointers and returns them directly, so
+        // IteratorSource::IteratorInterface is always safe regardless of whether
+        // the value is a boxed interface or an already-thin pointer.
         if let Some(elem_id) = self.unwrap_runtime_iterator_id(iterable_ty_id) {
-            return (
-                elem_id,
-                Some(IterableKind::Iterator {
-                    elem_type: elem_id,
-                    source: IteratorSource::RuntimeIterator,
-                }),
-            );
-        }
-        // Direct Iterator<T> interface (e.g. from arr.iter(), or a function returning Iterator<T>)
-        if let Some(elem_id) = self.extract_iterator_interface_element_type_id(iterable_ty_id) {
             self.type_arena_mut().runtime_iterator(elem_id);
             return (
                 elem_id,

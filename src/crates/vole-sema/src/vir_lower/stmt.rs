@@ -171,12 +171,10 @@ fn classify_let_storage(ty: TypeId, init_ty: TypeId, ctx: &mut LoweringCtx<'_>) 
             init_is_union,
         }
     } else if ctx.type_arena.is_interface(ty) {
-        // RuntimeIterator implements Iterator dispatch directly; skip boxing.
-        if !ctx.generic && ctx.type_arena.is_runtime_iterator(init_ty) {
-            LetStorageHint::RuntimeIterator
-        } else {
-            LetStorageHint::Interface
-        }
+        // After iter-3, all Iterator<T> types are SemaType::Interface.
+        // Always use LetStorageHint::Interface so the boxing logic in
+        // codegen correctly wraps concrete classes when needed.
+        LetStorageHint::Interface
     } else if ctx.type_arena.is_numeric(ty) {
         LetStorageHint::Numeric
     } else {
