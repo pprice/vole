@@ -114,9 +114,9 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut RcIterator {
 /// Returns pointer to heap-allocated iterator.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut RcIterator {
-    // Fast path: some call sites pass a raw RcIterator pointer when an
-    // Iterator<T> interface value was represented as RuntimeIterator<T>.
-    // In that case, retain and return the iterator directly.
+    // Fast path: some call sites pass a raw RcIterator pointer (thin
+    // Iterator<T> value). In that case, retain and return the iterator
+    // directly.
     if !boxed_interface.is_null() {
         unsafe {
             let header = boxed_interface as *const RcHeader;

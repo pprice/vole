@@ -103,7 +103,7 @@ pub struct EntityRegistry {
     /// in `register_implement_method_monomorphs` prevents duplicate entries.
     pub implement_method_monomorph_cache: ImplementMethodMonomorphCache,
 
-    /// Number of concrete RuntimeIterator element types at the time
+    /// Number of concrete Iterator element types at the time
     /// `implement_method_monomorph_cache` was last populated. Used to skip
     /// re-registration when the type arena hasn't grown.
     pub(crate) last_implement_elem_type_count: usize,

@@ -47,7 +47,7 @@ pub enum IterableKind {
     /// `[1, 2, 3]` — dynamic array iteration
     Array { elem_type: TypeId },
     /// Any iterator-producing expression.  The `source` field tells VIR
-    /// lowering what conversion is needed to reach a `RuntimeIterator`.
+    /// lowering what conversion is needed to produce an `Iterator<T>`.
     Iterator {
         elem_type: TypeId,
         source: IteratorSource,
@@ -66,8 +66,6 @@ pub enum IterableKind {
 /// the correct `VirIterKind` variant without re-detecting the iterable type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IteratorSource {
-    /// Already a `RuntimeIterator<T>` — pass through directly.
-    RuntimeIterator,
     /// Already an `Iterator<T>` interface value — wrap via `InterfaceIter`.
     IteratorInterface,
     /// String — call `StringCharsIter` runtime function.
@@ -87,10 +85,8 @@ pub enum IteratorSource {
 /// the module/builtin/array-push detection that previously used
 /// arena queries in codegen.
 ///
-/// Note: `RuntimeIterator` dispatch is NOT annotated here because the
-/// Iterator<T> → RuntimeIterator<T> conversion happens in codegen only
+/// Iterator<T> dispatch is handled through the standard resolution path
 /// (sema always sees Iterator<T> for builtin iterator return types).
-/// Codegen detects RuntimeIterator dispatch from the compiled value's type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodDispatchKind {
     /// Module-scoped function call (e.g., `math.sqrt(16.0)`).
@@ -104,9 +100,7 @@ pub enum MethodDispatchKind {
     ArrayPush,
     /// Default: vtable dispatch, direct call, external call, or other
     /// standard method dispatch. Codegen proceeds through the normal
-    /// resolution-driven paths. Codegen will still check for RuntimeIterator
-    /// dispatch at the codegen level (since the Iterator<T> → RuntimeIterator<T>
-    /// conversion is a codegen concern).
+    /// resolution-driven paths.
     Standard,
 }
 

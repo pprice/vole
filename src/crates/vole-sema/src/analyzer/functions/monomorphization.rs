@@ -507,7 +507,7 @@ impl Analyzer {
     /// Register implement-block method monomorph instances for all concrete
     /// element types known in the type arena.
     ///
-    /// Scans the type arena for all concrete `RuntimeIterator<T>` element
+    /// Scans the type arena for all concrete `Iterator<T>` element
     /// types and, for each (element_type, default_method) pair on the array's
     /// `Iterable<T>` implementation, registers an
     /// `ImplementMethodMonomorphInstance` in the entity registry cache.

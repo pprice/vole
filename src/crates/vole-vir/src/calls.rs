@@ -219,7 +219,7 @@ pub enum BuiltinMethod {
     // -- Array methods ------------------------------------------------------
     /// `[T].length` — returns the number of elements.
     ArrayLength,
-    /// `[T].iter()` — creates a `RuntimeIterator` over the array.
+    /// `[T].iter()` — creates an `Iterator<T>` over the array.
     ArrayIter,
     /// `[T].push(value)` — appends an element (separate dispatch kind in
     /// sema, but included here for completeness).
@@ -232,11 +232,11 @@ pub enum BuiltinMethod {
     StringIter,
 
     // -- Range methods ------------------------------------------------------
-    /// `range.iter()` — creates a `RuntimeIterator` over the range.
+    /// `range.iter()` — creates an `Iterator<i64>` over the range.
     RangeIter,
 
     // -- Iterator pipeline methods ------------------------------------------
-    // These are dispatched through RuntimeIterator's external bindings in
+    // These are dispatched through Iterator's external bindings in
     // codegen, but are enumerated here so VIR can name them without strings.
     /// `iter.map(f)` — lazy transform.
     IterMap,
@@ -369,7 +369,7 @@ impl BuiltinMethod {
     /// concrete return type without hardcoding method name strings.
     pub fn return_kind(&self) -> BuiltinReturnKind {
         match self {
-            // Pipeline methods return a new RuntimeIterator<T>
+            // Pipeline methods return a new Iterator<T>
             Self::IterMap
             | Self::IterFilter
             | Self::IterTake
@@ -384,7 +384,7 @@ impl BuiltinMethod {
             | Self::IterEnumerate
             | Self::IterZip
             | Self::IterChunks
-            | Self::IterWindows => BuiltinReturnKind::RuntimeIterator,
+            | Self::IterWindows => BuiltinReturnKind::Iterator,
             // Terminal methods with specific return types
             Self::IterCollect => BuiltinReturnKind::Array,
             Self::IterCount => BuiltinReturnKind::I64,
@@ -397,9 +397,7 @@ impl BuiltinMethod {
             Self::IterNext => BuiltinReturnKind::ElemType,
             // Non-iterator builtins — not applicable
             Self::ArrayLength | Self::StringLength => BuiltinReturnKind::I64,
-            Self::ArrayIter | Self::StringIter | Self::RangeIter => {
-                BuiltinReturnKind::RuntimeIterator
-            }
+            Self::ArrayIter | Self::StringIter | Self::RangeIter => BuiltinReturnKind::Iterator,
             Self::ArrayPush => BuiltinReturnKind::Void,
         }
     }
@@ -412,8 +410,8 @@ impl BuiltinMethod {
 /// in Iterable default method bodies).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinReturnKind {
-    /// Returns `RuntimeIterator<T>` (pipeline methods).
-    RuntimeIterator,
+    /// Returns `Iterator<T>` (pipeline methods).
+    Iterator,
     /// Returns `[T]` (collect).
     Array,
     /// Returns `i64` (count, length).

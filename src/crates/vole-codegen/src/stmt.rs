@@ -84,8 +84,8 @@ impl Cg<'_, '_, '_> {
         };
 
         // Box value if assigning to interface type.
-        // The `is_runtime_iterator` check skips boxing for RuntimeIterator
-        // values, which implement Iterator dispatch directly.
+        // The `is_runtime_iterator` check skips boxing for Iterator<T>
+        // thin pointers, which implement Iterator dispatch directly.
         if let Some(declared_vir) = declared_vir_opt
             && storage == LetStorageHint::Interface
         {

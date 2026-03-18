@@ -798,7 +798,7 @@ pub enum VirRcCleanup {
     /// Simple `rc_inc` / `rc_dec` call on the value directly.
     ///
     /// Applies to: String, Array, Class instance, Function/closure,
-    /// Handle, RuntimeIterator.
+    /// Handle, Iterator<T>.
     SimpleDecRef,
 
     /// The value is an interface fat pointer `[data_ptr, vtable_ptr]`.

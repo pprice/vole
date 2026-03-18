@@ -509,7 +509,7 @@ impl Cg<'_, '_, '_> {
                 return Ok(result);
             }
             VirMethodDispatchKind::Standard => {
-                // Fall through to RuntimeIterator check and standard dispatch below.
+                // Fall through to Iterator<T> check and standard dispatch below.
             }
         }
 
@@ -547,9 +547,8 @@ impl Cg<'_, '_, '_> {
 
         // Handle custom Iterator<T> implementors (classes/structs that extend
         // Iterator<T>). When the receiver is a concrete type implementing
-        // Iterator<T>, box+wrap it to RuntimeIterator<T> and dispatch
-        // via runtime_iterator_method. This replaces the sema-side
-        // CoercionKind::IteratorWrap annotation that was removed in iter-8.
+        // Iterator<T>, box+wrap it as an Iterator<T> thin pointer and dispatch
+        // via runtime_iterator_method.
         if !dispatch.receiver_is_interface
             && let Some(builtin) = BuiltinMethod::from_iter_method_name(method_name_str)
             && let Some((elem_vir, iface_vir)) =
@@ -601,19 +600,16 @@ impl Cg<'_, '_, '_> {
             // Interface dispatch with pre-computed slot (optimized path)
             if let Some(method_index) = resolved.method_index() {
                 // Compute the concrete return type for this vtable dispatch.
-                // 1. Use concrete_return_hint if available (already RuntimeIterator
+                // 1. Use concrete_return_hint if available (already Iterator<T>
                 //    for iterator methods from sema's VirResolvedMethod).
                 // 2. Otherwise derive from substituted_return_type (which has
-                //    concrete type args), applying Iterator→RuntimeIterator
-                //    conversion since vtable calls to Iterator methods return
-                //    raw pointers.
+                //    concrete type args).
                 let return_type_override =
                     self.resolved_concrete_return_hint(resolved).or_else(|| {
                         dispatch.substituted_return_type.map(|ty| {
                             let v = self.try_substitute_type_v(ty);
                             let table = self.vir_type_table();
-                            let as_type_id = table.vir_to_type_id(v);
-                            self.convert_interface_iterator_return_by_type(as_type_id)
+                            table.vir_to_type_id(v)
                         })
                     });
                 let result = self.interface_dispatch_call_args_by_slot(
@@ -737,8 +733,8 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 // Use concrete_return_hint if available (carries the correct
-                // RuntimeIterator type for iterator methods); otherwise use
-                // the VIR-normalized return type (already RuntimeIterator<T>
+                // Iterator<T> type for iterator methods); otherwise use
+                // the VIR-normalized return type (already Iterator<T>
                 // for external methods, see VIR lowering).
                 let return_type_id = self
                     .resolved_concrete_return_hint(resolved)
@@ -879,7 +875,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // Custom Iterator<T> implementors: box+wrap the concrete receiver
-            // as RuntimeIterator<T> and dispatch via runtime_iterator_method.
+            // as an Iterator<T> thin pointer and dispatch via runtime_iterator_method.
             if let Some(builtin) = BuiltinMethod::from_iter_method_name(method_name_str)
                 && let Some((elem_vir, iface_vir)) =
                     self.find_iterator_elem_for_concrete_receiver(resolved_obj_vir)
@@ -929,9 +925,9 @@ impl Cg<'_, '_, '_> {
                     let compiled = self.coerce_to_type_id(compiled, param_type_id)?;
                     args.push(compiled.value);
                 }
-                // Use concrete_return_hint (already RuntimeIterator) when
+                // Use concrete_return_hint (already Iterator<T>) when
                 // available; otherwise use VIR-normalized return type (already
-                // RuntimeIterator<T> for external methods, see VIR lowering).
+                // Iterator<T> for external methods, see VIR lowering).
                 // Falls back to entity binding's return type as last resort.
                 let return_type_id = dispatch
                     .resolved_method
@@ -1034,17 +1030,11 @@ impl Cg<'_, '_, '_> {
             })
             .unwrap_or(return_type_id);
 
-        // Convert Iterator<T> → RuntimeIterator<T> for method returns.
-        // All Iterator<T> values are thin pointers (RuntimeIterator), so this
-        // is always safe. It ensures downstream dispatch uses the direct path
-        // instead of vtable dispatch.
-        return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
-
         // In monomorphized contexts, the return type may still contain an unsubstituted
         // type parameter from the Iterable interface (e.g. Iterator<T> where T is the
         // interface's type param, not the function's). The function's substitution map
-        // can't resolve these. When conversion above fails, construct RuntimeIterator<T>
-        // from the receiver's concrete element type.
+        // can't resolve these. When this happens, construct Iterator<T> from the
+        // receiver's concrete element type.
         if self.substitutions.is_some() {
             let needs_derivation = {
                 let vir_ret = self.vir_lookup(return_type_id);
@@ -1397,7 +1387,7 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Box+wrap a custom Iterator<T> implementor as RuntimeIterator<T>
+    /// Box+wrap a custom Iterator<T> implementor as an Iterator<T> thin pointer
     /// and dispatch the method via `runtime_iterator_method`.
     ///
     /// Called from both the resolved-method and fallback paths when the

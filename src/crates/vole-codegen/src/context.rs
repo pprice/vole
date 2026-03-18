@@ -608,7 +608,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a `VirTypeId` is a fat-pointer interface (excludes Iterator<T>).
     ///
-    /// Iterator<T> is a thin pointer (same layout as RuntimeIterator).
+    /// Iterator<T> is a thin pointer (single word).
     /// All other interfaces are fat pointers needing deref for RC ops.
     #[inline]
     pub fn vir_query_is_fat_interface_v(&self, vir_ty: VirTypeId) -> bool {

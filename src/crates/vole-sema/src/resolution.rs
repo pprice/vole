@@ -30,7 +30,7 @@ pub enum ResolvedMethod {
         is_builtin: bool,
         external_info: Option<ExternalMethodInfo>,
         /// Concrete runtime type hint for codegen. For builtin iterators
-        /// (array.iter(), string.iter(), range.iter()), this is the RuntimeIterator(T)
+        /// (array.iter(), string.iter(), range.iter()), this is the Iterator<T>
         /// type. Codegen can use this instead of creating the type itself.
         concrete_return_hint: Option<TypeId>,
     },
@@ -58,7 +58,7 @@ pub enum ResolvedMethod {
         return_type_id: TypeId,
         external_info: Option<ExternalMethodInfo>,
         /// Concrete runtime return type for Iterable default methods.
-        /// For pipeline methods (map, filter, etc.) this is RuntimeIterator<T>,
+        /// For pipeline methods (map, filter, etc.) this is Iterator<T>,
         /// for terminals (collect, count, etc.) the concrete result type.
         concrete_return_hint: Option<TypeId>,
     },
@@ -189,7 +189,7 @@ impl ResolvedMethod {
 
     /// Get the concrete_return_hint for Implemented methods.
     /// This provides the actual runtime type when it differs from the declared return type.
-    /// For builtin iterators (array.iter(), string.iter(), range.iter()), this is RuntimeIterator(T).
+    /// For builtin iterators (array.iter(), string.iter(), range.iter()), this is Iterator<T>.
     pub fn concrete_return_hint(&self) -> Option<TypeId> {
         match self {
             ResolvedMethod::Implemented {
@@ -303,7 +303,7 @@ mod tests {
             concrete_return_hint: Some(runtime_iter),
         };
         assert_eq!(with_hint.concrete_return_hint(), Some(runtime_iter));
-        // Verify the hint is a RuntimeIterator
+        // Verify the hint is an Iterator type
         assert!(arena.is_runtime_iterator(runtime_iter));
         assert_eq!(arena.unwrap_runtime_iterator(runtime_iter), Some(iter_elem));
     }

@@ -179,11 +179,7 @@ impl Analyzer {
     }
 
     /// Record the resolved type for an expression using TypeId directly.
-    /// Also pre-creates RuntimeIterator types for Iterator<T> return types,
-    /// so codegen can look them up without needing mutable arena access.
     fn record_expr_type_id(&mut self, expr: &Expr, type_id: ArenaTypeId) -> ArenaTypeId {
-        // Pre-create RuntimeIterator(T) for Iterator<T> types so codegen can look them up
-        self.ensure_runtime_iterator_for_iterator(type_id);
         self.results.node_map.set_type(expr.id, type_id);
         type_id
     }
@@ -209,45 +205,6 @@ impl Analyzer {
             self.name_table()
                 .last_segment_str(param.name_id)
                 .unwrap_or_else(|| interner.resolve(param.name).to_string())
-        }
-    }
-
-    /// If the given type is Iterator<T>, ensure the type exists in the arena.
-    ///
-    /// After iter-3, `runtime_iterator(elem)` creates the same `Iterator<T>` interface type,
-    /// so this is effectively a no-op. Kept for now as it's harmless and will be
-    /// cleaned up in a future iteration.
-    fn ensure_runtime_iterator_for_iterator(&mut self, type_id: ArenaTypeId) {
-        // Primitive/reserved types (id < FIRST_DYNAMIC) are never interfaces,
-        // so skip the arena lookup and RefCell borrow for the common case.
-        if type_id.index() < ArenaTypeId::FIRST_DYNAMIC {
-            return;
-        }
-        // Check if this is an Iterator interface type
-        let elem_type_id = {
-            let arena = self.type_arena();
-            if let Some((type_def_id, type_args)) = arena.unwrap_interface(type_id) {
-                // Get the type's name_id from the registry
-                let type_name_id = self.entity_registry().get_type(type_def_id).name_id;
-                // Check if it's the Iterator interface by looking up the type name
-                let is_iterator = self
-                    .name_table()
-                    .last_segment_str(type_name_id)
-                    .is_some_and(|name| name == "Iterator");
-                if is_iterator {
-                    type_args.first().copied()
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
-
-        // Create the Iterator<T> type if needed (no-op after iter-3 since
-        // runtime_iterator() now creates Iterator<T> interface directly).
-        if let Some(elem) = elem_type_id {
-            self.type_arena_mut().runtime_iterator(elem);
         }
     }
 

@@ -318,14 +318,7 @@ impl Compiler<'_> {
                 .analyzed
                 .last_segment(name_id)
                 .unwrap_or_else(|| self.analyzed.display_name(name_id));
-            let func_key =
-                self.declare_function_by_name_id(name_id, &bare_name, DeclareMode::Declare);
-            // If this is a generator, override the return type to
-            // RuntimeIterator(T) so callers compiled before the
-            // generator itself use the correct (non-interface) type.
-            if let Some(func_key) = func_key {
-                self.override_generator_return_type(name_id, func_key);
-            }
+            self.declare_function_by_name_id(name_id, &bare_name, DeclareMode::Declare);
         }
 
         // Finalize classes in the main program module.
@@ -392,33 +385,6 @@ impl Compiler<'_> {
         }
 
         Ok(())
-    }
-
-    /// If `func` is a generator (sema marked it with `generator_element_type`),
-    /// override its declared return type to `RuntimeIterator(T)`.
-    ///
-    /// Called during pass 1 so that any function compiled in pass 2 that calls
-    /// this generator sees the correct (non-interface) return type.
-    fn override_generator_return_type(&mut self, name_id: NameId, func_key: FunctionKey) {
-        let elem_type_id = {
-            let func_id = match self.analyzed.function_id_by_name_id(name_id) {
-                Some(id) => id,
-                None => return,
-            };
-            match self
-                .analyzed
-                .function_def(func_id)
-                .sema_generator_element_type
-            {
-                Some(e) => e,
-                None => return,
-            }
-        };
-
-        if let Some(runtime_iter_type_id) = self.vir_query_lookup_iterator_interface(elem_type_id) {
-            self.func_registry
-                .set_return_type(func_key, runtime_iter_type_id);
-        }
     }
 
     /// Second pass: compile function bodies and tests.
@@ -703,12 +669,7 @@ impl Compiler<'_> {
                 .collect();
             for name_id in func_defs {
                 let display_name = self.analyzed.display_name(name_id);
-                let func_key =
-                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
-                // Override generator return types for imported module functions
-                if let Some(func_key) = func_key {
-                    self.override_generator_return_type(name_id, func_key);
-                }
+                self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
             }
 
             // Finalize module classes (register type metadata, import methods)
@@ -1313,12 +1274,7 @@ impl Compiler<'_> {
                 .collect();
             for name_id in func_defs {
                 let display_name = self.analyzed.display_name(name_id);
-                let func_key =
-                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
-                // Override generator return types for imported module functions
-                if let Some(func_key) = func_key {
-                    self.override_generator_return_type(name_id, func_key);
-                }
+                self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
             }
 
             // Finalize module classes (register type metadata, import methods)

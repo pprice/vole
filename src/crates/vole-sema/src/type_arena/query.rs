@@ -570,7 +570,7 @@ impl TypeArena {
     ///
     /// Scans for `Array<T>` types where a corresponding `Iterator<T>` interface
     /// also exists in the arena. This matches the original behavior of scanning
-    /// RuntimeIterator types: only element types that had both an Array and an
+    /// Iterator types: only element types that had both an Array and an
     /// Iterator representation are returned. Filtering by Iterator<T> existence
     /// prevents registering monomorphs for element types that never appear in
     /// an iterator context (e.g., arrays of unions, structs, etc.).

@@ -44,7 +44,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// Dispatches on the pre-resolved `BuiltinMethod` enum from VIR — no
     /// receiver-type re-detection needed.
-    /// `iter_type_hint` is the pre-computed RuntimeIterator type from sema's concrete_return_hint.
+    /// `iter_type_hint` is the pre-computed Iterator<T> type from sema's concrete_return_hint.
     pub(crate) fn builtin_method(
         &mut self,
         builtin: BuiltinMethod,
@@ -93,7 +93,6 @@ impl Cg<'_, '_, '_> {
             let elem_sema = table.vir_to_type_id(elem_vir_type_id);
             self.vir_query_lookup_iterator_interface(elem_sema)
                 .unwrap_or_else(|| {
-                    // After iter-3, RuntimeIterator and Iterator<T> are unified.
                     // Fall back to make_runtime_iter_value_v's VirTypeId and
                     // convert back to sema TypeId.
                     let iter_vir = self

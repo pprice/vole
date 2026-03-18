@@ -556,8 +556,8 @@ impl Analyzer {
     /// and the `IterableKind` annotation for VIR lowering dispatch.
     ///
     /// Range and Array are fast-path variants.  Everything else (string,
-    /// RuntimeIterator, Iterator interface, custom Iterator/Iterable) is
-    /// unified under `IterableKind::Iterator` with an [`IteratorSource`] tag
+    /// Iterator interface, custom Iterator/Iterable) is unified under
+    /// `IterableKind::Iterator` with an [`IteratorSource`] tag
     /// so VIR lowering can emit the correct `VirIterKind` without re-detecting
     /// types.
     fn classify_iterable(
@@ -584,9 +584,8 @@ impl Analyzer {
             );
         }
         // Iterator<T> interface — wrap via InterfaceIter.
-        // After iter-3, all Iterator<T> types are SemaType::Interface (no legacy
-        // SemaType::RuntimeIterator). The runtime's vole_interface_iter has a fast
-        // path that detects thin RcIterator pointers and returns them directly, so
+        // The runtime's vole_interface_iter has a fast path that detects thin
+        // RcIterator pointers and returns them directly, so
         // IteratorSource::IteratorInterface is always safe regardless of whether
         // the value is a boxed interface or an already-thin pointer.
         if let Some(elem_id) = self.unwrap_runtime_iterator_id(iterable_ty_id) {

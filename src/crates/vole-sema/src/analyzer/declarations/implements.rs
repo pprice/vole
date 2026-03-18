@@ -247,17 +247,17 @@ impl Analyzer {
                             );
                         }
 
-                        // If implementing Iterable<T>, pre-create RuntimeIterator<T> in the
-                        // type arena. This ensures codegen's `lookup_runtime_iterator` can
-                        // find the type when compiling Iterable default methods (count, map, etc.)
-                        // which call `self.iter()` internally.
+                        // If implementing Iterable<T>, pre-create Iterator<T> in the
+                        // type arena. This ensures codegen can find the type when compiling
+                        // Iterable default methods (count, map, etc.) which call `self.iter()`
+                        // internally.
                         let is_iterable =
                             self.name_table().well_known.is_iterable_type_def(iface_id);
                         if is_iterable && !interface_type_args.is_empty() {
                             let elem_type = interface_type_args[0];
                             // Only pre-create for concrete types (not type param placeholders).
                             // For generic `extend [T] with Iterable<T>`, T is a TypeParam and
-                            // RuntimeIterator<T> is pre-created at call site instead
+                            // Iterator<T> is pre-created at call site instead
                             // (in resolve_method_on_array_type).
                             let is_abstract = elem_type.is_invalid()
                                 || self.type_arena().unwrap_type_param(elem_type).is_some()

@@ -21,7 +21,7 @@
 // - `TypeParam(NameId)` - A type parameter in generic context (`T` in `Box<T>`)
 //
 // ## Compound Special Types
-// - `RuntimeIterator` - Builtin iterator (array.iter(), range.iter())
+// - `Iterator<T>` - Builtin iterator interface (array.iter(), range.iter())
 // - `Range` - Range literal type (0..10)
 //
 // This module defines the supporting structs for these variants. The variants

@@ -675,8 +675,6 @@ impl Analyzer {
         {
             // Annotate method dispatch kind so codegen can route without
             // re-detecting the receiver type via arena queries.
-            // Note: RuntimeIterator dispatch is NOT annotated here; the
-            // Iterator<T> → RuntimeIterator<T> conversion is a codegen concern.
             let dispatch_kind = {
                 let arena = self.type_arena();
                 if arena.unwrap_array(object_type_id).is_some() && method_name == "push" {

@@ -83,7 +83,7 @@ pub(crate) fn compile_generator_function<'ctx>(
     // Step 2: Compile the wrapper function
     compile_generator_wrapper(params, body_func_id, has_captures, codegen_ctx, env)?;
 
-    // Override the return type to RuntimeIterator(T) so callers use direct dispatch
+    // Set the return type to Iterator<T> so callers see the correct type
     let vir_table = &env.analyzed.type_table;
     let runtime_iter_type_id = vir_table
         .lookup_iterator_interface_sema(params.elem_type_id)

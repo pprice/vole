@@ -292,9 +292,9 @@ pub struct VirFor {
 /// Sema classifies every for-loop iterable into one of four `IterableKind`
 /// variants; VIR collapses them into three `VirIterKind` variants.
 ///
-/// All iterator-producing iterables (strings, RuntimeIterators,
-/// Iterator<T> interfaces, custom iterators, custom iterables) are unified
-/// under `Iterator`.  The setup-phase differences are handled by codegen
+/// All iterator-producing iterables (strings, Iterator<T> interfaces,
+/// custom iterators, custom iterables) are unified under `Iterator`.
+/// The setup-phase differences are handled by codegen
 /// using the iterable expression's compiled type — VIR only records the
 /// element type and conversion hint.
 #[derive(Debug, Clone)]
@@ -318,12 +318,12 @@ pub enum VirIterKind {
         elem_conversion: Option<VirElemConversion>,
     },
 
-    /// Iterate via a `RuntimeIterator` (the unified iterator protocol).
+    /// Iterate via an Iterator<T> thin pointer (the unified iterator protocol).
     ///
-    /// Covers all non-range, non-array iterables: strings, RuntimeIterator
-    /// values, Iterator<T> interfaces, custom iterators, and custom
-    /// iterables.  Codegen determines the setup phase (wrapping, boxing,
-    /// `.iter()` call) from the compiled iterable's type.
+    /// Covers all non-range, non-array iterables: strings, Iterator<T>
+    /// interfaces, custom iterators, and custom iterables.  Codegen
+    /// determines the setup phase (wrapping, boxing, `.iter()` call) from
+    /// the compiled iterable's type.
     Iterator {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,

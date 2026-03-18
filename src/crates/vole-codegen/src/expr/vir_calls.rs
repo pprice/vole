@@ -134,11 +134,8 @@ impl Cg<'_, '_, '_> {
     /// - Large structs (3+ flat slots): sret convention with a hidden first
     ///   parameter pointing to a caller-allocated return buffer.
     ///
-    /// For generator functions, the func_registry return type is overridden
-    /// to `RuntimeIterator(T)` during pass 1 (via `override_generator_return_type`).
     /// We use the func_registry's return type for interpreting the call result
-    /// so that downstream code sees the correct concrete type rather than the
-    /// sema-level `Iterator<T>` interface type.
+    /// when available (may differ from VIR type in edge cases).
     fn compile_vir_direct_call(
         &mut self,
         function_id: vole_identity::FunctionId,
@@ -157,8 +154,7 @@ impl Cg<'_, '_, '_> {
             .func_id(func_key)
             .ok_or_else(|| CodegenError::not_found("compiled function for VIR direct call", ""))?;
 
-        // Use the func_registry's return type if available (may differ from VIR
-        // type for generators, where pass 1 overrides it to RuntimeIterator(T)).
+        // Use the func_registry's return type if available.
         let callee_return_ty = self
             .codegen_ctx
             .funcs()
@@ -500,10 +496,7 @@ impl Cg<'_, '_, '_> {
             .copied()
             .ok_or_else(|| CodegenError::internal("vtable call missing return value"))?;
         let value = self.convert_from_i64_storage(word, return_ty);
-        // Vtable dispatch returns boxed interface values, not raw pointers.
-        // Do NOT convert Iterator<T> to RuntimeIterator<T> here — the boxed
-        // interface must be dispatched through the vtable, not treated as a
-        // raw RuntimeIterator pointer.
+        // Vtable dispatch returns boxed interface values.
         Ok(self.compiled(value, return_ty))
     }
 
@@ -534,8 +527,6 @@ impl Cg<'_, '_, '_> {
     /// Resolves the module/function symbols, looks up the `NativeFunction` in
     /// the runtime registry, compiles VIR args, and emits the indirect call.
     ///
-    /// For functions returning `Iterator<T>`, the return type is converted to
-    /// `RuntimeIterator<T>` so downstream code sees the concrete iterator type.
     fn compile_vir_native_call(
         &mut self,
         module_path: vole_identity::Symbol,
@@ -544,8 +535,6 @@ impl Cg<'_, '_, '_> {
         args: &[VirRef],
         return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        // Iterator<T> → RuntimeIterator<T> normalization is now done during
-        // VIR lowering for CallTarget::Native (see lower_call_expr).
         let module_str = self.interner().resolve(module_path).to_string();
         let name_str = self.interner().resolve(native_name).to_string();
         let native_func = self

@@ -338,7 +338,7 @@ impl Cg<'_, '_, '_> {
         Ok(false)
     }
 
-    // ===== VIR RuntimeIterator loops =====
+    // ===== VIR Iterator loops =====
 
     /// Compile a VIR for-loop over a runtime iterator (string, interface,
     /// custom iterator, or custom iterable).
@@ -417,7 +417,7 @@ impl Cg<'_, '_, '_> {
         Ok(false)
     }
 
-    /// Evaluate the VIR iterable and produce a RuntimeIterator thin pointer.
+    /// Evaluate the VIR iterable and produce an Iterator thin pointer.
     ///
     /// Returns `(iter_value, elem_vir_type, needs_elem_rc_dec)`.
     ///
@@ -584,9 +584,9 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Box a value as `Iterator<T>` interface and wrap via `InterfaceIter` into
-    /// a `RuntimeIterator`.
+    /// an Iterator thin pointer.
     ///
-    /// This is the unified path for creating `RuntimeIterator` values from
+    /// This is the unified path for creating Iterator thin pointers from
     /// custom iterators and coercion sites. Handles interface boxing, wrapping,
     /// and RC cleanup of the intermediate boxed interface.
     ///

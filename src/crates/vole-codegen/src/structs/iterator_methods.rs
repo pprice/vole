@@ -1,6 +1,6 @@
 // src/codegen/structs/iterator_methods.rs
 //
-// RuntimeIterator method dispatch, Iterator interface resolution,
+// Iterator<T> method dispatch, Iterator interface resolution,
 // and iterator return type conversion.
 
 use cranelift::prelude::*;
@@ -62,7 +62,7 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| CodegenError::not_found("external binding for Iterator", method_name))?;
 
         // The return_type_hint comes from sema's concrete_return_hint (already
-        // RuntimeIterator<T>) or from substituted_return_type. When unavailable
+        // Iterator<T>) or from substituted_return_type. When unavailable
         // (e.g. Iterable default bodies), derive from the BuiltinMethod's
         // return kind and the element type.
         let return_type_id = return_type_hint
@@ -74,8 +74,6 @@ impl Cg<'_, '_, '_> {
                     format!("{method_name} (expr_id={expr_id:?})"),
                 )
             })?;
-
-        let return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
 
         Ok((external_info, return_type_id))
     }
@@ -91,9 +89,7 @@ impl Cg<'_, '_, '_> {
     ) -> Option<TypeId> {
         let table = self.vir_type_table();
         match builtin.return_kind() {
-            BuiltinReturnKind::RuntimeIterator => {
-                table.lookup_iterator_interface_sema(elem_type_id)
-            }
+            BuiltinReturnKind::Iterator => table.lookup_iterator_interface_sema(elem_type_id),
             BuiltinReturnKind::Array => table.lookup_array_sema(elem_type_id),
             BuiltinReturnKind::I64 => Some(TypeId::I64),
             BuiltinReturnKind::Bool => Some(TypeId::BOOL),
@@ -103,7 +99,7 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
+    /// Handle method calls on Iterator<T> thin pointers — calls external Iterator functions directly
     pub(super) fn runtime_iterator_method(
         &mut self,
         obj: &CompiledValue,

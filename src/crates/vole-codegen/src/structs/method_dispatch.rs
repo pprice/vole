@@ -158,9 +158,8 @@ impl Cg<'_, '_, '_> {
             )
         })?;
 
-        // Use the func_registry's return type if it was overridden (e.g. generators
-        // have their return type changed from Iterator<T> to RuntimeIterator(T) in
-        // pass 1). Fall back to the sema return type otherwise.
+        // Use the func_registry's return type if available.
+        // Fall back to the sema return type otherwise.
         let return_type_id = self.funcs().return_type(func_key).unwrap_or(return_type_id);
 
         let func_ref = self
@@ -476,7 +475,7 @@ impl Cg<'_, '_, '_> {
     /// Dispatch an interface method call with pre-computed vtable slot index.
     /// This is the optimized path where sema has already computed the slot.
     /// `return_type_override` is the concrete return type from sema's
-    /// concrete_return_hint (e.g. RuntimeIterator<T> for iterator methods).
+    /// concrete_return_hint (e.g. Iterator<T> for iterator methods).
     pub(crate) fn interface_dispatch_call_args_by_slot(
         &mut self,
         obj: &CompiledValue,
@@ -596,45 +595,17 @@ impl Cg<'_, '_, '_> {
         let value = self.convert_from_i64_storage(word, return_type_id);
 
         // Use concrete return type override from sema's concrete_return_hint
-        // when available (e.g. RuntimeIterator<T> for iterator methods).
-        // For callers without a hint, convert Iterator<T> return types to
-        // RuntimeIterator<T> inline since external iterator methods return
-        // raw iterator pointers, not boxed interface values.
-        let return_type_id = return_type_override
-            .unwrap_or_else(|| self.convert_interface_iterator_return(return_vir, return_type_id));
+        // when available (e.g. Iterator<T> for iterator methods).
+        let return_type_id = return_type_override.unwrap_or(return_type_id);
 
         Ok(self.compiled(value, return_type_id))
-    }
-
-    /// Resolve an `Iterator<T>` VirTypeId return to its sema TypeId.
-    ///
-    /// If the VIR type is `Interface { Iterator, [elem] }`, looks up the
-    /// corresponding sema TypeId. Returns `fallback` otherwise.
-    fn convert_interface_iterator_return(&self, vir_ty: VirTypeId, fallback: TypeId) -> TypeId {
-        if self.vir_query_is_iterator_interface_v(vir_ty) {
-            let table = self.vir_type_table();
-            if let Some(sema_id) = table.lookup_vir_type_id(vir_ty) {
-                return sema_id;
-            }
-        }
-        fallback
-    }
-
-    /// Convert an Iterator<T> sema TypeId return to RuntimeIterator<T>.
-    ///
-    /// Resolves the TypeId to VirTypeId and delegates to the VIR-native check.
-    /// Both types are thin pointers — this is a type-tag bridge only.
-    /// Will be removed in iter-10.
-    pub(crate) fn convert_interface_iterator_return_by_type(&self, ty: TypeId) -> TypeId {
-        let vir_ty = self.vir_lookup(ty);
-        self.convert_interface_iterator_return(vir_ty, ty)
     }
 
     /// Find the Iterator<T> element type for a concrete receiver type.
     ///
     /// When the receiver is a class/struct that implements Iterator<T>,
     /// returns `Some((elem_vir, iterator_interface_vir))` so callers can
-    /// box+wrap the receiver as RuntimeIterator<T> before method dispatch.
+    /// box+wrap the receiver as an Iterator<T> thin pointer before method dispatch.
     pub(crate) fn find_iterator_elem_for_concrete_receiver(
         &self,
         receiver_vir: VirTypeId,

@@ -612,7 +612,7 @@ impl Analyzer {
             subs
         };
 
-        // Pre-create RuntimeIterator<elem_type> for any Iterable<T> elem types so codegen can
+        // Pre-create Iterator<elem_type> for any Iterable<T> elem types so codegen can
         // find it. Without this, VIR implement method monomorphs won't see the elem type.
         for &elem_type_id in iface_subs.values() {
             self.type_arena_mut().runtime_iterator(elem_type_id);
@@ -754,7 +754,7 @@ impl Analyzer {
             tdef_id,
         );
 
-        // Pre-create RuntimeIterator<elem_type> and Optional<elem_type> so codegen
+        // Pre-create Iterator<elem_type> and Optional<elem_type> so codegen
         // can look them up. Codegen compiles ALL Iterable default methods for each
         // concrete element type, including find/first/last/nth which return T?.
         // Without pre-creating Optional<elem_type>, the VIR type table sweep cannot
@@ -875,8 +875,8 @@ impl Analyzer {
             subs
         };
 
-        // Pre-create RuntimeIterator<elem_type> for any Iterable<T> elem types so codegen can
-        // find it when converting Iterator<T> return types to RuntimeIterator<T>.
+        // Pre-create Iterator<elem_type> for any Iterable<T> elem types so codegen can
+        // find it via the VIR type table.
         for &elem_type_id in iface_subs.values() {
             self.type_arena_mut().runtime_iterator(elem_type_id);
         }
@@ -1379,14 +1379,14 @@ impl Analyzer {
     /// Hint for Iterable default methods called directly on arrays/primitives.
     ///
     /// The compiled function internally calls `.iter()`, so pipeline methods
-    /// return `RuntimeIterator<elem>` and terminals return concrete types.
+    /// return `Iterator<elem>` and terminals return concrete types.
     fn compute_iterable_default_hint(
         &mut self,
         elem_type: ArenaTypeId,
         method_name: &str,
     ) -> Option<ArenaTypeId> {
         match method_name {
-            // Pipeline methods → RuntimeIterator<elem>
+            // Pipeline methods → Iterator<elem>
             "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
             | "flatten" | "flat_map" | "filter_map" | "enumerate" | "zip" | "chunks"
             | "windows" => Some(self.type_arena_mut().runtime_iterator(elem_type)),
@@ -1399,7 +1399,7 @@ impl Analyzer {
         }
     }
 
-    /// Terminal hint computed from elem_type directly (no RuntimeIterator unwrap).
+    /// Terminal hint computed from elem_type directly (no Iterator unwrap needed).
     fn compute_terminal_hint_from_elem(
         &mut self,
         elem_type: ArenaTypeId,
@@ -1416,7 +1416,7 @@ impl Analyzer {
         }
     }
 
-    /// Hint for .iter() — object is array/string/range, returns RuntimeIterator<elem>
+    /// Hint for .iter() — object is array/string/range, returns Iterator<elem>
     fn compute_iter_source_hint(&mut self, object_type_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let element_type = {
             let arena = self.type_arena();
@@ -1433,13 +1433,13 @@ impl Analyzer {
         element_type.map(|elem| self.type_arena_mut().runtime_iterator(elem))
     }
 
-    /// Hint for pipeline methods — object is RuntimeIterator<T>, returns RuntimeIterator<T>
+    /// Hint for pipeline methods — object is Iterator<T>, returns Iterator<T>
     fn compute_pipeline_hint(&mut self, object_type_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let elem = self.type_arena().unwrap_runtime_iterator(object_type_id)?;
         Some(self.type_arena_mut().runtime_iterator(elem))
     }
 
-    /// Hint for terminal methods — object is RuntimeIterator<T>, returns a concrete scalar type
+    /// Hint for terminal methods — object is Iterator<T>, returns a concrete scalar type
     fn compute_terminal_hint(
         &mut self,
         object_type_id: ArenaTypeId,
@@ -1453,7 +1453,7 @@ impl Analyzer {
             _ => {}
         }
 
-        // Remaining terminals need the element type from RuntimeIterator<T>
+        // Remaining terminals need the element type from Iterator<T>
         let elem = self.type_arena().unwrap_runtime_iterator(object_type_id)?;
 
         match method_name {
