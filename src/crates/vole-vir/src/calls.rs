@@ -362,4 +362,68 @@ impl BuiltinMethod {
     pub fn codegen_frees_closure(&self) -> bool {
         matches!(self, Self::IterFind | Self::IterAny | Self::IterAll)
     }
+
+    /// Classify the return type of this iterator method given the element type.
+    ///
+    /// Returns a [`BuiltinReturnKind`] that codegen can use to construct the
+    /// concrete return type without hardcoding method name strings.
+    pub fn return_kind(&self) -> BuiltinReturnKind {
+        match self {
+            // Pipeline methods return a new RuntimeIterator<T>
+            Self::IterMap
+            | Self::IterFilter
+            | Self::IterTake
+            | Self::IterSkip
+            | Self::IterReverse
+            | Self::IterSorted
+            | Self::IterUnique
+            | Self::IterChain
+            | Self::IterFlatten
+            | Self::IterFlatMap
+            | Self::IterFilterMap
+            | Self::IterEnumerate
+            | Self::IterZip
+            | Self::IterChunks
+            | Self::IterWindows => BuiltinReturnKind::RuntimeIterator,
+            // Terminal methods with specific return types
+            Self::IterCollect => BuiltinReturnKind::Array,
+            Self::IterCount => BuiltinReturnKind::I64,
+            Self::IterAny | Self::IterAll => BuiltinReturnKind::Bool,
+            Self::IterForEach => BuiltinReturnKind::Void,
+            Self::IterSum | Self::IterReduce => BuiltinReturnKind::ElemType,
+            Self::IterFirst | Self::IterLast | Self::IterNth | Self::IterFind => {
+                BuiltinReturnKind::Optional
+            }
+            Self::IterNext => BuiltinReturnKind::ElemType,
+            // Non-iterator builtins — not applicable
+            Self::ArrayLength | Self::StringLength => BuiltinReturnKind::I64,
+            Self::ArrayIter | Self::StringIter | Self::RangeIter => {
+                BuiltinReturnKind::RuntimeIterator
+            }
+            Self::ArrayPush => BuiltinReturnKind::Void,
+        }
+    }
+}
+
+/// Classification of a builtin method's return type.
+///
+/// Used by codegen as a fallback to construct the concrete return type from
+/// the element type when sema's `concrete_return_hint` is unavailable (e.g.
+/// in Iterable default method bodies).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinReturnKind {
+    /// Returns `RuntimeIterator<T>` (pipeline methods).
+    RuntimeIterator,
+    /// Returns `[T]` (collect).
+    Array,
+    /// Returns `i64` (count, length).
+    I64,
+    /// Returns `bool` (any, all).
+    Bool,
+    /// Returns `void` (for_each, push).
+    Void,
+    /// Returns the element type `T` itself (sum, reduce, next).
+    ElemType,
+    /// Returns `T?` (first, last, nth, find).
+    Optional,
 }

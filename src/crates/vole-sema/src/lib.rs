@@ -47,9 +47,9 @@ pub use memory_kind::MemoryKind;
 pub use module::{LoadError, ModuleInfo, ModuleLoader, ParsedModule, parallel_parse};
 pub use node_map::NodeMap;
 pub use node_map::{
-    CoercionKind, ItLambdaInfo, IterableKind, IteratorSource, LambdaAnalysis, LambdaDefaults,
-    MethodDispatchKind, NodeData, OptionalChainInfo, OptionalChainKind, StringConversion,
-    StructLiteralInfo, UnionStorageKind,
+    ItLambdaInfo, IterableKind, IteratorSource, LambdaAnalysis, LambdaDefaults, MethodDispatchKind,
+    NodeData, OptionalChainInfo, OptionalChainKind, StringConversion, StructLiteralInfo,
+    UnionStorageKind,
 };
 pub use numeric_model::{
     NumericCoercion, integer_result_type, numeric_coercion, numeric_result_type,

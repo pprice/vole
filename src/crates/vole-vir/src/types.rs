@@ -70,8 +70,6 @@ pub enum VirType {
     },
     /// Error type.
     Error { def: TypeDefId },
-    /// Runtime iterator wrapping an `Iterator<T>` interface.
-    RuntimeIterator { elem: VirTypeId },
     /// The void type (no value).
     Void,
     /// The bottom type (never returns).

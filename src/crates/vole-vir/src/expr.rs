@@ -851,14 +851,6 @@ pub enum CoerceKind {
     },
     /// Unbox an interface pointer back to the concrete value.
     Unbox,
-    /// Wrap a concrete iterator into a `RuntimeIterator`.
-    ///
-    /// Carries the pre-resolved element type and the `Iterator<elem>`
-    /// interface type so codegen can box + wrap without arena queries.
-    IteratorWrap {
-        elem_type: VirTypeId,
-        interface_type: VirTypeId,
-    },
     /// Wrap a non-union value into a union type.
     ///
     /// Codegen delegates to `construct_union_id_v` which finds the matching
@@ -882,22 +874,6 @@ pub enum VirMethodDispatchKind {
     ArrayPush,
     /// Standard method dispatch path.
     Standard,
-}
-
-/// Method-receiver coercion hints for VIR method dispatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VirMethodReceiverCoercion {
-    /// Receiver should be boxed to `Iterator<T>` then wrapped as
-    /// `RuntimeIterator<T>` before dispatch.
-    IteratorWrap {
-        elem_type: VirTypeId,
-        vir_elem_type: VirTypeId,
-        /// The `Iterator<T>` interface type, pre-resolved by sema.
-        ///
-        /// Eliminates codegen's need to reconstruct `Iterator<elem_type>`
-        /// via well-known type def lookup.
-        iterator_interface_type: VirTypeId,
-    },
 }
 
 /// External/native method information used by VIR method dispatch.
@@ -1114,7 +1090,6 @@ pub struct VirStaticMethodMonomorphKey {
 #[derive(Debug, Clone, Default)]
 pub struct VirMethodDispatchMeta {
     pub dispatch_kind: Option<VirMethodDispatchKind>,
-    pub receiver_coercion: Option<VirMethodReceiverCoercion>,
     pub resolved_method: Option<VirResolvedMethod>,
     pub generic_monomorph: Option<VirFunctionMonomorphKey>,
     pub substituted_return_type: Option<VirTypeId>,
@@ -1134,18 +1109,6 @@ pub struct VirMethodDispatchMeta {
     /// dispatch is wrong).  Set during VIR lowering; re-derived after
     /// monomorphization when type parameters become concrete.
     pub receiver_is_interface: bool,
-    /// Pre-computed: the resolved method returns a raw RuntimeIterator pointer
-    /// rather than a boxed Iterator<T> interface.
-    ///
-    /// Set during VIR lowering for:
-    /// - Implemented methods with external binding (runtime functions)
-    /// - DefaultMethod with external binding or on Iterable interface
-    /// - InterfaceMethod on Iterator interface (vtable thunks wrap to RuntimeIterator)
-    /// - IteratorWrap receiver coercion
-    ///
-    /// Codegen uses this to decide whether to apply
-    /// `convert_interface_iterator_return` normalization.
-    pub returns_raw_iterator: bool,
 }
 
 /// A single arm of a `Match` expression.

@@ -34,7 +34,7 @@ pub use paste;
 pub use vole_identity::{NodeId, Span};
 
 pub use builder::VirBuilder;
-pub use calls::{BuiltinMethod, CallTarget, LambdaDefaultsInfo, NativeAbi};
+pub use calls::{BuiltinMethod, BuiltinReturnKind, CallTarget, LambdaDefaultsInfo, NativeAbi};
 pub use entity_metadata::{
     VirEntityMetadata, VirFieldDef, VirFieldTypeTag, VirFunctionDef, VirGlobalDef,
     VirImplementBlockEntry, VirImplementation, VirMethodBinding, VirMethodDef, VirTypeDef,
@@ -45,9 +45,8 @@ pub use expr::{
     IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind, VirClassMethodMonomorphKey,
     VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirExternalMethodInfo,
     VirFunctionMonomorphKey, VirMatchArm, VirMetaKind, VirMethodDispatchKind,
-    VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern, VirRcCleanup,
-    VirRecordFieldBinding, VirResolvedMethod, VirStaticMethodMonomorphKey, VirStringPart,
-    VirTupleBinding, VirUnOp, classify_comparison,
+    VirMethodDispatchMeta, VirPattern, VirRcCleanup, VirRecordFieldBinding, VirResolvedMethod,
+    VirStaticMethodMonomorphKey, VirStringPart, VirTupleBinding, VirUnOp, classify_comparison,
 };
 pub use func::{ReturnAbi, VirBody, VirFunction, VirTest};
 pub use implement_dispatch::{

@@ -10,7 +10,7 @@
 use super::*;
 use crate::analysis_cache::IsCheckResult as SemaIsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
-use crate::node_map::{CoercionKind, MethodDispatchKind};
+use crate::node_map::MethodDispatchKind;
 use crate::resolution::ResolvedMethod;
 use crate::types::FunctionType;
 use crate::vir_lower::expr::lower_expr;
@@ -633,12 +633,6 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
     node_map.set_type(receiver_id, TypeId::I64);
     node_map.set_type(call_id, TypeId::STRING);
     node_map.set_method_dispatch_kind(call_id, MethodDispatchKind::Builtin);
-    node_map.set_coercion_kind(
-        call_id,
-        CoercionKind::IteratorWrap {
-            elem_type: TypeId::I64,
-        },
-    );
     node_map.set_method(
         call_id,
         ResolvedMethod::Implemented {
@@ -714,13 +708,6 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
             assert!(matches!(
                 dispatch.dispatch_kind,
                 Some(vole_vir::expr::VirMethodDispatchKind::Builtin(_))
-            ));
-            assert!(matches!(
-                dispatch.receiver_coercion,
-                Some(vole_vir::expr::VirMethodReceiverCoercion::IteratorWrap {
-                    elem_type: vole_identity::VirTypeId::I64,
-                    ..
-                })
             ));
             let resolved = dispatch
                 .resolved_method

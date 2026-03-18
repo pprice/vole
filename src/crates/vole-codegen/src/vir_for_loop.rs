@@ -417,14 +417,14 @@ impl Cg<'_, '_, '_> {
         Ok(false)
     }
 
-    /// Evaluate the VIR iterable and convert it to a RuntimeIterator.
+    /// Evaluate the VIR iterable and produce a RuntimeIterator thin pointer.
     ///
     /// Returns `(iter_value, elem_vir_type, needs_elem_rc_dec)`.
     ///
     /// Determines the setup strategy from the compiled iterable's type:
     /// - String → call `StringCharsIter`
-    /// - RuntimeIterator → pass through directly
-    /// - Iterator interface → wrap via `InterfaceIter`
+    /// - Iterator<T> interface → pass through (thin pointer)
+    /// - Non-Iterator interface → wrap via `InterfaceIter`
     /// - Custom iterator/iterable → box + wrap (with optional `.iter()` call)
     fn setup_vir_runtime_iter(
         &mut self,
@@ -440,14 +440,13 @@ impl Cg<'_, '_, '_> {
         // String → StringCharsIter
         if self.vir_query_is_string_v(iterable_vir) {
             let iter_val = self.call_runtime(RuntimeKey::StringCharsIter, &[iterable.value])?;
-            let iter = self.make_runtime_iter_value_v(iter_val, VirTypeId::STRING);
+            let iter = self.make_iterator_value_v(iter_val, VirTypeId::STRING);
             self.enter_iter_rc_scope(&iter, Some(&iterable));
             return Ok((iter_val, elem_vir, true));
         }
 
-        // RuntimeIterator or Iterator<T> interface → pass through.
-        // Both are thin pointers (i64) to the same runtime representation.
-        if self.vir_query_is_runtime_iterator_v(iterable_vir) {
+        // Iterator<T> interface → pass through (thin pointer).
+        if self.vir_query_is_iterator_interface_v(iterable_vir) {
             self.enter_iter_rc_scope(&iterable, None);
             return Ok((iterable.value, elem_vir, false));
         }
@@ -460,8 +459,6 @@ impl Cg<'_, '_, '_> {
         }
 
         // Custom iterator or iterable class/struct.
-        // Determine whether this type has an `.iter()` method (Iterable) or
-        // directly implements Iterator<T> (custom iterator).
         let iterator_interface_type = self.resolve_iterator_interface_for_elem(elem_vir);
 
         // Try custom iterable first: look up `.iter()` method on this type.
@@ -473,16 +470,14 @@ impl Cg<'_, '_, '_> {
                 .method_func_keys()
                 .get(&(type_name_id, iter_method_name_id))
         {
-            // This is a CustomIterable: call .iter() then wrap
+            // CustomIterable: call .iter() then pass through or wrap.
             let interface_vir = self.try_substitute_type_v(iterator_interface_type);
             let return_type_id = self.vir_type_table().vir_to_type_id(interface_vir);
             let func_ref = self.func_ref(func_key)?;
             let call_inst = self.emit_call(func_ref, &[iterable.value]);
             let iter_value = self.call_result(call_inst, return_type_id)?;
-            // .iter() may already return a thin RuntimeIterator (when its
-            // return site used box_and_wrap for Iterator<T>).  Only wrap
-            // if the result is still a fat interface.
-            if self.vir_query_is_runtime_iterator_v(iter_value.type_id) {
+            // .iter() returns Iterator<T> (thin pointer) — pass through.
+            if self.vir_query_is_iterator_interface_v(iter_value.type_id) {
                 self.enter_iter_rc_scope(&iter_value, None);
                 return Ok((iter_value.value, elem_vir, false));
             }
@@ -517,22 +512,22 @@ impl Cg<'_, '_, '_> {
     // Shared for-loop helpers (moved from deleted for_loop.rs)
     // =========================================================================
 
-    /// Create a `CompiledValue` for a `RuntimeIterator<T>` from a raw pointer (VirTypeId-native).
+    /// Create a `CompiledValue` for an `Iterator<T>` from a raw pointer (VirTypeId-native).
     ///
-    /// Falls back to `RuntimeIterator<i64>` when sema did not pre-intern
+    /// Falls back to `Iterator<i64>` when sema did not pre-intern
     /// the specific element type (e.g. propagated class method monomorphs).
-    /// All RuntimeIterator types share the same physical layout (RC pointer),
+    /// All Iterator<T> types share the same physical layout (RC pointer),
     /// so the fallback is layout-safe; only VIR type metadata differs.
-    pub(crate) fn make_runtime_iter_value_v(
+    pub(crate) fn make_iterator_value_v(
         &self,
         raw: Value,
         elem_vir: VirTypeId,
     ) -> super::types::CompiledValue {
-        let runtime_iter_vir = self
-            .vir_query_lookup_runtime_iterator_v(elem_vir)
-            .or_else(|| self.vir_query_lookup_runtime_iterator_v(VirTypeId::I64))
-            .expect("RuntimeIterator<i64> must always be pre-interned");
-        super::types::CompiledValue::owned(raw, types::I64, runtime_iter_vir)
+        let iter_vir = self
+            .vir_query_lookup_iterator_interface_v(elem_vir)
+            .or_else(|| self.vir_query_lookup_iterator_interface_v(VirTypeId::I64))
+            .expect("Iterator<i64> must always be pre-interned");
+        super::types::CompiledValue::owned(raw, types::I64, iter_vir)
     }
 
     /// Track an owned iterator in the current RC scope for cleanup.
@@ -562,12 +557,12 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Wrap a boxed interface value via `InterfaceIter`, consuming the old
-    /// value and returning a `RuntimeIterator` `CompiledValue` (VirTypeId-native).
+    /// value and returning an `Iterator<T>` `CompiledValue` (VirTypeId-native).
     ///
     /// The input is always a fat-pointer interface `[data_ptr, vtable_ptr]`
     /// from `box_interface_value_v`. RC cleanup explicitly loads `data_ptr`
-    /// at offset 0 and rc_dec's it, because the VirTypeId may be
-    /// Iterator<T> (classified as thin by dual-path) while the value is
+    /// at offset 0 and rc_dec's it, because the VirTypeId is
+    /// `Interface { Iterator }` (thin pointer) while the value is
     /// still physically a fat pointer at this intermediate stage.
     pub(crate) fn wrap_interface_iter_v(
         &mut self,
@@ -585,7 +580,7 @@ impl Cg<'_, '_, '_> {
             .load(types::I64, MemFlags::new(), iface.value, 0);
         self.emit_rc_dec(data_word)?;
         iface.mark_consumed();
-        Ok(self.make_runtime_iter_value_v(wrapped, elem_vir))
+        Ok(self.make_iterator_value_v(wrapped, elem_vir))
     }
 
     /// Box a value as `Iterator<T>` interface and wrap via `InterfaceIter` into

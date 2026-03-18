@@ -399,10 +399,10 @@ impl<'a> Compiler<'a> {
     // vir_query_primitives() deleted — use TypeId constants directly
     // (e.g. TypeId::STRING, TypeId::I64)
 
-    /// Look up an existing runtime iterator type by element `TypeId` via VirTypeTable.
+    /// Look up an existing `Iterator<T>` interface type by element `TypeId` via VirTypeTable.
     #[inline]
-    fn vir_query_lookup_runtime_iterator(&self, elem: TypeId) -> Option<TypeId> {
-        self.vir_type_table().lookup_runtime_iterator_sema(elem)
+    fn vir_query_lookup_iterator_interface(&self, elem: TypeId) -> Option<TypeId> {
+        self.vir_type_table().lookup_iterator_interface_sema(elem)
     }
 
     /// Unwrap a fallible `VirTypeId` to `(success, errors)` via VirTypeTable.

@@ -1700,13 +1700,19 @@ pub fn classify_rc_cleanup(vir_ty: VirTypeId, table: &VirTypeTable) -> crate::ex
 
     match ty {
         // Simple RC types: single pointer to RC-managed heap object.
-        VirType::Array { .. }
-        | VirType::Function { .. }
-        | VirType::Class { .. }
-        | VirType::RuntimeIterator { .. } => VirRcCleanup::SimpleDecRef,
+        VirType::Array { .. } | VirType::Function { .. } | VirType::Class { .. } => {
+            VirRcCleanup::SimpleDecRef
+        }
 
-        // Interface: fat pointer — must extract data word first.
-        VirType::Interface { .. } => VirRcCleanup::InterfaceDecRef,
+        // Interface: Iterator<T> is a thin pointer (SimpleDecRef),
+        // all other interfaces are fat pointers (InterfaceDecRef).
+        VirType::Interface { def, .. } => {
+            if table.iterator_type_def() == Some(*def) {
+                VirRcCleanup::SimpleDecRef
+            } else {
+                VirRcCleanup::InterfaceDecRef
+            }
+        }
 
         // Handle is a well-known primitive but RC-managed.
         VirType::Primitive(VirPrimitiveKind::Handle) => VirRcCleanup::SimpleDecRef,
@@ -1773,11 +1779,10 @@ pub fn classify_capture_rc_kind(
             VirCaptureRcKind::Rc
         }
 
-        // NOT capture-eligible despite being RC: interface (fat pointer),
-        // handle, iterator.
-        VirType::Interface { .. }
-        | VirType::RuntimeIterator { .. }
-        | VirType::Primitive(VirPrimitiveKind::Handle) => VirCaptureRcKind::None,
+        // NOT capture-eligible despite being RC: interface, handle.
+        VirType::Interface { .. } | VirType::Primitive(VirPrimitiveKind::Handle) => {
+            VirCaptureRcKind::None
+        }
 
         // Non-RC types.
         VirType::Primitive(_)
@@ -1858,15 +1863,7 @@ fn rederive_let_storage(
                 },
             }
         }
-        VirType::Interface { .. } => {
-            // If the existing hint is already RuntimeIterator (pre-classified
-            // by sema lowering), preserve it.
-            if matches!(existing, LetStorageHint::RuntimeIterator) {
-                LetStorageHint::RuntimeIterator
-            } else {
-                LetStorageHint::Interface
-            }
-        }
+        VirType::Interface { .. } => LetStorageHint::Interface,
         VirType::Primitive(p) if p.is_numeric() => LetStorageHint::Numeric,
         _ => LetStorageHint::Scalar,
     }

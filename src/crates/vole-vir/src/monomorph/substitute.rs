@@ -179,13 +179,6 @@ fn substitute_one(
             let layout = compute_layout(&ty, target);
             target.intern(ty, layout)
         }
-        VirType::RuntimeIterator { elem } => {
-            let new_elem = substitute_one(*elem, source, target, subs, memo);
-            let ty = VirType::RuntimeIterator { elem: new_elem };
-            let layout = compute_layout(&ty, target);
-            target.intern(ty, layout)
-        }
-
         // Leaf types: no VirTypeIds inside, intern as-is.
         VirType::Primitive(_)
         | VirType::Error { .. }
@@ -234,7 +227,6 @@ fn compute_layout(ty: &VirType, _table: &VirTypeTable) -> Option<VirTypeLayout> 
         VirType::Class { .. }
         | VirType::Array { .. }
         | VirType::FixedArray { .. }
-        | VirType::RuntimeIterator { .. }
         | VirType::Interface { .. } => Some(VirTypeLayout {
             is_rc: true,
             is_heap: true,
@@ -716,11 +708,18 @@ mod tests {
     }
 
     #[test]
-    fn runtime_iterator_substitution() {
+    fn iterator_interface_substitution() {
         let mut source = VirTypeTable::new();
         let t_name = name(100);
+        let iter_def = vole_identity::TypeDefId::new(42);
         let param_id = source.intern(VirType::Param { name: t_name }, None);
-        let iter_id = source.intern(VirType::RuntimeIterator { elem: param_id }, None);
+        let iter_id = source.intern(
+            VirType::Interface {
+                def: iter_def,
+                type_args: vec![param_id],
+            },
+            None,
+        );
 
         let mut target = VirTypeTable::new();
         let mut subs = TypeSubstitution::default();
@@ -731,8 +730,9 @@ mod tests {
         let new_iter = target.get(mapping[&iter_id]);
         assert_eq!(
             *new_iter,
-            VirType::RuntimeIterator {
-                elem: VirTypeId::F64
+            VirType::Interface {
+                def: iter_def,
+                type_args: vec![VirTypeId::F64],
             }
         );
     }
@@ -961,7 +961,14 @@ mod tests {
             },
             None,
         );
-        let iter_id = source.intern(VirType::RuntimeIterator { elem: param_id }, None);
+        let iter_def = vole_identity::TypeDefId::new(42);
+        let iter_id = source.intern(
+            VirType::Interface {
+                def: iter_def,
+                type_args: vec![param_id],
+            },
+            None,
+        );
         let fixed_id = source.intern(
             VirType::FixedArray {
                 elem: param_id,
@@ -989,7 +996,7 @@ mod tests {
             ("Struct<T>", struct_id),
             ("Interface<T>", iface_id),
             ("Fallible<T>", fallible_id),
-            ("RuntimeIterator<T>", iter_id),
+            ("Iterator<T>", iter_id),
             ("FixedArray<T,3>", fixed_id),
             ("Array<Optional<T>>", nested_id),
         ];

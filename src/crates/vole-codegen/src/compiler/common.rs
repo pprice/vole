@@ -48,9 +48,6 @@ pub struct FunctionCompileConfig<'a> {
     pub skip_block_params: usize,
     /// What to return when the block doesn't terminate explicitly
     pub default_return: DefaultReturn,
-    /// True when compiling an Iterable default method body.
-    /// Affects RC lifecycle for closure parameters passed to pipeline/terminal methods.
-    pub in_iterable_default_body: bool,
     /// Concrete VirTypeId for `Self` in interface default method bodies.
     ///
     /// During VIR lowering, `Self` (Placeholder) maps to `VirTypeId::UNKNOWN`.
@@ -72,7 +69,6 @@ impl<'a> FunctionCompileConfig<'a> {
             return_type_id,
             skip_block_params: 0,
             default_return: DefaultReturn::Empty,
-            in_iterable_default_body: false,
             self_vir_type: None,
         }
     }
@@ -80,12 +76,6 @@ impl<'a> FunctionCompileConfig<'a> {
     /// Set skip_block_params to 1 (for sret hidden parameter).
     pub fn with_sret(mut self) -> Self {
         self.skip_block_params = 1;
-        self
-    }
-
-    /// Mark this as an Iterable default method body compilation.
-    pub fn with_iterable_default_body(mut self) -> Self {
-        self.in_iterable_default_body = true;
         self
     }
 
@@ -109,7 +99,6 @@ impl<'a> FunctionCompileConfig<'a> {
             return_type_id,
             skip_block_params: 0,
             default_return: DefaultReturn::Empty,
-            in_iterable_default_body: false,
             self_vir_type: None,
         }
     }
@@ -138,7 +127,6 @@ impl<'a> FunctionCompileConfig<'a> {
             return_type_id: Some(return_type_id),
             skip_block_params: 1, // Skip the closure pointer
             default_return: DefaultReturn::Zero,
-            in_iterable_default_body: false,
             self_vir_type: None,
         }
     }
@@ -522,9 +510,6 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
         .with_module(module_id)
         .with_substitutions(substitutions);
 
-    if config.in_iterable_default_body {
-        cg = cg.with_iterable_default_body();
-    }
     if let Some(self_vir_ty) = config.self_vir_type {
         cg = cg.with_self_vir_type(self_vir_ty);
     }

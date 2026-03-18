@@ -180,11 +180,6 @@ pub enum LetStorageHint {
     /// The binding type is an interface — concrete values are boxed to an
     /// interface pointer (vtable + data).
     Interface,
-    /// The init expression is a `RuntimeIterator` assigned to an
-    /// interface-typed binding.  Codegen passes the value through without
-    /// boxing because `RuntimeIterator` implements `Iterator` dispatch
-    /// directly via `runtime_iterator_method`.
-    RuntimeIterator,
     /// The binding type is numeric — init values may need widening or
     /// narrowing (e.g. `i32 → i64`, `f32 → f64`).
     Numeric,

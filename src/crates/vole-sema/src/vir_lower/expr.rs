@@ -14,8 +14,8 @@ use vole_vir::calls::{CallTarget, LambdaDefaultsInfo};
 use vole_vir::expr::{
     AsCastKind, ComparisonHint, IsCheckResult, VirBinOp, VirCapture, VirCaptureRcKind,
     VirClassMethodMonomorphKey, VirExpr, VirExternalMethodInfo, VirFunctionMonomorphKey,
-    VirMetaKind, VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion,
-    VirResolvedMethod, VirStaticMethodMonomorphKey, VirStringPart, VirUnOp, classify_comparison,
+    VirMetaKind, VirMethodDispatchKind, VirMethodDispatchMeta, VirResolvedMethod,
+    VirStaticMethodMonomorphKey, VirStringPart, VirUnOp, classify_comparison,
 };
 use vole_vir::func::VirBody;
 use vole_vir::numeric_model::numeric_result_type_v;
@@ -1126,32 +1126,6 @@ fn lower_method_dispatch_meta(
             crate::node_map::MethodDispatchKind::Standard => VirMethodDispatchKind::Standard,
         });
 
-    let receiver_coercion = ctx
-        .node_map
-        .get_coercion_kind(expr_id)
-        .map(|kind| match kind {
-            crate::node_map::CoercionKind::IteratorWrap { elem_type } => {
-                let vir_elem_type = ctx.translate(elem_type);
-                let iterator_interface_type = ctx
-                    .name_table
-                    .well_known
-                    .iterator_type_def
-                    .map(|def| {
-                        let iface = vole_vir::types::VirType::Interface {
-                            def,
-                            type_args: vec![vir_elem_type],
-                        };
-                        ctx.type_table.intern(iface, None)
-                    })
-                    .unwrap_or(VirTypeId::UNKNOWN);
-                VirMethodReceiverCoercion::IteratorWrap {
-                    elem_type: vir_elem_type,
-                    vir_elem_type,
-                    iterator_interface_type,
-                }
-            }
-        });
-
     let sema_method = ctx.node_map.get_method(expr_id);
     let resolved_method = sema_method.map(|resolved| lower_resolved_method(resolved, ctx));
 
@@ -1265,46 +1239,8 @@ fn lower_method_dispatch_meta(
             .is_some_and(|ty| ctx.type_arena.is_interface(ty))
     };
 
-    // Pre-compute whether the resolved method returns a raw RuntimeIterator
-    // pointer (not a boxed Iterator<T> interface).  This is true for:
-    // 1. Implemented methods with external binding (runtime FFI)
-    // 2. DefaultMethod with external binding OR on Iterable interface
-    // 3. InterfaceMethod on Iterator interface (vtable thunks)
-    // 4. IteratorWrap receiver coercion
-    let returns_raw_iterator = {
-        let from_resolved = sema_method.is_some_and(|resolved| match resolved {
-            crate::resolution::ResolvedMethod::Implemented { external_info, .. } => {
-                external_info.is_some()
-            }
-            crate::resolution::ResolvedMethod::DefaultMethod {
-                external_info,
-                interface_type_def_id,
-                ..
-            } => {
-                external_info.is_some()
-                    || ctx
-                        .name_table
-                        .well_known
-                        .is_iterable_type_def(*interface_type_def_id)
-            }
-            crate::resolution::ResolvedMethod::InterfaceMethod {
-                interface_type_def_id,
-                ..
-            } => ctx
-                .name_table
-                .well_known
-                .is_iterator_type_def(*interface_type_def_id),
-            _ => false,
-        });
-        let from_coercion = receiver_coercion
-            .as_ref()
-            .is_some_and(|c| matches!(c, VirMethodReceiverCoercion::IteratorWrap { .. }));
-        from_resolved || from_coercion
-    };
-
     VirMethodDispatchMeta {
         dispatch_kind,
-        receiver_coercion,
         resolved_method,
         generic_monomorph,
         substituted_return_type,
@@ -1314,7 +1250,6 @@ fn lower_method_dispatch_meta(
         static_method_generic,
         implement_method_monomorph,
         receiver_is_interface,
-        returns_raw_iterator,
     }
 }
 
@@ -1346,15 +1281,7 @@ fn lower_resolved_method(
             concrete_return_hint,
             ..
         } => {
-            // Normalize Iterator<T> → RuntimeIterator<T> in the return type
-            // for external methods.  Runtime functions return raw iterator
-            // pointers, so codegen should see RuntimeIterator<T> directly.
             let ret = ctx.translate(*return_type_id);
-            let ret = if external_info.is_some() {
-                ctx.normalize_iterator_return(ret)
-            } else {
-                ret
-            };
             VirResolvedMethod::Implemented {
                 type_def_id: *type_def_id,
                 func_type_id: ctx.translate(*func_type_id),
@@ -1389,15 +1316,7 @@ fn lower_resolved_method(
             concrete_return_hint,
             ..
         } => {
-            // Normalize Iterator<T> → RuntimeIterator<T> for default methods
-            // with external bindings (e.g. Iterable default methods like map,
-            // filter that call iter() internally and return RuntimeIterator).
             let ret = ctx.translate(*return_type_id);
-            let ret = if external_info.is_some() {
-                ctx.normalize_iterator_return(ret)
-            } else {
-                ret
-            };
             VirResolvedMethod::DefaultMethod {
                 type_def_id: *type_def_id,
                 interface_type_def_id: *interface_type_def_id,
@@ -1419,20 +1338,7 @@ fn lower_resolved_method(
             method_index,
             ..
         } => {
-            // Normalize Iterator<T> → RuntimeIterator<T> only for methods on
-            // the Iterator interface itself.  Vtable thunks for Iterator wrap
-            // results in RuntimeIterator.  Other interfaces returning
-            // Iterator<T> return boxed interface pointers — DO NOT normalize.
             let ret = ctx.translate(*return_type_id);
-            let ret = if ctx
-                .name_table
-                .well_known
-                .is_iterator_type_def(*interface_type_def_id)
-            {
-                ctx.normalize_iterator_return(ret)
-            } else {
-                ret
-            };
             VirResolvedMethod::InterfaceMethod {
                 interface_type_def_id: *interface_type_def_id,
                 func_type_id: ctx.translate(*func_type_id),
@@ -1825,17 +1731,6 @@ fn lower_call(
 
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
-
-    // Normalize Iterator<T> → RuntimeIterator<T> for native calls.
-    // Native (FFI) runtime functions always return raw iterator pointers,
-    // never boxed interface values.  Normalizing here eliminates the need
-    // for codegen to re-detect this conversion.
-    let (compat_ty, vir_ty) = if matches!(&target, CallTarget::Native { .. }) {
-        let norm = ctx.normalize_iterator_return(vir_ty);
-        (norm, norm)
-    } else {
-        (compat_ty, vir_ty)
-    };
 
     let result_is_fallible = !ctx.generic && ctx.type_arena.unwrap_fallible(ty).is_some();
     Box::new(VirExpr::Call {

@@ -141,34 +141,6 @@ impl LoweringCtx<'_> {
         self.translate(type_id)
     }
 
-    /// Normalize `Iterator<T>` to `RuntimeIterator<T>` in return-type position.
-    ///
-    /// Delegates to `VirTypeTable::normalize_iterator_return` using the
-    /// well-known Iterator `TypeDefId`.  Returns `ty` unchanged when the
-    /// Iterator interface is not registered or when `ty` is not `Iterator<T>`.
-    ///
-    /// When creating a new `RuntimeIterator<T>` VirTypeId, ensures the
-    /// reverse sema `TypeId` mapping exists so that codegen's
-    /// `vir_to_type_id()` returns a valid type (not `TypeId::UNKNOWN`).
-    pub fn normalize_iterator_return(&mut self, ty: VirTypeId) -> VirTypeId {
-        let Some(iter_def) = self.name_table.well_known.iterator_type_def else {
-            return ty;
-        };
-        let norm = self.type_table.normalize_iterator_return(ty, iter_def);
-        if norm != ty && self.type_table.lookup_vir_type_id(norm).is_none() {
-            // The RuntimeIterator<T> VirTypeId has no sema TypeId mapping.
-            // Look up the sema RuntimeIterator type and register the mapping
-            // so that codegen's `vir_to_type_id()` returns a valid TypeId.
-            if let Some(elem_vir) = self.type_table.unwrap_runtime_iterator(norm)
-                && let Some(elem_sema) = self.type_table.lookup_vir_type_id(elem_vir)
-                && let Some(sema_ty) = self.type_arena.lookup_runtime_iterator(elem_sema)
-            {
-                self.type_table.record_type_id(sema_ty, norm);
-            }
-        }
-        norm
-    }
-
     /// Check whether an AST object expression refers to a variable declared
     /// as `unknown` (i.e. the runtime value is heap-allocated even though the
     /// narrowed type may be a stack-allocated struct).

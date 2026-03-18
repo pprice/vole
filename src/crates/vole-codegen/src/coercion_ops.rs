@@ -259,9 +259,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         value_vir: VirTypeId,
         target_vir: VirTypeId,
     ) -> InlineCoercion {
-        use crate::types::vir_conversions::{
-            vir_is_numeric, vir_is_runtime_iterator, vir_is_union,
-        };
+        use crate::types::vir_conversions::{vir_is_numeric, vir_is_union};
         let table = self.vir_type_table();
 
         // Numeric → numeric: widening, narrowing, int↔float conversions.
@@ -272,13 +270,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return InlineCoercion::Numeric;
         }
 
-        // Interface boxing: non-interface → interface (skip RuntimeIterator).
+        // Interface boxing: non-interface → interface (skip Iterator<T>).
         // `is_interface` and `unwrap_interface` match the same VirType::Interface
         // pattern, so unwrap_interface always succeeds when is_interface is true.
-        let iter_def = table.iterator_type_def();
         if table.is_interface(target_vir)
             && !table.is_interface(value_vir)
-            && !vir_is_runtime_iterator(value_vir, table, iter_def)
+            && !table.is_iterator_interface(value_vir)
         {
             let (type_def_id, type_args) = table
                 .unwrap_interface(target_vir)

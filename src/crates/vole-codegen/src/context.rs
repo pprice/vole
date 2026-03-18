@@ -187,19 +187,6 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Yielder pointer variable for generator body functions.
     /// When set, `ExprKind::Yield` compiles to `vole_generator_yield(yielder, value)`.
     pub yielder_var: Option<Variable>,
-    /// True when compiling an Iterable default method body.
-    ///
-    /// In these compiled bodies, closure parameters (like `f` in `fn map(f)`) are owned by
-    /// the body — the outer caller transferred ownership without emitting rc_dec (due to
-    /// `used_iterable_default_path`). This means:
-    ///   - For pipeline methods (map/filter): do NOT emit rc_inc for borrowed closure params
-    ///     (the iterator gets the single reference and frees it on drop)
-    ///   - For terminal methods (any/all/find): DO emit rc_dec after the runtime call
-    ///     (the runtime borrows the closure but doesn't free it; codegen must)
-    ///
-    /// When false (regular user code), closure params are borrowed — the CALLER retains
-    /// ownership and will dec_ref them. Pipeline methods must rc_inc to get their own ref.
-    pub in_iterable_default_body: bool,
     /// Concrete VirTypeId for `Self` in interface default method bodies.
     ///
     /// During VIR lowering, `Self` (Placeholder) maps to `VirTypeId::UNKNOWN`.
@@ -315,7 +302,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             global_module_bindings: env.global_module_bindings,
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
-            in_iterable_default_body: false,
             self_vir_type: None,
             vir_resolved_call_args: None,
             vir_lambda_defaults: None,
@@ -400,15 +386,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Set the yielder variable for generator body compilation.
     pub fn with_yielder(mut self, yielder_var: Variable) -> Self {
         self.yielder_var = Some(yielder_var);
-        self
-    }
-
-    /// Mark this as an Iterable default method body compilation.
-    ///
-    /// When true, closure parameters are treated as owned (caller transferred ownership).
-    /// Pipeline methods skip rc_inc; terminal methods emit rc_dec after the runtime call.
-    pub fn with_iterable_default_body(mut self) -> Self {
-        self.in_iterable_default_body = true;
         self
     }
 
@@ -635,12 +612,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// All other interfaces are fat pointers needing deref for RC ops.
     #[inline]
     pub fn vir_query_is_fat_interface_v(&self, vir_ty: VirTypeId) -> bool {
-        let table = self.vir_type_table();
-        crate::types::vir_conversions::vir_is_fat_interface(
-            vir_ty,
-            table,
-            table.iterator_type_def(),
-        )
+        crate::types::vir_conversions::vir_is_fat_interface(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a nominal `VirTypeId` to its TypeDefId via VirTypeTable.
@@ -790,16 +762,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a `VirTypeId` is a runtime iterator type via VirTypeTable.
     ///
-    /// Dual-path: matches both `VirType::RuntimeIterator` and
-    /// `VirType::Interface` whose `TypeDefId` is the well-known Iterator.
+    /// Check if a VirTypeId is an `Iterator<T>` interface (thin pointer).
     #[inline]
-    pub fn vir_query_is_runtime_iterator_v(&self, vir_ty: VirTypeId) -> bool {
-        let table = self.vir_type_table();
-        crate::types::vir_conversions::vir_is_runtime_iterator(
-            vir_ty,
-            table,
-            table.iterator_type_def(),
-        )
+    pub fn vir_query_is_iterator_interface_v(&self, vir_ty: VirTypeId) -> bool {
+        self.vir_type_table().is_iterator_interface(vir_ty)
     }
 
     /// Unwrap a fallible `VirTypeId` to `(success, errors)` via VirTypeTable.
@@ -891,16 +857,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Unwrap a runtime iterator `VirTypeId` to its element `VirTypeId` via VirTypeTable.
     ///
-    /// Dual-path: matches both `VirType::RuntimeIterator` and
-    /// `VirType::Interface` whose `TypeDefId` is the well-known Iterator.
+    /// Unwrap an `Iterator<T>` interface, returning the element VirTypeId.
     #[inline]
-    pub fn vir_query_unwrap_runtime_iterator_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
-        let table = self.vir_type_table();
-        crate::types::vir_conversions::vir_unwrap_runtime_iterator(
-            vir_ty,
-            table,
-            table.iterator_type_def(),
-        )
+    pub fn vir_query_unwrap_iterator_interface_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
+        self.vir_type_table().unwrap_iterator_interface(vir_ty)
     }
 
     /// Unwrap an interface `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
@@ -955,16 +915,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .or_else(|| self.analyzed().substitute_fallback(ty, subs))
     }
 
-    /// Look up an existing runtime iterator type by element `TypeId` via VirTypeTable.
+    /// Look up an existing `Iterator<T>` interface type by element `TypeId` via VirTypeTable.
     #[inline]
-    pub fn vir_query_lookup_runtime_iterator(&self, elem: TypeId) -> Option<TypeId> {
-        self.vir_type_table().lookup_runtime_iterator_sema(elem)
+    pub fn vir_query_lookup_iterator_interface(&self, elem: TypeId) -> Option<TypeId> {
+        self.vir_type_table().lookup_iterator_interface_sema(elem)
     }
 
-    /// Look up an existing runtime iterator type by element `VirTypeId` via VirTypeTable.
+    /// Look up an existing `Iterator<T>` interface type by element `VirTypeId` via VirTypeTable.
     #[inline]
-    pub fn vir_query_lookup_runtime_iterator_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
-        self.vir_type_table().lookup_runtime_iterator_v(elem)
+    pub fn vir_query_lookup_iterator_interface_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
+        self.vir_type_table().lookup_iterator_interface_v(elem)
     }
 
     /// Substitute type parameters in a type, panicking on failure.

@@ -1793,7 +1793,6 @@ fn minimal_meta_type_name<C: VtableCtx>(vir_ty: VirTypeId, ctx: &C) -> String {
         VirType::Primitive(kind) => format!("{:?}", kind).to_lowercase(),
         VirType::Optional { .. } => "optional".to_string(),
         VirType::Union { .. } => "union".to_string(),
-        VirType::RuntimeIterator { .. } => "iterator".to_string(),
         other => format!("{:?}", other),
     }
 }

@@ -86,10 +86,10 @@ pub(crate) fn compile_generator_function<'ctx>(
     // Override the return type to RuntimeIterator(T) so callers use direct dispatch
     let vir_table = &env.analyzed.type_table;
     let runtime_iter_type_id = vir_table
-        .lookup_runtime_iterator_sema(params.elem_type_id)
+        .lookup_iterator_interface_sema(params.elem_type_id)
         .ok_or_else(|| {
             CodegenError::internal(
-                "RuntimeIterator type not pre-created by sema for generator element type",
+                "Iterator<T> type not pre-created by sema for generator element type",
             )
         })?;
     codegen_ctx

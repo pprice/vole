@@ -19,9 +19,7 @@ use vole_identity::{
 };
 use vole_vir::BuiltinMethod;
 use vole_vir::VirRef;
-use vole_vir::expr::{
-    VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirResolvedMethod,
-};
+use vole_vir::expr::{VirMethodDispatchKind, VirMethodDispatchMeta, VirResolvedMethod};
 use vole_vir::types::VirType;
 
 use super::static_methods::StaticMethodCallArgs;
@@ -89,10 +87,6 @@ impl MethodResolutionRef<'_> {
 
     fn is_interface_method(self) -> bool {
         self.0.is_interface_method()
-    }
-
-    fn interface_type_def_id_for_default(self) -> Option<vole_identity::TypeDefId> {
-        self.0.default_interface_type_def_id()
     }
 }
 
@@ -519,10 +513,8 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        // RuntimeIterator dispatch: detected from the codegen-side compiled type
-        // (not sema annotation) because the Iterator<T> → RuntimeIterator<T>
-        // conversion happens in codegen only.
-        if let Some(elem_vir_type_id) = self.vir_query_unwrap_runtime_iterator_v(obj.type_id) {
+        // Iterator<T> dispatch: detected from the codegen-side compiled type.
+        if let Some(elem_vir_type_id) = self.vir_query_unwrap_iterator_interface_v(obj.type_id) {
             let table = self.vir_type_table();
             let elem_type_id = table.vir_to_type_id(elem_vir_type_id);
             let return_type_hint = dispatch
@@ -550,55 +542,37 @@ impl Cg<'_, '_, '_> {
                 elem_type_id,
                 None,
                 return_type_hint,
-                dispatch.returns_raw_iterator,
             );
         }
 
-        // Handle custom Iterator<T> implementors: box as Iterator<T> interface,
-        // wrap via InterfaceIter into RuntimeIterator, then dispatch the method.
-        // Driven by sema's CoercionKind annotation — no type re-detection needed.
-        let iterator_wrap_info = dispatch.receiver_coercion.map(|coercion| match coercion {
-            VirMethodReceiverCoercion::IteratorWrap {
-                elem_type,
-                iterator_interface_type,
-                ..
-            } => (elem_type, iterator_interface_type),
-        });
-        if let Some((elem_vir_type, interface_vir_type)) = iterator_wrap_info {
-            let runtime_iter =
-                self.box_and_wrap_as_runtime_iterator(obj, interface_vir_type, elem_vir_type)?;
-            let elem_type = {
-                let v = self.try_substitute_type_v(elem_vir_type);
-                let table = self.vir_type_table();
-                table.vir_to_type_id(v)
-            };
-            let table = self.vir_type_table();
-            let return_type_hint = dispatch
-                .substituted_return_type
-                .map(|ty| {
-                    let v = self.try_substitute_type_v(ty);
-                    table.vir_to_type_id(v)
-                })
+        // Handle custom Iterator<T> implementors (classes/structs that extend
+        // Iterator<T>). When the receiver is a concrete type implementing
+        // Iterator<T>, box+wrap it to RuntimeIterator<T> and dispatch
+        // via runtime_iterator_method. This replaces the sema-side
+        // CoercionKind::IteratorWrap annotation that was removed in iter-8.
+        if !dispatch.receiver_is_interface
+            && let Some(builtin) = BuiltinMethod::from_iter_method_name(method_name_str)
+            && let Some((elem_vir, iface_vir)) =
+                self.find_iterator_elem_for_concrete_receiver(obj.type_id)
+        {
+            let return_type_hint = resolution
+                .and_then(|r| self.resolved_concrete_return_hint(r))
                 .or_else(|| {
-                    dispatch
-                        .resolved_method
-                        .as_ref()
-                        .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
+                    dispatch.substituted_return_type.map(|ty| {
+                        let v = self.try_substitute_type_v(ty);
+                        let table = self.vir_type_table();
+                        table.vir_to_type_id(v)
+                    })
                 })
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
-            let builtin =
-                BuiltinMethod::from_iter_method_name(method_name_str).ok_or_else(|| {
-                    CodegenError::not_found("iterator builtin method", method_name_str)
-                })?;
-            return self.runtime_iterator_method(
-                &runtime_iter,
+            return self.dispatch_custom_iterator_method(
+                obj,
                 &mc.arg_source(),
                 method_name_str,
                 builtin,
-                elem_type,
-                None,
+                elem_vir,
+                iface_vir,
                 return_type_hint,
-                dispatch.returns_raw_iterator,
             );
         }
 
@@ -648,7 +622,6 @@ impl Cg<'_, '_, '_> {
                     method_index,
                     self.resolved_dispatch_func_type_id(resolved),
                     return_type_override,
-                    dispatch.returns_raw_iterator,
                 )?;
                 // Consume the owned RC receiver after the call. For temporaries
                 // (e.g. make_nums().collect()), this rc_dec's the interface's
@@ -846,12 +819,6 @@ impl Cg<'_, '_, '_> {
         // Get func_key, return_type_id, and fallback_param_type_ids from resolution or fallback.
         // fallback_param_type_ids is used when resolution doesn't provide param types (e.g. in
         // monomorphized generic contexts where sema skips the generic body).
-        // used_iterable_default_path tracks whether the method is a compiled Iterable default that
-        // returns raw *mut RcIterator (not a boxed interface). This happens for:
-        // 1. Array/primitive types whose Iterable default is resolved via VIR metadata
-        // 2. Primitive types (range, string) whose Iterable default is in method_func_keys
-        //    (compiled via compile_implement_block) — these also return *mut RcIterator.
-        let mut used_iterable_default_path = false;
         let (func_key, return_type_id, fallback_param_type_ids) = if let Some(resolved) = resolution
         {
             // Use method resolution's type_def_id for method_func_keys lookup.
@@ -861,31 +828,14 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| CodegenError::not_found("type_def_id", method_name_str))?;
             let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
 
-            // Detect if this is a DefaultMethod from Iterable interface.
-            // Such methods (range::map, etc.) are compiled from the Iterable body which calls
-            // self.iter().map(f). At runtime they return *mut RcIterator, not Iterator<T>.
-            let is_iterable_default_method = resolved
-                .interface_type_def_id_for_default()
-                .is_some_and(|interface_type_def_id| {
-                    self.name_table()
-                        .well_known
-                        .is_iterable_type_def(interface_type_def_id)
-                });
-
             let func_key = self
                 .method_func_keys()
                 .get(&(type_name_id, method_name_id))
                 .copied()
-                .inspect(|_k| {
-                    if is_iterable_default_method {
-                        used_iterable_default_path = true;
-                    }
-                })
                 .or_else(|| {
                     // VIR metadata path: look up implement method monomorph by the
                     // per-call-site key stored during VIR lowering.
                     self.try_resolve_implement_method_monomorph(dispatch)
-                        .inspect(|_| used_iterable_default_path = true)
                 });
             (func_key, self.resolved_return_type_id(resolved), None)
         } else {
@@ -926,6 +876,23 @@ impl Cg<'_, '_, '_> {
                     dispatch.receiver_is_interface,
                 )?;
                 return Ok(result);
+            }
+
+            // Custom Iterator<T> implementors: box+wrap the concrete receiver
+            // as RuntimeIterator<T> and dispatch via runtime_iterator_method.
+            if let Some(builtin) = BuiltinMethod::from_iter_method_name(method_name_str)
+                && let Some((elem_vir, iface_vir)) =
+                    self.find_iterator_elem_for_concrete_receiver(resolved_obj_vir)
+            {
+                return self.dispatch_custom_iterator_method(
+                    obj,
+                    &mc.arg_source(),
+                    method_name_str,
+                    builtin,
+                    elem_vir,
+                    iface_vir,
+                    None,
+                );
             }
 
             let resolved_obj_type_id = {
@@ -997,7 +964,6 @@ impl Cg<'_, '_, '_> {
                     // VIR metadata path: look up implement method monomorph by the
                     // per-call-site key stored during VIR lowering.
                     self.try_resolve_implement_method_monomorph(dispatch)
-                        .inspect(|_| used_iterable_default_path = true)
                 })
                 .or_else(|| {
                     // Fallback for monomorphized generic contexts where the VIR
@@ -1005,7 +971,6 @@ impl Cg<'_, '_, '_> {
                     // templates set it to None). Construct the key from the
                     // receiver's concrete VIR type.
                     self.try_resolve_implement_method_by_type(method_name_id, resolved_obj_vir)
-                        .inspect(|_| used_iterable_default_path = true)
                 });
 
             // Get return type and param types from entity registry
@@ -1069,27 +1034,18 @@ impl Cg<'_, '_, '_> {
             })
             .unwrap_or(return_type_id);
 
-        // For Iterable default methods on arrays/primitives (range, string), the
-        // func_key comes from VIR metadata resolution and the compiled function
-        // returns a raw RuntimeIterator pointer. Convert Iterator<T> → RuntimeIterator<T>
-        // so subsequent method calls use direct dispatch instead of vtable dispatch.
-        //
-        // The VIR flag `returns_raw_iterator` captures this from sema analysis;
-        // `used_iterable_default_path` is the codegen-derived fallback for
-        // cross-module test blocks where VIR metadata may be absent.
-        //
-        // NOTE: Do NOT apply this in all monomorphized contexts — user-defined
-        // .iter() methods return boxed Iterator<T> interfaces, not raw pointers.
-        // Converting those to RuntimeIterator causes segfaults.
-        if dispatch.returns_raw_iterator || used_iterable_default_path {
-            return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
-        }
+        // Convert Iterator<T> → RuntimeIterator<T> for method returns.
+        // All Iterator<T> values are thin pointers (RuntimeIterator), so this
+        // is always safe. It ensures downstream dispatch uses the direct path
+        // instead of vtable dispatch.
+        return_type_id = self.convert_interface_iterator_return_by_type(return_type_id);
+
         // In monomorphized contexts, the return type may still contain an unsubstituted
         // type parameter from the Iterable interface (e.g. Iterator<T> where T is the
         // interface's type param, not the function's). The function's substitution map
-        // can't resolve these. When conversion above fails, derive the correct
-        // RuntimeIterator return type from the receiver's concrete element type.
-        if used_iterable_default_path || self.substitutions.is_some() {
+        // can't resolve these. When conversion above fails, construct RuntimeIterator<T>
+        // from the receiver's concrete element type.
+        if self.substitutions.is_some() {
             let needs_derivation = {
                 let vir_ret = self.vir_lookup(return_type_id);
                 if let Some((type_def_id, _)) = self.vir_query_unwrap_interface_v(vir_ret) {
@@ -1113,14 +1069,11 @@ impl Cg<'_, '_, '_> {
                         None
                     };
                 if let Some(elem_type_id) = elem_type_id
-                    && let Some(iter_type_def) = self.name_table().well_known.iterator_type_def
-                    && let Some(derived) = self.derive_iterator_return_type(
-                        method_name_str,
-                        elem_type_id,
-                        iter_type_def,
-                    )
+                    && let Some(runtime_iter) = self
+                        .vir_type_table()
+                        .lookup_iterator_interface_sema(elem_type_id)
                 {
-                    return_type_id = derived;
+                    return_type_id = runtime_iter;
                 }
             }
         }
@@ -1376,22 +1329,13 @@ impl Cg<'_, '_, '_> {
                 let union_copy = self.copy_union_ptr_to_local(src_ptr, return_type_id);
 
                 // Now consume RC receiver and arg temps.
-                // For compiled Iterable default methods (used_iterable_default_path), the callee
-                // owns RC args (closures) and frees them internally. Mark them consumed without
-                // emitting rc_dec to avoid a double-free.
                 let mut obj = obj;
                 self.consume_method_receiver(
                     &mut obj,
                     receiver_is_global_init_rc_iface,
                     dispatch.receiver_is_interface,
                 )?;
-                if used_iterable_default_path {
-                    for cv in rc_temps.iter_mut() {
-                        cv.mark_consumed();
-                    }
-                } else {
-                    self.consume_rc_args(&mut rc_temps)?;
-                }
+                self.consume_rc_args(&mut rc_temps)?;
 
                 return Ok(union_copy);
             }
@@ -1402,28 +1346,13 @@ impl Cg<'_, '_, '_> {
         // from trim() is Owned but was never rc_dec'd, causing leaks/heap
         // corruption. Similarly, Owned class arguments (e.g., b.equals(Id{n:5}))
         // need cleanup after the callee has consumed them.
-        //
-        // Exception: compiled Iterable default methods (used_iterable_default_path) take
-        // ownership of all RC arguments (closures, etc.) and free them internally —
-        // either by storing them in iterators (map/filter/flat_map), passing them through
-        // to runtime functions that free them (reduce/for_each via vole_iter_reduce_tagged),
-        // or borrowing and freeing them in the runtime (find/any/all). The caller must NOT
-        // free these args again. Mark them consumed without emitting an rc_dec.
         let mut obj = obj;
         self.consume_method_receiver(
             &mut obj,
             receiver_is_global_init_rc_iface,
             dispatch.receiver_is_interface,
         )?;
-        if used_iterable_default_path {
-            // Ownership of RC args transferred to the compiled Iterable default method.
-            // Mark as consumed to satisfy lifecycle tracking without emitting a double-free.
-            for cv in rc_temps.iter_mut() {
-                cv.mark_consumed();
-            }
-        } else {
-            self.consume_rc_args(&mut rc_temps)?;
-        }
+        self.consume_rc_args(&mut rc_temps)?;
 
         if is_sret {
             // Sret: result[0] is the sret pointer we passed in
@@ -1466,6 +1395,38 @@ impl Cg<'_, '_, '_> {
 
             Ok(self.compiled_with_ty(result_value, expected_ty, return_type_id))
         }
+    }
+
+    /// Box+wrap a custom Iterator<T> implementor as RuntimeIterator<T>
+    /// and dispatch the method via `runtime_iterator_method`.
+    ///
+    /// Called from both the resolved-method and fallback paths when the
+    /// receiver is a concrete class/struct implementing Iterator<T>.
+    fn dispatch_custom_iterator_method(
+        &mut self,
+        obj: CompiledValue,
+        arg_source: &ArgSource<'_>,
+        method_name: &str,
+        builtin: BuiltinMethod,
+        elem_vir: VirTypeId,
+        iface_vir: VirTypeId,
+        return_type_hint: Option<TypeId>,
+    ) -> CodegenResult<CompiledValue> {
+        let runtime_iter = self.box_and_wrap_as_runtime_iterator(obj, iface_vir, elem_vir)?;
+        let elem_type = {
+            let v = self.try_substitute_type_v(elem_vir);
+            let table = self.vir_type_table();
+            table.vir_to_type_id(v)
+        };
+        self.runtime_iterator_method(
+            &runtime_iter,
+            arg_source,
+            method_name,
+            builtin,
+            elem_type,
+            None,
+            return_type_hint,
+        )
     }
 
     /// Compile default expressions for omitted method parameters.

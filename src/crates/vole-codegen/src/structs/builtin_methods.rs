@@ -34,8 +34,8 @@ impl Cg<'_, '_, '_> {
         let result = self.call_runtime(RuntimeKey::RangeIter, &[start_val.value, end_value])?;
 
         let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-            self.vir_query_lookup_runtime_iterator(TypeId::I64)
-                .expect("INTERNAL: range iterator: RuntimeIterator<i64> type not pre-created")
+            self.vir_query_lookup_iterator_interface(TypeId::I64)
+                .expect("INTERNAL: range iterator: Iterator<i64> type not pre-created")
         });
         Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
     }
@@ -91,13 +91,13 @@ impl Cg<'_, '_, '_> {
         let iter_type_id = iter_type_hint.unwrap_or_else(|| {
             let table = self.vir_type_table();
             let elem_sema = table.vir_to_type_id(elem_vir_type_id);
-            self.vir_query_lookup_runtime_iterator(elem_sema)
+            self.vir_query_lookup_iterator_interface(elem_sema)
                 .unwrap_or_else(|| {
                     // After iter-3, RuntimeIterator and Iterator<T> are unified.
                     // Fall back to make_runtime_iter_value_v's VirTypeId and
                     // convert back to sema TypeId.
                     let iter_vir = self
-                        .vir_query_lookup_runtime_iterator_v(elem_vir_type_id)
+                        .vir_query_lookup_iterator_interface_v(elem_vir_type_id)
                         .unwrap_or(elem_vir_type_id);
                     table.vir_to_type_id(iter_vir)
                 })
@@ -126,8 +126,8 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let result = self.call_runtime(RuntimeKey::StringCharsIter, &[obj.value])?;
         let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-            self.vir_query_lookup_runtime_iterator(TypeId::STRING)
-                .expect("INTERNAL: string iterator: RuntimeIterator<string> type not pre-created")
+            self.vir_query_lookup_iterator_interface(TypeId::STRING)
+                .expect("INTERNAL: string iterator: Iterator<string> type not pre-created")
         });
         // Set elem_tag to RuntimeTypeId::String so terminal methods can properly
         // free owned char strings produced by the string chars iterator.
@@ -155,8 +155,8 @@ impl Cg<'_, '_, '_> {
             .load(types::I64, MemFlags::new(), obj.value, 8);
         let result = self.call_runtime(RuntimeKey::RangeIter, &[start, end])?;
         let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-            self.vir_query_lookup_runtime_iterator(TypeId::I64)
-                .expect("INTERNAL: range.iter(): RuntimeIterator<i64> type not pre-created")
+            self.vir_query_lookup_iterator_interface(TypeId::I64)
+                .expect("INTERNAL: range.iter(): Iterator<i64> type not pre-created")
         });
         Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
     }

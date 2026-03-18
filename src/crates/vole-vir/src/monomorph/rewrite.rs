@@ -408,13 +408,6 @@ fn rewrite_coerce_kind(kind: &CoerceKind, ctx: &RewriteCtx) -> CoerceKind {
             interface_type_def: *interface_type_def,
             interface_type_args: interface_type_args.iter().map(|t| ctx.remap(*t)).collect(),
         },
-        CoerceKind::IteratorWrap {
-            elem_type,
-            interface_type,
-        } => CoerceKind::IteratorWrap {
-            elem_type: ctx.remap(*elem_type),
-            interface_type: ctx.remap(*interface_type),
-        },
         // Numeric coercions and Unbox carry no VirTypeIds to remap.
         other => other.clone(),
     }
@@ -884,17 +877,6 @@ fn rewrite_method_dispatch_meta(
 ) -> VirMethodDispatchMeta {
     VirMethodDispatchMeta {
         dispatch_kind: meta.dispatch_kind,
-        receiver_coercion: meta.receiver_coercion.map(|coercion| match coercion {
-            crate::expr::VirMethodReceiverCoercion::IteratorWrap {
-                elem_type,
-                vir_elem_type,
-                iterator_interface_type,
-            } => crate::expr::VirMethodReceiverCoercion::IteratorWrap {
-                elem_type: ctx.remap(elem_type),
-                vir_elem_type: ctx.remap(vir_elem_type),
-                iterator_interface_type: ctx.remap(iterator_interface_type),
-            },
-        }),
         resolved_method: meta
             .resolved_method
             .as_ref()
@@ -931,10 +913,6 @@ fn rewrite_method_dispatch_meta(
         // Copied as-is; rederive_decisions will update from the now-concrete
         // receiver type after substitution.
         receiver_is_interface: meta.receiver_is_interface,
-        // Copied as-is; the flag depends on the resolved method's properties
-        // (external binding, interface identity) which are stable across type
-        // substitution — no rederive needed.
-        returns_raw_iterator: meta.returns_raw_iterator,
     }
 }
 
@@ -2184,13 +2162,6 @@ mod tests {
                     args: vec![],
                     dispatch: VirMethodDispatchMeta {
                         dispatch_kind: None,
-                        receiver_coercion: Some(
-                            crate::expr::VirMethodReceiverCoercion::IteratorWrap {
-                                elem_type: type_id(10),
-                                vir_elem_type: param_id,
-                                iterator_interface_type: type_id(10),
-                            },
-                        ),
                         resolved_method: Some(crate::expr::VirResolvedMethod::Implemented {
                             type_def_id: Some(vole_identity::TypeDefId::new(7)),
                             func_type_id: type_id(21),
@@ -2233,7 +2204,6 @@ mod tests {
                             },
                         ),
                         receiver_is_interface: false,
-                        returns_raw_iterator: false,
                     },
                     node_id: NodeId::new_for_test(7),
                     ty: type_id(20),
@@ -2254,13 +2224,6 @@ mod tests {
                 dispatch, vir_ty, ..
             } => {
                 assert_eq!(*vir_ty, VirTypeId::I64);
-                assert!(matches!(
-                    dispatch.receiver_coercion,
-                    Some(crate::expr::VirMethodReceiverCoercion::IteratorWrap {
-                        vir_elem_type: VirTypeId::I64,
-                        ..
-                    })
-                ));
                 assert_eq!(dispatch.vir_substituted_return_type, Some(VirTypeId::I64));
                 let resolved = dispatch
                     .resolved_method

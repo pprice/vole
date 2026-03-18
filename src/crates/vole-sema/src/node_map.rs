@@ -10,7 +10,7 @@
 //! using `NodeMap::merge()` which moves each module's `Vec<NodeData>` in O(1).
 //!
 //! This module also defines the supporting enum/struct types that are stored
-//! as fields of `NodeData`: `IterableKind`, `StringConversion`, `CoercionKind`,
+//! as fields of `NodeData`: `IterableKind`, `StringConversion`,
 //! `OptionalChainKind`, `OptionalChainInfo`, `LambdaAnalysis`, `LambdaDefaults`,
 //! and `ItLambdaInfo`.
 
@@ -78,18 +78,6 @@ pub enum IteratorSource {
     /// Custom class/struct implementing `Iterable<T>` — call `.iter()` to
     /// get `Iterator<T>`, then wrap via `InterfaceIter`.
     CustomIterable,
-}
-
-/// Interface coercion annotation, stored by sema at sites where a value
-/// needs boxing or wrapping to satisfy an interface type.
-///
-/// Codegen reads this to apply the correct coercion without re-detecting types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoercionKind {
-    /// Method call receiver is a custom `Iterator<T>` implementor.
-    /// Codegen should box to `Iterator<T>` interface, then wrap via
-    /// `InterfaceIter` into a `RuntimeIterator` before dispatching the method.
-    IteratorWrap { elem_type: TypeId },
 }
 
 /// Method dispatch routing annotation, set by sema during method resolution.
@@ -298,9 +286,6 @@ pub struct NodeData {
 
     /// Iterable classification for for-loop iterables.
     pub iterable_kind: Option<IterableKind>,
-
-    /// Interface coercion annotation for method call receivers.
-    pub coercion_kind: Option<CoercionKind>,
 
     /// String conversion annotation for interpolation parts (boxed — can be large).
     pub string_conversion: Option<Box<StringConversion>>,
@@ -595,18 +580,6 @@ impl NodeMap {
         self.get_mut_or_insert(node).iterable_kind = Some(kind);
     }
 
-    // -- coercion_kind -----------------------------------------------------
-
-    /// Get the coercion kind for a method call expression's receiver.
-    pub fn get_coercion_kind(&self, node: NodeId) -> Option<CoercionKind> {
-        self.get(node).and_then(|d| d.coercion_kind)
-    }
-
-    /// Set the coercion kind for a method call expression's receiver.
-    pub fn set_coercion_kind(&mut self, node: NodeId, kind: CoercionKind) {
-        self.get_mut_or_insert(node).coercion_kind = Some(kind);
-    }
-
     // -- string_conversion -------------------------------------------------
 
     /// Get the string conversion annotation for an interpolation expression part.
@@ -877,9 +850,6 @@ fn merge_node_data(dst: &mut NodeData, src: NodeData) {
     if src.iterable_kind.is_some() {
         dst.iterable_kind = src.iterable_kind;
     }
-    if src.coercion_kind.is_some() {
-        dst.coercion_kind = src.coercion_kind;
-    }
     if src.string_conversion.is_some() {
         dst.string_conversion = src.string_conversion;
     }
@@ -1012,13 +982,6 @@ mod tests {
                 source: IteratorSource::String,
             })
         );
-
-        // coercion_kind
-        let ck = CoercionKind::IteratorWrap {
-            elem_type: TypeId::I64,
-        };
-        map.set_coercion_kind(node, ck);
-        assert_eq!(map.get_coercion_kind(node), Some(ck));
 
         // intrinsic_key
         map.set_intrinsic_key(node, "f64_sqrt".to_string());

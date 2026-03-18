@@ -843,17 +843,9 @@ impl Compiler<'_> {
                     &mut self.func_registry,
                     &mut self.pending_monomorphs,
                 );
-                let mut config =
+                let config =
                     FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
                         .with_self_vir_type(self_vir_ty);
-                if self
-                    .analyzed
-                    .name_table()
-                    .well_known
-                    .is_iterable_type_def(interface_tdef_id)
-                {
-                    config = config.with_iterable_default_body();
-                }
                 let subs = if vir_subs.is_empty() {
                     None
                 } else {
@@ -953,7 +945,7 @@ impl Compiler<'_> {
 
         let elem_types: Vec<TypeId> = self
             .vir_type_table()
-            .all_concrete_runtime_iterator_elem_types_sema();
+            .all_concrete_iterator_elem_types_sema();
 
         for elem_type in elem_types {
             let self_type_id = match self.vir_type_table().lookup_array_sema(elem_type) {
@@ -1114,7 +1106,6 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
             let config = FunctionCompileConfig::method(params, self_binding, Some(return_vir_ty))
-                .with_iterable_default_body()
                 .with_self_vir_type(self_vir_ty);
             let vir_func = self
                 .analyzed

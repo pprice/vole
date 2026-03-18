@@ -96,8 +96,8 @@ impl VirTypeTable {
     /// Set the well-known Iterator interface `TypeDefId`.
     ///
     /// Called during VIR lowering after the Iterator interface is registered.
-    /// Enables dual-path treatment: Iterator<T> interface values are thin
-    /// pointers (same layout as RuntimeIterator), not fat-pointer interfaces.
+    /// Iterator<T> interface values are thin pointers, not fat-pointer
+    /// interfaces.
     pub fn set_iterator_type_def(&mut self, type_def_id: TypeDefId) {
         self.iterator_type_def = Some(type_def_id);
     }
@@ -492,33 +492,22 @@ impl VirTypeTable {
         }
     }
 
-    /// Extract the element type from a `RuntimeIterator` type.
-    pub fn unwrap_runtime_iterator(&self, id: VirTypeId) -> Option<VirTypeId> {
+    /// Extract the element type from an `Iterator<T>` interface type.
+    ///
+    /// Returns `Some(elem)` if the type is `Interface { def == iterator_type_def, [elem] }`.
+    pub fn unwrap_iterator_interface(&self, id: VirTypeId) -> Option<VirTypeId> {
+        let iter_def = self.iterator_type_def?;
         match self.get(id) {
-            VirType::RuntimeIterator { elem } => Some(*elem),
+            VirType::Interface { def, type_args } if *def == iter_def && type_args.len() == 1 => {
+                Some(type_args[0])
+            }
             _ => None,
         }
     }
 
-    /// Normalize `Iterator<T>` to `RuntimeIterator<T>` in value/return contexts.
-    ///
-    /// If `ty` is `Interface { def == iterator_type_def, type_args: [elem] }`,
-    /// returns the interned `RuntimeIterator { elem }`.  Otherwise returns `ty`
-    /// unchanged.  This is the single normalization point so that codegen never
-    /// needs to re-detect this conversion.
-    pub fn normalize_iterator_return(
-        &mut self,
-        ty: VirTypeId,
-        iterator_type_def: TypeDefId,
-    ) -> VirTypeId {
-        if let VirType::Interface { def, type_args } = self.get(ty)
-            && *def == iterator_type_def
-            && type_args.len() == 1
-        {
-            let elem = type_args[0];
-            return self.intern(VirType::RuntimeIterator { elem }, None);
-        }
-        ty
+    /// Check if a type is the `Iterator<T>` interface.
+    pub fn is_iterator_interface(&self, id: VirTypeId) -> bool {
+        self.unwrap_iterator_interface(id).is_some()
     }
 
     // -- Type identity predicates -------------------------------------------
@@ -679,7 +668,6 @@ impl VirTypeTable {
             VirType::Tuple { .. } => (85, id.raw() as u64),
             VirType::Function { .. } => (80, id.raw() as u64),
             VirType::Fallible { .. } => (75, id.raw() as u64),
-            VirType::RuntimeIterator { .. } => (70, id.raw() as u64),
             VirType::Class { def, .. }
             | VirType::Struct { def, .. }
             | VirType::Interface { def, .. }
@@ -802,7 +790,6 @@ impl VirTypeTable {
             // in Cranelift, so they're already word-sized — identity.
             VirType::Class { .. }
             | VirType::Array { .. }
-            | VirType::RuntimeIterator { .. }
             | VirType::Interface { .. }
             | VirType::Struct { .. }
             | VirType::Function { .. }
@@ -1020,7 +1007,6 @@ fn remap_type_ids_in_type(ty: &VirType, mapping: &FxHashMap<VirTypeId, VirTypeId
             def: *def,
             type_args: remap_vec(type_args),
         },
-        VirType::RuntimeIterator { elem } => VirType::RuntimeIterator { elem: remap(elem) },
     }
 }
 
@@ -1064,7 +1050,7 @@ fn merge_one(
                 merge_one(id, other, this, mapping, in_progress);
             }
         }
-        VirType::Optional { inner, .. } | VirType::RuntimeIterator { elem: inner } => {
+        VirType::Optional { inner, .. } => {
             merge_one(*inner, other, this, mapping, in_progress);
         }
         VirType::Fallible { success, errors } => {
@@ -1310,9 +1296,7 @@ impl VirTypeTable {
     /// Record only the reverse `VirTypeId → TypeId` mapping.
     ///
     /// Unlike `record_type_id`, this does NOT update the forward
-    /// `TypeId → VirTypeId` mapping. Used when a single sema TypeId
-    /// maps to multiple VIR representations (e.g., Iterator<T> maps
-    /// to both VirType::Interface and VirType::RuntimeIterator).
+    /// `TypeId → VirTypeId` mapping.
     pub fn record_reverse_type_id(&mut self, vir_type_id: VirTypeId, type_id: TypeId) {
         self.vir_to_type_id.entry(vir_type_id).or_insert(type_id);
     }
@@ -1427,12 +1411,16 @@ impl VirTypeTable {
         self.lookup(&VirType::Array { elem })
     }
 
-    /// Look up a runtime iterator type by its element `VirTypeId`.
+    /// Look up an `Iterator<T>` interface type by its element `VirTypeId`.
     ///
-    /// Returns `Some(id)` if `RuntimeIterator { elem }` was already interned,
-    /// `None` otherwise.
-    pub fn lookup_runtime_iterator_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
-        self.lookup(&VirType::RuntimeIterator { elem })
+    /// Returns `Some(id)` if `Interface { def: iterator_type_def, type_args: [elem] }`
+    /// was already interned, `None` otherwise.
+    pub fn lookup_iterator_interface_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
+        let iter_def = self.iterator_type_def?;
+        self.lookup(&VirType::Interface {
+            def: iter_def,
+            type_args: vec![elem],
+        })
     }
 
     /// Look up a fixed-array type by element and length.
@@ -1476,10 +1464,10 @@ impl VirTypeTable {
         self.lookup_vir_type_id(arr)
     }
 
-    /// Look up a runtime iterator type by element `TypeId`.
-    pub fn lookup_runtime_iterator_sema(&self, elem: TypeId) -> Option<TypeId> {
+    /// Look up an `Iterator<T>` interface type by element `TypeId`.
+    pub fn lookup_iterator_interface_sema(&self, elem: TypeId) -> Option<TypeId> {
         let elem_vir = self.lookup_type_id(elem)?;
-        let iter = self.lookup_runtime_iterator_v(elem_vir)?;
+        let iter = self.lookup_iterator_interface_v(elem_vir)?;
         self.lookup_vir_type_id(iter)
     }
 
@@ -1537,21 +1525,28 @@ impl VirTypeTable {
 
     // -- bulk queries ---------------------------------------------------------
 
-    /// Return all concrete element types for which a `RuntimeIterator` exists.
+    /// Return all concrete element types for which an `Iterator<T>` interface exists.
     ///
     /// Skips abstract `Param` elements (type parameters).  Returns sema
     /// `TypeId` values so callers that still traffic in `TypeId` can use the
     /// result directly.
-    pub fn all_concrete_runtime_iterator_elem_types_sema(&self) -> Vec<TypeId> {
+    pub fn all_concrete_iterator_elem_types_sema(&self) -> Vec<TypeId> {
+        let Some(iter_def) = self.iterator_type_def else {
+            return Vec::new();
+        };
         self.types
             .iter()
             .filter_map(|ty| {
-                if let VirType::RuntimeIterator { elem } = ty {
+                if let VirType::Interface { def, type_args } = ty
+                    && *def == iter_def
+                    && type_args.len() == 1
+                {
+                    let elem = type_args[0];
                     // Skip abstract TypeParam elements
                     if matches!(self.types[elem.raw() as usize], VirType::Param { .. }) {
                         None
                     } else {
-                        self.lookup_vir_type_id(*elem)
+                        self.lookup_vir_type_id(elem)
                     }
                 } else {
                     None
@@ -1679,13 +1674,6 @@ impl VirTypeTable {
                     inner: new_inner,
                     variants: new_variants,
                 })
-            }
-            VirType::RuntimeIterator { elem } => {
-                let new_elem = self.substitute_vir(*elem, subs)?;
-                if new_elem == *elem {
-                    return Some(vir_id);
-                }
-                self.lookup(&VirType::RuntimeIterator { elem: new_elem })
             }
             VirType::Tuple { elems } => {
                 let new_elems = self.substitute_vir_vec(elems, subs)?;
@@ -1862,13 +1850,6 @@ impl VirTypeTable {
                     None,
                 ))
             }
-            VirType::RuntimeIterator { elem } => {
-                let new_elem = self.substitute_vir_or_intern(*elem, subs)?;
-                if new_elem == *elem {
-                    return Some(vir_id);
-                }
-                Some(self.intern(VirType::RuntimeIterator { elem: new_elem }, None))
-            }
             VirType::Tuple { elems } => {
                 let new_elems = self.substitute_vir_vec_or_intern(elems, subs)?;
                 if new_elems == *elems {
@@ -2037,13 +2018,6 @@ impl VirTypeTable {
                     inner: new_inner,
                     variants: new_variants,
                 })
-            }
-            VirType::RuntimeIterator { elem } => {
-                let new_elem = self.substitute_native(*elem, subs)?;
-                if new_elem == *elem {
-                    return Some(vir_id);
-                }
-                self.lookup(&VirType::RuntimeIterator { elem: new_elem })
             }
             VirType::Tuple { elems } => {
                 let new_elems = self.substitute_native_vec(elems, subs)?;
@@ -2481,16 +2455,21 @@ mod tests {
     }
 
     #[test]
-    fn unwrap_runtime_iterator() {
+    fn unwrap_iterator_interface() {
         let mut table = VirTypeTable::new();
+        let iter_def = vole_identity::TypeDefId::new(42);
+        table.set_iterator_type_def(iter_def);
         let id = table.intern(
-            VirType::RuntimeIterator {
-                elem: VirTypeId::I64,
+            VirType::Interface {
+                def: iter_def,
+                type_args: vec![VirTypeId::I64],
             },
             None,
         );
-        assert_eq!(table.unwrap_runtime_iterator(id), Some(VirTypeId::I64));
-        assert!(table.unwrap_runtime_iterator(VirTypeId::I64).is_none());
+        assert_eq!(table.unwrap_iterator_interface(id), Some(VirTypeId::I64));
+        assert!(table.is_iterator_interface(id));
+        assert!(table.unwrap_iterator_interface(VirTypeId::I64).is_none());
+        assert!(!table.is_iterator_interface(VirTypeId::I64));
     }
 
     // -- Type identity predicate tests --------------------------------------

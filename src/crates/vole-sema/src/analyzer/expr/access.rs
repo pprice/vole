@@ -450,13 +450,6 @@ impl Analyzer {
         if let Some(resolved) =
             self.resolve_method_via_entity_registry_id(inner_type_id, method_call.method, interner)
         {
-            if let Some(elem_type) = self.extract_custom_iterator_element_type_id(inner_type_id) {
-                self.results.node_map.set_coercion_kind(
-                    resolution_id,
-                    crate::node_map::CoercionKind::IteratorWrap { elem_type },
-                );
-            }
-
             // Annotate method dispatch kind for codegen routing.
             let dispatch_kind = {
                 let arena = self.type_arena();
@@ -680,15 +673,6 @@ impl Analyzer {
         if let Some(resolved) =
             self.resolve_method_via_entity_registry_id(object_type_id, method_call.method, interner)
         {
-            // Annotate custom Iterator<T> receivers so codegen can box/wrap them
-            // as RuntimeIterator without re-detecting the type.
-            if let Some(elem_type) = self.extract_custom_iterator_element_type_id(object_type_id) {
-                self.results.node_map.set_coercion_kind(
-                    expr.id,
-                    crate::node_map::CoercionKind::IteratorWrap { elem_type },
-                );
-            }
-
             // Annotate method dispatch kind so codegen can route without
             // re-detecting the receiver type via arena queries.
             // Note: RuntimeIterator dispatch is NOT annotated here; the

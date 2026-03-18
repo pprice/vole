@@ -66,27 +66,6 @@ pub fn translate_type_id(
         table.mark_closure(vir_id);
     }
 
-    // For Iterator<T> interface types, also pre-intern the VirType::RuntimeIterator
-    // entry so codegen can find it via lookup_runtime_iterator_v(). The primary
-    // VirTypeId remains Interface (needed for vtable generation during boxing);
-    // RuntimeIterator is a secondary entry for the runtime dispatch path.
-    if let Some(elem_sema) = arena.unwrap_iterator_interface_elem(type_id) {
-        let elem_vir = translate_type_id(table, elem_sema, arena);
-        let rt_layout = Some(VirTypeLayout {
-            is_rc: true,
-            is_heap: true,
-            is_wide: false,
-            slot_count: 1,
-            storage: StorageClass::Pointer,
-        });
-        let rt_vir = table.intern(VirType::RuntimeIterator { elem: elem_vir }, rt_layout);
-        // Record reverse mapping only (VirTypeId → sema TypeId) so that
-        // lookup_runtime_iterator_sema returns the Iterator<T> sema TypeId.
-        // We must NOT overwrite the forward mapping (sema TypeId → VirTypeId)
-        // which should remain Interface (needed for vtable generation).
-        table.record_reverse_type_id(rt_vir, type_id);
-    }
-
     vir_id
 }
 
@@ -869,9 +848,8 @@ mod tests {
         arena.set_well_known_iterator_type_def_id(fake_iterator_tdef);
         let iter_id = arena.runtime_iterator(TypeId::STRING);
 
-        // After iter-3, runtime_iterator() creates SemaType::Interface { Iterator, [STRING] },
-        // which translates to VirType::Interface (not VirType::RuntimeIterator).
-        // The normalize_iterator_return pass converts it to RuntimeIterator where needed.
+        // runtime_iterator() creates SemaType::Interface { Iterator, [STRING] },
+        // which translates to VirType::Interface.
         let mut table = VirTypeTable::new();
         let vir_id = translate_type_id(&mut table, iter_id, &arena);
         match table.get(vir_id) {

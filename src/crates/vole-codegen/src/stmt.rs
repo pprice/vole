@@ -77,11 +77,6 @@ impl Cg<'_, '_, '_> {
                     // proper calling convention.
                     (init.value, init.type_id)
                 }
-                LetStorageHint::RuntimeIterator => {
-                    // RuntimeIterator implements Iterator dispatch directly;
-                    // pass through without interface boxing.
-                    (init.value, init.type_id)
-                }
                 _ => (init.value, declared_vir),
             }
         } else {
@@ -89,22 +84,19 @@ impl Cg<'_, '_, '_> {
         };
 
         // Box value if assigning to interface type.
-        // RuntimeIterator storage hint skips this entirely (pre-classified by
-        // sema lowering).  The `is_runtime_iterator` fallback covers the
-        // monomorphization rederive path where the hint may be Interface
-        // even though the init value is a RuntimeIterator.
+        // The `is_runtime_iterator` check skips boxing for RuntimeIterator
+        // values, which implement Iterator dispatch directly.
         if let Some(declared_vir) = declared_vir_opt
             && storage == LetStorageHint::Interface
         {
             let is_final_interface = self.vir_query_is_interface_v(final_vir_ty);
-            let is_runtime_iterator = self.vir_query_is_runtime_iterator_v(final_vir_ty);
 
-            if !is_final_interface && !is_runtime_iterator {
+            if !is_final_interface {
                 // When the init is not an interface but VIR declared type is
                 // an interface, box via VIR path.
                 let cranelift_ty = self.builder.func.dfg.value_type(final_value);
                 let value_to_box = CompiledValue::new(final_value, cranelift_ty, init.type_id);
-                if let Some(elem_vir) = self.vir_query_unwrap_runtime_iterator_v(declared_vir) {
+                if let Some(elem_vir) = self.vir_query_unwrap_iterator_interface_v(declared_vir) {
                     // Iterator<T> let-binding: box + wrap into thin pointer.
                     let wrapped = self.box_and_wrap_as_runtime_iterator(
                         value_to_box,
@@ -739,9 +731,9 @@ impl Cg<'_, '_, '_> {
                 // NOTE: box_interface_value requires sema TypeId for vtable generation.
                 let ret_vir_ty =
                     return_vir_ty.expect("InterfaceBox convention requires return type");
-                if let Some(elem_vir) = self.vir_query_unwrap_runtime_iterator_v(ret_vir_ty) {
-                    if self.vir_query_is_runtime_iterator_v(compiled.type_id) {
-                        // Already a thin RuntimeIterator — return directly.
+                if let Some(elem_vir) = self.vir_query_unwrap_iterator_interface_v(ret_vir_ty) {
+                    if self.vir_query_is_iterator_interface_v(compiled.type_id) {
+                        // Already a thin Iterator<T> — return directly.
                         self.builder.ins().return_(&[compiled.value]);
                     } else {
                         // Concrete class (e.g. MapKeyIterator) being returned as
@@ -750,9 +742,7 @@ impl Cg<'_, '_, '_> {
                             self.box_and_wrap_as_runtime_iterator(compiled, ret_vir_ty, elem_vir)?;
                         self.builder.ins().return_(&[wrapped.value]);
                     }
-                } else if !self.vir_query_is_interface_v(compiled.type_id)
-                    && !self.vir_query_is_runtime_iterator_v(compiled.type_id)
-                {
+                } else if !self.vir_query_is_interface_v(compiled.type_id) {
                     let boxed = self.box_interface_value_v(compiled, ret_vir_ty)?;
                     self.builder.ins().return_(&[boxed.value]);
                 } else {
