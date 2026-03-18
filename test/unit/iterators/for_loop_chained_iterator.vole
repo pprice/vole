@@ -1,0 +1,202 @@
+// Test: for-in loop over chained iterator expressions.
+// Covers the gap where a pipeline method (.map, .filter, etc.) result
+// is used directly as a for-loop source — the intermediate Iterator<T>
+// must be iterable without an explicit .collect().
+//
+// DO NOT SIMPLIFY this test.
+
+class CounterFL {
+    current: i64,
+    max: i64,
+}
+
+extend CounterFL with Iterator<i64> {
+    func next() -> i64 | Done {
+        if self.current >= self.max {
+            return Done {}
+        }
+        let v = self.current
+        self.current = self.current + 1
+        return v
+    }
+}
+
+class NumbersFL {
+    start: i64,
+    end_val: i64,
+}
+
+extend NumbersFL with Iterable<i64> {
+    func iter() -> Iterator<i64> {
+        return CounterFL { current: self.start, max: self.end_val }
+    }
+}
+
+func make_numbers(n: i64) -> Iterator<i64> {
+    var i = 0
+    while i < n {
+        yield i
+        i = i + 1
+    }
+}
+
+tests "for-in over chained iterator expressions" {
+    test "for-in over arr.iter().map()" {
+        let arr = [1, 2, 3]
+        var total = 0
+        for x in arr.iter().map((n) => n * 10) {
+            total = total + x
+        }
+        assert(total == 60) // 10 + 20 + 30
+    }
+
+    test "for-in over arr.iter().filter()" {
+        let arr = [1, 2, 3, 4, 5, 6]
+        var sum = 0
+        for x in arr.iter().filter((n) => n % 2 == 0) {
+            sum = sum + x
+        }
+        assert(sum == 12) // 2 + 4 + 6
+    }
+
+    test "for-in over arr.iter().map().filter()" {
+        let arr = [1, 2, 3, 4, 5]
+        var sum = 0
+        for x in arr.iter().map((n) => n * 2).filter((n) => n > 5) {
+            sum = sum + x
+        }
+        // Doubled: [2, 4, 6, 8, 10], filtered >5: [6, 8, 10] => 24
+        assert(sum == 24)
+    }
+
+    test "for-in over arr.map() direct iterable shorthand" {
+        let arr = [10, 20, 30]
+        var total = 0
+        for x in arr.map((n) => n + 1) {
+            total = total + x
+        }
+        assert(total == 63) // 11 + 21 + 31
+    }
+
+    test "for-in over arr.filter() direct iterable shorthand" {
+        let arr = [1, 2, 3, 4, 5]
+        var sum = 0
+        for x in arr.filter((n) => n > 3) {
+            sum = sum + x
+        }
+        assert(sum == 9) // 4 + 5
+    }
+
+    test "for-in over arr.filter().map() direct shorthand" {
+        let arr = [1, 2, 3, 4, 5, 6]
+        var sum = 0
+        for x in arr.filter((n) => n % 2 == 0).map((n) => n * 100) {
+            sum = sum + x
+        }
+        // Evens: [2, 4, 6], *100: [200, 400, 600] => 1200
+        assert(sum == 1200)
+    }
+
+    test "for-in over range.map()" {
+        var total = 0
+        for x in (1..4).map((n) => n * n) {
+            total = total + x
+        }
+        // 1 + 4 + 9 = 14
+        assert(total == 14)
+    }
+
+    test "for-in over range.filter().map().take()" {
+        var sum = 0
+        for x in (0..20).filter((n) => n % 3 == 0).map((n) => n * 2).take(4) {
+            sum = sum + x
+        }
+        // Multiples of 3 in 0..20: [0, 3, 6, 9, ...], *2: [0, 6, 12, 18, ...], take 4: [0, 6, 12, 18] => 36
+        assert(sum == 36)
+    }
+
+    test "for-in over generator().map()" {
+        var total = 0
+        for x in make_numbers(4).map((n) => n + 100) {
+            total = total + x
+        }
+        // 100 + 101 + 102 + 103 = 406
+        assert(total == 406)
+    }
+
+    test "for-in over generator().filter()" {
+        var sum = 0
+        for x in make_numbers(6).filter((n) => n % 2 == 1) {
+            sum = sum + x
+        }
+        // Odd numbers in 0..6: 1 + 3 + 5 = 9
+        assert(sum == 9)
+    }
+
+    test "for-in over custom iterator.map()" {
+        let c = CounterFL { current: 0, max: 4 }
+        var total = 0
+        for x in c.map((n) => n * 5) {
+            total = total + x
+        }
+        // 0 + 5 + 10 + 15 = 30
+        assert(total == 30)
+    }
+
+    test "for-in over custom iterable.map()" {
+        let nums = NumbersFL { start: 1, end_val: 4 }
+        var total = 0
+        for x in nums.map((n) => n * 10) {
+            total = total + x
+        }
+        // 10 + 20 + 30 = 60
+        assert(total == 60)
+    }
+
+    test "for-in over chained map with break" {
+        let arr = [1, 2, 3, 4, 5]
+        var sum = 0
+        for x in arr.iter().map((n) => n * 2) {
+            if x > 6 {
+                break
+            }
+            sum = sum + x
+        }
+        // 2 + 4 + 6 = 12 (8 > 6 triggers break)
+        assert(sum == 12)
+    }
+
+    test "for-in over chained map with continue" {
+        let arr = [1, 2, 3, 4, 5]
+        var sum = 0
+        for x in arr.iter().map((n) => n * 2) {
+            if x == 6 {
+                continue
+            }
+            sum = sum + x
+        }
+        // 2 + 4 + 8 + 10 = 24 (skip 6)
+        assert(sum == 24)
+    }
+
+    test "nested for-in both with chains" {
+        var total = 0
+        for x in [1, 2].iter().map((n) => n * 10) {
+            for y in [1, 2, 3].iter().filter((n) => n > 1) {
+                total = total + x + y
+            }
+        }
+        // Outer: [10, 20], Inner: [2, 3]
+        // (10+2) + (10+3) + (20+2) + (20+3) = 12 + 13 + 22 + 23 = 70
+        assert(total == 70)
+    }
+
+    test "for-in over string.map()" {
+        let s = "abc"
+        var count = 0
+        for ch in s.map((c) => c) {
+            count = count + 1
+        }
+        assert(count == 3)
+    }
+}

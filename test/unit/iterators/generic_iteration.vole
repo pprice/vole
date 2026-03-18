@@ -1,0 +1,245 @@
+// Test: generic functions using iterator patterns.
+// Covers gaps in generic iteration:
+//   - Generic function with Iterator<T> parameter
+//   - Generic function calling .map()/.filter() on [T]
+//   - Generic function iterating over [T] with for-in
+//
+// DO NOT SIMPLIFY this test.
+
+// --- Generic function with Iterator<T> parameter ---
+
+func collect_all<T>(iter: Iterator<T>) -> [T] {
+    return iter.collect()
+}
+
+func count_iter<T>(iter: Iterator<T>) -> i64 {
+    return iter.count()
+}
+
+func sum_iter_generic(iter: Iterator<i64>) -> i64 {
+    var total = 0
+    for v in iter {
+        total = total + v
+    }
+    return total
+}
+
+// --- Generic function iterating over [T] ---
+
+func count_items<T>(items: [T]) -> i64 {
+    var n = 0
+    for _ in items {
+        n = n + 1
+    }
+    return n
+}
+
+func to_array<T>(items: [T]) -> [T] {
+    return items.iter().collect()
+}
+
+// --- Generic function calling .map()/.filter() on [T] ---
+
+func double_all(items: [i64]) -> [i64] {
+    return items.map((x) => x * 2).collect()
+}
+
+func keep_positive(items: [i64]) -> [i64] {
+    return items.filter((x) => x > 0).collect()
+}
+
+func filter_and_map(items: [i64]) -> [i64] {
+    return items.filter((x) => x % 2 == 0).map((x) => x * 10).collect()
+}
+
+func map_and_sum(items: [i64]) -> i64 {
+    return items.map((x) => x + 1).sum()
+}
+
+func filter_count(items: [i64]) -> i64 {
+    return items.filter((x) => x > 0).count()
+}
+
+// --- Generic function with closure parameter applied to [T] ---
+
+func apply_map<T>(items: [T], f: (T) -> T) -> [T] {
+    return items.iter().map(f).collect()
+}
+
+func apply_filter<T>(items: [T], pred: (T) -> bool) -> [T] {
+    return items.iter().filter(pred).collect()
+}
+
+// --- Generator returning Iterator<T> used generically ---
+
+func gen_range(n: i64) -> Iterator<i64> {
+    var i = 0
+    while i < n {
+        yield i
+        i = i + 1
+    }
+}
+
+tests "generic iteration" {
+    // -------------------------------------------------------------------------
+    // Iterator<T> parameter
+    // -------------------------------------------------------------------------
+
+    test "collect_all with i64 array iterator" {
+        let result = collect_all([10, 20, 30].iter())
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 20)
+        assert(result[2] == 30)
+    }
+
+    test "collect_all with string array iterator" {
+        let result = collect_all(["a", "b"].iter())
+        assert(result.length() == 2)
+        assert(result[0] == "a")
+        assert(result[1] == "b")
+    }
+
+    test "count_iter with i64 iterator" {
+        let c = count_iter([1, 2, 3, 4, 5].iter())
+        assert(c == 5)
+    }
+
+    test "count_iter with string iterator" {
+        let c = count_iter(["x", "y"].iter())
+        assert(c == 2)
+    }
+
+    test "count_iter with empty iterator" {
+        let arr: [i64] = []
+        let c = count_iter(arr.iter())
+        assert(c == 0)
+    }
+
+    test "sum_iter_generic with array iter" {
+        assert(sum_iter_generic([1, 2, 3].iter()) == 6)
+    }
+
+    test "sum_iter_generic with mapped iterator" {
+        assert(sum_iter_generic([1, 2, 3].iter().map((x) => x * 2)) == 12)
+    }
+
+    test "sum_iter_generic with filtered iterator" {
+        assert(sum_iter_generic([1, 2, 3, 4, 5].iter().filter((x) => x % 2 == 0)) == 6)
+    }
+
+    test "collect_all with generator" {
+        let result = collect_all(gen_range(3))
+        assert(result.length() == 3)
+        assert(result[0] == 0)
+        assert(result[1] == 1)
+        assert(result[2] == 2)
+    }
+
+    test "count_iter with generator" {
+        let c = count_iter(gen_range(5))
+        assert(c == 5)
+    }
+
+    // -------------------------------------------------------------------------
+    // Generic [T] iteration
+    // -------------------------------------------------------------------------
+
+    test "count_items with i64 array" {
+        assert(count_items([1, 2, 3]) == 3)
+    }
+
+    test "count_items with string array" {
+        assert(count_items(["a", "b", "c", "d"]) == 4)
+    }
+
+    test "count_items with empty array" {
+        let arr: [i64] = []
+        assert(count_items(arr) == 0)
+    }
+
+    test "to_array round-trip i64" {
+        let result = to_array([5, 10, 15])
+        assert(result.length() == 3)
+        assert(result[0] == 5)
+        assert(result[1] == 10)
+        assert(result[2] == 15)
+    }
+
+    test "to_array round-trip string" {
+        let result = to_array(["hello", "world"])
+        assert(result.length() == 2)
+        assert(result[0] == "hello")
+        assert(result[1] == "world")
+    }
+
+    // -------------------------------------------------------------------------
+    // .map()/.filter() on arrays in non-generic function context
+    // -------------------------------------------------------------------------
+
+    test "double_all" {
+        let result = double_all([1, 2, 3])
+        assert(result.length() == 3)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+        assert(result[2] == 6)
+    }
+
+    test "keep_positive" {
+        let result = keep_positive([-1, 2, -3, 4, 0])
+        assert(result.length() == 2)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+    }
+
+    test "filter_and_map" {
+        let result = filter_and_map([1, 2, 3, 4, 5, 6])
+        // Evens: [2, 4, 6], *10: [20, 40, 60]
+        assert(result.length() == 3)
+        assert(result[0] == 20)
+        assert(result[1] == 40)
+        assert(result[2] == 60)
+    }
+
+    test "map_and_sum" {
+        // [1, 2, 3] -> [2, 3, 4] -> sum = 9
+        assert(map_and_sum([1, 2, 3]) == 9)
+    }
+
+    test "filter_count" {
+        assert(filter_count([-1, 0, 1, 2, -3]) == 2)
+    }
+
+    // -------------------------------------------------------------------------
+    // Generic function with closure parameter
+    // -------------------------------------------------------------------------
+
+    test "apply_map i64 doubles" {
+        let result = apply_map([1, 2, 3], (x: i64) => x * 2)
+        assert(result.length() == 3)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+        assert(result[2] == 6)
+    }
+
+    test "apply_map string identity" {
+        let result = apply_map(["a", "b"], (s: string) => s)
+        assert(result.length() == 2)
+        assert(result[0] == "a")
+        assert(result[1] == "b")
+    }
+
+    test "apply_filter i64 positives" {
+        let result = apply_filter([-1, 2, -3, 4], (x: i64) => x > 0)
+        assert(result.length() == 2)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+    }
+
+    test "apply_filter string non-empty" {
+        let result = apply_filter(["a", "", "b", ""], (s: string) => s != "")
+        assert(result.length() == 2)
+        assert(result[0] == "a")
+        assert(result[1] == "b")
+    }
+}
