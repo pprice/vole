@@ -131,21 +131,12 @@ impl Cg<'_, '_, '_> {
 
         // Build args: self (iterator ptr) + method args
         //
-        // Closure parameters are borrowed — the caller retains ownership and will
-        // dec_ref them (either via scope-exit for locals, or on return for function
-        // parameters).
-        //   - Pipeline methods (stores_closure): iterator will also dec_ref the
-        //     closure on drop. Emit rc_inc so both cleanup paths can dec independently.
-        //   - Terminal consumer methods (runtime_frees_closure: for_each, reduce):
-        //     runtime frees the closure via Closure::free after iteration. Emit
-        //     rc_inc so both the runtime's free and the caller's cleanup can dec
-        //     independently. Without this, Iterable default methods (which receive
-        //     the closure as a borrowed parameter) cause a double-free: the runtime
-        //     frees the closure, then the caller's scope-exit rc_dec's a freed ptr.
-        //   - Terminal predicate methods (codegen_frees_closure: find, any, all):
-        //     runtime borrows but does NOT free. Codegen handles cleanup from
-        //     rc_temps. No extra rc_inc needed for borrowed closures.
-        let callee_owns_closure = builtin.stores_closure() || builtin.runtime_frees_closure();
+        // Closure ownership: when the callee takes ownership of the closure
+        // (stores_closure: pipeline methods store it in the iterator; consumes_closure:
+        // for_each/reduce free it after iteration), owned closures are NOT tracked
+        // in rc_temps (the callee handles cleanup). Borrowed closures get rc_inc
+        // so both the callee's cleanup and the caller's scope-exit can dec independently.
+        let callee_owns_closure = builtin.stores_closure() || builtin.consumes_closure();
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         let iter_arg_count = arg_source.len();

@@ -363,14 +363,14 @@ impl BuiltinMethod {
         matches!(self, Self::IterFind | Self::IterAny | Self::IterAll)
     }
 
-    /// Whether the runtime frees the closure argument after calling this method.
+    /// Whether the runtime consumes (frees) the closure argument.
     ///
     /// Terminal consumer methods (`for_each`, `reduce`) take ownership of the
     /// closure and free it via `Closure::free` after iteration completes.
-    /// When the closure is borrowed (e.g. a parameter in an Iterable default
-    /// method body), codegen must emit `rc_inc` before the call so both the
-    /// runtime's free and the caller's scope-exit cleanup can dec independently.
-    pub fn runtime_frees_closure(&self) -> bool {
+    /// Codegen must NOT track these closures in `rc_temps` (they're consumed).
+    /// For borrowed closures, codegen emits `rc_inc` so both the runtime's free
+    /// and the caller's scope-exit cleanup can dec independently.
+    pub fn consumes_closure(&self) -> bool {
         matches!(self, Self::IterForEach | Self::IterReduce)
     }
 

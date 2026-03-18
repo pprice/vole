@@ -150,7 +150,8 @@ pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Clo
         RcIterator::dec_ref(iter);
     }
 
-    // Free the callback closure (ownership transferred from codegen)
+    // Free the callback closure — runtime takes ownership from codegen.
+    // Codegen does NOT emit rc_dec for this argument (it's consumed, not borrowed).
     unsafe { Closure::free(callback as *mut Closure) };
 }
 
@@ -216,7 +217,8 @@ pub extern "C" fn vole_iter_reduce_tagged(
         RcIterator::dec_ref(iter);
     }
 
-    // Free the reducer closure (ownership transferred from codegen)
+    // Free the reducer closure — runtime takes ownership from codegen.
+    // Codegen does NOT emit rc_dec for this argument (it's consumed, not borrowed).
     unsafe { Closure::free(reducer as *mut Closure) };
 
     acc
