@@ -136,21 +136,29 @@ impl Cg<'_, '_, '_> {
         // parameters).
         //   - Pipeline methods (stores_closure): iterator will also dec_ref the
         //     closure on drop. Emit rc_inc so both cleanup paths can dec independently.
-        //   - Terminal methods: runtime borrows and does NOT free. The outer caller
-        //     handles dec_ref (scope-exit or return cleanup). No extra action needed.
-        let stores_closure = builtin.stores_closure();
+        //   - Terminal consumer methods (runtime_frees_closure: for_each, reduce):
+        //     runtime frees the closure via Closure::free after iteration. Emit
+        //     rc_inc so both the runtime's free and the caller's cleanup can dec
+        //     independently. Without this, Iterable default methods (which receive
+        //     the closure as a borrowed parameter) cause a double-free: the runtime
+        //     frees the closure, then the caller's scope-exit rc_dec's a freed ptr.
+        //   - Terminal predicate methods (codegen_frees_closure: find, any, all):
+        //     runtime borrows but does NOT free. Codegen handles cleanup from
+        //     rc_temps. No extra rc_inc needed for borrowed closures.
+        let callee_owns_closure = builtin.stores_closure() || builtin.runtime_frees_closure();
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         let iter_arg_count = arg_source.len();
         for i in 0..iter_arg_count {
             let compiled = self.compile_arg_from_source(arg_source, i)?;
-            if stores_closure
+            if callee_owns_closure
                 && compiled.is_borrowed()
                 && self.cached_rc_state_v(compiled.type_id).needs_cleanup()
             {
-                // Borrowed closure param: scope-exit (or return cleanup) will dec_ref
-                // AND iterator will dec_ref on drop. Bump the refcount so both can
-                // dec independently.
+                // Borrowed closure param: the callee will free/dec_ref the closure
+                // (pipeline methods on iterator drop, terminal methods in the runtime).
+                // The caller also dec_ref's via scope-exit or return cleanup.
+                // Bump the refcount so both can dec independently.
                 self.emit_rc_inc(compiled.value)?;
             } else if compiled.is_owned() {
                 rc_temps.push(compiled);

@@ -363,6 +363,17 @@ impl BuiltinMethod {
         matches!(self, Self::IterFind | Self::IterAny | Self::IterAll)
     }
 
+    /// Whether the runtime frees the closure argument after calling this method.
+    ///
+    /// Terminal consumer methods (`for_each`, `reduce`) take ownership of the
+    /// closure and free it via `Closure::free` after iteration completes.
+    /// When the closure is borrowed (e.g. a parameter in an Iterable default
+    /// method body), codegen must emit `rc_inc` before the call so both the
+    /// runtime's free and the caller's scope-exit cleanup can dec independently.
+    pub fn runtime_frees_closure(&self) -> bool {
+        matches!(self, Self::IterForEach | Self::IterReduce)
+    }
+
     /// Classify the return type of this iterator method given the element type.
     ///
     /// Returns a [`BuiltinReturnKind`] that codegen can use to construct the
