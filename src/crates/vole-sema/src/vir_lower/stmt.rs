@@ -439,7 +439,7 @@ fn is_simple_rc_type(arena: &crate::type_arena::TypeArena, ty: TypeId) -> bool {
         || arena.is_function(ty)
         || arena.is_class(ty)
         || arena.is_handle(ty)
-        || arena.is_runtime_iterator(ty)
+        || arena.is_iterator_interface(ty)
         || arena.is_interface(ty)
 }
 

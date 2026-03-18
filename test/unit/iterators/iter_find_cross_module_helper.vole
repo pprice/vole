@@ -1,12 +1,12 @@
 // Helper module for iter_find_cross_module.vole
 //
-// Creates a RuntimeIterator<bool> via .map() which causes codegen to
+// Creates an Iterator<bool> via .map() which causes codegen to
 // compile Iterable default methods (find, first, last, nth) for the
 // bool element type. Without the corresponding Optional<bool> sema
 // TypeId, this previously caused:
 //   "iterator method return type not found: find (expr_id=None)"
 
-// This function produces a RuntimeIterator<bool> by mapping i64 → bool.
+// This function produces an Iterator<bool> by mapping i64 → bool.
 func map_to_bools(arr: [i64]) -> [bool] {
     return arr.iter().map((x) => x > 0).collect()
 }

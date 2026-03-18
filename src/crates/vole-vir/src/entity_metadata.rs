@@ -480,7 +480,7 @@ pub struct VirFunctionDef {
     /// return types in FunctionRegistry.
     pub sema_return_type: TypeId,
     /// Original sema generator element TypeId, for callers that still
-    /// call `lookup_runtime_iterator` on the sema TypeArena.
+    /// call `lookup_iterator` on the sema TypeArena.
     pub sema_generator_element_type: Option<TypeId>,
 }
 

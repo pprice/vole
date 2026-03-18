@@ -3,7 +3,7 @@
 // the return type contained an unsubstituted interface type parameter.
 // The monomorphized function's substitution map only covers its own type params
 // (e.g. T: IFace1), not the Iterable interface's T, so the Iterator<T> return
-// type was not converted to RuntimeIterator, causing vtable dispatch on a raw
+// type was not converted to Iterator<T>, causing vtable dispatch on a raw
 // iterator pointer.
 
 interface IFace1 {}

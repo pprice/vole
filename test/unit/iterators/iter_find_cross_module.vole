@@ -1,8 +1,8 @@
-// Regression test: cross-module import with RuntimeIterator<bool> from .map()
+// Regression test: cross-module import with Iterator<bool> from .map()
 //
-// When module A creates RuntimeIterator<bool> via .map((x) => x > 0) and
+// When module A creates Iterator<bool> via .map((x) => x > 0) and
 // module B imports A, codegen tries to compile Iterable default methods
-// (find, first, last, nth) for ALL RuntimeIterator element types including
+// (find, first, last, nth) for ALL Iterator element types including
 // bool. These methods return T? (Optional<bool>), but if no code ever uses
 // bool? directly, the sema TypeId for Optional<bool> may not exist.
 //

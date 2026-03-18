@@ -841,14 +841,14 @@ mod tests {
     }
 
     #[test]
-    fn translate_runtime_iterator() {
+    fn translate_iterator() {
         let mut arena = test_arena();
-        // Set up a fake Iterator TypeDefId so runtime_iterator() works.
+        // Set up a fake Iterator TypeDefId so iterator() works.
         let fake_iterator_tdef = vole_identity::TypeDefId::new(999);
         arena.set_well_known_iterator_type_def_id(fake_iterator_tdef);
-        let iter_id = arena.runtime_iterator(TypeId::STRING);
+        let iter_id = arena.iterator(TypeId::STRING);
 
-        // runtime_iterator() creates SemaType::Interface { Iterator, [STRING] },
+        // iterator() creates SemaType::Interface { Iterator, [STRING] },
         // which translates to VirType::Interface.
         let mut table = VirTypeTable::new();
         let vir_id = translate_type_id(&mut table, iter_id, &arena);

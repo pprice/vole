@@ -100,7 +100,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Handle method calls on Iterator<T> thin pointers — calls external Iterator functions directly
-    pub(super) fn runtime_iterator_method(
+    pub(super) fn iterator_method(
         &mut self,
         obj: &CompiledValue,
         arg_source: &ArgSource<'_>,

@@ -88,7 +88,7 @@ pub fn vir_query_is_struct(&self, type_id: TypeId) -> bool {
 
 | Line | Call | Context | Enrichment Need |
 |------|------|---------|-----------------|
-| 89 | `is_interface()`, `is_runtime_iterator()` | Let interface hint | Annotate Let node with LetStorageHint |
+| 89 | `is_interface()`, `is_iterator_interface()` | Let interface hint | Annotate Let node with LetStorageHint |
 | 92, 136, 168-172 | `is_sentinel()` | Sentinel union detection | Add `vir_is_sentinel()` helper |
 | 143-144 | `is_integer()` | Integer type widening | Annotate result type in VIR |
 | 305-376 | `is_sentinel()` in union construction loop | Union field tag assignment | Annotate union variants in VIR |

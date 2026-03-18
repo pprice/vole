@@ -760,7 +760,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_is_array(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a `VirTypeId` is a runtime iterator type via VirTypeTable.
+    /// Check if a `VirTypeId` is an Iterator<T> interface type via VirTypeTable.
     ///
     /// Check if a VirTypeId is an `Iterator<T>` interface (thin pointer).
     #[inline]
@@ -855,7 +855,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
     }
 
-    /// Unwrap a runtime iterator `VirTypeId` to its element `VirTypeId` via VirTypeTable.
+    /// Unwrap an Iterator<T> `VirTypeId` to its element `VirTypeId` via VirTypeTable.
     ///
     /// Unwrap an `Iterator<T>` interface, returning the element VirTypeId.
     #[inline]

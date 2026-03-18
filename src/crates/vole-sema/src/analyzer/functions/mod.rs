@@ -51,7 +51,7 @@ impl Analyzer {
             self.env.current_generator_element_type = Some(element_type_id);
             // Pre-create Iterator<T> so codegen can look it up when
             // compiling generator functions (coroutine-backed iterators).
-            self.type_arena_mut().runtime_iterator(element_type_id);
+            self.type_arena_mut().iterator(element_type_id);
         }
 
         saved

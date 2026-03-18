@@ -186,7 +186,7 @@ pub enum BoxingStrategy {
     ///
     /// Applies to: i64, u64, string, handle, class, array, interface,
     /// function, struct (pointer-passed), union, optional, fallible, tuple,
-    /// fixed array, range, unknown, error, runtime iterator, meta type,
+    /// fixed array, range, unknown, error, iterator, meta type,
     /// void, never.
     Identity,
 

@@ -264,7 +264,7 @@ impl Analyzer {
                                 || self.type_arena().unwrap_type_param_ref(elem_type).is_some()
                                 || self.type_arena().is_self_type(elem_type);
                             if !is_abstract {
-                                self.type_arena_mut().runtime_iterator(elem_type);
+                                self.type_arena_mut().iterator(elem_type);
                                 // Also pre-create Optional<T> for Iterable default methods
                                 // (find, first, last, nth) that return T?.
                                 self.type_arena_mut().optional(elem_type);

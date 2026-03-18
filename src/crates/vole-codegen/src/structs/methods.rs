@@ -534,7 +534,7 @@ impl Cg<'_, '_, '_> {
                 BuiltinMethod::from_iter_method_name(method_name_str).ok_or_else(|| {
                     CodegenError::not_found("iterator builtin method", method_name_str)
                 })?;
-            return self.runtime_iterator_method(
+            return self.iterator_method(
                 &obj,
                 &mc.arg_source(),
                 method_name_str,
@@ -548,7 +548,7 @@ impl Cg<'_, '_, '_> {
         // Handle custom Iterator<T> implementors (classes/structs that extend
         // Iterator<T>). When the receiver is a concrete type implementing
         // Iterator<T>, box+wrap it as an Iterator<T> thin pointer and dispatch
-        // via runtime_iterator_method.
+        // via iterator_method.
         if !dispatch.receiver_is_interface
             && let Some(builtin) = BuiltinMethod::from_iter_method_name(method_name_str)
             && let Some((elem_vir, iface_vir)) =
@@ -875,7 +875,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // Custom Iterator<T> implementors: box+wrap the concrete receiver
-            // as an Iterator<T> thin pointer and dispatch via runtime_iterator_method.
+            // as an Iterator<T> thin pointer and dispatch via iterator_method.
             if let Some(builtin) = BuiltinMethod::from_iter_method_name(method_name_str)
                 && let Some((elem_vir, iface_vir)) =
                     self.find_iterator_elem_for_concrete_receiver(resolved_obj_vir)
@@ -1388,7 +1388,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Box+wrap a custom Iterator<T> implementor as an Iterator<T> thin pointer
-    /// and dispatch the method via `runtime_iterator_method`.
+    /// and dispatch the method via `iterator_method`.
     ///
     /// Called from both the resolved-method and fallback paths when the
     /// receiver is a concrete class/struct implementing Iterator<T>.
@@ -1402,14 +1402,14 @@ impl Cg<'_, '_, '_> {
         iface_vir: VirTypeId,
         return_type_hint: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
-        let runtime_iter = self.box_and_wrap_as_runtime_iterator(obj, iface_vir, elem_vir)?;
+        let iter_val = self.box_and_wrap_as_iterator(obj, iface_vir, elem_vir)?;
         let elem_type = {
             let v = self.try_substitute_type_v(elem_vir);
             let table = self.vir_type_table();
             table.vir_to_type_id(v)
         };
-        self.runtime_iterator_method(
-            &runtime_iter,
+        self.iterator_method(
+            &iter_val,
             arg_source,
             method_name,
             builtin,

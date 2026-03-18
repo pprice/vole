@@ -242,11 +242,11 @@ mod tests {
     }
 
     #[test]
-    fn runtime_iterator_is_rc() {
+    fn iterator_is_rc() {
         let mut a = arena();
         let fake_iterator_tdef = TypeDefId::new(999);
         a.set_well_known_iterator_type_def_id(fake_iterator_tdef);
-        let it = a.runtime_iterator(TypeId::I32);
+        let it = a.iterator(TypeId::I32);
         assert_eq!(a.memory_kind(it), MemoryKind::Rc);
     }
 

@@ -127,7 +127,7 @@ iter_next_fn!(
             let payload = ptr::read(payload_ptr);
 
             // Optional/union returns use a pointer ABI from JIT codegen. The
-            // pointed storage is not heap-owned by runtime iterators, so we
+            // pointed storage is not heap-owned by iterators, so we
             // must not deallocate it here.
 
             // Tag 0 = I64 (value), Tag 1 = Nil

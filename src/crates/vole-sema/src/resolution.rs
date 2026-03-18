@@ -291,7 +291,7 @@ mod tests {
         let fake_iterator_tdef = TypeDefId::new(999);
         arena.set_well_known_iterator_type_def_id(fake_iterator_tdef);
         let iter_elem = arena.i64();
-        let runtime_iter = arena.runtime_iterator(iter_elem);
+        let iter_type = arena.iterator(iter_elem);
         let with_hint = ResolvedMethod::Implemented {
             type_def_id: None,
             method_name_id,
@@ -300,12 +300,12 @@ mod tests {
             return_type_id: ret_type,
             is_builtin: true,
             external_info: None,
-            concrete_return_hint: Some(runtime_iter),
+            concrete_return_hint: Some(iter_type),
         };
-        assert_eq!(with_hint.concrete_return_hint(), Some(runtime_iter));
+        assert_eq!(with_hint.concrete_return_hint(), Some(iter_type));
         // Verify the hint is an Iterator type
-        assert!(arena.is_runtime_iterator(runtime_iter));
-        assert_eq!(arena.unwrap_runtime_iterator(runtime_iter), Some(iter_elem));
+        assert!(arena.is_iterator_interface(iter_type));
+        assert_eq!(arena.unwrap_iterator_elem(iter_type), Some(iter_elem));
     }
 
     #[test]

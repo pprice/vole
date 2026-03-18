@@ -71,7 +71,7 @@ pub enum VirExpr {
 
     /// Range expression (`start..end` or `start..=end`).
     ///
-    /// For inclusive ranges, codegen adds 1 to `end` so the runtime iterator
+    /// For inclusive ranges, codegen adds 1 to `end` so the iterator
     /// uses exclusive-end semantics internally.
     Range {
         start: VirRef,

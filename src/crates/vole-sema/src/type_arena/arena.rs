@@ -442,7 +442,7 @@ impl TypeArena {
         self.intern(SemaType::FixedArray { element, size })
     }
 
-    /// Create a runtime iterator type as `Iterator<T>` interface.
+    /// Create an `Iterator<T>` interface.
     ///
     /// Requires the well-known Iterator TypeDefId to be set (i.e., prelude loaded).
     /// Creates `SemaType::Interface { type_def_id: Iterator, type_args: [element] }`
@@ -451,12 +451,12 @@ impl TypeArena {
     /// Panics if the well-known Iterator TypeDefId is not set. This should only
     /// happen in test arenas without prelude — those tests should use
     /// `set_well_known_iterator_type_def_id()` before calling this.
-    pub fn runtime_iterator(&mut self, element: TypeId) -> TypeId {
+    pub fn iterator(&mut self, element: TypeId) -> TypeId {
         if self.is_invalid(element) {
             return self.invalid();
         }
         let iterator_tdef = self.well_known_iterator_type_def_id.expect(
-            "runtime_iterator() called without well_known_iterator_type_def_id set; \
+            "iterator() called without well_known_iterator_type_def_id set; \
              call set_well_known_iterator_type_def_id() first",
         );
         self.intern(SemaType::Interface {

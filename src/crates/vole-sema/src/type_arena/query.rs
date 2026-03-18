@@ -275,11 +275,6 @@ impl TypeArena {
         id.is_unknown()
     }
 
-    /// Check if this is a runtime iterator type (`Iterator<T>` interface).
-    pub fn is_runtime_iterator(&self, id: TypeId) -> bool {
-        self.is_iterator_interface(id)
-    }
-
     /// Check if a type is an `Iterator<T>` interface type (using well-known TypeDefId).
     ///
     /// Returns `true` if the well-known Iterator TypeDefId has been populated and the
@@ -432,15 +427,15 @@ impl TypeArena {
         }
     }
 
-    /// Unwrap a runtime iterator type, returning the element type `T`
+    /// Unwrap an Iterator<T> type, returning the element type `T`
     /// from `Iterator<T>`.
-    pub fn unwrap_runtime_iterator(&self, id: TypeId) -> Option<TypeId> {
+    pub fn unwrap_iterator_elem(&self, id: TypeId) -> Option<TypeId> {
         self.unwrap_iterator_interface_elem(id)
     }
 
     /// Look up an existing `Iterator<T>` type by element type (read-only).
     /// Returns None if the type doesn't exist in the arena.
-    pub fn lookup_runtime_iterator(&self, element: TypeId) -> Option<TypeId> {
+    pub fn lookup_iterator(&self, element: TypeId) -> Option<TypeId> {
         let iterator_tdef = self.well_known_iterator_type_def_id?;
         let interface_ty = SemaType::Interface {
             type_def_id: iterator_tdef,
@@ -574,7 +569,7 @@ impl TypeArena {
     /// Iterator representation are returned. Filtering by Iterator<T> existence
     /// prevents registering monomorphs for element types that never appear in
     /// an iterator context (e.g., arrays of unions, structs, etc.).
-    pub fn all_concrete_runtime_iterator_elem_types(&self) -> Vec<TypeId> {
+    pub fn all_concrete_iterator_elem_types(&self) -> Vec<TypeId> {
         self.types
             .iter()
             .filter_map(|ty| {
@@ -584,7 +579,7 @@ impl TypeArena {
                         return None;
                     }
                     // Only include if an Iterator<elem> type exists in the arena
-                    if self.lookup_runtime_iterator(*elem).is_some() {
+                    if self.lookup_iterator(*elem).is_some() {
                         Some(*elem)
                     } else {
                         None

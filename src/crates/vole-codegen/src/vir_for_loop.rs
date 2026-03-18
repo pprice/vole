@@ -95,7 +95,7 @@ impl Cg<'_, '_, '_> {
         match &vir_for.kind {
             VirIterKind::Range => self.compile_vir_for_range(vir_for),
             VirIterKind::Array { .. } => self.compile_vir_for_array(vir_for),
-            VirIterKind::Iterator { .. } => self.compile_vir_for_runtime_iter(vir_for),
+            VirIterKind::Iterator { .. } => self.compile_vir_for_iterator(vir_for),
         }
     }
 
@@ -340,10 +340,10 @@ impl Cg<'_, '_, '_> {
 
     // ===== VIR Iterator loops =====
 
-    /// Compile a VIR for-loop over a runtime iterator (string, interface,
+    /// Compile a VIR for-loop over an iterator (string, interface,
     /// custom iterator, or custom iterable).
-    fn compile_vir_for_runtime_iter(&mut self, vir_for: &VirFor) -> CodegenResult<bool> {
-        let (iter_val, elem_vir, needs_elem_rc_dec) = self.setup_vir_runtime_iter(vir_for)?;
+    fn compile_vir_for_iterator(&mut self, vir_for: &VirFor) -> CodegenResult<bool> {
+        let (iter_val, elem_vir, needs_elem_rc_dec) = self.setup_vir_iterator(vir_for)?;
         let elem_conversion = iter_elem_conversion(&vir_for.kind);
 
         let slot_data = self.alloc_stack(8);
@@ -426,12 +426,9 @@ impl Cg<'_, '_, '_> {
     /// - Iterator<T> interface → pass through (thin pointer)
     /// - Non-Iterator interface → wrap via `InterfaceIter`
     /// - Custom iterator/iterable → box + wrap (with optional `.iter()` call)
-    fn setup_vir_runtime_iter(
-        &mut self,
-        vir_for: &VirFor,
-    ) -> CodegenResult<(Value, VirTypeId, bool)> {
+    fn setup_vir_iterator(&mut self, vir_for: &VirFor) -> CodegenResult<(Value, VirTypeId, bool)> {
         let VirIterKind::Iterator { elem_type, .. } = &vir_for.kind else {
-            unreachable!("setup_vir_runtime_iter called with non-Iterator kind");
+            unreachable!("setup_vir_iterator called with non-Iterator kind");
         };
         let elem_vir = self.try_substitute_type_v(*elem_type);
         let iterable = self.compile_vir_expr(&vir_for.iterable)?;
@@ -487,8 +484,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Custom iterator: box directly as Iterator<T> interface, then wrap.
-        let iter =
-            self.box_and_wrap_as_runtime_iterator(iterable, iterator_interface_type, elem_vir)?;
+        let iter = self.box_and_wrap_as_iterator(iterable, iterator_interface_type, elem_vir)?;
         self.enter_iter_rc_scope(&iter, None);
         Ok((iter.value, elem_vir, false))
     }
@@ -593,7 +589,7 @@ impl Cg<'_, '_, '_> {
     /// For borrowed values (local variable references), rc_inc's the data
     /// before boxing so that `wrap_interface_iter_v`'s rc_dec doesn't steal
     /// the original variable's reference.
-    pub(crate) fn box_and_wrap_as_runtime_iterator(
+    pub(crate) fn box_and_wrap_as_iterator(
         &mut self,
         obj: super::types::CompiledValue,
         interface_vir_ty: VirTypeId,

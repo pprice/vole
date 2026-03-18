@@ -579,7 +579,7 @@ impl Analyzer {
         // Get all concrete element types from the type arena
         let elem_types: Vec<ArenaTypeId> = {
             let arena = self.type_arena();
-            arena.all_concrete_runtime_iterator_elem_types()
+            arena.all_concrete_iterator_elem_types()
         };
 
         // Skip re-registration if element types haven't grown since last time.

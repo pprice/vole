@@ -237,7 +237,7 @@ impl Analyzer {
         let is_on_iterator = {
             let arena = self.type_arena();
             arena.unwrap_interface(object_type_id).is_some()
-                || arena.unwrap_runtime_iterator(object_type_id).is_some()
+                || arena.unwrap_iterator_elem(object_type_id).is_some()
         };
         is_transform_method && is_on_iterator && !func_type.params_id.is_empty()
     }

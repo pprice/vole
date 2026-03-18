@@ -84,7 +84,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Box value if assigning to interface type.
-        // The `is_runtime_iterator` check skips boxing for Iterator<T>
+        // The `is_iterator_interface` check skips boxing for Iterator<T>
         // thin pointers, which implement Iterator dispatch directly.
         if let Some(declared_vir) = declared_vir_opt
             && storage == LetStorageHint::Interface
@@ -98,11 +98,8 @@ impl Cg<'_, '_, '_> {
                 let value_to_box = CompiledValue::new(final_value, cranelift_ty, init.type_id);
                 if let Some(elem_vir) = self.vir_query_unwrap_iterator_interface_v(declared_vir) {
                     // Iterator<T> let-binding: box + wrap into thin pointer.
-                    let wrapped = self.box_and_wrap_as_runtime_iterator(
-                        value_to_box,
-                        declared_vir,
-                        elem_vir,
-                    )?;
+                    let wrapped =
+                        self.box_and_wrap_as_iterator(value_to_box, declared_vir, elem_vir)?;
                     final_value = wrapped.value;
                     final_vir_ty = wrapped.type_id;
                 } else {
@@ -739,7 +736,7 @@ impl Cg<'_, '_, '_> {
                         // Concrete class (e.g. MapKeyIterator) being returned as
                         // Iterator<T>: box as interface then wrap into thin pointer.
                         let wrapped =
-                            self.box_and_wrap_as_runtime_iterator(compiled, ret_vir_ty, elem_vir)?;
+                            self.box_and_wrap_as_iterator(compiled, ret_vir_ty, elem_vir)?;
                         self.builder.ins().return_(&[wrapped.value]);
                     }
                 } else if !self.vir_query_is_interface_v(compiled.type_id) {

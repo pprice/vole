@@ -513,7 +513,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         todo!(
             "VIR CallTarget::BuiltinMethod({:?}) — \
-             needs per-method dispatch to existing builtin_method()/runtime_iterator_method() \
+             needs per-method dispatch to existing builtin_method()/iterator_method() \
              infrastructure.  Each variant (ArrayLength, ArrayIter, StringIter, IterMap, …) \
              uses different runtime keys, elem_tag setup, RC ownership, and return-type \
              logic.  Delegate to builtin_methods.rs and iterator_methods.rs once VIR \

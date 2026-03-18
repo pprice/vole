@@ -615,7 +615,7 @@ impl Analyzer {
         // Pre-create Iterator<elem_type> for any Iterable<T> elem types so codegen can
         // find it. Without this, VIR implement method monomorphs won't see the elem type.
         for &elem_type_id in iface_subs.values() {
-            self.type_arena_mut().runtime_iterator(elem_type_id);
+            self.type_arena_mut().iterator(elem_type_id);
         }
 
         // Resolve the method via entity registry or interface fallback.
@@ -759,7 +759,7 @@ impl Analyzer {
         // concrete element type, including find/first/last/nth which return T?.
         // Without pre-creating Optional<elem_type>, the VIR type table sweep cannot
         // intern the bidirectional TypeId<->VirTypeId mapping that codegen requires.
-        self.type_arena_mut().runtime_iterator(elem_type);
+        self.type_arena_mut().iterator(elem_type);
         self.type_arena_mut().optional(elem_type);
 
         // Resolve via the interface fallback — same pattern used by primitive types (string,
@@ -878,7 +878,7 @@ impl Analyzer {
         // Pre-create Iterator<elem_type> for any Iterable<T> elem types so codegen can
         // find it via the VIR type table.
         for &elem_type_id in iface_subs.values() {
-            self.type_arena_mut().runtime_iterator(elem_type_id);
+            self.type_arena_mut().iterator(elem_type_id);
         }
 
         // Helper to apply iface_subs to a resolved method (if non-empty).
@@ -1389,7 +1389,7 @@ impl Analyzer {
             // Pipeline methods → Iterator<elem>
             "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
             | "flatten" | "flat_map" | "filter_map" | "enumerate" | "zip" | "chunks"
-            | "windows" => Some(self.type_arena_mut().runtime_iterator(elem_type)),
+            | "windows" => Some(self.type_arena_mut().iterator(elem_type)),
             // Terminal methods → concrete result
             "collect" | "count" | "any" | "all" | "for_each" | "sum" | "reduce" | "first"
             | "last" | "nth" | "find" | "next" => {
@@ -1430,13 +1430,13 @@ impl Analyzer {
                 None
             }
         };
-        element_type.map(|elem| self.type_arena_mut().runtime_iterator(elem))
+        element_type.map(|elem| self.type_arena_mut().iterator(elem))
     }
 
     /// Hint for pipeline methods — object is Iterator<T>, returns Iterator<T>
     fn compute_pipeline_hint(&mut self, object_type_id: ArenaTypeId) -> Option<ArenaTypeId> {
-        let elem = self.type_arena().unwrap_runtime_iterator(object_type_id)?;
-        Some(self.type_arena_mut().runtime_iterator(elem))
+        let elem = self.type_arena().unwrap_iterator_elem(object_type_id)?;
+        Some(self.type_arena_mut().iterator(elem))
     }
 
     /// Hint for terminal methods — object is Iterator<T>, returns a concrete scalar type
@@ -1454,7 +1454,7 @@ impl Analyzer {
         }
 
         // Remaining terminals need the element type from Iterator<T>
-        let elem = self.type_arena().unwrap_runtime_iterator(object_type_id)?;
+        let elem = self.type_arena().unwrap_iterator_elem(object_type_id)?;
 
         match method_name {
             "sum" | "reduce" | "next" => Some(elem),

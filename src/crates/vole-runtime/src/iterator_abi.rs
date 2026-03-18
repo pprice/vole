@@ -30,7 +30,7 @@ use crate::iterator::RcIterator;
 pub struct IteratorHandle(*mut RcIterator);
 
 impl IteratorHandle {
-    /// Construct from raw runtime iterator pointer.
+    /// Construct from raw iterator pointer.
     pub fn from_raw(raw: *mut RcIterator) -> Self {
         Self(raw)
     }

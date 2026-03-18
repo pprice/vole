@@ -262,10 +262,10 @@ impl Analyzer {
         self.type_arena().unwrap_tuple(id).map(|v| v.to_vec())
     }
 
-    /// Get runtime iterator element type if this is a runtime iterator
+    /// Get Iterator<T> element type if this is an Iterator<T> interface
     #[inline]
-    pub(crate) fn unwrap_runtime_iterator_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
-        self.type_arena().unwrap_runtime_iterator(id)
+    pub(crate) fn unwrap_iterator_elem_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
+        self.type_arena().unwrap_iterator_elem(id)
     }
 
     /// Get inner type if this is an optional type (T | nil) with exactly one non-nil variant.
@@ -306,10 +306,10 @@ impl Analyzer {
         self.type_arena().unwrap_fallible(id).is_some()
     }
 
-    /// Check if TypeId is a runtime iterator type
+    /// Check if TypeId is an Iterator<T> interface type
     #[inline]
-    pub(crate) fn is_runtime_iterator_id(&self, id: ArenaTypeId) -> bool {
-        self.type_arena().unwrap_runtime_iterator(id).is_some()
+    pub(crate) fn is_iterator_id(&self, id: ArenaTypeId) -> bool {
+        self.type_arena().unwrap_iterator_elem(id).is_some()
     }
 
     // ========== Sequence type helpers ==========

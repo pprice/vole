@@ -588,8 +588,8 @@ impl Analyzer {
         // RcIterator pointers and returns them directly, so
         // IteratorSource::IteratorInterface is always safe regardless of whether
         // the value is a boxed interface or an already-thin pointer.
-        if let Some(elem_id) = self.unwrap_runtime_iterator_id(iterable_ty_id) {
-            self.type_arena_mut().runtime_iterator(elem_id);
+        if let Some(elem_id) = self.unwrap_iterator_elem_id(iterable_ty_id) {
+            self.type_arena_mut().iterator(elem_id);
             return (
                 elem_id,
                 Some(IterableKind::Iterator {
@@ -600,7 +600,7 @@ impl Analyzer {
         }
         // Class/struct implementing Iterator<T> via extend — box to interface, then wrap
         if let Some(elem_id) = self.extract_custom_iterator_element_type_id(iterable_ty_id) {
-            self.type_arena_mut().runtime_iterator(elem_id);
+            self.type_arena_mut().iterator(elem_id);
             return (
                 elem_id,
                 Some(IterableKind::Iterator {
@@ -611,7 +611,7 @@ impl Analyzer {
         }
         // Class/struct implementing Iterable<T> — call .iter() to get Iterator<T>, then wrap
         if let Some(elem_id) = self.extract_iterable_element_type_id(iterable_ty_id) {
-            self.type_arena_mut().runtime_iterator(elem_id);
+            self.type_arena_mut().iterator(elem_id);
             return (
                 elem_id,
                 Some(IterableKind::Iterator {
