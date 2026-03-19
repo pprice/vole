@@ -290,7 +290,15 @@ fn lower_binary(
                 let rv = ctx.translate(r);
                 classify_comparison(vir_op, lv, rv, lhs_is_optional, ctx.type_table)
             }
-            _ => ComparisonHint::None,
+            _ => {
+                // Fallback: use the VIR-level types of the already-lowered
+                // sub-expressions.  Interface default method bodies may lack
+                // NodeMap entries but the VIR sub-expression types (e.g.
+                // StringLiteral → STRING) are still available.
+                let lv = vole_vir::extract_vir_ty(&lhs).unwrap_or(VirTypeId::UNKNOWN);
+                let rv = vole_vir::extract_vir_ty(&rhs).unwrap_or(VirTypeId::UNKNOWN);
+                classify_comparison(vir_op, lv, rv, lhs_is_optional, ctx.type_table)
+            }
         }
     } else {
         ComparisonHint::None
@@ -308,6 +316,7 @@ fn lower_binary(
         rhs_is_optional,
         lhs_is_unsigned,
         comparison_hint,
+        string_concat: false,
     })
 }
 
@@ -584,6 +593,7 @@ fn lower_compound_assign(
                 rhs_is_optional: false,
                 lhs_is_unsigned,
                 comparison_hint: ComparisonHint::None,
+                string_concat: false,
             });
             Box::new(VirExpr::LocalStore {
                 name: *sym,
@@ -615,6 +625,7 @@ fn lower_compound_assign(
                 rhs_is_optional: false,
                 lhs_is_unsigned,
                 comparison_hint: ComparisonHint::None,
+                string_concat: false,
             });
             Box::new(VirExpr::FieldStore {
                 object: obj_for_store,
@@ -648,6 +659,7 @@ fn lower_compound_assign(
                 rhs_is_optional: false,
                 lhs_is_unsigned,
                 comparison_hint: ComparisonHint::None,
+                string_concat: false,
             });
             Box::new(VirExpr::IndexStore {
                 object: obj_for_store,
@@ -809,7 +821,15 @@ fn lower_interpolated_string(parts: &[StringPart], ctx: &mut LoweringCtx<'_>) ->
                         .cloned()
                         .unwrap_or(StringConversion::Identity)
                 };
-                VirStringPart::Expr { value, conversion }
+                let is_borrowed = matches!(
+                    (&conversion, value.as_ref()),
+                    (StringConversion::Identity, VirExpr::LocalLoad { .. })
+                );
+                VirStringPart::Expr {
+                    value,
+                    conversion,
+                    is_borrowed,
+                }
             }
         })
         .collect();
@@ -1123,7 +1143,10 @@ fn lower_method_dispatch_meta(
                 VirMethodDispatchKind::Builtin(builtin)
             }
             crate::node_map::MethodDispatchKind::ArrayPush => VirMethodDispatchKind::ArrayPush,
-            crate::node_map::MethodDispatchKind::Standard => VirMethodDispatchKind::Standard,
+            crate::node_map::MethodDispatchKind::Standard => {
+                classify_iterator_dispatch(receiver_node_id, ctx)
+                    .unwrap_or(VirMethodDispatchKind::Standard)
+            }
         });
 
     let sema_method = ctx.node_map.get_method(expr_id);
@@ -1251,6 +1274,63 @@ fn lower_method_dispatch_meta(
         implement_method_monomorph,
         receiver_is_interface,
     }
+}
+
+/// Classify whether a method call receiver is an `Iterator<T>` interface or a
+/// concrete type implementing `Iterator<T>`.
+///
+/// Returns `Some(Iterator { .. })` when the receiver IS `Iterator<T>`,
+/// `Some(CustomIterator { .. })` when the receiver is a concrete type that
+/// implements `Iterator<T>`, or `None` when neither applies (standard dispatch).
+///
+/// In generic mode, receiver types may be type parameters — returns `None`
+/// so the rederive pass can classify after monomorphization.
+fn classify_iterator_dispatch(
+    receiver_node_id: vole_identity::NodeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> Option<VirMethodDispatchKind> {
+    if ctx.generic {
+        return None;
+    }
+    let receiver_ty = ctx.node_map.get_type(receiver_node_id)?;
+
+    // Case 1: Receiver IS Iterator<T>.
+    if let Some(elem_ty) = ctx.type_arena.unwrap_iterator_interface_elem(receiver_ty) {
+        let elem_vir = ctx.translate(elem_ty);
+        return Some(VirMethodDispatchKind::Iterator {
+            elem_type: elem_vir,
+        });
+    }
+
+    // Case 2: Receiver is a concrete type implementing Iterator<T>.
+    let iterator_tdef = ctx.type_arena.well_known_iterator_type_def_id()?;
+    let type_def_id = ctx.type_arena.type_def_id(receiver_ty)?;
+    // Skip if the receiver is itself an interface (would use vtable dispatch).
+    if ctx.type_arena.is_interface(receiver_ty) {
+        return None;
+    }
+    let type_args = ctx
+        .entities
+        .get_implementation_type_args(type_def_id, iterator_tdef);
+    let &elem_sema_ty = type_args.first()?;
+    let elem_vir = ctx.translate(elem_sema_ty);
+    // Look up or intern the Iterator<T> interface VirTypeId.
+    let interface_type = ctx
+        .type_table
+        .lookup_iterator_interface_v(elem_vir)
+        .unwrap_or_else(|| {
+            ctx.type_table.intern(
+                vole_vir::types::VirType::Interface {
+                    def: iterator_tdef,
+                    type_args: vec![elem_vir],
+                },
+                None,
+            )
+        });
+    Some(VirMethodDispatchKind::CustomIterator {
+        elem_type: elem_vir,
+        interface_type,
+    })
 }
 
 fn lower_resolved_method(

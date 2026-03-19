@@ -808,8 +808,15 @@ impl<'a> VirPrinter<'a> {
             }
             match part {
                 VirStringPart::Literal(sym) => w!(out, "\"{}\"", self.sym(*sym)),
-                VirStringPart::Expr { value, conversion } => {
+                VirStringPart::Expr {
+                    value,
+                    conversion,
+                    is_borrowed,
+                } => {
                     w!(out, "[{:?}] ", conversion);
+                    if *is_borrowed {
+                        w!(out, "(borrowed) ");
+                    }
                     self.fmt_expr(value, out, ind);
                 }
             }

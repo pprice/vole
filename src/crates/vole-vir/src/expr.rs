@@ -191,6 +191,17 @@ pub enum VirExpr {
         /// templates where operand types are not yet concrete.
         /// Set during VIR lowering; re-derived after monomorphization.
         comparison_hint: ComparisonHint,
+        /// Pre-resolved string concatenation hint.
+        ///
+        /// Set to `true` when this `Add` operation is a string concatenation
+        /// (left operand is a string).  This is always `false` during initial
+        /// VIR lowering — non-generic string `+` is lowered directly to
+        /// `VirExpr::StringConcat`.  This field is set during monomorphization
+        /// rederive when a generic `Add` is instantiated with string operands.
+        ///
+        /// Codegen dispatches to `string_concat()` when this is `true`
+        /// instead of re-detecting `VirTypeId::STRING` at compile time.
+        string_concat: bool,
     },
 
     /// Unary operation (negation, logical/bitwise not).
@@ -587,6 +598,16 @@ pub fn classify_comparison(
     if !is_cmp {
         return ComparisonHint::None;
     }
+    // When one operand is UNKNOWN but the other is STRING, classify as
+    // StringEq.  This covers interface default method bodies where sema
+    // doesn't produce full NodeMap entries but one operand (e.g. a string
+    // literal) has a known type.
+    if (lhs_ty == VirTypeId::UNKNOWN || rhs_ty == VirTypeId::UNKNOWN) && is_eq_ne {
+        if lhs_ty == VirTypeId::STRING || rhs_ty == VirTypeId::STRING {
+            return ComparisonHint::StringEq;
+        }
+        return ComparisonHint::None;
+    }
     if lhs_ty == VirTypeId::UNKNOWN || rhs_ty == VirTypeId::UNKNOWN {
         return ComparisonHint::None;
     }
@@ -624,6 +645,15 @@ pub fn classify_comparison(
         if table.is_string(lhs_ty) {
             return ComparisonHint::StringEq;
         }
+    }
+
+    // If either operand is a type parameter (Param), the concrete type is
+    // unknown at this point.  Return None so the hint is recomputed after
+    // monomorphization substitutes concrete types.
+    if matches!(table.get(lhs_ty), crate::types::VirType::Param { .. })
+        || matches!(table.get(rhs_ty), crate::types::VirType::Param { .. })
+    {
+        return ComparisonHint::None;
     }
 
     // Numeric dispatch: f128, f32/f64, unsigned int, signed int.
@@ -873,6 +903,19 @@ pub enum VirMethodDispatchKind {
     Builtin(crate::BuiltinMethod),
     /// Array push special-case dispatch.
     ArrayPush,
+    /// Iterator<T> interface dispatch — receiver IS an Iterator<T> thin pointer.
+    ///
+    /// `elem_type` is the element `VirTypeId` for the iterator.
+    /// Codegen dispatches directly via `iterator_method` without re-detecting.
+    Iterator { elem_type: VirTypeId },
+    /// Custom iterator dispatch — receiver is a concrete type implementing Iterator<T>.
+    ///
+    /// Codegen boxes the receiver as `Iterator<T>` before dispatching via `iterator_method`.
+    /// `elem_type` is `T`, `interface_type` is the `Iterator<T>` interface VirTypeId.
+    CustomIterator {
+        elem_type: VirTypeId,
+        interface_type: VirTypeId,
+    },
     /// Standard method dispatch path.
     Standard,
 }
@@ -1435,9 +1478,15 @@ pub enum VirStringPart {
     /// A literal string fragment (e.g. the `"hello "` in `"hello {x}"`).
     Literal(Symbol),
     /// An expression with its string-conversion strategy.
+    ///
+    /// `is_borrowed` is true when the expression is a simple variable
+    /// reference (LocalLoad) with Identity conversion, meaning codegen
+    /// should preserve the borrowed lifecycle instead of treating the
+    /// result as owned.
     Expr {
         value: VirRef,
         conversion: StringConversion,
+        is_borrowed: bool,
     },
 }
 

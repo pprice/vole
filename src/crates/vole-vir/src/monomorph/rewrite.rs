@@ -800,9 +800,14 @@ fn rewrite_capture(cap: &VirCapture, ctx: &RewriteCtx) -> VirCapture {
 fn rewrite_string_part(part: &VirStringPart, ctx: &RewriteCtx) -> VirStringPart {
     match part {
         VirStringPart::Literal(s) => VirStringPart::Literal(*s),
-        VirStringPart::Expr { value, conversion } => VirStringPart::Expr {
+        VirStringPart::Expr {
+            value,
+            conversion,
+            is_borrowed,
+        } => VirStringPart::Expr {
             value: rewrite_ref(value, ctx),
             conversion: conversion.clone(),
+            is_borrowed: *is_borrowed,
         },
     }
 }

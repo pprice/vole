@@ -404,15 +404,18 @@ fn rederive_expr(
             // Re-derive receiver_is_interface from the now-concrete receiver type.
             if let Some(recv_vir_ty) = extract_vir_ty(receiver) {
                 dispatch.receiver_is_interface = table.is_interface(recv_vir_ty);
-                // Re-derive dispatch_kind when it was not set in the generic template.
-                if dispatch.dispatch_kind.is_none()
-                    && let Some(ctx) = call_ctx
-                {
-                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
+                // Re-derive dispatch_kind when it was not set in the generic
+                // template, OR when it was Standard but the concrete receiver
+                // is now Iterator<T> or a custom iterator implementor.
+                let should_rederive = dispatch.dispatch_kind.is_none()
+                    || dispatch.dispatch_kind == Some(VirMethodDispatchKind::Standard);
+                if should_rederive && let Some(ctx) = call_ctx {
+                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind_with_entities(
                         recv_vir_ty,
                         *method,
                         table,
                         ctx.interner,
+                        entities,
                     ));
                 }
             }
@@ -423,10 +426,16 @@ fn rederive_expr(
             object,
             field,
             storage,
+            vir_ty,
             ..
         } => {
             rederive_ref(object, table, ret_ty, entities, call_ctx);
             rederive_field_storage(object, *field, storage, table, entities);
+            // Rederive field type from the concrete object type.
+            // When the VIR was lowered from a generic template's NodeMap,
+            // vir_ty may be a Param placeholder. Resolve it from entity
+            // metadata if the object type is now concrete.
+            rederive_field_vir_ty(object, *field, vir_ty, table, entities);
         }
         VirExpr::FieldStore {
             object,
@@ -623,15 +632,18 @@ fn rederive_expr(
             // Re-derive receiver_is_interface from the now-concrete object type.
             if let Some(obj_vir_ty) = extract_vir_ty(object) {
                 dispatch.receiver_is_interface = table.is_interface(obj_vir_ty);
-                // Re-derive dispatch_kind when it was not set in the generic template.
-                if dispatch.dispatch_kind.is_none()
-                    && let Some(ctx) = call_ctx
-                {
-                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
+                // Re-derive dispatch_kind when it was not set in the generic
+                // template, OR when it was Standard but the concrete receiver
+                // is now Iterator<T> or a custom iterator implementor.
+                let should_rederive = dispatch.dispatch_kind.is_none()
+                    || dispatch.dispatch_kind == Some(VirMethodDispatchKind::Standard);
+                if should_rederive && let Some(ctx) = call_ctx {
+                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind_with_entities(
                         obj_vir_ty,
                         *method,
                         table,
                         ctx.interner,
+                        entities,
                     ));
                 }
             }
@@ -1204,6 +1216,46 @@ pub fn rederive_method_dispatch_kind(
     if table.is_range(recv_vir_ty) && name == "iter" {
         return VirMethodDispatchKind::Builtin(BuiltinMethod::RangeIter);
     }
+    // Check if the receiver IS Iterator<T>.
+    if let Some(elem_type) = table.unwrap_iterator_interface(recv_vir_ty) {
+        return VirMethodDispatchKind::Iterator { elem_type };
+    }
+    VirMethodDispatchKind::Standard
+}
+
+/// Extended version of `rederive_method_dispatch_kind` that also detects
+/// concrete types implementing `Iterator<T>` (custom iterators) using
+/// entity metadata.
+///
+/// Falls back to `rederive_method_dispatch_kind` for all non-custom-iterator
+/// cases.
+pub fn rederive_method_dispatch_kind_with_entities(
+    recv_vir_ty: VirTypeId,
+    method_name: Symbol,
+    table: &VirTypeTable,
+    interner: &Interner,
+    entities: &VirEntityMetadata,
+) -> VirMethodDispatchKind {
+    let base = rederive_method_dispatch_kind(recv_vir_ty, method_name, table, interner);
+    if base != VirMethodDispatchKind::Standard {
+        return base;
+    }
+    // Check if the receiver is a concrete type implementing Iterator<T>.
+    if !table.is_interface(recv_vir_ty)
+        && let Some(iterator_tdef) = table.iterator_type_def()
+        && let Some(type_def_id) = table.type_def_id(recv_vir_ty)
+    {
+        let type_args = entities.implementation_type_args(type_def_id, iterator_tdef);
+        if let Some(&elem_type) = type_args.first() {
+            let interface_type = table
+                .lookup_iterator_interface_v(elem_type)
+                .unwrap_or(recv_vir_ty); // fallback — should not happen
+            return VirMethodDispatchKind::CustomIterator {
+                elem_type,
+                interface_type,
+            };
+        }
+    }
     VirMethodDispatchKind::Standard
 }
 
@@ -1506,13 +1558,24 @@ fn rederive_string_parts(
     call_ctx: Option<&RederiveCallCtx<'_>>,
 ) {
     for part in parts {
-        if let VirStringPart::Expr { value, conversion } = part {
+        if let VirStringPart::Expr {
+            value,
+            conversion,
+            is_borrowed,
+        } = part
+        {
             rederive_ref(value, table, ret_ty, entities, call_ctx);
             // Extract the expression's VirTypeId to re-derive the conversion.
             let vir_ty = extract_vir_ty(value);
             if let Some(vir_ty) = vir_ty {
                 rederive_string_conversion(conversion, vir_ty, table);
             }
+            // Re-derive is_borrowed: a LocalLoad with Identity conversion
+            // produces a borrowed value; everything else is owned.
+            *is_borrowed = matches!(
+                (&*conversion, value.as_ref()),
+                (StringConversion::Identity, VirExpr::LocalLoad { .. })
+            );
         }
     }
 }
@@ -1575,7 +1638,10 @@ fn nominal_type_def_from_vir_type(
 }
 
 /// Extract the VirTypeId from a VirExpr, if it carries one.
-fn extract_vir_ty(expr: &VirExpr) -> Option<VirTypeId> {
+///
+/// Returns `Some(vir_ty)` for expressions with a type field, and `None`
+/// for void/side-effect-only expressions (RcInc, RcDec, stores, etc.).
+pub fn extract_vir_ty(expr: &VirExpr) -> Option<VirTypeId> {
     match expr {
         // Variants with a `vir_ty` field
         VirExpr::IntLiteral { vir_ty, .. }
@@ -1630,6 +1696,56 @@ fn extract_vir_ty(expr: &VirExpr) -> Option<VirTypeId> {
         | VirExpr::RcDec { .. }
         | VirExpr::RcMove { .. }
         | VirExpr::Yield { .. } => None,
+    }
+}
+
+/// Re-derive a `FieldLoad.vir_ty` from the concrete object type's field
+/// metadata.
+///
+/// When the VIR was lowered from a generic template's NodeMap, the field's
+/// `vir_ty` may be a `VirType::Param` placeholder (e.g., `T` instead of
+/// `string`).  If the object type is now concrete (struct or class), look
+/// up the field's actual type from entity metadata and update `vir_ty`.
+fn rederive_field_vir_ty(
+    object: &VirRef,
+    field: Symbol,
+    vir_ty: &mut VirTypeId,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) {
+    // Only rederive if the current type is non-concrete (Param or Unknown).
+    if !matches!(table.get(*vir_ty), VirType::Param { .. } | VirType::Unknown) {
+        return;
+    }
+    let Some(obj_vir_ty) = extract_vir_ty(object) else {
+        return;
+    };
+    if let Some(field_ty) = resolve_field_type(obj_vir_ty, field, table, entities) {
+        *vir_ty = field_ty;
+    }
+}
+
+/// Resolve a field's VirTypeId from the concrete object type and field symbol.
+///
+/// Returns `None` if the type is not a struct/class, or the field cannot be
+/// found in the entity metadata.
+fn resolve_field_type(
+    obj_vir_ty: VirTypeId,
+    field: Symbol,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+) -> Option<VirTypeId> {
+    match table.get(obj_vir_ty) {
+        VirType::Struct { def, .. } => {
+            let fd = entities.find_field_by_symbol(*def, field)?;
+            Some(fd.vir_ty)
+        }
+        VirType::Class { def, .. } => {
+            let (_, field_vir_ty) =
+                compute_class_physical_slot_and_type(*def, field, table, entities)?;
+            Some(field_vir_ty)
+        }
+        _ => None,
     }
 }
 
@@ -2369,6 +2485,7 @@ mod tests {
                 conversion: StringConversion::Generic {
                     type_id: sema_type_id(10),
                 },
+                is_borrowed: false,
             }],
         });
 
@@ -2399,6 +2516,7 @@ mod tests {
                 conversion: StringConversion::Generic {
                     type_id: sema_type_id(10),
                 },
+                is_borrowed: false,
             }],
         });
 
@@ -2429,6 +2547,7 @@ mod tests {
                 conversion: StringConversion::Generic {
                     type_id: sema_type_id(10),
                 },
+                is_borrowed: false,
             }],
         });
 
@@ -2459,6 +2578,7 @@ mod tests {
                 conversion: StringConversion::Generic {
                     type_id: sema_type_id(10),
                 },
+                is_borrowed: false,
             }],
         });
 
@@ -2489,6 +2609,7 @@ mod tests {
                 conversion: StringConversion::Generic {
                     type_id: sema_type_id(10),
                 },
+                is_borrowed: false,
             }],
         });
 
@@ -2515,6 +2636,7 @@ mod tests {
                 conversion: StringConversion::Generic {
                     type_id: sema_type_id(10),
                 },
+                is_borrowed: false,
             }],
         });
 
@@ -2552,6 +2674,7 @@ mod tests {
                 conversion: StringConversion::Generic {
                     type_id: sema_type_id(10),
                 },
+                is_borrowed: false,
             }],
         });
 
@@ -2580,6 +2703,7 @@ mod tests {
                     vir_ty: VirTypeId::I64,
                 }),
                 conversion: StringConversion::F64ToString,
+                is_borrowed: false,
             }],
         });
 
@@ -2610,6 +2734,7 @@ mod tests {
                 conversion: StringConversion::Generic {
                     type_id: sema_type_id(10),
                 },
+                is_borrowed: false,
             }],
         });
 
@@ -2916,6 +3041,7 @@ mod tests {
                         conversion: StringConversion::Generic {
                             type_id: sema_type_id(10),
                         },
+                        is_borrowed: false,
                     }],
                 })),
             },

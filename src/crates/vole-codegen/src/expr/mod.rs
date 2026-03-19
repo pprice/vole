@@ -420,6 +420,7 @@ impl Cg<'_, '_, '_> {
                 rhs_is_optional,
                 lhs_is_unsigned,
                 comparison_hint,
+                string_concat,
                 ..
             } => self.compile_vir_binary_op(
                 *op,
@@ -431,6 +432,7 @@ impl Cg<'_, '_, '_> {
                 *rhs_is_optional,
                 *lhs_is_unsigned,
                 *comparison_hint,
+                *string_concat,
             ),
             VirExpr::UnaryOp { op, operand, .. } => self.compile_vir_unary_op(*op, operand),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
@@ -775,12 +777,32 @@ impl Cg<'_, '_, '_> {
         rhs_is_optional: bool,
         lhs_is_unsigned: bool,
         comparison_hint: ComparisonHint,
+        is_string_concat: bool,
     ) -> CodegenResult<CompiledValue> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
-        if op == VirBinOp::Add && left.type_id == VirTypeId::STRING {
+        // String concatenation: dispatched via the VIR-level hint set
+        // during lowering or monomorphization rederive.
+        if is_string_concat {
             return self.string_concat(left, right);
         }
+        // When comparison_hint is None (generic templates with Param types
+        // that weren't rederived), recompute from the now-concrete compiled
+        // VirTypeIds.  This replaces the old blanket STRING re-detection
+        // guard with a targeted fallback for the None case only.
+        let effective_hint = if comparison_hint == ComparisonHint::None
+            && matches!(op, VirBinOp::Eq | VirBinOp::Ne)
+        {
+            vole_vir::classify_comparison(
+                op,
+                left.type_id,
+                right.type_id,
+                lhs_is_optional,
+                &self.env.analyzed.type_table,
+            )
+        } else {
+            comparison_hint
+        };
         self.binary_op(
             left,
             right,
@@ -790,7 +812,7 @@ impl Cg<'_, '_, '_> {
             lhs_is_optional,
             rhs_is_optional,
             lhs_is_unsigned,
-            comparison_hint,
+            effective_hint,
         )
     }
 
@@ -887,11 +909,15 @@ impl Cg<'_, '_, '_> {
                     let s = self.resolve_symbol(*sym).to_string();
                     (self.string_literal(&s)?.value, true)
                 }
-                VirStringPart::Expr { value, conversion } => {
+                VirStringPart::Expr {
+                    value,
+                    conversion,
+                    is_borrowed,
+                } => {
                     let compiled = self.compile_vir_expr(value)?;
                     #[expect(clippy::wildcard_enum_match_arm)]
                     match conversion {
-                        StringConversion::Identity => (compiled.value, compiled.is_owned()),
+                        StringConversion::Identity => (compiled.value, !is_borrowed),
                         _ => (self.apply_string_conversion(compiled, conversion)?, true),
                     }
                 }
