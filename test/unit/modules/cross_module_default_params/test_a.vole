@@ -1,0 +1,32 @@
+// Test file A: imports shared_lib and calls functions with default params.
+// Regression test for vol-cd3b.
+
+let lib = import "./shared_lib.vole"
+
+tests {
+    test "default param - use default from file A" {
+        assert(lib.multiply(16) == 48)
+    }
+
+    test "default param - override default from file A" {
+        assert(lib.multiply(16, 5) == 80)
+    }
+
+    test "string default param from file A" {
+        assert(lib.greet("world") == "hello world")
+    }
+
+    test "string default param - override from file A" {
+        assert(lib.greet("world", "hi") == "hi world")
+    }
+
+    test "multiple default params from file A" {
+        assert(lib.add_three(1) == 111)
+        assert(lib.add_three(1, 2) == 103)
+        assert(lib.add_three(1, 2, 3) == 6)
+    }
+
+    test "intra-module call with default from file A" {
+        assert(lib.caller() == 48)
+    }
+}

@@ -49,7 +49,12 @@ impl EntityRegistry {
         // If this function was already registered (shared CompilationDb across
         // multiple files), return the existing FunctionId so that VIR caches
         // keyed by FunctionId remain valid.
+        //
+        // Update `param_defaults` to the new parse's AST nodes so that VIR
+        // lowering's `fill_default_args` can find their types in the current
+        // NodeMap (each analysis produces a fresh NodeMap with new NodeIds).
         if let Some(&existing_id) = self.function_by_name.get(&full_name_id) {
+            self.function_defs[existing_id.index() as usize].param_defaults = param_defaults;
             return existing_id;
         }
 

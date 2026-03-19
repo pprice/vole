@@ -1,0 +1,30 @@
+// Test file B: also imports shared_lib and calls functions with default params.
+// Both test_a.vole and test_b.vole import the same module, exercising the
+// shared CompilationDb path where FunctionId dedup caused stale param_defaults.
+// Regression test for vol-cd3b.
+
+let lib = import "./shared_lib.vole"
+
+tests {
+    test "default param - use default from file B" {
+        assert(lib.multiply(10) == 30)
+    }
+
+    test "default param - override default from file B" {
+        assert(lib.multiply(10, 7) == 70)
+    }
+
+    test "string default param from file B" {
+        assert(lib.greet("vole") == "hello vole")
+    }
+
+    test "multiple default params from file B" {
+        assert(lib.add_three(5) == 115)
+        assert(lib.add_three(5, 20) == 125)
+        assert(lib.add_three(5, 20, 30) == 55)
+    }
+
+    test "intra-module call with default from file B" {
+        assert(lib.caller() == 48)
+    }
+}

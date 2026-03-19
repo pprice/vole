@@ -1,0 +1,20 @@
+// Shared module with functions that have default parameters.
+// Regression test for vol-cd3b: default params in cross-module functions
+// must work when the module is re-analyzed in shared CompilationDb mode.
+
+func multiply(x: i64, factor: i64 = 3) -> i64 {
+    return x * factor
+}
+
+func greet(name: string, prefix: string = "hello") -> string {
+    return prefix + " " + name
+}
+
+func add_three(a: i64, b: i64 = 10, c: i64 = 100) -> i64 {
+    return a + b + c
+}
+
+func caller() -> i64 {
+    // Call with default within the same module
+    return multiply(16)
+}
