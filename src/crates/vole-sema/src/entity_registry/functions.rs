@@ -29,7 +29,11 @@ impl EntityRegistry {
         )
     }
 
-    /// Register a new free function with default expressions and param names
+    /// Register a new free function with default expressions and param names.
+    ///
+    /// If a function with the same `full_name_id` was already registered (e.g.,
+    /// the same module was analyzed by multiple files sharing a `CompilationDb`),
+    /// returns the existing `FunctionId` to keep VIR caches consistent.
     #[expect(clippy::too_many_arguments)]
     pub fn register_function_full(
         &mut self,
@@ -42,6 +46,13 @@ impl EntityRegistry {
         param_names: Vec<String>,
         is_external: bool,
     ) -> FunctionId {
+        // If this function was already registered (shared CompilationDb across
+        // multiple files), return the existing FunctionId so that VIR caches
+        // keyed by FunctionId remain valid.
+        if let Some(&existing_id) = self.function_by_name.get(&full_name_id) {
+            return existing_id;
+        }
+
         let id = FunctionId::new(self.function_defs.len() as u32);
         self.function_defs.push(FunctionDef {
             id,

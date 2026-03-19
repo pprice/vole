@@ -1,0 +1,21 @@
+// Test file B: also imports shared_lib and calls its functions.
+// Both test_a.vole and test_b.vole import the same module, exercising
+// the shared CompilationDb path where FunctionIds could get duplicated.
+// Regression test for vol-qmjf.
+
+let lib = import "./shared_lib.vole"
+
+tests {
+    test "shared lib add from file B" {
+        assert(lib.add(10, 20) == 30)
+    }
+
+    test "shared lib greet from file B" {
+        assert(lib.greet("vole") == "hello vole")
+    }
+
+    test "shared lib Point from file B" {
+        let p = lib.Point { x: 5, y: 15 }
+        assert(p.distance() == 20)
+    }
+}

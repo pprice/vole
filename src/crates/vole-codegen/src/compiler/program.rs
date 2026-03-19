@@ -1385,7 +1385,12 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Build params from VIR function param Symbols + pre-resolved TypeIds
-        let vir = vir_func.expect("VIR must be available for module function");
+        let vir = vir_func.unwrap_or_else(|| {
+            panic!(
+                "VIR must be available for module function '{}' (func_id={:?})",
+                display_name, semantic_func_id,
+            )
+        });
         let params: Vec<(Symbol, VirTypeId, types::Type)> = vir
             .params
             .iter()

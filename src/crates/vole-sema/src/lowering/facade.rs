@@ -1071,10 +1071,16 @@ where
 
     let (vir_monomorph_map, vir_function_map, vir_method_map) = {
         let _t = compile_timing!(DEBUG, "build_lookup_maps").entered();
+        let mut method_map = build_vir_method_map(&vir_functions);
+        // When modules are re-analyzed with a shared CompilationDb (multi-file
+        // test mode), methods get new MethodIds but their VIR bodies are cached
+        // with old MethodIds.  Add aliases so codegen can find VIR bodies using
+        // the current entity registry's MethodIds.
+        add_method_id_aliases(&mut method_map, entities);
         (
             build_vir_monomorph_map(&vir_functions),
             build_vir_function_map(&vir_functions),
-            build_vir_method_map(&vir_functions),
+            method_map,
         )
     };
 
@@ -1530,6 +1536,35 @@ fn build_vir_method_map(vir_functions: &[VirFunction]) -> FxHashMap<MethodId, us
         }
     }
     map
+}
+
+/// Add method ID aliases to handle re-analysis in shared CompilationDb mode.
+///
+/// When modules are re-analyzed by different files sharing a `CompilationDb`,
+/// methods get new `MethodId`s but their VIR bodies are cached with the old IDs.
+/// This function adds alias entries so codegen can find VIR bodies using the
+/// entity registry's current `MethodId`s.
+fn add_method_id_aliases<E: LoweringEntityLookup>(
+    method_map: &mut FxHashMap<MethodId, usize>,
+    entities: &E,
+) {
+    let registry = entities.as_entity_registry();
+    // Collect aliases first to avoid borrowing issues
+    let aliases: Vec<(MethodId, usize)> = method_map
+        .iter()
+        .filter_map(|(&old_method_id, &idx)| {
+            let method_def = registry.method_defs.get(old_method_id.index() as usize)?;
+            let &current_id = registry.method_by_full_name.get(&method_def.full_name_id)?;
+            if current_id != old_method_id {
+                Some((current_id, idx))
+            } else {
+                None
+            }
+        })
+        .collect();
+    for (new_id, idx) in aliases {
+        method_map.entry(new_id).or_insert(idx);
+    }
 }
 
 /// Build VIR implement-dispatch metadata from sema's `ImplementRegistry`.

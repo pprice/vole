@@ -1,0 +1,19 @@
+// Test file A: imports shared_lib and calls its functions.
+// Part of regression test for vol-qmjf.
+
+let lib = import "./shared_lib.vole"
+
+tests {
+    test "shared lib add from file A" {
+        assert(lib.add(2, 3) == 5)
+    }
+
+    test "shared lib greet from file A" {
+        assert(lib.greet("world") == "hello world")
+    }
+
+    test "shared lib Point from file A" {
+        let p = lib.Point { x: 10, y: 20 }
+        assert(p.distance() == 30)
+    }
+}

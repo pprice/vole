@@ -1,0 +1,19 @@
+// Shared module imported by multiple test files.
+// Regression test for vol-qmjf: VIR must be available for module function.
+
+func add(a: i64, b: i64) -> i64 {
+    return a + b
+}
+
+func greet(name: string) -> string {
+    return "hello " + name
+}
+
+class Point {
+    x: i64,
+    y: i64,
+
+    func distance() -> i64 {
+        return self.x + self.y
+    }
+}
