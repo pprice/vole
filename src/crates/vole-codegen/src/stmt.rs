@@ -131,7 +131,7 @@ impl Cg<'_, '_, '_> {
         if let Some(hint_type_id) = sentinel_hint_type_id
             && self.vir_query_is_sentinel_v(resolved_value_vir)
         {
-            let hint_vir = self.vir_lookup_or_compat(hint_type_id);
+            let hint_vir = self.vir_lookup(hint_type_id);
             if let Some(pos) = variants.iter().position(|&v| v == hint_vir) {
                 return Ok((pos, value.value, hint_vir));
             }
@@ -386,7 +386,7 @@ impl Cg<'_, '_, '_> {
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
         // Bridge: convert union_type_id to VirTypeId and delegate to _v variant.
-        let union_vir = self.vir_lookup_or_compat(union_type_id);
+        let union_vir = self.vir_lookup(union_type_id);
         let result =
             self.construct_union_id_with_hint_v(value, union_vir, sentinel_hint_type_id)?;
         // Re-wrap with original TypeId to preserve caller semantics.

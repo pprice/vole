@@ -19,7 +19,7 @@ use crate::ops::{sextend_const, uextend_const};
 use vole_identity::{BoxingStrategy, Interner, NameId, NameTable, Symbol, TypeDefId, VirTypeId};
 use vole_vir::entity_metadata::VirEntityMetadata;
 use vole_vir::type_table::VirTypeTable;
-use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};
+use vole_vir::types::{VirPrimitiveKind, VirType};
 
 use super::vir_struct_helpers::{
     VirStructEntityLookup, vir_struct_flat_slot_count, vir_struct_total_byte_size,
@@ -103,16 +103,6 @@ fn vir_primitive_to_cranelift(kind: VirPrimitiveKind, pointer_type: Type) -> Typ
     }
 }
 
-/// Check if a `VirTypeId` is reference-counted (needs RC management).
-pub(crate) fn vir_is_rc(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    table.get_layout(vir_ty).is_some_and(|l| l.is_rc)
-}
-
-/// Check if a `VirTypeId` lives on the heap.
-pub(crate) fn vir_is_heap(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    table.get_layout(vir_ty).is_some_and(|l| l.is_heap)
-}
-
 /// Get the register slot count for a `VirTypeId`.
 ///
 /// Returns 0 for void, 1 for most types, 2 for wide types (i128).
@@ -120,16 +110,6 @@ pub(crate) fn vir_slot_count(vir_ty: VirTypeId, table: &VirTypeTable) -> usize {
     table
         .get_layout(vir_ty)
         .map_or(1, |l| l.slot_count as usize)
-}
-
-/// Get the `StorageClass` for a `VirTypeId`.
-///
-/// Returns `StorageClass::Pointer` as fallback if no layout is available
-/// (should not happen post-monomorphization).
-pub(crate) fn vir_storage_class(vir_ty: VirTypeId, table: &VirTypeTable) -> StorageClass {
-    table
-        .get_layout(vir_ty)
-        .map_or(StorageClass::Pointer, |l| l.storage)
 }
 
 /// Get the byte size of a field for a `VirTypeId`: 16 for wide types, 8 for all others.
@@ -306,16 +286,6 @@ pub(crate) fn vir_is_function(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
     matches!(table.get(vir_ty), VirType::Function { .. })
 }
 
-/// Check if a `VirTypeId` is an error type.
-pub(crate) fn vir_is_error(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    matches!(table.get(vir_ty), VirType::Error { .. })
-}
-
-/// Check if a `VirTypeId` is an `Iterator<T>` interface (thin pointer).
-pub(crate) fn vir_is_iterator_interface(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    table.is_iterator_interface(vir_ty)
-}
-
 /// Check if a `VirTypeId` is the unknown (boxed TaggedValue) type.
 pub(crate) fn vir_is_unknown(vir_ty: VirTypeId, _table: &VirTypeTable) -> bool {
     vir_ty == VirTypeId::UNKNOWN
@@ -366,16 +336,6 @@ pub(crate) fn vir_unwrap_nominal(vir_ty: VirTypeId, table: &VirTypeTable) -> Opt
         | VirType::Interface { def, .. } => Some(*def),
         _ => None,
     }
-}
-
-/// Unwrap an `Iterator<T>` interface, returning the element `VirTypeId`.
-///
-/// Returns `None` if the type is not an `Iterator<T>` interface.
-pub(crate) fn vir_unwrap_iterator_interface(
-    vir_ty: VirTypeId,
-    table: &VirTypeTable,
-) -> Option<VirTypeId> {
-    table.unwrap_iterator_interface(vir_ty)
 }
 
 /// Unwrap a function type, returning the return type `VirTypeId`.
@@ -1588,7 +1548,7 @@ fn vir_compute_type_size_aligned(
 mod tests {
     use super::*;
     use vole_vir::type_table::VirTypeTable;
-    use vole_vir::types::VirTypeLayout;
+    use vole_vir::types::{StorageClass, VirTypeLayout};
 
     fn test_table() -> VirTypeTable {
         VirTypeTable::new()
@@ -1821,36 +1781,6 @@ mod tests {
     }
 
     #[test]
-    fn is_rc_string() {
-        let table = test_table();
-        assert!(vir_is_rc(VirTypeId::STRING, &table));
-    }
-
-    #[test]
-    fn is_rc_i64_false() {
-        let table = test_table();
-        assert!(!vir_is_rc(VirTypeId::I64, &table));
-    }
-
-    #[test]
-    fn is_rc_handle() {
-        let table = test_table();
-        assert!(vir_is_rc(VirTypeId::HANDLE, &table));
-    }
-
-    #[test]
-    fn is_heap_string() {
-        let table = test_table();
-        assert!(vir_is_heap(VirTypeId::STRING, &table));
-    }
-
-    #[test]
-    fn is_heap_i64_false() {
-        let table = test_table();
-        assert!(!vir_is_heap(VirTypeId::I64, &table));
-    }
-
-    #[test]
     fn slot_count_i64() {
         let table = test_table();
         assert_eq!(vir_slot_count(VirTypeId::I64, &table), 1);
@@ -1866,51 +1796,6 @@ mod tests {
     fn slot_count_void() {
         let table = test_table();
         assert_eq!(vir_slot_count(VirTypeId::VOID, &table), 0);
-    }
-
-    #[test]
-    fn storage_class_i64() {
-        let table = test_table();
-        assert_eq!(
-            vir_storage_class(VirTypeId::I64, &table),
-            StorageClass::Word
-        );
-    }
-
-    #[test]
-    fn storage_class_f64() {
-        let table = test_table();
-        assert_eq!(
-            vir_storage_class(VirTypeId::F64, &table),
-            StorageClass::Float
-        );
-    }
-
-    #[test]
-    fn storage_class_string() {
-        let table = test_table();
-        assert_eq!(
-            vir_storage_class(VirTypeId::STRING, &table),
-            StorageClass::Pointer
-        );
-    }
-
-    #[test]
-    fn storage_class_i128() {
-        let table = test_table();
-        assert_eq!(
-            vir_storage_class(VirTypeId::I128, &table),
-            StorageClass::Wide
-        );
-    }
-
-    #[test]
-    fn storage_class_void() {
-        let table = test_table();
-        assert_eq!(
-            vir_storage_class(VirTypeId::VOID, &table),
-            StorageClass::Void
-        );
     }
 
     #[test]
@@ -2131,45 +2016,6 @@ mod tests {
     }
 
     #[test]
-    fn error_predicate() {
-        let mut table = test_table();
-        let err_ty = table.intern(
-            VirType::Error {
-                def: TypeDefId::new(50),
-            },
-            None,
-        );
-        assert!(vir_is_error(err_ty, &table));
-        assert!(!vir_is_error(VirTypeId::I64, &table));
-    }
-
-    #[test]
-    fn iterator_interface_predicate() {
-        let mut table = test_table();
-        let iter_def = TypeDefId::new(99);
-        table.set_iterator_type_def(iter_def);
-        let iface_ty = table.intern(
-            VirType::Interface {
-                def: iter_def,
-                type_args: vec![VirTypeId::STRING],
-            },
-            None,
-        );
-        assert!(vir_is_iterator_interface(iface_ty, &table));
-        assert!(!vir_is_iterator_interface(VirTypeId::I64, &table));
-        // Non-Iterator interface is not an iterator interface.
-        let other_def = TypeDefId::new(100);
-        let other_iface = table.intern(
-            VirType::Interface {
-                def: other_def,
-                type_args: vec![VirTypeId::I64],
-            },
-            None,
-        );
-        assert!(!vir_is_iterator_interface(other_iface, &table));
-    }
-
-    #[test]
     fn unknown_predicate() {
         let table = test_table();
         assert!(vir_is_unknown(VirTypeId::UNKNOWN, &table));
@@ -2190,7 +2036,6 @@ mod tests {
         assert!(!vir_is_struct(VirTypeId::STRING, &table));
         assert!(!vir_is_interface(VirTypeId::STRING, &table));
         assert!(!vir_is_nil(VirTypeId::STRING, &table));
-        assert!(!vir_is_error(VirTypeId::STRING, &table));
         assert!(vir_is_string(VirTypeId::STRING, &table));
     }
 
@@ -2317,29 +2162,6 @@ mod tests {
         assert!(vir_unwrap_nominal(VirTypeId::I64, &table).is_none());
         assert!(vir_unwrap_nominal(VirTypeId::STRING, &table).is_none());
         assert!(vir_unwrap_nominal(VirTypeId::UNKNOWN, &table).is_none());
-    }
-
-    // -----------------------------------------------------------------------
-    // vir_unwrap_iterator_interface
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn unwrap_iterator_interface() {
-        let mut table = test_table();
-        let iter_def = TypeDefId::new(99);
-        table.set_iterator_type_def(iter_def);
-        let iface_ty = table.intern(
-            VirType::Interface {
-                def: iter_def,
-                type_args: vec![VirTypeId::I64],
-            },
-            None,
-        );
-        assert_eq!(
-            vir_unwrap_iterator_interface(iface_ty, &table),
-            Some(VirTypeId::I64)
-        );
-        assert!(vir_unwrap_iterator_interface(VirTypeId::I64, &table).is_none());
     }
 
     // -----------------------------------------------------------------------

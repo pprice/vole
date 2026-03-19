@@ -200,21 +200,6 @@ impl Cg<'_, '_, '_> {
         None
     }
 
-    /// TEMP(N279-C): some VIR-resolved method signatures still include an
-    /// implicit receiver (`self`) parameter. Call sites pass the receiver
-    /// separately, so drop that leading slot only when the call shape shows an
-    /// extra parameter beyond provided args.
-    /// TEMP(N279-C): VIR resolves SelfType during lowering, so post-VIR
-    /// signatures never contain Self placeholder parameters.  This is now
-    /// a simple passthrough but callers still need the Vec allocation.
-    fn normalize_method_param_type_ids_for_call(
-        &self,
-        param_type_ids: &[TypeId],
-        _provided_arg_count: usize,
-    ) -> Vec<TypeId> {
-        param_type_ids.to_vec()
-    }
-
     /// Resolve method parameter TypeIds to concrete call-site types.
     ///
     /// Applies both function-level substitutions and receiver-generic
@@ -712,7 +697,7 @@ impl Cg<'_, '_, '_> {
                 let arg_count = mc.arg_count();
                 let param_type_ids = self
                     .resolved_method_param_type_ids(resolved)
-                    .map(|ids| self.normalize_method_param_type_ids_for_call(&ids, arg_count));
+                    .map(|ids| ids.to_vec());
                 if let Some(param_type_ids) = &param_type_ids {
                     for (i, &param_type_id) in param_type_ids.iter().enumerate().take(arg_count) {
                         let compiled =
@@ -1168,7 +1153,7 @@ impl Cg<'_, '_, '_> {
         let final_arg_source = mc.arg_source();
         let final_arg_count = mc.arg_count();
         let param_type_ids = param_type_ids
-            .map(|ids| self.normalize_method_param_type_ids_for_call(&ids, final_arg_count))
+            .map(|ids| ids.to_vec())
             .map(|ids| self.concretize_method_param_type_ids_for_receiver_v(obj.type_id, &ids));
         let mapping_is_valid = |mapping: &[Option<usize>]| {
             let mut method_param_offset = 0usize;

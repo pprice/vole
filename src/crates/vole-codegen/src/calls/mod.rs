@@ -144,7 +144,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .return_type(func_key)
             .expect("INTERNAL: function call: missing return type in registry");
         let return_type_id = return_type_id_override.unwrap_or(callee_return_type_id);
-        let return_vir_ty = self.vir_lookup_or_compat(return_type_id);
+        let return_vir_ty = self.vir_lookup(return_type_id);
 
         let is_sret = self.is_sret_struct_return(callee_return_type_id);
 

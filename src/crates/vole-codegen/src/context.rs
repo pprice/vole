@@ -474,26 +474,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         lookup.unwrap_or(VirTypeId::UNKNOWN)
     }
 
-    /// Look up the VirTypeId for a sema TypeId.
-    ///
-    /// Returns the VirTypeId from VirTypeTable. For types that cannot be
-    /// properly mapped (Placeholder, sema-internal), returns
-    /// `VirTypeId::UNKNOWN`. Callers that need type substitution should use
-    /// `try_substitute_type_v` which handles the UNKNOWN case by falling
-    /// back to sema-level substitution.
-    #[inline]
-    pub fn vir_lookup_or_compat(&self, type_id: TypeId) -> VirTypeId {
-        self.vir_lookup(type_id)
-    }
-
     /// Convert a sema `TypeId` to a `VirTypeId` for interior codegen use.
     ///
     /// Boundary bridge: interior codegen should call this instead of
-    /// `vir_lookup` or `vir_lookup_or_compat` directly. Returns
-    /// `VirTypeId::UNKNOWN` for unmapped types (safe for all `_v` query
-    /// methods). Callers that need compat-encoded round-tripping (variable
-    /// registration, substitution) should use the dedicated bridges
-    /// (`bind_var`, `register_rc_local_id`, `coerce_to_type_id`) instead.
+    /// `vir_lookup` directly. Returns `VirTypeId::UNKNOWN` for unmapped
+    /// types (safe for all `_v` query methods). Callers that need
+    /// compat-encoded round-tripping (variable registration, substitution)
+    /// should use the dedicated bridges (`bind_var`,
+    /// `register_rc_local_id`, `coerce_to_type_id`) instead.
     #[inline]
     pub fn to_vir_type(&self, type_id: TypeId) -> VirTypeId {
         self.vir_lookup(type_id)
@@ -1459,7 +1447,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         union_storage_hint: Option<UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
         let resolved_elem_type = self.try_substitute_type(elem_type_id);
-        let resolved_elem_vir = self.vir_lookup_or_compat(resolved_elem_type);
+        let resolved_elem_vir = self.vir_lookup(resolved_elem_type);
 
         // Derive the strategy, using the union hint when available.
         let strategy = match union_storage_hint {

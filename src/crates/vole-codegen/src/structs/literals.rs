@@ -91,7 +91,7 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let union_vir = self.vir_lookup_or_compat(union_type_id);
+        let union_vir = self.vir_lookup(union_type_id);
         let result = self.construct_union_heap_id_v(value, union_vir)?;
         // Re-wrap with original TypeId to preserve caller semantics.
         Ok(self.compiled_with_ty(result.value, result.ty, union_type_id))

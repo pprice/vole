@@ -183,15 +183,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Returns the value unchanged if no coercion is needed.
     /// Coerce a value to the target type specified by a sema `TypeId`.
     ///
-    /// Boundary bridge: converts `TypeId` to `VirTypeId` via `vir_lookup_or_compat`
+    /// Boundary bridge: converts `TypeId` to `VirTypeId` via `vir_lookup`
     /// and delegates to [`coerce_to_type`](Self::coerce_to_type).
-    /// Uses compat encoding so unmapped cross-module types survive round-tripping.
     pub fn coerce_to_type_id(
         &mut self,
         value: CompiledValue,
         target_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        self.coerce_to_type(value, self.vir_lookup_or_compat(target_type_id))
+        self.coerce_to_type(value, self.vir_lookup(target_type_id))
     }
 
     pub fn coerce_to_type(
@@ -644,7 +643,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 rc_owned.push(compiled);
             }
 
-            let param_vir_ty = self.vir_lookup_or_compat(param_type_id);
+            let param_vir_ty = self.vir_lookup(param_type_id);
             let compiled = self.coerce_to_type(compiled, param_vir_ty)?;
             let expected_ty = self.cranelift_type(param_type_id);
             let compiled =
