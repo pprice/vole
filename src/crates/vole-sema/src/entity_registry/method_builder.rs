@@ -128,8 +128,17 @@ impl MethodDefBuilder {
 
     /// Register the method on the EntityRegistry.
     ///
-    /// Returns the newly created `MethodId`.
+    /// If a method with the same `full_name_id` was already registered (e.g.,
+    /// the same module was analyzed by multiple files sharing a `CompilationDb`),
+    /// returns the existing `MethodId` to keep VIR caches consistent.
     pub fn register(self, registry: &mut EntityRegistry) -> MethodId {
+        // If this method was already registered (shared CompilationDb across
+        // multiple files), return the existing MethodId so that VIR caches
+        // keyed by MethodId remain valid.
+        if let Some(&existing_id) = registry.method_by_full_name.get(&self.full_name_id) {
+            return existing_id;
+        }
+
         let id = MethodId::new(registry.method_defs.len() as u32);
         registry.method_defs.push(MethodDef {
             id,
