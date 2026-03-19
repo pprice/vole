@@ -308,17 +308,29 @@ fn rederive_expr(
             lhs,
             rhs,
             op,
+            vir_ty,
+            ty,
             promoted_ty,
             lhs_is_optional,
             rhs_is_optional,
             lhs_is_unsigned,
             comparison_hint,
+            string_concat,
             ..
         } => {
             rederive_ref(lhs, table, ret_ty, entities, call_ctx);
             rederive_ref(rhs, table, ret_ty, entities, call_ctx);
             let lhs_ty = extract_vir_ty(lhs);
             let rhs_ty = extract_vir_ty(rhs);
+            // Re-derive string concatenation hint: a generic Add instantiated
+            // with string operands is a string concat, not numeric addition.
+            // Check both the lhs operand type (preferred, may be UNKNOWN in
+            // generics) and the result type of the BinaryOp itself.
+            if *op == crate::expr::VirBinOp::Add {
+                let result_is_string = *vir_ty == VirTypeId::STRING
+                    || (*vir_ty == VirTypeId::UNKNOWN && *ty == VirTypeId::STRING);
+                *string_concat = lhs_ty == Some(VirTypeId::STRING) || result_is_string;
+            }
             // Re-derive optional hints from now-concrete operand types.
             if matches!(op, crate::expr::VirBinOp::Eq | crate::expr::VirBinOp::Ne) {
                 if let Some(lhs_vir_ty) = lhs_ty {
@@ -1163,7 +1175,11 @@ fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
 /// type is a type parameter).  After monomorphization, the receiver type
 /// is concrete, so we can determine dispatch from the VIR type table.
 /// Module dispatch is never missing — modules are always concrete in sema.
-fn rederive_method_dispatch_kind(
+///
+/// Also used by the targeted `fill_missing_dispatch_kinds` pass and by
+/// codegen when compiling interface default method bodies from templates
+/// where the VIR types are substituted at compile time.
+pub fn rederive_method_dispatch_kind(
     recv_vir_ty: VirTypeId,
     method_name: Symbol,
     table: &VirTypeTable,
@@ -1189,6 +1205,255 @@ fn rederive_method_dispatch_kind(
         return VirMethodDispatchKind::Builtin(BuiltinMethod::RangeIter);
     }
     VirMethodDispatchKind::Standard
+}
+
+// ---------------------------------------------------------------------------
+// Targeted dispatch_kind fill pass
+// ---------------------------------------------------------------------------
+
+/// Walk a VirFunction and fill in `dispatch_kind` wherever it is `None`.
+///
+/// Interface default method bodies are not type-checked by sema, so their
+/// VIR templates have `dispatch_kind: None` for every method call.  After
+/// type substitution produces a concrete function, this pass derives
+/// dispatch_kind from the receiver's VIR type — identical to what
+/// `rederive_method_dispatch_kind` does for generic monomorphs.
+///
+/// Call this on implement-method monomorphs that were produced by
+/// `rewrite_function` without a subsequent `rederive_decisions_with_calls`.
+pub fn fill_missing_dispatch_kinds(
+    func: &mut VirFunction,
+    table: &VirTypeTable,
+    interner: &Interner,
+) {
+    fill_dispatch_body(&mut func.body, table, interner);
+}
+
+fn fill_dispatch_body(body: &mut VirBody, table: &VirTypeTable, interner: &Interner) {
+    for stmt in &mut body.stmts {
+        fill_dispatch_stmt(stmt, table, interner);
+    }
+    if let Some(ref mut trailing) = body.trailing {
+        fill_dispatch_ref(trailing, table, interner);
+    }
+}
+
+fn fill_dispatch_ref(r: &mut VirRef, table: &VirTypeTable, interner: &Interner) {
+    fill_dispatch_expr(r.as_mut(), table, interner);
+}
+
+fn fill_dispatch_stmt(stmt: &mut VirStmt, table: &VirTypeTable, interner: &Interner) {
+    match stmt {
+        VirStmt::Let { value, .. } => fill_dispatch_ref(value, table, interner),
+        VirStmt::LetTuple { value, .. } => fill_dispatch_ref(value, table, interner),
+        VirStmt::Assign { target, value } => {
+            match target {
+                crate::stmt::AssignTarget::Local(_) => {}
+                crate::stmt::AssignTarget::Field { object, .. } => {
+                    fill_dispatch_ref(object, table, interner);
+                }
+                crate::stmt::AssignTarget::Index { array, index } => {
+                    fill_dispatch_ref(array, table, interner);
+                    fill_dispatch_ref(index, table, interner);
+                }
+            }
+            fill_dispatch_ref(value, table, interner);
+        }
+        VirStmt::Expr { value } => fill_dispatch_ref(value, table, interner),
+        VirStmt::While { cond, body } => {
+            fill_dispatch_ref(cond, table, interner);
+            fill_dispatch_body(body, table, interner);
+        }
+        VirStmt::For(vir_for) => {
+            fill_dispatch_ref(&mut vir_for.iterable, table, interner);
+            fill_dispatch_body(&mut vir_for.body, table, interner);
+        }
+        VirStmt::Return { value, .. } => {
+            if let Some(v) = value {
+                fill_dispatch_ref(v, table, interner);
+            }
+        }
+        VirStmt::Break | VirStmt::Continue | VirStmt::Noop => {}
+        VirStmt::Raise { fields, .. } => {
+            for (_, val) in fields {
+                fill_dispatch_ref(val, table, interner);
+            }
+        }
+        VirStmt::RcInc { value, .. } | VirStmt::RcDec { value, .. } => {
+            fill_dispatch_ref(value, table, interner);
+        }
+    }
+}
+
+fn fill_dispatch_expr(expr: &mut VirExpr, table: &VirTypeTable, interner: &Interner) {
+    match expr {
+        VirExpr::MethodCall {
+            receiver,
+            method,
+            args,
+            dispatch,
+            ..
+        } => {
+            fill_dispatch_ref(receiver, table, interner);
+            for arg in args {
+                fill_dispatch_ref(arg, table, interner);
+            }
+            if dispatch.dispatch_kind.is_none() {
+                if let Some(recv_vir_ty) = extract_vir_ty(receiver) {
+                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
+                        recv_vir_ty,
+                        *method,
+                        table,
+                        interner,
+                    ));
+                }
+            }
+        }
+        VirExpr::OptionalMethodCall {
+            object,
+            method,
+            method_args,
+            dispatch,
+            ..
+        } => {
+            fill_dispatch_ref(object, table, interner);
+            for arg in method_args {
+                fill_dispatch_ref(arg, table, interner);
+            }
+            if dispatch.dispatch_kind.is_none() {
+                if let Some(obj_vir_ty) = extract_vir_ty(object) {
+                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
+                        obj_vir_ty, *method, table, interner,
+                    ));
+                }
+            }
+        }
+        // Recurse into sub-expressions for all other variants.
+        VirExpr::Call { args, .. } => {
+            for arg in args {
+                fill_dispatch_ref(arg, table, interner);
+            }
+        }
+        VirExpr::BinaryOp { lhs, rhs, .. } => {
+            fill_dispatch_ref(lhs, table, interner);
+            fill_dispatch_ref(rhs, table, interner);
+        }
+        VirExpr::UnaryOp { operand, .. } => fill_dispatch_ref(operand, table, interner),
+        VirExpr::StringConcat { parts } => {
+            for part in parts {
+                fill_dispatch_ref(part, table, interner);
+            }
+        }
+        VirExpr::InterpolatedString { parts } => {
+            for part in parts {
+                if let VirStringPart::Expr { value, .. } = part {
+                    fill_dispatch_ref(value, table, interner);
+                }
+            }
+        }
+        VirExpr::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            fill_dispatch_ref(cond, table, interner);
+            fill_dispatch_body(then_body, table, interner);
+            if let Some(else_b) = else_body {
+                fill_dispatch_body(else_b, table, interner);
+            }
+        }
+        VirExpr::Block {
+            stmts, trailing, ..
+        } => {
+            for stmt in stmts {
+                fill_dispatch_stmt(stmt, table, interner);
+            }
+            if let Some(t) = trailing {
+                fill_dispatch_ref(t, table, interner);
+            }
+        }
+        VirExpr::Match {
+            scrutinee, arms, ..
+        } => {
+            fill_dispatch_ref(scrutinee, table, interner);
+            for arm in arms {
+                if let Some(ref mut guard) = arm.guard {
+                    fill_dispatch_ref(guard, table, interner);
+                }
+                fill_dispatch_body(&mut arm.body, table, interner);
+            }
+        }
+        VirExpr::Lambda { body, .. } => fill_dispatch_body(body, table, interner),
+        VirExpr::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                fill_dispatch_ref(elem, table, interner);
+            }
+        }
+        VirExpr::RepeatLiteral { element, .. } => {
+            fill_dispatch_ref(element, table, interner);
+        }
+        VirExpr::ArrayFilled { count, value, .. } => {
+            fill_dispatch_ref(count, table, interner);
+            fill_dispatch_ref(value, table, interner);
+        }
+        VirExpr::Range { start, end, .. } => {
+            fill_dispatch_ref(start, table, interner);
+            fill_dispatch_ref(end, table, interner);
+        }
+        VirExpr::StructLiteral { fields, .. } | VirExpr::ClassInstance { fields, .. } => {
+            for (_, val) in fields {
+                fill_dispatch_ref(val, table, interner);
+            }
+        }
+        VirExpr::FieldLoad { object, .. } => fill_dispatch_ref(object, table, interner),
+        VirExpr::FieldStore { object, value, .. } => {
+            fill_dispatch_ref(object, table, interner);
+            fill_dispatch_ref(value, table, interner);
+        }
+        VirExpr::Index { object, index, .. } => {
+            fill_dispatch_ref(object, table, interner);
+            fill_dispatch_ref(index, table, interner);
+        }
+        VirExpr::IndexStore {
+            object,
+            index,
+            value,
+            ..
+        } => {
+            fill_dispatch_ref(object, table, interner);
+            fill_dispatch_ref(index, table, interner);
+            fill_dispatch_ref(value, table, interner);
+        }
+        VirExpr::RcInc { value, .. } | VirExpr::RcDec { value, .. } | VirExpr::RcMove { value } => {
+            fill_dispatch_ref(value, table, interner);
+        }
+        VirExpr::Coerce { value, .. } => fill_dispatch_ref(value, table, interner),
+        VirExpr::IsCheck { value, .. } | VirExpr::AsCast { value, .. } => {
+            fill_dispatch_ref(value, table, interner);
+        }
+        VirExpr::LocalStore { value, .. } => fill_dispatch_ref(value, table, interner),
+        VirExpr::NullCoalesce { value, default, .. } => {
+            fill_dispatch_ref(value, table, interner);
+            fill_dispatch_ref(default, table, interner);
+        }
+        VirExpr::OptionalChain { object, .. } => fill_dispatch_ref(object, table, interner),
+        VirExpr::Try { value, .. } | VirExpr::Yield { value } => {
+            fill_dispatch_ref(value, table, interner);
+        }
+        // Leaf nodes with no sub-expressions.
+        VirExpr::IntLiteral { .. }
+        | VirExpr::WideLiteral { .. }
+        | VirExpr::FloatLiteral { .. }
+        | VirExpr::BoolLiteral(_)
+        | VirExpr::StringLiteral(_)
+        | VirExpr::NilLiteral
+        | VirExpr::Unreachable { .. }
+        | VirExpr::Import { .. }
+        | VirExpr::TypeLiteral
+        | VirExpr::LocalLoad { .. }
+        | VirExpr::MetaAccess { .. } => {}
+    }
 }
 
 fn rederive_union_storage_from_array_expr(

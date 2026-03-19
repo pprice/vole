@@ -480,6 +480,7 @@ where
             entities,
             type_arena,
             names,
+            interner,
         );
     }
 

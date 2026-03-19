@@ -295,6 +295,7 @@ pub fn lower_implement_method_monomorphized_instances(
         ctx.entities,
         ctx.type_arena,
         ctx.names,
+        work.interner,
     );
 }
 
@@ -309,6 +310,7 @@ pub fn lower_implement_method_monomorphs(
     entities: &dyn LoweringEntityLookup,
     type_arena: &TypeArena,
     names: &NameTable,
+    interner: &Interner,
 ) {
     let instances = entities.implement_method_monomorph_instances();
     if instances.is_empty() {
@@ -349,6 +351,13 @@ pub fn lower_implement_method_monomorphs(
 
         // Recompute return ABI from the now-concrete return type.
         concrete.return_abi = ReturnAbi::classify(concrete.vir_return_type, type_table, None);
+
+        // Fill in dispatch_kind for method calls inside the body.
+        // Interface default method bodies are not type-checked by sema, so VIR
+        // templates have dispatch_kind: None.  After type substitution the
+        // receiver types are concrete, so we can derive dispatch from the VIR
+        // type table.
+        vole_vir::fill_missing_dispatch_kinds(&mut concrete, type_table, interner);
 
         // Tag with mangled name; clear method_id (looked up by mangled name).
         concrete.method_id = None;

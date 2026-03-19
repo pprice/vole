@@ -449,15 +449,17 @@ impl Cg<'_, '_, '_> {
 
         // Route method dispatch based on VIR's MethodDispatchKind annotation.
         // Normally set by sema during VIR lowering or by rederive after
-        // monomorphization.  Interface default methods lowered with unknown
-        // param types may still arrive without dispatch_kind; derive it from
-        // the compiled receiver's VIR type.
+        // monomorphization.  When compiling interface default method bodies
+        // from templates (where the VIR has UNKNOWN receiver types and
+        // dispatch_kind is None), derive it from the compiled receiver's
+        // concrete VIR type using the canonical rederive logic.
         let dispatch_kind = dispatch.dispatch_kind.unwrap_or_else(|| {
-            tracing::warn!(
-                method = method_name_str,
-                "dispatch_kind not set — deriving from receiver type"
-            );
-            self.derive_dispatch_kind_from_receiver(&obj, method_name_str)
+            vole_vir::rederive_method_dispatch_kind(
+                obj.type_id,
+                mc_method,
+                self.vir_type_table(),
+                self.interner(),
+            )
         });
         match dispatch_kind {
             VirMethodDispatchKind::Module { module_id } => {
@@ -1414,38 +1416,5 @@ impl Cg<'_, '_, '_> {
         is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         self.compile_method_defaults(method_id, start_index, expected_types, is_generic_class)
-    }
-
-    /// Derive dispatch kind from the compiled receiver's VIR type.
-    ///
-    /// Fallback for interface default method bodies where VIR lowering could
-    /// not determine dispatch_kind (receiver type was unknown).  Uses the VIR
-    /// type table to classify the receiver at compile time.
-    fn derive_dispatch_kind_from_receiver(
-        &self,
-        obj: &CompiledValue,
-        method_name: &str,
-    ) -> VirMethodDispatchKind {
-        let table = self.vir_type_table();
-        let vir_ty = obj.type_id;
-        if table.is_array(vir_ty) {
-            return match method_name {
-                "push" => VirMethodDispatchKind::ArrayPush,
-                "length" => VirMethodDispatchKind::Builtin(BuiltinMethod::ArrayLength),
-                "iter" => VirMethodDispatchKind::Builtin(BuiltinMethod::ArrayIter),
-                _ => VirMethodDispatchKind::Standard,
-            };
-        }
-        if table.is_string(vir_ty) {
-            return match method_name {
-                "length" => VirMethodDispatchKind::Builtin(BuiltinMethod::StringLength),
-                "iter" => VirMethodDispatchKind::Builtin(BuiltinMethod::StringIter),
-                _ => VirMethodDispatchKind::Standard,
-            };
-        }
-        if table.is_range(vir_ty) && method_name == "iter" {
-            return VirMethodDispatchKind::Builtin(BuiltinMethod::RangeIter);
-        }
-        VirMethodDispatchKind::Standard
     }
 }

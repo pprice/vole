@@ -58,9 +58,10 @@ pub use monomorph::{
     InstanceIndex, MonomorphInstance, MonomorphResult, RederiveCallCtx, RewriteCtx,
     TypeSubstitution, VirClassMethodMonomorphInfo, VirImplementMethodMonomorphInfo,
     VirMonomorphInfo, VirStaticMethodMonomorphInfo, classify_capture_rc_kind, classify_rc_cleanup,
-    monomorphize, monomorphize_with_seeds, rederive_decisions, rederive_decisions_with_calls,
-    rederive_monomorphized_calls, resolve_all_calls, resolve_generic_calls, resolve_test_calls,
-    rewrite_function, substitute_types,
+    fill_missing_dispatch_kinds, monomorphize, monomorphize_with_seeds, rederive_decisions,
+    rederive_decisions_with_calls, rederive_method_dispatch_kind, rederive_monomorphized_calls,
+    resolve_all_calls, resolve_generic_calls, resolve_test_calls, rewrite_function,
+    substitute_types,
 };
 pub use numeric_model::{
     NumericCoercion, integer_result_type, integer_result_type_v, numeric_coercion,
