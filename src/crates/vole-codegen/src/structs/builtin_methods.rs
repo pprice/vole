@@ -88,25 +88,49 @@ impl Cg<'_, '_, '_> {
             .vir_query_unwrap_array_v(obj.type_id)
             .ok_or_else(|| CodegenError::internal("ArrayIter on non-array type"))?;
         let result = self.call_runtime(RuntimeKey::ArrayIter, &[obj.value])?;
-        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-            let table = self.vir_type_table();
-            let elem_sema = table.vir_to_type_id(elem_vir_type_id);
-            self.vir_query_lookup_iterator_interface(elem_sema)
-                .unwrap_or_else(|| {
-                    // Fall back to make_runtime_iter_value_v's VirTypeId and
-                    // convert back to sema TypeId.
-                    let iter_vir = self
-                        .vir_query_lookup_iterator_interface_v(elem_vir_type_id)
-                        .unwrap_or(elem_vir_type_id);
-                    table.vir_to_type_id(iter_vir)
-                })
-        });
+
+        // When iter_type_hint is unavailable, derive the Iterator<T> type.
+        // Try sema-level lookup first, then VIR-level lookup.
+        // If the VIR-level lookup succeeds but lacks a sema reverse mapping
+        // (common for types created by register_implement_method_monomorphs
+        // after the VIR sweep), return the CompiledValue with the VirTypeId
+        // directly to preserve correct dispatch.
+        if let Some(hint) = iter_type_hint {
+            let tag = self.vir_query_unknown_type_tag_v(elem_vir_type_id);
+            if tag != 0 {
+                let tag_val = self.iconst_cached(types::I64, tag as i64);
+                self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
+            }
+            return Ok(self.compiled_owned_with_ty(result, self.ptr_type(), hint));
+        }
+
         let tag = self.vir_query_unknown_type_tag_v(elem_vir_type_id);
         if tag != 0 {
             let tag_val = self.iconst_cached(types::I64, tag as i64);
             self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
         }
-        Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
+
+        let table = self.vir_type_table();
+        let elem_sema = table.vir_to_type_id(elem_vir_type_id);
+        let iter_type_id = self
+            .vir_query_lookup_iterator_interface(elem_sema)
+            .or_else(|| {
+                // Fall back to VIR-level lookup and convert back to sema TypeId.
+                let iter_vir = self.vir_query_lookup_iterator_interface_v(elem_vir_type_id)?;
+                table.lookup_vir_type_id(iter_vir)
+            });
+
+        if let Some(iter_type_id) = iter_type_id {
+            Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
+        } else {
+            // Sema TypeId not available (type created after VIR sweep without
+            // reverse mapping). Use the VirTypeId directly so subsequent
+            // method dispatch sees an Iterator<T> interface.
+            let iter_vir = self
+                .vir_query_lookup_iterator_interface_v(elem_vir_type_id)
+                .unwrap_or(elem_vir_type_id);
+            Ok(CompiledValue::owned(result, self.ptr_type(), iter_vir))
+        }
     }
 
     fn string_length(&mut self, obj: &CompiledValue) -> CodegenResult<CompiledValue> {
