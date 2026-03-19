@@ -993,7 +993,9 @@ impl Cg<'_, '_, '_> {
             ),
             CoerceKind::Unbox => self.compile_coerce_unbox_v(value, to),
             CoerceKind::UnionWrap => self.construct_union_id_v(value, to),
-            CoerceKind::BoxToUnknown => self.box_to_unknown(value),
+            CoerceKind::BoxToUnknown { conversion } => {
+                self.box_to_unknown_hinted(value, *conversion)
+            }
         }
     }
 

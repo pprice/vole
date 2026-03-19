@@ -221,7 +221,9 @@ fn classify_coercion(
             if !ctx.generic && ctx.type_arena.is_unknown(value_ty) {
                 None
             } else {
-                Some(CoerceKind::BoxToUnknown)
+                let vir_value = ctx.translate(value_ty);
+                let conversion = ctx.type_table.unknown_box_conversion(vir_value);
+                Some(CoerceKind::BoxToUnknown { conversion })
             }
         }
         _ => None,
@@ -258,7 +260,9 @@ fn classify_return_coercion(
         return Some(CoerceKind::UnionWrap);
     }
     if ctx.type_arena.is_unknown(return_ty) && !ctx.type_arena.is_unknown(value_ty) {
-        return Some(CoerceKind::BoxToUnknown);
+        let vir_value = ctx.translate(value_ty);
+        let conversion = ctx.type_table.unknown_box_conversion(vir_value);
+        return Some(CoerceKind::BoxToUnknown { conversion });
     }
     None
 }

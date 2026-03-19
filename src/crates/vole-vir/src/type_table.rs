@@ -7,7 +7,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{
-    ArrayStoreStrategy, BoxingStrategy, NameId, TypeDefId, TypeId, VirElemConversion, VirTypeId,
+    ArrayStoreStrategy, BoxingStrategy, NameId, TypeDefId, TypeId, UnknownBoxConversion,
+    VirElemConversion, VirTypeId,
 };
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
@@ -835,6 +836,59 @@ impl VirTypeTable {
             // Wide types: oversized, must heap-box.
             VirPrimitiveKind::I128 => BoxingStrategy::HeapBox { size: 16 },
             VirPrimitiveKind::F128 => BoxingStrategy::HeapBox { size: 16 },
+        }
+    }
+
+    // -- Unknown-box conversion (value → i64 for TaggedValue) -----------------
+
+    /// Compute the value-to-i64 conversion strategy for unknown boxing.
+    ///
+    /// Tells codegen how to convert a typed value into the i64 payload
+    /// of a heap-allocated `TaggedValue`, without inspecting Cranelift IR
+    /// types at compile time.
+    pub fn unknown_box_conversion(&self, id: VirTypeId) -> UnknownBoxConversion {
+        // Sentinel types (nil, Done) are zero-sized structs represented as
+        // I8 placeholders.  Uextend the I8 to I64 for TaggedValue storage.
+        if self.is_sentinel(id) {
+            return UnknownBoxConversion::UextendInt { bits: 8 };
+        }
+
+        match self.get(id) {
+            VirType::Primitive(kind) => Self::primitive_unknown_box_conversion(*kind),
+            VirType::Param { .. } => UnknownBoxConversion::Unresolved,
+            // All compound and heap types are pointer-width i64 — identity.
+            _ => UnknownBoxConversion::Identity,
+        }
+    }
+
+    /// Unknown-box conversion for a primitive kind.
+    fn primitive_unknown_box_conversion(kind: VirPrimitiveKind) -> UnknownBoxConversion {
+        match kind {
+            // Word-sized integers and pointer-sized RC types: already i64.
+            VirPrimitiveKind::I64
+            | VirPrimitiveKind::U64
+            | VirPrimitiveKind::String
+            | VirPrimitiveKind::Handle => UnknownBoxConversion::Identity,
+
+            // Sub-word signed integers: sign-extend to i64.
+            VirPrimitiveKind::I8 => UnknownBoxConversion::SextendInt { bits: 8 },
+            VirPrimitiveKind::I16 => UnknownBoxConversion::SextendInt { bits: 16 },
+            VirPrimitiveKind::I32 => UnknownBoxConversion::SextendInt { bits: 32 },
+
+            // Sub-word unsigned integers and bool: zero-extend to i64.
+            VirPrimitiveKind::Bool | VirPrimitiveKind::U8 => {
+                UnknownBoxConversion::UextendInt { bits: 8 }
+            }
+            VirPrimitiveKind::U16 => UnknownBoxConversion::UextendInt { bits: 16 },
+            VirPrimitiveKind::U32 => UnknownBoxConversion::UextendInt { bits: 32 },
+
+            // Floats: bitcast to integer representation.
+            VirPrimitiveKind::F64 => UnknownBoxConversion::BitcastF64,
+            VirPrimitiveKind::F32 => UnknownBoxConversion::BitcastF32,
+
+            // Wide types cannot be boxed as unknown (128 bits > 64-bit payload).
+            // The Unresolved variant signals codegen to emit an error.
+            VirPrimitiveKind::I128 | VirPrimitiveKind::F128 => UnknownBoxConversion::Unresolved,
         }
     }
 }

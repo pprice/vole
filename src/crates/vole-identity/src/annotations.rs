@@ -128,6 +128,45 @@ pub enum VirElemConversion {
     Unresolved,
 }
 
+/// Value-to-i64 conversion strategy for unknown boxing (TaggedValue storage).
+///
+/// Pre-computed from the source type's VIR representation so codegen can
+/// convert a typed value to the i64 payload of a `TaggedValue` without
+/// inspecting Cranelift IR types.
+///
+/// This is the inverse of [`VirElemConversion`]: where `VirElemConversion`
+/// converts i64 → typed value, `UnknownBoxConversion` converts typed value → i64.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnknownBoxConversion {
+    /// Value is already i64 / pointer-width — no conversion needed.
+    ///
+    /// Applies to: i64, u64, string, class, array, interface, function,
+    /// struct (pointer), nil, unknown, handle, etc.
+    Identity,
+
+    /// Bitcast f64 to i64.
+    BitcastF64,
+
+    /// Bitcast f32 to i32, then uextend to i64.
+    BitcastF32,
+
+    /// Sign-extend a narrow signed integer to i64.
+    ///
+    /// `bits` is the source width (8, 16, or 32).
+    /// Applies to: i8, i16, i32.
+    SextendInt { bits: u8 },
+
+    /// Zero-extend a narrow unsigned integer to i64.
+    ///
+    /// `bits` is the source width (8, 16, or 32).
+    /// Applies to: u8, bool (8), u16 (16), u32 (32).
+    UextendInt { bits: u8 },
+
+    /// Unresolved — used in generic templates before monomorphization.
+    /// Codegen falls back to the old type-based detection.
+    Unresolved,
+}
+
 /// String interpolation conversion strategy.
 ///
 /// Sema computes the conversion needed for each sub-expression in an

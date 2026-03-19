@@ -294,7 +294,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Unknown boxing: non-unknown → unknown.
         if table.is_unknown(target_vir) && !table.is_unknown(value_vir) {
-            return InlineCoercion::Kind(CoerceKind::BoxToUnknown);
+            let conversion = table.unknown_box_conversion(value_vir);
+            return InlineCoercion::Kind(CoerceKind::BoxToUnknown { conversion });
         }
 
         InlineCoercion::None
@@ -473,6 +474,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// rc_inc for the inner value should pass `skip_inner_rc_inc = true` via
     /// `box_to_unknown_no_inc`.
     pub fn box_to_unknown(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
+        let conversion = self.vir_type_table().unknown_box_conversion(value.type_id);
+        self.box_to_unknown_hinted(value, conversion)
+    }
+
+    /// Box a value into the unknown type with a pre-computed conversion hint.
+    ///
+    /// Used by the VIR coerce path where the conversion is already known.
+    /// Handles RC inc for borrowed values before boxing.
+    pub(crate) fn box_to_unknown_hinted(
+        &mut self,
+        value: CompiledValue,
+        conversion: vole_identity::UnknownBoxConversion,
+    ) -> CodegenResult<CompiledValue> {
         // RC-inc borrowed RC values so the TaggedValue owns its own reference.
         // unknown_heap_cleanup will rc_dec the inner value when the TaggedValue
         // is freed, so we need the extra reference to avoid use-after-free.
@@ -482,7 +496,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         {
             self.emit_rc_inc_for_type_v(value.value, value.type_id)?;
         }
-        self.box_to_unknown_raw(value)
+        self.box_to_unknown_raw(value, conversion)
     }
 
     /// Box a value into the unknown type without rc_inc'ing the inner value.
@@ -490,44 +504,61 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Use when the caller has already ensured the inner value has an extra
     /// reference (e.g., class literal field init which rc_inc's before coercion).
     pub fn box_to_unknown_no_inc(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
-        self.box_to_unknown_raw(value)
+        let conversion = self.vir_type_table().unknown_box_conversion(value.type_id);
+        self.box_to_unknown_raw(value, conversion)
     }
 
     /// Raw unknown boxing: heap-allocates a TaggedValue without RC adjustment.
-    fn box_to_unknown_raw(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
-        if value.ty == types::I128 || value.ty == types::F128 {
-            return Err(CodegenError::type_mismatch(
-                "unknown boxing",
-                "a type that fits in 64 bits",
-                "128-bit values (i128/f128 cannot be boxed as unknown)",
-            ));
-        }
+    ///
+    /// Uses the pre-computed [`UnknownBoxConversion`] hint to convert the
+    /// source value to an i64 payload mechanically, without inspecting
+    /// Cranelift IR types.
+    fn box_to_unknown_raw(
+        &mut self,
+        value: CompiledValue,
+        conversion: vole_identity::UnknownBoxConversion,
+    ) -> CodegenResult<CompiledValue> {
+        use vole_identity::UnknownBoxConversion;
 
         // Get the runtime tag for this type
         let tag = self.vir_query_unknown_type_tag_v(value.type_id);
         let tag_val = self.iconst_cached(types::I64, tag as i64);
 
-        // Convert value to i64 for storage
-        let value_as_i64 = if value.ty == types::I64 || value.ty == self.ptr_type() {
-            value.value
-        } else if value.ty == types::F64 {
-            self.builder
-                .ins()
-                .bitcast(types::I64, MemFlags::new(), value.value)
-        } else if value.ty == types::F32 {
-            let i32_val = self
-                .builder
-                .ins()
-                .bitcast(types::I32, MemFlags::new(), value.value);
-            uextend_const(self.builder, types::I64, i32_val)
-        } else if value.ty.is_int() && value.ty.bytes() < 8 {
-            if self.vir_query_is_unsigned_v(value.type_id) {
-                uextend_const(self.builder, types::I64, value.value)
-            } else {
+        // Convert value to i64 for storage using the pre-computed hint
+        let value_as_i64 = match conversion {
+            UnknownBoxConversion::Identity => value.value,
+            UnknownBoxConversion::BitcastF64 => {
+                self.builder
+                    .ins()
+                    .bitcast(types::I64, MemFlags::new(), value.value)
+            }
+            UnknownBoxConversion::BitcastF32 => {
+                let i32_val = self
+                    .builder
+                    .ins()
+                    .bitcast(types::I32, MemFlags::new(), value.value);
+                uextend_const(self.builder, types::I64, i32_val)
+            }
+            UnknownBoxConversion::SextendInt { .. } => {
                 sextend_const(self.builder, types::I64, value.value)
             }
-        } else {
-            value.value
+            UnknownBoxConversion::UextendInt { .. } => {
+                uextend_const(self.builder, types::I64, value.value)
+            }
+            UnknownBoxConversion::Unresolved => {
+                // Post-monomorphization the source VirTypeId is concrete but
+                // the hint was never updated.  Rederive from the type table.
+                let rederived = self.vir_type_table().unknown_box_conversion(value.type_id);
+                if rederived == UnknownBoxConversion::Unresolved {
+                    return Err(CodegenError::type_mismatch(
+                        "unknown boxing",
+                        "a type that fits in 64 bits",
+                        "128-bit or unresolved type (cannot be boxed as unknown)",
+                    ));
+                }
+                // Recurse with the resolved conversion.
+                return self.box_to_unknown_raw(value, rederived);
+            }
         };
 
         // Heap-allocate the TaggedValue via runtime call

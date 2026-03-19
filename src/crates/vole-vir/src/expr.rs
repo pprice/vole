@@ -4,7 +4,7 @@
 
 use vole_identity::{
     ArrayStoreStrategy, ImplementMethodMonomorphKey, MethodId, ModuleId, NameId, NodeId,
-    StringConversion, Symbol, TypeDefId, UnionStorageKind, VirTypeId,
+    StringConversion, Symbol, TypeDefId, UnionStorageKind, UnknownBoxConversion, VirTypeId,
 };
 
 use crate::calls::CallTarget;
@@ -858,9 +858,10 @@ pub enum CoerceKind {
     UnionWrap,
     /// Box a non-unknown value as `unknown` (TaggedValue on the heap).
     ///
-    /// Codegen delegates to `box_to_unknown` which allocates a
-    /// `(tag, value)` pair via `vole_tagged_value_new`.
-    BoxToUnknown,
+    /// Codegen uses the pre-computed `conversion` hint to convert the
+    /// source value to an i64 payload, then allocates a `(tag, value)`
+    /// pair via `vole_tagged_value_new`.
+    BoxToUnknown { conversion: UnknownBoxConversion },
 }
 
 /// Sema-independent dispatch kind annotation for VIR method calls.
