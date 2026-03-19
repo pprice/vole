@@ -244,7 +244,7 @@ impl Cg<'_, '_, '_> {
             unreachable!("compile_vir_for_array called with non-Array kind");
         };
         let mut elem_vir = self.try_substitute_type_v(*elem_type);
-        let mut union_storage = *union_storage;
+        let union_storage = *union_storage;
         let mut store_strategy = *store_strategy;
         let mut elem_conversion = *elem_conversion;
 
@@ -257,12 +257,6 @@ impl Cg<'_, '_, '_> {
             let derived = self.array_store_strategy_v(arr_elem_vir);
             store_strategy = Some(derived);
             elem_conversion = Some(self.elem_conversion_v(arr_elem_vir));
-            if union_storage.is_none() && self.vir_query_is_union_v(arr_elem_vir) {
-                union_storage = Some(match derived {
-                    ArrayStoreStrategy::UnionInline => UnionStorageKind::Inline,
-                    _ => UnionStorageKind::Heap,
-                });
-            }
         }
 
         // Track owned iterable in a dedicated RC scope.
@@ -730,8 +724,9 @@ impl Cg<'_, '_, '_> {
 
     /// Decode a raw array element value to the correct Cranelift type (VirTypeId-native).
     ///
-    /// Dispatches on the pre-computed [`ArrayStoreStrategy`] when available,
-    /// falling back to the `union_storage` hint and type queries.
+    /// Dispatches on the pre-computed [`UnionStorageKind`] for union elements,
+    /// or computes a non-union strategy directly.  Sema/VIR always annotate
+    /// union storage, so `None` means "not a union" — no fallback query.
     pub(crate) fn decode_array_elem_v(
         &mut self,
         elem_val: Value,
@@ -739,11 +734,12 @@ impl Cg<'_, '_, '_> {
         elem_vir: VirTypeId,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<Value> {
-        // Compute the strategy from the existing annotations.
         let strategy = match union_storage {
             Some(UnionStorageKind::Inline) => ArrayStoreStrategy::UnionInline,
             Some(UnionStorageKind::Heap) => ArrayStoreStrategy::UnionBoxed,
-            None => self.array_store_strategy_v(elem_vir),
+            // Sema/VIR always populate UnionStorageKind for union element
+            // types.  `None` means "not a union" — compute directly.
+            None => self.non_union_array_store_strategy_v(elem_vir),
         };
         self.decode_array_elem_by_strategy(elem_val, elem_ptr, elem_vir, strategy)
     }

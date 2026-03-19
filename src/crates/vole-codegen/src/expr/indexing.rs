@@ -92,7 +92,7 @@ impl Cg<'_, '_, '_> {
         object: &VirExpr,
         index: &VirExpr,
         value_expr: &VirExpr,
-        _union_storage: Option<UnionStorageKind>,
+        union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
         let arr = self.compile_vir_expr(object)?;
         let val = self.compile_vir_expr(value_expr)?;
@@ -104,13 +104,13 @@ impl Cg<'_, '_, '_> {
             self.vir_index_assign_fixed_array(arr.value, index, val, elem_type_id, size)
         } else if is_dynamic_array {
             let idx = self.compile_vir_expr(index)?;
-            self.index_assign_dynamic_array_inner(arr, idx, val)
+            self.index_assign_dynamic_array_inner(arr, idx, val, union_storage)
         } else if let Some((_, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
             if let Some((elem_type_id, size)) = fixed_array {
                 self.vir_index_assign_fixed_array(arr.value, index, val, elem_type_id, size)
             } else if dyn_array.is_some() {
                 let idx = self.compile_vir_expr(index)?;
-                self.index_assign_dynamic_array_inner(arr, idx, val)
+                self.index_assign_dynamic_array_inner(arr, idx, val, union_storage)
             } else {
                 let type_name = self.vir_query_display_basic_v(arr.type_id);
                 Err(CodegenError::type_mismatch(
@@ -333,10 +333,11 @@ impl Cg<'_, '_, '_> {
         arr: CompiledValue,
         idx: CompiledValue,
         val: CompiledValue,
+        union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
         let elem_vir_ty = self.vir_query_unwrap_array_v(arr.type_id);
         let (tag_val, value_bits, val) = if let Some(vir_ty) = elem_vir_ty {
-            self.prepare_dynamic_array_store_with_hint_v(val, vir_ty, None)?
+            self.prepare_dynamic_array_store_with_hint_v(val, vir_ty, union_storage)?
         } else {
             self.prepare_dynamic_array_store_untyped(val)?
         };

@@ -256,6 +256,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.vir_type_table().array_store_strategy(elem_vir)
     }
 
+    /// Compute the array element storage strategy for a **non-union** VIR
+    /// element type.
+    ///
+    /// Delegates to `VirTypeTable::non_union_array_store_strategy()`.  Use
+    /// this in codegen paths where `UnionStorageKind` is `None` — the element
+    /// is guaranteed not to be a union because sema/VIR always annotate union
+    /// storage.
+    pub fn non_union_array_store_strategy_v(&self, elem_vir: VirTypeId) -> ArrayStoreStrategy {
+        self.vir_type_table()
+            .non_union_array_store_strategy(elem_vir)
+    }
+
     /// Compute the element value conversion from a VIR element type.
     ///
     /// Delegates to `VirTypeTable::elem_conversion()`.  Codegen call sites

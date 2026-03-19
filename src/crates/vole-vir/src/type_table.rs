@@ -738,6 +738,25 @@ impl VirTypeTable {
         }
     }
 
+    /// Compute the array element storage strategy for a **non-union** element.
+    ///
+    /// Delegates to [`array_store_strategy`](Self::array_store_strategy) and
+    /// asserts (debug-only) that the result is not a union strategy.  Callers
+    /// use this when `UnionStorageKind` is `None` — sema/VIR always annotate
+    /// union storage, so the element must not be a union.
+    pub fn non_union_array_store_strategy(&self, elem: VirTypeId) -> ArrayStoreStrategy {
+        let strategy = self.array_store_strategy(elem);
+        debug_assert!(
+            !matches!(
+                strategy,
+                ArrayStoreStrategy::UnionInline | ArrayStoreStrategy::UnionBoxed
+            ),
+            "non_union_array_store_strategy called for union/optional element — \
+             use the pre-annotated UnionStorageKind instead"
+        );
+        strategy
+    }
+
     // -- Element value conversion (raw i64 → typed value) ---------------------
 
     /// Compute the element value conversion for a given element type.

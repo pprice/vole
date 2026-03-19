@@ -1440,6 +1440,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Computes the [`ArrayStoreStrategy`] and delegates to
     /// [`prepare_array_store_by_strategy`](Self::prepare_array_store_by_strategy).
+    ///
+    /// When `union_storage_hint` is `None`, falls back to type-based strategy
+    /// computation.  VIR-annotated paths should always provide the hint for
+    /// union element types; non-VIR callers may still rely on the fallback.
     pub fn prepare_dynamic_array_store_with_hint(
         &mut self,
         value: CompiledValue,
