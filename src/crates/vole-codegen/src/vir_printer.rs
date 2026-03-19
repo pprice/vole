@@ -17,7 +17,7 @@ use vole_vir::expr::{
 };
 use vole_vir::func::{VirBody, VirFunction};
 use vole_vir::refs::VirRef;
-use vole_vir::stmt::{AssignTarget, VirIterKind, VirStmt};
+use vole_vir::stmt::{AssignTarget, VirIterKind, VirIterSetup, VirStmt};
 
 /// Writes to a String, ignoring the infallible Result.
 macro_rules! w {
@@ -195,8 +195,17 @@ impl<'a> VirPrinter<'a> {
         let kind_label = match &vir_for.kind {
             VirIterKind::Range => "range".to_string(),
             VirIterKind::Array { elem_type, .. } => format!("array<{}>", self.ty(*elem_type)),
-            VirIterKind::Iterator { elem_type, .. } => {
-                format!("iterator<{}>", self.ty(*elem_type))
+            VirIterKind::Iterator {
+                elem_type, setup, ..
+            } => {
+                let setup_label = match setup {
+                    VirIterSetup::StringChars => "string-chars",
+                    VirIterSetup::IteratorPassthrough => "passthrough",
+                    VirIterSetup::CustomIterator => "custom-iterator",
+                    VirIterSetup::CustomIterable => "custom-iterable",
+                    VirIterSetup::Unresolved => "unresolved",
+                };
+                format!("iterator<{}>[{}]", self.ty(*elem_type), setup_label)
             }
         };
         w!(

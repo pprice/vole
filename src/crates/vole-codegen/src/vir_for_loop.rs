@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use vole_identity::{ArrayStoreStrategy, TypeId, UnionStorageKind, VirElemConversion, VirTypeId};
-use vole_vir::stmt::{VirFor, VirIterKind};
+use vole_vir::stmt::{VirFor, VirIterKind, VirIterSetup};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
 use super::context::Cg;
@@ -421,17 +421,89 @@ impl Cg<'_, '_, '_> {
     ///
     /// Returns `(iter_value, elem_vir_type, needs_elem_rc_dec)`.
     ///
-    /// Determines the setup strategy from the compiled iterable's type:
-    /// - String → call `StringCharsIter`
-    /// - Iterator<T> interface → pass through (thin pointer)
-    /// - Non-Iterator interface → wrap via `InterfaceIter`
-    /// - Custom iterator/iterable → box + wrap (with optional `.iter()` call)
+    /// Dispatches on the pre-computed `VirIterSetup` from VIR lowering
+    /// instead of re-detecting the iterable's type at compile time.
     fn setup_vir_iterator(&mut self, vir_for: &VirFor) -> CodegenResult<(Value, VirTypeId, bool)> {
-        let VirIterKind::Iterator { elem_type, .. } = &vir_for.kind else {
+        let VirIterKind::Iterator {
+            elem_type, setup, ..
+        } = &vir_for.kind
+        else {
             unreachable!("setup_vir_iterator called with non-Iterator kind");
         };
         let elem_vir = self.try_substitute_type_v(*elem_type);
         let iterable = self.compile_vir_expr(&vir_for.iterable)?;
+
+        match setup {
+            VirIterSetup::StringChars => {
+                let iter_val = self.call_runtime(RuntimeKey::StringCharsIter, &[iterable.value])?;
+                let iter = self.make_iterator_value_v(iter_val, VirTypeId::STRING);
+                self.enter_iter_rc_scope(&iter, Some(&iterable));
+                Ok((iter_val, elem_vir, true))
+            }
+            VirIterSetup::IteratorPassthrough => {
+                self.enter_iter_rc_scope(&iterable, None);
+                Ok((iterable.value, elem_vir, false))
+            }
+            VirIterSetup::CustomIterable => self.setup_custom_iterable(iterable, elem_vir),
+            VirIterSetup::CustomIterator => {
+                let iterator_interface_type = self.resolve_iterator_interface_for_elem(elem_vir);
+                let iter =
+                    self.box_and_wrap_as_iterator(iterable, iterator_interface_type, elem_vir)?;
+                self.enter_iter_rc_scope(&iter, None);
+                Ok((iter.value, elem_vir, false))
+            }
+            VirIterSetup::Unresolved => self.setup_vir_iterator_fallback(iterable, elem_vir),
+        }
+    }
+
+    /// Setup for `VirIterSetup::CustomIterable`: call `.iter()` method on
+    /// the iterable, then pass through or wrap the result.
+    fn setup_custom_iterable(
+        &mut self,
+        iterable: super::types::CompiledValue,
+        elem_vir: VirTypeId,
+    ) -> CodegenResult<(Value, VirTypeId, bool)> {
+        let iterator_interface_type = self.resolve_iterator_interface_for_elem(elem_vir);
+        let iterable_vir = iterable.type_id;
+
+        if let Some(type_name_id) = self
+            .analyzed()
+            .impl_type_name_id_from_vir_type_id(iterable_vir)
+            && let Some(iter_method_name_id) = self.analyzed().try_method_name_id_by_str("iter")
+            && let Some(&func_key) = self
+                .method_func_keys()
+                .get(&(type_name_id, iter_method_name_id))
+        {
+            let interface_vir = self.try_substitute_type_v(iterator_interface_type);
+            let return_type_id = self.vir_type_table().vir_to_type_id(interface_vir);
+            let func_ref = self.func_ref(func_key)?;
+            let call_inst = self.emit_call(func_ref, &[iterable.value]);
+            let iter_value = self.call_result(call_inst, return_type_id)?;
+            // .iter() returns Iterator<T> (thin pointer) — pass through.
+            if self.vir_query_is_iterator_interface_v(iter_value.type_id) {
+                self.enter_iter_rc_scope(&iter_value, None);
+                return Ok((iter_value.value, elem_vir, false));
+            }
+            let iter = self.wrap_interface_iter_v(iter_value, elem_vir)?;
+            self.enter_iter_rc_scope(&iter, None);
+            return Ok((iter.value, elem_vir, false));
+        }
+
+        // Fallback: if the .iter() method lookup fails (shouldn't happen
+        // for correctly classified iterables), try boxing as iterator.
+        let iter = self.box_and_wrap_as_iterator(iterable, iterator_interface_type, elem_vir)?;
+        self.enter_iter_rc_scope(&iter, None);
+        Ok((iter.value, elem_vir, false))
+    }
+
+    /// Fallback setup for `VirIterSetup::Unresolved`: uses the old
+    /// type-detection logic for generic templates where sema could not
+    /// classify the iterator source.
+    fn setup_vir_iterator_fallback(
+        &mut self,
+        iterable: super::types::CompiledValue,
+        elem_vir: VirTypeId,
+    ) -> CodegenResult<(Value, VirTypeId, bool)> {
         let iterable_vir = iterable.type_id;
 
         // String → StringCharsIter
@@ -455,38 +527,10 @@ impl Cg<'_, '_, '_> {
             return Ok((iter.value, elem_vir, false));
         }
 
-        // Custom iterator or iterable class/struct.
-        let iterator_interface_type = self.resolve_iterator_interface_for_elem(elem_vir);
-
-        // Try custom iterable first: look up `.iter()` method on this type.
-        if let Some(type_name_id) = self
-            .analyzed()
-            .impl_type_name_id_from_vir_type_id(iterable_vir)
-            && let Some(iter_method_name_id) = self.analyzed().try_method_name_id_by_str("iter")
-            && let Some(&func_key) = self
-                .method_func_keys()
-                .get(&(type_name_id, iter_method_name_id))
-        {
-            // CustomIterable: call .iter() then pass through or wrap.
-            let interface_vir = self.try_substitute_type_v(iterator_interface_type);
-            let return_type_id = self.vir_type_table().vir_to_type_id(interface_vir);
-            let func_ref = self.func_ref(func_key)?;
-            let call_inst = self.emit_call(func_ref, &[iterable.value]);
-            let iter_value = self.call_result(call_inst, return_type_id)?;
-            // .iter() returns Iterator<T> (thin pointer) — pass through.
-            if self.vir_query_is_iterator_interface_v(iter_value.type_id) {
-                self.enter_iter_rc_scope(&iter_value, None);
-                return Ok((iter_value.value, elem_vir, false));
-            }
-            let iter = self.wrap_interface_iter_v(iter_value, elem_vir)?;
-            self.enter_iter_rc_scope(&iter, None);
-            return Ok((iter.value, elem_vir, false));
-        }
-
-        // Custom iterator: box directly as Iterator<T> interface, then wrap.
-        let iter = self.box_and_wrap_as_iterator(iterable, iterator_interface_type, elem_vir)?;
-        self.enter_iter_rc_scope(&iter, None);
-        Ok((iter.value, elem_vir, false))
+        // Custom iterable (has .iter()) or custom iterator (box directly).
+        // Reuse setup_custom_iterable which handles both paths: it tries
+        // .iter() first and falls back to box_and_wrap_as_iterator.
+        self.setup_custom_iterable(iterable, elem_vir)
     }
 
     /// Resolve the `Iterator<T>` interface VirTypeId for a given element type.

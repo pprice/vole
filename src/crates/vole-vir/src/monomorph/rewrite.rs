@@ -258,6 +258,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             rhs_is_optional: false,
             lhs_is_unsigned: false,
             comparison_hint: ComparisonHint::None,
+            string_concat: false,
         },
         VirExpr::UnaryOp {
             op,
@@ -1140,10 +1141,12 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
             elem_type,
             vir_elem_type,
             elem_conversion,
+            setup,
         } => VirIterKind::Iterator {
             elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
             elem_conversion: *elem_conversion,
+            setup: *setup,
         },
     }
 }
@@ -1412,6 +1415,7 @@ mod tests {
                         rhs_is_optional: false,
                         lhs_is_unsigned: false,
                         comparison_hint: crate::expr::ComparisonHint::None,
+                        string_concat: false,
                     }),
                     mutable: false,
                     ty: type_id(10),
@@ -1708,6 +1712,7 @@ mod tests {
                         elem_type: type_id(10),
                         vir_elem_type: param_id,
                         elem_conversion: VirElemConversion::Unresolved,
+                        setup: crate::stmt::VirIterSetup::Unresolved,
                     },
                 })],
                 trailing: None,

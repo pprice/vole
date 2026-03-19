@@ -1298,15 +1298,15 @@ fn fill_dispatch_expr(expr: &mut VirExpr, table: &VirTypeTable, interner: &Inter
             for arg in args {
                 fill_dispatch_ref(arg, table, interner);
             }
-            if dispatch.dispatch_kind.is_none() {
-                if let Some(recv_vir_ty) = extract_vir_ty(receiver) {
-                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
-                        recv_vir_ty,
-                        *method,
-                        table,
-                        interner,
-                    ));
-                }
+            if dispatch.dispatch_kind.is_none()
+                && let Some(recv_vir_ty) = extract_vir_ty(receiver)
+            {
+                dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
+                    recv_vir_ty,
+                    *method,
+                    table,
+                    interner,
+                ));
             }
         }
         VirExpr::OptionalMethodCall {
@@ -1320,12 +1320,12 @@ fn fill_dispatch_expr(expr: &mut VirExpr, table: &VirTypeTable, interner: &Inter
             for arg in method_args {
                 fill_dispatch_ref(arg, table, interner);
             }
-            if dispatch.dispatch_kind.is_none() {
-                if let Some(obj_vir_ty) = extract_vir_ty(object) {
-                    dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
-                        obj_vir_ty, *method, table, interner,
-                    ));
-                }
+            if dispatch.dispatch_kind.is_none()
+                && let Some(obj_vir_ty) = extract_vir_ty(object)
+            {
+                dispatch.dispatch_kind = Some(rederive_method_dispatch_kind(
+                    obj_vir_ty, *method, table, interner,
+                ));
             }
         }
         // Recurse into sub-expressions for all other variants.
@@ -2739,6 +2739,7 @@ mod tests {
                 elem_type: type_id(10),
                 vir_elem_type: VirTypeId::I64,
                 elem_conversion: VirElemConversion::Unresolved,
+                setup: crate::stmt::VirIterSetup::Unresolved,
             },
         })]);
 

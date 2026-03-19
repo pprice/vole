@@ -3,6 +3,7 @@
 // Statement lowering: AST `Stmt` -> VIR `VirStmt`.
 
 use crate::IterableKind;
+use crate::node_map::IteratorSource;
 use vole_frontend::PatternKind;
 use vole_frontend::ast::{ExprKind, LetInit, LetStmt, Stmt};
 use vole_identity::{ArrayStoreStrategy, TypeId, VirElemConversion};
@@ -10,7 +11,8 @@ use vole_identity::{ArrayStoreStrategy, TypeId, VirElemConversion};
 use vole_vir::expr::{CoerceKind, VirExpr};
 use vole_vir::stmt::{
     DestructureTupleKind, LetStorageHint, ReturnConvention, UnionTagHint, VirDestructureElement,
-    VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
+    VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirIterSetup,
+    VirModuleBinding, VirStmt,
 };
 
 use super::LoweringCtx;
@@ -517,12 +519,19 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 elem_conversion,
             }
         }
-        Some(IterableKind::Iterator { elem_type, .. }) => {
+        Some(IterableKind::Iterator { elem_type, source }) => {
             let vir_elem = ctx.translate(elem_type);
+            let setup = match source {
+                IteratorSource::String => VirIterSetup::StringChars,
+                IteratorSource::IteratorInterface => VirIterSetup::IteratorPassthrough,
+                IteratorSource::CustomIterator => VirIterSetup::CustomIterator,
+                IteratorSource::CustomIterable => VirIterSetup::CustomIterable,
+            };
             VirIterKind::Iterator {
                 elem_type: vir_elem,
                 vir_elem_type: vir_elem,
                 elem_conversion: ctx.type_table.elem_conversion(vir_elem),
+                setup,
             }
         }
         Some(IterableKind::Generic { elem_type }) => {
@@ -535,6 +544,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 elem_type: vir_elem,
                 vir_elem_type: vir_elem,
                 elem_conversion: VirElemConversion::Unresolved,
+                setup: VirIterSetup::Unresolved,
             }
         }
         None if ctx.generic => {
@@ -550,6 +560,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 elem_type: vir_elem,
                 vir_elem_type: vir_elem,
                 elem_conversion: VirElemConversion::Unresolved,
+                setup: VirIterSetup::Unresolved,
             }
         }
         None => {

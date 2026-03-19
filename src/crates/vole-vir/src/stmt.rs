@@ -321,15 +321,46 @@ pub enum VirIterKind {
     /// Iterate via an Iterator<T> thin pointer (the unified iterator protocol).
     ///
     /// Covers all non-range, non-array iterables: strings, Iterator<T>
-    /// interfaces, custom iterators, and custom iterables.  Codegen
-    /// determines the setup phase (wrapping, boxing, `.iter()` call) from
-    /// the compiled iterable's type.
+    /// interfaces, custom iterators, and custom iterables.  The `setup`
+    /// field tells codegen how to produce the Iterator thin pointer from
+    /// the compiled iterable value, without re-detecting types.
     Iterator {
         elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
         /// Pre-computed element conversion for the raw i64 from iter_next.
         elem_conversion: VirElemConversion,
+        /// Pre-computed setup strategy for producing the Iterator thin
+        /// pointer from the iterable value.  Determined during VIR lowering
+        /// from sema's `IteratorSource` classification.
+        setup: VirIterSetup,
     },
+}
+
+/// How to produce an `Iterator<T>` thin pointer from a compiled iterable.
+///
+/// Mirrors sema's `IteratorSource` but lives in VIR so codegen reads the
+/// decision rather than re-detecting the iterable's type at compile time.
+///
+/// The `Unresolved` variant covers generic templates and error-recovery
+/// paths where sema could not classify the source; codegen falls back to
+/// the old type-detection logic for those cases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VirIterSetup {
+    /// String → call `StringCharsIter` runtime function.
+    StringChars,
+    /// Already an `Iterator<T>` interface value — pass through as-is
+    /// (thin pointer).
+    IteratorPassthrough,
+    /// Custom class/struct implementing `Iterator<T>` — box to
+    /// `Iterator<T>` interface, then wrap via `InterfaceIter`.
+    CustomIterator,
+    /// Custom class/struct implementing `Iterable<T>` — call `.iter()`
+    /// method to get `Iterator<T>`, then pass through or wrap.
+    CustomIterable,
+    /// Setup strategy could not be determined statically (generic
+    /// template or error recovery).  Codegen falls back to the old
+    /// type-detection dispatch.
+    Unresolved,
 }
 
 // ---------------------------------------------------------------------------
