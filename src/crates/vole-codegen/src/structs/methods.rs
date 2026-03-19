@@ -811,6 +811,15 @@ impl Cg<'_, '_, '_> {
                     // VIR metadata path: look up implement method monomorph by the
                     // per-call-site key stored during VIR lowering.
                     self.try_resolve_implement_method_monomorph(dispatch)
+                })
+                .or_else(|| {
+                    // Fallback for iterable default methods (filter, map, collect, etc.)
+                    // on arrays. These are compiled per-element-type and registered via
+                    // implement_method_monomorphs, not method_func_keys. When the VIR
+                    // dispatch metadata lacks implement_method_monomorph (e.g. in shared
+                    // CompilationDb mode), construct the key from the receiver's concrete
+                    // VIR type.
+                    self.try_resolve_implement_method_by_type(method_name_id, obj.type_id)
                 });
             (func_key, self.resolved_return_type_id(resolved), None)
         } else {

@@ -1,0 +1,35 @@
+// File A: uses iterable default methods (filter, map, collect) on arrays.
+// Regression test for vol-hn8y: in shared CompilationDb mode (multi-file
+// `vole test`), the method_func_keys lookup for iterable default methods
+// could fail because these are compiled per-element-type via
+// implement_method_monomorphs, not registered in method_func_keys.
+
+func make_data() -> [i64] {
+    return [10, -3, 7, -1, 5, 0, -8, 2]
+}
+
+tests {
+    test "array filter then collect" {
+        let data = make_data()
+        let positives = data.filter((x) => x > 0).collect()
+        assert(positives.length() == 4)
+    }
+
+    test "array filter then sum" {
+        let data = make_data()
+        let result = data.filter((x) => x > 0).sum()
+        assert(result == 24)
+    }
+
+    test "array map then filter" {
+        let data = [1, 2, 3, 4, 5]
+        let result = data.map((x) => x * 2).filter((x) => x > 4).collect()
+        assert(result.length() == 3)
+    }
+
+    test "array collect from iter" {
+        let data = [1, 2, 3]
+        let copy = data.iter().collect()
+        assert(copy.length() == 3)
+    }
+}

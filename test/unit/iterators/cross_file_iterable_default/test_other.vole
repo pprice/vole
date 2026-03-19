@@ -1,0 +1,19 @@
+// File B: runs alongside test_filter.vole in the same directory.
+// Shares the CompilationDb, exercising the shared entity registry path.
+// This file uses arrays but not iterable default methods like filter/map.
+
+func double(x: i64) -> i64 {
+    return x * 2
+}
+
+tests {
+    test "basic arithmetic" {
+        assert(double(21) == 42)
+    }
+
+    test "array basics" {
+        let arr = [1, 2, 3]
+        assert(arr.length() == 3)
+        assert(arr[0] == 1)
+    }
+}
