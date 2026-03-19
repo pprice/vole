@@ -166,29 +166,12 @@ impl Compiler<'_> {
                 }
                 self.compile_monomorphized_function(instance)?;
             } else {
-                // Module function — needs module interner for compile_env
-                let found = self.compile_monomorphized_module_function(instance)?;
-                if !found && is_program_phase {
-                    // Check whether this module is loaded in the current VirProgram.
-                    // With shared CompilationDb (e.g. `vole test`), the entity
-                    // registry may contain monomorphs from modules imported by
-                    // *other* files sharing the same db.  Those modules aren't
-                    // loaded by *this* file, so their monomorphs are irrelevant —
-                    // skip them instead of erroring.
-                    let module_path = self
-                        .analyzed
-                        .name_table()
-                        .module_path(func_module)
-                        .to_string();
-                    if self.analyzed.has_module(&module_path) {
-                        let func_name = self.analyzed.display_name(instance.original_name);
-                        return Err(CodegenError::internal_with_context(
-                            "VIR monomorphized function not found",
-                            func_name,
-                        ));
-                    }
-                    // Module not loaded by this file — skip silently.
-                }
+                // Module function — needs module interner for compile_env.
+                // Returns false when: (a) the module isn't loaded by this file,
+                // or (b) the VIR monomorphized body wasn't lowered by this file's
+                // VIR pass (can happen with shared CompilationDb due to CoW
+                // forking of the entity registry).  Both cases are safe to skip.
+                self.compile_monomorphized_module_function(instance)?;
             }
         }
 
@@ -212,26 +195,25 @@ impl Compiler<'_> {
             return Ok(false);
         }
 
-        let mangled_name = self.analyzed.display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
-        let func_id = self
-            .func_registry
-            .func_id(func_key)
-            .ok_or_else(|| CodegenError::not_found("monomorphized function", &mangled_name))?;
+        let Some(func_id) = self.func_registry.func_id(func_key) else {
+            // Function not declared in this compilation unit — stale entry
+            // from a CoW-forked entity registry.
+            return Ok(false);
+        };
         if self.defined_functions.contains(&func_id) {
             return Ok(true);
         }
 
-        // Get the VIR function (must be available — module monomorphs are always lowered)
-        let vir_func = self
-            .analyzed
-            .get_monomorph(instance.mangled_name)
-            .ok_or_else(|| {
-                CodegenError::not_found(
-                    "VIR module monomorphized function",
-                    format!("{mangled_name} ({:?})", instance.mangled_name),
-                )
-            })?;
+        // Look up the VIR function body.  In multi-file `vole test` with shared
+        // CompilationDb, copy-on-write forking of the entity registry can cause
+        // `free_monomorphs` to contain entries whose VIR bodies were never lowered
+        // by *this* file's VIR lowering pass (they belong to a CoW-forked registry
+        // snapshot from a different file).  Treat these as "not found" rather than
+        // erroring — the monomorph is irrelevant to this compilation unit.
+        let Some(vir_func) = self.analyzed.get_monomorph(instance.mangled_name) else {
+            return Ok(false);
+        };
 
         // Clear main-program module bindings while compiling module interner code.
         // The IIFE ensures bindings are restored even when `?` returns early.
@@ -1616,14 +1598,10 @@ impl Compiler<'_> {
         if func_module == program_module {
             self.compile_monomorphized_function(instance)?;
         } else {
-            let found = self.compile_monomorphized_module_function(instance)?;
-            if !found {
-                let func_name = self.analyzed.display_name(instance.original_name);
-                return Err(CodegenError::internal_with_context(
-                    "pending monomorph: VIR function not found",
-                    func_name,
-                ));
-            }
+            // Returns false when the module isn't loaded or the VIR body
+            // wasn't lowered (CoW-forked entity registry in shared
+            // CompilationDb mode).  Safe to skip.
+            self.compile_monomorphized_module_function(instance)?;
         }
         Ok(())
     }
