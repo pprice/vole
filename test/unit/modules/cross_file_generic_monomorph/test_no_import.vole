@@ -1,0 +1,20 @@
+// File B: does NOT import generic_lib, but shares the same CompilationDb
+// when run via `vole test` on this directory.
+// Before the fix for vol-tbwn, this file would fail with:
+//   "VIR monomorphized function not found" for generic_lib::apply
+// because the shared entity registry contained monomorphs from File A's
+// analysis, but this file's VirProgram had no VIR body for them.
+
+func add(a: i64, b: i64) -> i64 {
+    return a + b
+}
+
+tests {
+    test "local function works" {
+        assert(add(2, 3) == 5)
+    }
+
+    test "basic arithmetic" {
+        assert(10 * 4 == 40)
+    }
+}

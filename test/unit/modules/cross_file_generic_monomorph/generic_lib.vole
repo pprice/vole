@@ -1,0 +1,18 @@
+// Module with a generic function that self-instantiates.
+// Regression test for vol-tbwn: monomorphs from this module should not
+// cause "VIR monomorphized function not found" in unrelated test files
+// sharing the same CompilationDb.
+
+func apply<T>(x: T, f: (T) -> T) -> T {
+    return f(x)
+}
+
+// Concrete caller that instantiates apply<i64> within this module.
+func apply_double(n: i64) -> i64 {
+    return apply(n, (x: i64) => x * 2)
+}
+
+// Concrete caller that instantiates apply<string> within this module.
+func apply_exclaim(s: string) -> string {
+    return apply(s, (x: string) => x + "!")
+}

@@ -1,0 +1,16 @@
+// File A: imports generic_lib and calls concrete wrappers that internally
+// instantiate generic monomorphs (apply<i64>, apply<string>).
+// This creates monomorphs in the shared CompilationDb's entity registry.
+// Regression test for vol-tbwn.
+
+let lib = import "./generic_lib.vole"
+
+tests {
+    test "apply_double" {
+        assert(lib.apply_double(21) == 42)
+    }
+
+    test "apply_exclaim" {
+        assert(lib.apply_exclaim("hello") == "hello!")
+    }
+}

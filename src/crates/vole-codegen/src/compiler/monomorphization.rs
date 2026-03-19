@@ -96,11 +96,28 @@ impl Compiler<'_> {
         // Collect from VirProgram.free_monomorphs to avoid borrow issues
         let instances: Vec<_> = self.analyzed.free_monomorphs.values().cloned().collect();
 
+        let program_module = self.program_module();
+
         for instance in &instances {
             // Skip external functions - they don't need JIT compilation
             // They're called directly via native_registry
             if self.is_external_func(instance.original_name) {
                 continue;
+            }
+
+            // Skip monomorphs from modules not loaded by this file.
+            // With shared CompilationDb (e.g. `vole test`), the entity
+            // registry may contain monomorphs from other files' imports.
+            let func_module = self.analyzed.name_table().module_of(instance.original_name);
+            if func_module != program_module {
+                let module_path = self
+                    .analyzed
+                    .name_table()
+                    .module_path(func_module)
+                    .to_string();
+                if !self.analyzed.has_module(&module_path) {
+                    continue;
+                }
             }
 
             self.declare_monomorph_instance(instance, false);
@@ -152,11 +169,25 @@ impl Compiler<'_> {
                 // Module function — needs module interner for compile_env
                 let found = self.compile_monomorphized_module_function(instance)?;
                 if !found && is_program_phase {
-                    let func_name = self.analyzed.display_name(instance.original_name);
-                    return Err(CodegenError::internal_with_context(
-                        "VIR monomorphized function not found",
-                        func_name,
-                    ));
+                    // Check whether this module is loaded in the current VirProgram.
+                    // With shared CompilationDb (e.g. `vole test`), the entity
+                    // registry may contain monomorphs from modules imported by
+                    // *other* files sharing the same db.  Those modules aren't
+                    // loaded by *this* file, so their monomorphs are irrelevant —
+                    // skip them instead of erroring.
+                    let module_path = self
+                        .analyzed
+                        .name_table()
+                        .module_path(func_module)
+                        .to_string();
+                    if self.analyzed.has_module(&module_path) {
+                        let func_name = self.analyzed.display_name(instance.original_name);
+                        return Err(CodegenError::internal_with_context(
+                            "VIR monomorphized function not found",
+                            func_name,
+                        ));
+                    }
+                    // Module not loaded by this file — skip silently.
                 }
             }
         }
