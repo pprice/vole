@@ -15,6 +15,7 @@ This project uses a CLI ticket system for task management. Run `tk help` when yo
   - NEVER add new `just` file commands unless the user asks you to
   - NEVER downgrade or close tickets unless the work is complete.
   - If you take shortcuts, track them in tickets with `tk`
+  - Use `fix(regression):` for bugs you introduced and then fixed — not user-facing bugs.
 </IMPORTANT>
 
 ## Project Rules
