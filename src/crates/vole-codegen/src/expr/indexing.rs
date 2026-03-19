@@ -14,32 +14,11 @@ use crate::types::CompiledValue;
 
 use vole_identity::{TypeId, UnionStorageKind, VirTypeId};
 use vole_vir::VirExpr;
-use vole_vir::types::VirType;
 
 use super::super::context::Cg;
 use super::super::structs::{reconstruct_i128, split_i128_for_storage};
 
-type VirIndexDispatch = (
-    Option<Vec<VirTypeId>>,
-    Option<(VirTypeId, usize)>,
-    Option<VirTypeId>,
-);
-
 impl Cg<'_, '_, '_> {
-    /// Recover index dispatch information from VIR type metadata.
-    ///
-    /// TEMP(N279-C): bridge for cases where the primary unwrap query
-    /// returns `None` (e.g. compat-flagged VirTypeId).
-    fn vir_index_dispatch(&self, object: &VirExpr) -> Option<VirIndexDispatch> {
-        let vir_ty = Self::vir_expr_type_id(object)?;
-        match self.vir_type_table().get(vir_ty) {
-            VirType::Tuple { elems } => Some((Some(elems.to_vec()), None, None)),
-            VirType::FixedArray { elem, len } => Some((None, Some((*elem, *len as usize)), None)),
-            VirType::Array { elem } => Some((None, None, Some(*elem))),
-            _ => None,
-        }
-    }
-
     // =========================================================================
     // VIR index codegen
     // =========================================================================
@@ -64,17 +43,6 @@ impl Cg<'_, '_, '_> {
         }
         if let Some(element_id) = self.vir_query_unwrap_array_v(obj.type_id) {
             return self.vir_index_dynamic_array(obj, index, element_id, vir_ty, union_storage);
-        }
-        if let Some((tuple_elems, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
-            if let Some(elem_type_ids) = tuple_elems {
-                return self.vir_index_tuple(obj, index, &elem_type_ids);
-            }
-            if let Some((element_id, size)) = fixed_array {
-                return self.vir_index_fixed_array(obj, index, element_id, size);
-            }
-            if let Some(element_id) = dyn_array {
-                return self.vir_index_dynamic_array(obj, index, element_id, vir_ty, union_storage);
-            }
         }
 
         // Codegen should not reach this — sema validates indexable types.
@@ -105,20 +73,6 @@ impl Cg<'_, '_, '_> {
         } else if is_dynamic_array {
             let idx = self.compile_vir_expr(index)?;
             self.index_assign_dynamic_array_inner(arr, idx, val, union_storage)
-        } else if let Some((_, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
-            if let Some((elem_type_id, size)) = fixed_array {
-                self.vir_index_assign_fixed_array(arr.value, index, val, elem_type_id, size)
-            } else if dyn_array.is_some() {
-                let idx = self.compile_vir_expr(index)?;
-                self.index_assign_dynamic_array_inner(arr, idx, val, union_storage)
-            } else {
-                let type_name = self.vir_query_display_basic_v(arr.type_id);
-                Err(CodegenError::type_mismatch(
-                    "index assignment",
-                    "array",
-                    type_name,
-                ))
-            }
         } else {
             let type_name = self.vir_query_display_basic_v(arr.type_id);
             Err(CodegenError::type_mismatch(
@@ -335,12 +289,11 @@ impl Cg<'_, '_, '_> {
         val: CompiledValue,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
-        let elem_vir_ty = self.vir_query_unwrap_array_v(arr.type_id);
-        let (tag_val, value_bits, val) = if let Some(vir_ty) = elem_vir_ty {
-            self.prepare_dynamic_array_store_with_hint_v(val, vir_ty, union_storage)?
-        } else {
-            self.prepare_dynamic_array_store_untyped(val)?
-        };
+        let elem_vir_ty = self
+            .vir_query_unwrap_array_v(arr.type_id)
+            .expect("index assign target must have known array element type");
+        let (tag_val, value_bits, val) =
+            self.prepare_dynamic_array_store_with_hint_v(val, elem_vir_ty, union_storage)?;
 
         self.rc_inc_borrowed_for_container(&val)?;
 

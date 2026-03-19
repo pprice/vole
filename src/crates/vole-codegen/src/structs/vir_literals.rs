@@ -44,30 +44,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         })?;
         let field_slots = metadata.field_slots.clone();
 
-        // Prefer the VIR-provided result type, but fall back to metadata type_id
-        // when VIR->sema mapping degraded to UNKNOWN during migration.
-        // TEMP(N279-C): remove fallback once struct literals are VirTypeId-native.
-        let preferred_type_id = self.try_substitute_type(result_type_id);
-        let layout_type_id = if self.struct_total_byte_size(preferred_type_id).is_some() {
-            preferred_type_id
-        } else {
-            let fallback = self
-                .analyzed()
-                .type_def(type_def_id)
-                .base_type_id
-                .map(|ty| self.try_substitute_type(ty))
-                .unwrap_or(TypeId::UNKNOWN);
-            if self.struct_total_byte_size(fallback).is_some() {
-                fallback
-            } else {
-                return Err(CodegenError::internal_with_context(
-                    "struct literal layout type unavailable",
-                    format!(
-                        "type_def_id={type_def_id:?}, preferred={preferred_type_id:?}, fallback={fallback:?}"
-                    ),
-                ));
-            }
-        };
+        let layout_type_id = self.try_substitute_type(result_type_id);
         let total_size = self.struct_total_byte_size(layout_type_id).ok_or_else(|| {
             CodegenError::internal_with_context(
                 "struct literal size lookup failed",

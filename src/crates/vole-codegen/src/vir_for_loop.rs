@@ -243,21 +243,12 @@ impl Cg<'_, '_, '_> {
         else {
             unreachable!("compile_vir_for_array called with non-Array kind");
         };
-        let mut elem_vir = self.try_substitute_type_v(*elem_type);
+        let elem_vir = self.try_substitute_type_v(*elem_type);
         let union_storage = *union_storage;
-        let mut store_strategy = *store_strategy;
-        let mut elem_conversion = *elem_conversion;
+        let store_strategy = *store_strategy;
+        let elem_conversion = *elem_conversion;
 
         let arr = self.compile_vir_expr(&vir_for.iterable)?;
-
-        // TEMP(N279-C): if VIR iterator metadata degraded to `unknown`, recover
-        // element typing/storage from the compiled iterable value.
-        if let Some(arr_elem_vir) = self.vir_query_unwrap_array_v(arr.type_id) {
-            elem_vir = arr_elem_vir;
-            let derived = self.array_store_strategy_v(arr_elem_vir);
-            store_strategy = Some(derived);
-            elem_conversion = Some(self.elem_conversion_v(arr_elem_vir));
-        }
 
         // Track owned iterable in a dedicated RC scope.
         self.push_rc_scope();

@@ -1406,17 +1406,6 @@ impl Cg<'_, '_, '_> {
             let drop_flag = self.register_rc_local(var, final_vir_ty);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         } else if self.rc_scopes.has_active_scope()
-            && self.vir_query_is_unknown_v(final_vir_ty)
-            && init_is_unknown
-            && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
-        {
-            // TEMP(N279-C): mixed VIR/sema metadata can degrade array-literal
-            // let bindings to UNKNOWN while still carrying raw array pointers
-            // (not boxed TaggedValue unknown). Register generic RC cleanup so
-            // scope-exit emits rc_dec and array element closures are released.
-            let drop_flag = self.register_rc_local(var, VirTypeId::HANDLE);
-            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
-        } else if self.rc_scopes.has_active_scope()
             && self.cached_rc_state_v(final_vir_ty).needs_cleanup()
         {
             let is_borrow = init.is_borrowed();

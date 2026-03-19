@@ -16,8 +16,9 @@ pub use instance::{
     VirStaticMethodMonomorphInfo,
 };
 pub use rederive::{
-    RederiveCallCtx, classify_capture_rc_kind, classify_rc_cleanup, fill_missing_dispatch_kinds,
-    rederive_decisions, rederive_decisions_with_calls, rederive_method_dispatch_kind,
+    RederiveCallCtx, classify_capture_rc_kind, classify_rc_cleanup, extract_vir_ty,
+    fill_missing_dispatch_kinds, rederive_decisions, rederive_decisions_with_calls,
+    rederive_method_dispatch_kind, rederive_method_dispatch_kind_with_entities,
     rederive_monomorphized_calls,
 };
 pub use resolve::{InstanceIndex, resolve_all_calls, resolve_generic_calls, resolve_test_calls};

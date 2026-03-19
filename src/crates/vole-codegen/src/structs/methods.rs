@@ -341,15 +341,7 @@ impl Cg<'_, '_, '_> {
         obj_vir_type: VirTypeId,
     ) -> Option<crate::FunctionKey> {
         // Extract element VirTypeId from the receiver type.
-        let elem_vir = self.vir_query_unwrap_array_v(obj_vir_type).or_else(|| {
-            if self.vir_query_is_string_v(obj_vir_type) {
-                Some(VirTypeId::STRING)
-            } else if obj_vir_type == VirTypeId::RANGE {
-                Some(VirTypeId::I64)
-            } else {
-                None
-            }
-        })?;
+        let elem_vir = self.vir_query_iterable_element_type_v(obj_vir_type)?;
 
         // Look up the array TypeDefId and Iterable interface TypeDefId.
         let array_name_id = self.analyzed().array_type_name_id()?;
@@ -394,7 +386,6 @@ impl Cg<'_, '_, '_> {
                     table.vir_to_type_id(v)
                 },
                 arg_source: &mc.arg_source(),
-                method_sym: mc_method,
                 expr_id,
                 vir_dispatch: Some(dispatch),
             });
@@ -454,11 +445,12 @@ impl Cg<'_, '_, '_> {
         // dispatch_kind is None), derive it from the compiled receiver's
         // concrete VIR type using the canonical rederive logic.
         let dispatch_kind = dispatch.dispatch_kind.unwrap_or_else(|| {
-            vole_vir::rederive_method_dispatch_kind(
+            vole_vir::rederive_method_dispatch_kind_with_entities(
                 obj.type_id,
                 mc_method,
                 self.vir_type_table(),
                 self.interner(),
+                self.analyzed().entity_metadata(),
             )
         });
         match dispatch_kind {
@@ -495,71 +487,71 @@ impl Cg<'_, '_, '_> {
                 )?;
                 return Ok(result);
             }
-            VirMethodDispatchKind::Standard => {
-                // Fall through to Iterator<T> check and standard dispatch below.
-            }
-        }
-
-        // Iterator<T> dispatch: detected from the codegen-side compiled type.
-        if let Some(elem_vir_type_id) = self.vir_query_unwrap_iterator_interface_v(obj.type_id) {
-            let table = self.vir_type_table();
-            let elem_type_id = table.vir_to_type_id(elem_vir_type_id);
-            let return_type_hint = dispatch
-                .substituted_return_type
-                .map(|ty| {
-                    let v = self.try_substitute_type_v(ty);
-                    table.vir_to_type_id(v)
-                })
-                .or_else(|| {
-                    dispatch
-                        .resolved_method
-                        .as_ref()
-                        .and_then(|r| self.resolved_concrete_return_hint(MethodResolutionRef(r)))
-                })
-                .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
-            let builtin =
-                BuiltinMethod::from_iter_method_name(method_name_str).ok_or_else(|| {
-                    CodegenError::not_found("iterator builtin method", method_name_str)
-                })?;
-            return self.iterator_method(
-                &obj,
-                &mc.arg_source(),
-                method_name_str,
-                builtin,
-                elem_type_id,
-                None,
-                return_type_hint,
-            );
-        }
-
-        // Handle custom Iterator<T> implementors (classes/structs that extend
-        // Iterator<T>). When the receiver is a concrete type implementing
-        // Iterator<T>, box+wrap it as an Iterator<T> thin pointer and dispatch
-        // via iterator_method.
-        if !dispatch.receiver_is_interface
-            && let Some(builtin) = BuiltinMethod::from_iter_method_name(method_name_str)
-            && let Some((elem_vir, iface_vir)) =
-                self.find_iterator_elem_for_concrete_receiver(obj.type_id)
-        {
-            let return_type_hint = resolution
-                .and_then(|r| self.resolved_concrete_return_hint(r))
-                .or_else(|| {
-                    dispatch.substituted_return_type.map(|ty| {
+            VirMethodDispatchKind::Iterator { elem_type } => {
+                // elem_type is already concrete: it comes from sema VIR
+                // lowering (non-generic), from rederive after monomorphization,
+                // or from the codegen fallback (unwrapped from obj.type_id).
+                // Use the VIR type table directly — no substitution needed.
+                let table = self.vir_type_table();
+                let elem_type_id = table.vir_to_type_id(elem_type);
+                let return_type_hint = dispatch
+                    .substituted_return_type
+                    .map(|ty| {
                         let v = self.try_substitute_type_v(ty);
                         let table = self.vir_type_table();
                         table.vir_to_type_id(v)
                     })
-                })
-                .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
-            return self.dispatch_custom_iterator_method(
-                obj,
-                &mc.arg_source(),
-                method_name_str,
-                builtin,
-                elem_vir,
-                iface_vir,
-                return_type_hint,
-            );
+                    .or_else(|| {
+                        dispatch.resolved_method.as_ref().and_then(|r| {
+                            self.resolved_concrete_return_hint(MethodResolutionRef(r))
+                        })
+                    })
+                    .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
+                let builtin =
+                    BuiltinMethod::from_iter_method_name(method_name_str).ok_or_else(|| {
+                        CodegenError::not_found("iterator builtin method", method_name_str)
+                    })?;
+                return self.iterator_method(
+                    &obj,
+                    &mc.arg_source(),
+                    method_name_str,
+                    builtin,
+                    elem_type_id,
+                    None,
+                    return_type_hint,
+                );
+            }
+            VirMethodDispatchKind::CustomIterator {
+                elem_type,
+                interface_type,
+            } => {
+                let builtin =
+                    BuiltinMethod::from_iter_method_name(method_name_str).ok_or_else(|| {
+                        CodegenError::not_found("custom iterator builtin method", method_name_str)
+                    })?;
+                let return_type_hint = resolution
+                    .and_then(|r| self.resolved_concrete_return_hint(r))
+                    .or_else(|| {
+                        dispatch.substituted_return_type.map(|ty| {
+                            let v = self.try_substitute_type_v(ty);
+                            let table = self.vir_type_table();
+                            table.vir_to_type_id(v)
+                        })
+                    })
+                    .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
+                return self.dispatch_custom_iterator_method(
+                    obj,
+                    &mc.arg_source(),
+                    method_name_str,
+                    builtin,
+                    elem_type,
+                    interface_type,
+                    return_type_hint,
+                );
+            }
+            VirMethodDispatchKind::Standard => {
+                // Fall through to standard dispatch below.
+            }
         }
 
         let method_name_id = self.method_name_id(mc_method)?;
@@ -861,23 +853,6 @@ impl Cg<'_, '_, '_> {
                 return Ok(result);
             }
 
-            // Custom Iterator<T> implementors: box+wrap the concrete receiver
-            // as an Iterator<T> thin pointer and dispatch via iterator_method.
-            if let Some(builtin) = BuiltinMethod::from_iter_method_name(method_name_str)
-                && let Some((elem_vir, iface_vir)) =
-                    self.find_iterator_elem_for_concrete_receiver(resolved_obj_vir)
-            {
-                return self.dispatch_custom_iterator_method(
-                    obj,
-                    &mc.arg_source(),
-                    method_name_str,
-                    builtin,
-                    elem_vir,
-                    iface_vir,
-                    None,
-                );
-            }
-
             let resolved_obj_type_id = {
                 let table = self.vir_type_table();
                 table.vir_to_type_id(resolved_obj_vir)
@@ -1033,23 +1008,12 @@ impl Cg<'_, '_, '_> {
                     false
                 }
             };
-            if needs_derivation {
-                let elem_type_id =
-                    if let Some(elem_vir) = self.vir_query_unwrap_array_v(obj.type_id) {
-                        let table = self.vir_type_table();
-                        Some(table.vir_to_type_id(elem_vir))
-                    } else if self.vir_query_is_string_v(obj.type_id) {
-                        Some(TypeId::STRING)
-                    } else if obj.type_id == VirTypeId::RANGE {
-                        Some(TypeId::I64)
-                    } else {
-                        None
-                    };
-                if let Some(elem_type_id) = elem_type_id
-                    && let Some(runtime_iter) = self
-                        .vir_type_table()
-                        .lookup_iterator_interface_sema(elem_type_id)
-                {
+            if needs_derivation
+                && let Some(elem_vir) = self.vir_query_iterable_element_type_v(obj.type_id)
+            {
+                let table = self.vir_type_table();
+                let elem_type_id = table.vir_to_type_id(elem_vir);
+                if let Some(runtime_iter) = table.lookup_iterator_interface_sema(elem_type_id) {
                     return_type_id = runtime_iter;
                 }
             }

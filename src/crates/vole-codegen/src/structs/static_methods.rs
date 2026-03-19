@@ -1,12 +1,14 @@
-//! Static method dispatch and related intrinsics.
-
-use cranelift::prelude::*;
+//! Static method dispatch for user-defined static methods.
+//!
+//! Float constant intrinsics (nan, infinity, epsilon, neg_infinity) and
+//! `Array.filled` are pre-resolved during VIR lowering to specialized nodes
+//! (`VirExpr::FloatLiteral` and `VirExpr::ArrayFilled` respectively), so
+//! codegen never sees them as `VirResolvedMethod::Static` calls.
 
 use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
-use vole_identity::Symbol;
 use vole_identity::{
     MethodId, NameId, NodeId, StaticMethodMonomorphKey, TypeDefId, TypeId, VirTypeId,
 };
@@ -22,7 +24,6 @@ pub(super) struct StaticMethodCallArgs<'a> {
     pub method_id: MethodId,
     pub func_type_id: TypeId,
     pub arg_source: &'a ArgSource<'a>,
-    pub method_sym: Symbol,
     pub expr_id: NodeId,
     pub vir_dispatch: Option<&'a VirMethodDispatchMeta>,
 }
@@ -39,49 +40,11 @@ impl Cg<'_, '_, '_> {
             method_id,
             func_type_id,
             arg_source,
-            method_sym,
             expr_id,
             vir_dispatch,
         } = args;
 
         let arg_count = arg_source.len();
-
-        // Check for float intrinsics (nan, infinity, neg_infinity, epsilon)
-        // These are compiled directly to constants, no function call needed.
-        if arg_count == 0
-            && let Some(result) = self.try_float_intrinsic(type_def_id, method_sym)?
-        {
-            return Ok(result);
-        }
-
-        let return_type_hint = vir_dispatch
-            .and_then(|dispatch| {
-                let table = self.vir_type_table();
-                dispatch
-                    .substituted_return_type
-                    .map(|ty| {
-                        let v = self.try_substitute_type_v(ty);
-                        table.vir_to_type_id(v)
-                    })
-                    .or_else(|| {
-                        dispatch.resolved_method.as_ref().map(|resolved| {
-                            let v = self.try_substitute_type_v(resolved.return_type_id());
-                            table.vir_to_type_id(v)
-                        })
-                    })
-            })
-            .or_else(|| self.get_call_return_type());
-
-        // Check for Array.filled<T> intrinsic (compiled as ArrayFilled runtime call)
-        if let Some(result) = self.try_array_filled_intrinsic(
-            type_def_id,
-            arg_source,
-            method_sym,
-            Some(expr_id),
-            return_type_hint,
-        )? {
-            return Ok(result);
-        }
 
         // Get the method's name_id for lookup
         let method_def = self.analyzed().method_def(method_id);
@@ -441,146 +404,6 @@ impl Cg<'_, '_, '_> {
         }
 
         Ok(result)
-    }
-
-    /// Try to compile a float intrinsic (nan, infinity, neg_infinity, epsilon).
-    /// Returns Some(value) if this is a known intrinsic, None otherwise.
-    fn try_float_intrinsic(
-        &mut self,
-        type_def_id: TypeDefId,
-        method_sym: Symbol,
-    ) -> CodegenResult<Option<CompiledValue>> {
-        // Get type name_id and check if it's f32 or f64
-        let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
-        let name_table = self.name_table();
-        let is_f32 = type_name_id == name_table.primitives.f32;
-        let is_f64 = type_name_id == name_table.primitives.f64;
-
-        if !is_f32 && !is_f64 {
-            return Ok(None);
-        }
-
-        // Get method name string
-        let method_name = self.interner().resolve(method_sym);
-
-        // Match intrinsic methods
-        let value = match method_name {
-            "nan" => {
-                if is_f32 {
-                    let v = self.builder.ins().f32const(f32::NAN);
-                    CompiledValue::new(v, types::F32, VirTypeId::F32)
-                } else {
-                    let v = self.builder.ins().f64const(f64::NAN);
-                    CompiledValue::new(v, types::F64, VirTypeId::F64)
-                }
-            }
-            "infinity" => {
-                if is_f32 {
-                    let v = self.builder.ins().f32const(f32::INFINITY);
-                    CompiledValue::new(v, types::F32, VirTypeId::F32)
-                } else {
-                    let v = self.builder.ins().f64const(f64::INFINITY);
-                    CompiledValue::new(v, types::F64, VirTypeId::F64)
-                }
-            }
-            "neg_infinity" => {
-                if is_f32 {
-                    let v = self.builder.ins().f32const(f32::NEG_INFINITY);
-                    CompiledValue::new(v, types::F32, VirTypeId::F32)
-                } else {
-                    let v = self.builder.ins().f64const(f64::NEG_INFINITY);
-                    CompiledValue::new(v, types::F64, VirTypeId::F64)
-                }
-            }
-            "epsilon" => {
-                if is_f32 {
-                    let v = self.builder.ins().f32const(f32::EPSILON);
-                    CompiledValue::new(v, types::F32, VirTypeId::F32)
-                } else {
-                    let v = self.builder.ins().f64const(f64::EPSILON);
-                    CompiledValue::new(v, types::F64, VirTypeId::F64)
-                }
-            }
-            _ => return Ok(None),
-        };
-
-        Ok(Some(value))
-    }
-
-    /// Intercept `Array.filled<T>(count, value) -> [T]` and compile as a direct
-    /// `vole_array_filled(count, tag, value)` runtime call. Handles union boxing
-    /// so each array slot gets its own heap-allocated union pointer.
-    fn try_array_filled_intrinsic(
-        &mut self,
-        type_def_id: TypeDefId,
-        arg_source: &ArgSource<'_>,
-        method_sym: Symbol,
-        expr_id: Option<NodeId>,
-        return_type_hint: Option<TypeId>,
-    ) -> CodegenResult<Option<CompiledValue>> {
-        // Check if this is Array.filled
-        let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
-        let type_name = self.name_table().last_segment_str(type_name_id);
-        if type_name.as_deref() != Some("Array") {
-            return Ok(None);
-        }
-        let method_name = self.interner().resolve(method_sym);
-        if method_name != "filled" {
-            return Ok(None);
-        }
-
-        let filled_arg_count = arg_source.len();
-        // We expect exactly two arguments: count and value
-        if filled_arg_count != 2 {
-            return Err(CodegenError::arg_count("Array.filled", 2, filled_arg_count));
-        }
-
-        // Get the return type [T] from sema to determine element type T.
-        // VIR-return metadata may still be an unresolved placeholder; if so,
-        // fall back to expression type metadata before failing.
-        let unwrap_array_sema = |ret_ty: TypeId| -> Option<(TypeId, TypeId)> {
-            let vir = self.vir_lookup(ret_ty);
-            let elem_vir = self.vir_query_unwrap_array_v(vir)?;
-            let table = self.vir_type_table();
-            let elem_ty = table.vir_to_type_id(elem_vir);
-            Some((ret_ty, elem_ty))
-        };
-        let hint_array_elem = return_type_hint.and_then(&unwrap_array_sema);
-        let expr_array_elem = expr_id
-            .and(self.get_call_return_type())
-            .and_then(unwrap_array_sema);
-        let (return_type_id, elem_type_id) =
-            hint_array_elem.or(expr_array_elem).ok_or_else(|| {
-                CodegenError::type_mismatch("Array.filled", "array type", "non-array")
-            })?;
-        let is_wide_elem = matches!(elem_type_id, TypeId::I128 | TypeId::F128);
-
-        // Compile count argument
-        let count = self.compile_arg_from_source(arg_source, 0)?;
-
-        // Compile value argument
-        let value = self.compile_arg_from_source(arg_source, 1)?;
-
-        let (tag_val, value_bits, mut stored_value) =
-            self.prepare_dynamic_array_store(value, elem_type_id)?;
-
-        // Call vole_array_filled(count, tag, value) -> *mut RcArray
-        let filled_ref = self.runtime_func_ref(RuntimeKey::ArrayFilled)?;
-        let call = self.emit_call(filled_ref, &[count.value, tag_val, value_bits]);
-        let result_val = self.builder.inst_results(call)[0];
-
-        // Array.filled clones the provided element into each slot; release the
-        // original temporary value now that ownership has transferred.
-        if is_wide_elem {
-            self.call_runtime_void(RuntimeKey::RcDec, &[value_bits])?;
-        } else {
-            self.consume_rc_value(&mut stored_value)?;
-        }
-
-        let mut result = self.compiled_with_ty(result_val, self.ptr_type(), return_type_id);
-        result.rc_lifecycle = RcLifecycle::Owned;
-
-        Ok(Some(result))
     }
 
     /// Compile a pre-resolved `Array.filled<T>(count, value)` from VIR.

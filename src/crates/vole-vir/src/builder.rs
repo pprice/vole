@@ -127,6 +127,7 @@ impl VirBuilder {
             rhs_is_optional: false,
             lhs_is_unsigned: false,
             comparison_hint: ComparisonHint::None,
+            string_concat: false,
         })
     }
 

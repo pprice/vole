@@ -450,15 +450,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.analyzed.type_table
     }
 
-    /// Best-effort translation from sema `TypeId` to `VirTypeId`.
+    /// Translate a sema `TypeId` to a `VirTypeId`.
     ///
     /// Reserved primitive/special IDs are aligned between `TypeId` and
     /// `VirTypeId`, so those can be mapped directly. Dynamic sema IDs are
-    /// resolved by `vir_query_*` helpers via arena fallback paths.
-    ///
-    /// Temporary bridge after removing `VirTypeTable`'s sema cache (N279-B).
-    /// Once N279-C migrates all VIR consumers to carry `VirTypeId` directly,
-    /// this lookup path should be deleted.
+    /// resolved via the VirTypeTable's TypeId-to-VirTypeId mapping.
     #[inline]
     pub fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
         let lookup = self.vir_type_table().lookup_type_id(type_id);
@@ -805,6 +801,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_unwrap_array(vir_ty, self.vir_type_table())
     }
 
+    /// Extract the iterable element type from any iterable receiver VirTypeId.
+    ///
+    /// Returns the element type: array<T> → T, string → string, range → i64.
+    #[inline]
+    pub fn vir_query_iterable_element_type_v(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
+        crate::types::vir_conversions::vir_iterable_element_type(vir_ty, self.vir_type_table())
+    }
+
     /// Unwrap a struct `VirTypeId` to `(TypeDefId, type_args)` via VirTypeTable.
     #[inline]
     pub fn vir_query_unwrap_struct_v(
@@ -879,12 +883,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_lookup_array(&self, elem: TypeId) -> Option<TypeId> {
         self.vir_type_table().lookup_array_sema(elem)
-    }
-
-    /// Look up an existing array type by element `VirTypeId` via VirTypeTable.
-    #[inline]
-    pub fn vir_query_lookup_array_v(&self, elem: VirTypeId) -> Option<VirTypeId> {
-        self.vir_type_table().lookup_array_v(elem)
     }
 
     /// Look up the result of substituting type parameters in a type via VirTypeTable.
@@ -1009,18 +1007,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect();
         let ret = table.vir_to_type_id(vir_ret);
         Some((params, ret))
-    }
-
-    /// Look up an existing fixed-array type by element `VirTypeId` and size
-    /// via VirTypeTable.
-    #[inline]
-    pub fn vir_query_lookup_fixed_array_v(
-        &self,
-        element: VirTypeId,
-        size: usize,
-    ) -> Option<VirTypeId> {
-        self.vir_type_table()
-            .lookup_fixed_array_v(element, size as u32)
     }
 
     /// Look up module exports by `ModuleId`.
@@ -1407,10 +1393,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Convert a value to dynamic array storage representation when element
-    /// type information is unavailable.
-    ///
-    /// TEMP(N279-C): migration bridge for fallback paths where sema array
-    /// element `TypeId` is currently unavailable.
+    /// type information is unavailable (e.g. empty array literals).
     pub(crate) fn prepare_dynamic_array_store_untyped(
         &mut self,
         value: CompiledValue,

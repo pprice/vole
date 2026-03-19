@@ -187,6 +187,16 @@ pub(crate) fn vir_unwrap_array(vir_ty: VirTypeId, table: &VirTypeTable) -> Optio
     }
 }
 
+/// Extract the iterable element type from any iterable receiver.
+///
+/// Delegates to `VirTypeTable::iterable_element_type`.
+pub(crate) fn vir_iterable_element_type(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<VirTypeId> {
+    table.iterable_element_type(vir_ty)
+}
+
 /// Check if a `VirTypeId` is a class (reference-counted instance) type.
 pub(crate) fn vir_is_class(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
     matches!(table.get(vir_ty), VirType::Class { .. })

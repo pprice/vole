@@ -511,6 +511,26 @@ impl VirTypeTable {
         self.unwrap_iterator_interface(id).is_some()
     }
 
+    /// Extract the element type for any iterable receiver type.
+    ///
+    /// Returns the element type that iterating over this type produces:
+    /// - `Array<T>` → `T`
+    /// - `string` → `string` (each character is a string)
+    /// - `range` → `i64`
+    ///
+    /// Returns `None` for non-iterable types.
+    pub fn iterable_element_type(&self, id: VirTypeId) -> Option<VirTypeId> {
+        if let Some(elem) = self.unwrap_array(id) {
+            Some(elem)
+        } else if self.is_string(id) {
+            Some(VirTypeId::STRING)
+        } else if self.is_range(id) {
+            Some(VirTypeId::I64)
+        } else {
+            None
+        }
+    }
+
     // -- Type identity predicates -------------------------------------------
 
     /// Whether this is a `Union` type.

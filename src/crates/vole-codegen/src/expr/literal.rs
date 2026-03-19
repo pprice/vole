@@ -66,35 +66,10 @@ impl Cg<'_, '_, '_> {
         // Dynamic array path.
         let arr_ptr = self.call_runtime(RuntimeKey::ArrayNew, &[])?;
         let array_push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
-        let mut elem_vir = self.vir_query_unwrap_array_v(vir_array_type_id);
-        let mut result_array_vir = vir_array_type_id;
-        let mut first_compiled: Option<CompiledValue> = None;
+        let elem_vir = self.vir_query_unwrap_array_v(vir_array_type_id);
 
-        if elem_vir.is_none() && !elements.is_empty() {
-            let first = self.compile_vir_expr(&elements[0])?;
-            let inferred_elem = self.try_substitute_type_v(first.type_id);
-            if !self.vir_query_is_unknown_v(inferred_elem)
-                && let Some(inferred_array_vir) = self.vir_query_lookup_array_v(inferred_elem)
-            {
-                // TEMP(N279-C): mixed VIR/sema metadata can degrade array literal
-                // type IDs to unknown. Infer from the first concrete element so
-                // let-binding coercion/RC bookkeeping remains correct.
-                elem_vir = Some(inferred_elem);
-                result_array_vir = inferred_array_vir;
-            }
-            first_compiled = Some(first);
-        }
-
-        for (i, elem_expr) in elements.iter().enumerate() {
-            let compiled = if i == 0 {
-                if let Some(first) = first_compiled.take() {
-                    first
-                } else if let Some(ev) = elem_vir {
-                    self.compile_vir_expr_with_expected_type_v(elem_expr, ev)?
-                } else {
-                    self.compile_vir_expr(elem_expr)?
-                }
-            } else if let Some(ev) = elem_vir {
+        for elem_expr in elements {
+            let compiled = if let Some(ev) = elem_vir {
                 self.compile_vir_expr_with_expected_type_v(elem_expr, ev)?
             } else {
                 self.compile_vir_expr(elem_expr)?
@@ -106,6 +81,8 @@ impl Cg<'_, '_, '_> {
             } else if let Some(ev) = elem_vir {
                 self.prepare_dynamic_array_store_with_hint_v(compiled, ev, None)?
             } else {
+                // Element type unknown (e.g. empty array `[]`); derive strategy
+                // from the compiled element's own type.
                 self.prepare_dynamic_array_store_untyped(compiled)?
             };
 
@@ -119,7 +96,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let ptr_type = self.ptr_type();
-        Ok(CompiledValue::new(arr_ptr, ptr_type, result_array_vir))
+        Ok(CompiledValue::new(arr_ptr, ptr_type, vir_array_type_id))
     }
 
     /// Compile a VIR repeat literal `[value; count]` to a fixed-size array.
@@ -133,20 +110,15 @@ impl Cg<'_, '_, '_> {
         vir_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let mut elem_value = self.compile_vir_expr(element)?;
-        let (elem_vir, result_vir) =
-            if let Some((elem_vir, _)) = self.vir_query_unwrap_fixed_array_v(vir_type_id) {
-                (elem_vir, vir_type_id)
-            } else {
-                // TEMP(N279-C): During mixed VIR/sema migration, some repeat literals
-                // arrive with degraded compat type IDs (e.g. f128 paths mapping through
-                // vir F64) even though element VIR is concrete. Keep codegen robust by
-                // deriving element layout from the compiled element value.
-                let fallback_elem_vir = self.try_substitute_type_v(elem_value.type_id);
-                let fallback_result_vir = self
-                    .vir_query_lookup_fixed_array_v(fallback_elem_vir, count)
-                    .unwrap_or(vir_type_id);
-                (fallback_elem_vir, fallback_result_vir)
-            };
+        let (elem_vir, _len) = self
+            .vir_query_unwrap_fixed_array_v(vir_type_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "repeat literal VirTypeId {:?} is not a FixedArray — VIR metadata incomplete",
+                    vir_type_id
+                )
+            });
+        // result type is the same as the input fixed-array type
 
         let elem_size = self.vir_query_field_byte_size_v(elem_vir);
         let total_size = elem_size * (count as u32);
@@ -179,7 +151,7 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue::new(ptr, ptr_type, result_vir))
+        Ok(CompiledValue::new(ptr, ptr_type, vir_type_id))
     }
 
     /// Compile a VIR tuple literal to stack-allocated memory.

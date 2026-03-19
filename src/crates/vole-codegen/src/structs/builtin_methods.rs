@@ -147,19 +147,41 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         iter_type_hint: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
+        let elem_vir_type_id = self
+            .vir_query_iterable_element_type_v(obj.type_id)
+            .ok_or_else(|| CodegenError::internal("StringIter on non-string type"))?;
         let result = self.call_runtime(RuntimeKey::StringCharsIter, &[obj.value])?;
-        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-            self.vir_query_lookup_iterator_interface(TypeId::STRING)
-                .expect("INTERNAL: string iterator: Iterator<string> type not pre-created")
-        });
-        // Set elem_tag to RuntimeTypeId::String so terminal methods can properly
-        // free owned char strings produced by the string chars iterator.
-        let string_tag = self.vir_query_unknown_type_tag(TypeId::STRING);
-        if string_tag != 0 {
-            let tag_val = self.iconst_cached(types::I64, string_tag as i64);
+
+        // Set elem_tag so terminal methods can properly free owned char strings
+        // produced by the string chars iterator.
+        let tag = self.vir_query_unknown_type_tag_v(elem_vir_type_id);
+        if tag != 0 {
+            let tag_val = self.iconst_cached(types::I64, tag as i64);
             self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
         }
-        Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
+
+        if let Some(hint) = iter_type_hint {
+            return Ok(self.compiled_owned_with_ty(result, self.ptr_type(), hint));
+        }
+
+        // Derive Iterator<T> type from elem type, same pattern as array_iter.
+        let table = self.vir_type_table();
+        let elem_sema = table.vir_to_type_id(elem_vir_type_id);
+        let iter_type_id = self
+            .vir_query_lookup_iterator_interface(elem_sema)
+            .or_else(|| {
+                let iter_vir = self.vir_query_lookup_iterator_interface_v(elem_vir_type_id)?;
+                table.lookup_vir_type_id(iter_vir)
+            });
+
+        if let Some(iter_type_id) = iter_type_id {
+            Ok(self.compiled_owned_with_ty(result, self.ptr_type(), iter_type_id))
+        } else {
+            let iter_vir = self
+                .vir_query_lookup_iterator_interface_v(elem_vir_type_id)
+                .unwrap_or(elem_vir_type_id);
+            Ok(CompiledValue::owned(result, self.ptr_type(), iter_vir))
+        }
     }
 
     /// Load start/end from a compiled range object and create a range iterator.
@@ -199,12 +221,11 @@ impl Cg<'_, '_, '_> {
         // Compile the argument
         let value = self.compile_arg_from_source(arg_source, 0)?;
 
-        let elem_vir = self.vir_query_unwrap_array_v(arr_obj.type_id);
-        let (tag_val, value_bits, mut value) = if let Some(elem_vir) = elem_vir {
-            self.prepare_dynamic_array_store_with_hint_v(value, elem_vir, None)?
-        } else {
-            self.prepare_dynamic_array_store_untyped(value)?
-        };
+        let elem_vir = self
+            .vir_query_unwrap_array_v(arr_obj.type_id)
+            .expect("array.push target must have known array element type");
+        let (tag_val, value_bits, mut value) =
+            self.prepare_dynamic_array_store_with_hint_v(value, elem_vir, None)?;
 
         // RC: inc borrowed RC elements so the array gets its own reference.
         // Without this, the element's original binding and the array would

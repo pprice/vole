@@ -600,34 +600,4 @@ impl Cg<'_, '_, '_> {
 
         Ok(self.compiled(value, return_type_id))
     }
-
-    /// Find the Iterator<T> element type for a concrete receiver type.
-    ///
-    /// When the receiver is a class/struct that implements Iterator<T>,
-    /// returns `Some((elem_vir, iterator_interface_vir))` so callers can
-    /// box+wrap the receiver as an Iterator<T> thin pointer before method dispatch.
-    pub(crate) fn find_iterator_elem_for_concrete_receiver(
-        &self,
-        receiver_vir: VirTypeId,
-    ) -> Option<(VirTypeId, VirTypeId)> {
-        let iterator_tdef = self.name_table().well_known.iterator_type_def?;
-        let table = self.vir_type_table();
-        let type_def_id = table.type_def_id(receiver_vir)?;
-
-        // Check if this type implements Iterator<T> and get the type args
-        let type_args = self
-            .analyzed()
-            .entity_metadata()
-            .implementation_type_args(type_def_id, iterator_tdef);
-        let &elem_vir = type_args.first()?;
-
-        // Look up the existing Iterator<T> interface VirTypeId
-        let iface_type = vole_vir::types::VirType::Interface {
-            def: iterator_tdef,
-            type_args: vec![elem_vir],
-        };
-        let iface_vir = table.lookup(&iface_type)?;
-
-        Some((elem_vir, iface_vir))
-    }
 }

@@ -199,8 +199,8 @@ impl Cg<'_, '_, '_> {
     #[expect(clippy::too_many_arguments)]
     pub fn binary_op(
         &mut self,
-        mut left: CompiledValue,
-        mut right: CompiledValue,
+        left: CompiledValue,
+        right: CompiledValue,
         op: VirBinOp,
         promoted_ty: VirTypeId,
         line: u32,
@@ -209,12 +209,24 @@ impl Cg<'_, '_, '_> {
         lhs_is_unsigned: bool,
         comparison_hint: ComparisonHint,
     ) -> CodegenResult<CompiledValue> {
-        // Guard: monomorphized generics may have stale ComparisonHint (e.g.
-        // IntCmp for strings) because FieldLoad vir_ty isn't rederived from
-        // Param to concrete type. Use codegen's compiled types as truth.
-        if matches!(op, VirBinOp::Eq | VirBinOp::Ne) && self.vir_query_is_string_v(left.type_id) {
-            return self.dispatch_string_eq(left, right, op);
+        // Guard: monomorphized generics with structural constraints may have
+        // string Add ops that weren't caught by the VIR string_concat hint
+        // (sema assigns UNKNOWN to method return types on structural type
+        // params).  Use compiled types as fallback.
+        if op == VirBinOp::Add && self.vir_query_is_string_v(left.type_id) {
+            return self.string_concat(left, right);
         }
+        // Assert: string Eq/Ne must always be classified by sema/VIR.
+        // The ComparisonHint::StringEq annotation is set during VIR lowering,
+        // during monomorphization rederive, or recomputed in codegen's
+        // compile_vir_binary_op when the VIR hint was None/stale.
+        debug_assert!(
+            !(matches!(op, VirBinOp::Eq | VirBinOp::Ne)
+                && self.vir_query_is_string_v(left.type_id)
+                && comparison_hint != ComparisonHint::StringEq),
+            "string Eq/Ne without StringEq hint: hint={comparison_hint:?}, left={:?}, line={line}",
+            left.type_id,
+        );
         if matches!(op, VirBinOp::Eq | VirBinOp::Ne) {
             match comparison_hint {
                 ComparisonHint::OptionalNilEq => {
@@ -412,18 +424,6 @@ impl Cg<'_, '_, '_> {
                 }
             }
         };
-
-        // Consume RC operands used by string comparison.
-        // When comparison_hint is StringEq, dispatch_string_eq handles RC
-        // cleanup and returns early. This handles the None fallback path
-        // where string Eq/Ne falls through to emit_eq/emit_ne.
-        if comparison_hint == ComparisonHint::None
-            && left.type_id == VirTypeId::STRING
-            && matches!(op, VirBinOp::Eq | VirBinOp::Ne)
-        {
-            self.consume_rc_value(&mut left)?;
-            self.consume_rc_value(&mut right)?;
-        }
 
         // For comparison ops, result is bool; otherwise use the promoted type
         let (final_ty, final_vir_ty) = match op {
