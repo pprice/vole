@@ -38,6 +38,9 @@ echo ""
 echo "$notes"
 echo ""
 
+# --- Update lockfile ---
+cargo generate-lockfile --quiet
+
 # --- Commit ---
 git add "$CARGO_TOML" Cargo.lock
 git commit -m "$(cat <<EOF
